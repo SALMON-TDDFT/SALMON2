@@ -457,4 +457,4 @@ factor-off Taylor. The ordinary mixed sample explicitly selects --hse-symmetry
 back the entire loop when InputError rejects a symmetry-breaking A. Direct/protected
 resume and local two-LD/SBE/PBE-TDDFT/HSE mixtures are tested. Material/field/XC
 compatibility and physical convergence remain separate; see the
-[symmetry guide](FAST_HSE_SYMMETRY.en.md), including the low-gradient sensitivity.
+[symmetry guide](FAST_HSE_SYMMETRY.en.md), including stable low-gradient evaluation and the original-case regression.

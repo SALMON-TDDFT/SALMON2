@@ -732,8 +732,11 @@ Taylor、1プロセス1寿命・共有対称化設定不変。学習／PT-CN対�
 実際の局所Aが群を破ると保護付きで拒否される。未適合な物質・配置の例を無理に通さない。
 合成検証は--orbital-phase .23を明示するが、利用者のGSを黙って変更してはならない。
 
-極小勾配のLibxc HSE評価で、有限値のまま大きな微分感度が出るケースを実測した。
-probe_hse_low_gradient.py BUILD_RECORD NEW_JSONは診断のみ。exit0やstatus=diagnosticを物理検証の
-合格と解釈せず、low_gradient_sensitivity_detectedがTrueなら未解決の数値感度として報告する。
-密度・勾配を勝手にfloor/smoothせず、許容誤差を緩めて一致を装わない。接続検証の通過は
-物理量の収束保証ではない。次の課題はこの低勾配微分の安定化と縮約内部MPIの検証。
+極小勾配のLibxc HSEの相殺は、現在の完全ソースで同じWPBEh式をu=s²で安定評価する。
+全k参照ワーカーとMPIライブラリを両方新ソースから明示的に構築・監査する。protocol1だけで
+数値修正を推定しない。test_hse_low_gradient.pyは80桁エネルギー差分、
+test_fast_hse_low_gradient_mpi.pyは元のphase0・全／縮約k点の比較に使う。
+probe_hse_low_gradient.pyは生のLibxc診断で、wrapper修正後も感度Trueになり得る。
+これをwrapperの失敗と取り違えない。密度・勾配・Aをfloor/smoothせず、許容誤差を緩めない。
+元の失敗例と通常回帰の結果・ハッシュを保持する。数値一致は物理収束の保証ではない。
+次の課題は縮約内部MPIと初期化範囲の検証。分子の作業は保留。

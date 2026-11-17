@@ -40,7 +40,8 @@
     "src/rt/taylor.f90",
     "src/rt/step_recovery.f90",
     "src/rt/CMakeLists.txt",
-    "src/xc/exx_symmetry.f90"
+    "src/xc/exx_symmetry.f90",
+    "src/xc/hybrid_semilocal.f90"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -70,6 +71,6 @@
   ],
   "scope": "explicit full-support fast HSE native ownership; serial and experimental k-only host-MPI CPU contexts, common immutable per-group configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "b2f38eed6e48649fc304b43ff6d0f8789c23ff782048f0109ed837b5976b75ef",
+  "replacements_sha256": "af1cd291a8bba7d7ed6ed61510cf278e98a6f09154fa810dd8b74079d5929e88",
   "patch_sha256_role": "historical migration identity; no patch is applied"
 }

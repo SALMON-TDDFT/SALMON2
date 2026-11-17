@@ -185,6 +185,11 @@
       "before_sha256": "bc374fcdde702f480174a78b4cef5a9e34d6ca86b0c62a832ffa5a15ee3c8a40",
       "after_sha256": "fd6707902bc1ad089d6e41fdc856dde9be5a2ddd2c28b3b65c3bc487cf7d3f23",
       "source": "overrides/hse-explicit-routing/src/xc/exx_symmetry.f90"
+    },
+    "src/xc/hybrid_semilocal.f90": {
+      "before_sha256": "2188c1dbdfe20218af5a48a9a2dc5998f412e91e3cff25dc1329371b44df5af4",
+      "after_sha256": "bb153effbaa5de297f757e57ed68bfb7aaafd6af4cc2617347baedb91474dd68",
+      "source": "overrides/hse-explicit-routing/src/xc/hybrid_semilocal.f90"
     }
   }
 }

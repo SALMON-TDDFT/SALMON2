@@ -11,9 +11,10 @@ The dated sections below retain the scope at their completion time. Older statem
 Project lead directs HSE development through the fast-PR profile with symmetry as
 central. Owned actual-A checks, exchange-map/cache persistence and explicit internal
 TDDFT direct/staged resume plus explicit public C/Python opt-in/retry and protected
-mixed connection are verified in the bounded single-k profile. The highest newly
-observed numerical issue is Libxc HSE near-zero-gradient derivative sensitivity;
-it remains unresolved, with the original failed comparison retained. Then come
+mixed connection are verified in the bounded single-k profile. The Libxc HSE near-zero-gradient cancellation is now resolved in the complete
+wrapper source by stable evaluation of the same WPBEh formula. The unchanged
+phase0 full/reduced case, ordinary regressions and80-digit energy differences
+pass; old failure evidence is retained. Next come
 reduced-k internal-MPI partition/failure/restart tests. Default/old init and serial
 workers still reject symmetry. No physical-convergence certificate is implied.
 The standard k-point port is deferred; its distinct arithmetic is not the target
@@ -623,3 +624,20 @@ Evidence: `../symmetry-tddft-validation-2026-11-18.md`.
 - [ ] Reduced internal-k MPI2, learned/PT-CN symmetry, broader initialization/physical convergence remain open. Default remains denied and molecular work paused. Resource budgets advisory only; no Actions.
 
 Evidence: `../public-hse-symmetry-validation-2026-11-18.md`.
+
+
+## 2026-11-18 — Libxc HSE small-gradient cancellation
+
+- [x] Stable same-formula WPBEh(0) energy/derivatives in squared reduced gradient;
+  screened quadratic limit below roundoff, untouched PBE correlation.
+- [x] Native regression fails on the old library;240-case density/screening sweep,
+  independent80-digit unscreened/screened energy differences, polarized/core
+  derivatives and low-density screening boundary checks pass.
+- [x] Original phase0 full8/reduced4-k weak-field regression, OMP1/2; FDTD
+  coupling, failure/rollback, protected restore and fresh-process direct resume.
+- [x] Ordinary PBE byte equality, fast-PR Taylor/PT-CN/mixed roundoff agreement.
+- [ ] Reduced internal-k MPI, broader initialization and converged physical benchmarks.
+
+Historical unresolved sensitivity notes above describe the old binaries. Both
+serial full-k reference and MPI runtime need explicit rebuilding from new sources.
+Raw Libxc diagnostic sensitivity remains expected; no library binary is patched.

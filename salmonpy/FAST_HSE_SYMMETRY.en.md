@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.4`
+[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.5`
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -149,24 +149,49 @@ Odd/fault/protected restore tests and fresh direct resume preserve trajectories
 without accepted-step replay. Fixtures are synthetic; compare material/field
 compatibility and convergence separately.
 
-## Known near-zero-gradient XC sensitivity
+## Stable near-zero-gradient XC evaluation
 
-The local Libxc5.2.3 HSE evaluation showed large derivative sensitivity at nearly
-zero density gradients: a density difference about7e-15 yielded a potential
-difference about0.016 in one synthetic case, and full/reduced currents differed
-about5.7e-10. Smaller time steps did not remove it. The pure Libxc diagnostic
-reproduces this without FDTD or a rollback operation. This issue is unresolved;
-no smoothing/clamping, tolerance relaxation or source/library patch is applied.
+Libxc5.2.3 HSE06 mixes WPBEh(0) − 0.25 WPBEh(ω) + PBE correlation.
+Separate differentiation of the E1 and log terms in WPBEh(0) cancels large terms
+at nearly zero gradients. The original phase0 synthetic full8/reduced4-k case
+showed a current difference about5.7e-10; smaller time steps did not remove it.
 
-`probe_hse_low_gradient.py BUILD_RECORD NEW_JSON` loads the hash-verified selected
-library explicitly. Inspect `low_gradient_sensitivity_detected`; exit0 and
-`status=diagnostic` are not a physical pass. Production HSE accuracy is not
-certified by these integration tests. Keep a sensitivity report with results.
-The successful mixed fixture explicitly uses `--orbital-phase .23`, avoiding the
-flat-gradient test nodes; it is not a modification to any user's GS or a general
-numerical remedy. The original phase0 case/failed comparison is retained.
+The current complete fast-PR source evaluates the same formula in u=s² for
+reduced gradients s≤1e-4, combining the cancellation before differentiation.
+Discarded E1-series terms are below double precision. Screened exchange uses its
+analytic quadratic limit only below roundoff in u; correlation retains Libxc.
+Points outside this region retain original Libxc output bytes. No density,
+gradient or field floor/smoothing, tolerance relaxation or conventional HSE is
+used. Spin scaling and fixed-core density/gradient contributions are checked.
 
-Next: resolve the low-gradient derivative issue with a mathematically consistent
-validated treatment; validate reduced internal-k MPI and broader initialization.
-Preserve fast-PR algorithms and conventional-HSE exclusion. Memory budgets remain
-warning-only and molecular work remains paused.
+The unchanged original phase0 case now passes full/reduced current and energy
+comparisons over32 steps, FDTD coupling, failed-step recovery, protected restore
+and fresh-process direct resume. Ordinary PBE arrays remain byte equal; ordinary
+fast-HSE Taylor/PT-CN and mixed arrays differ only at roundoff. Synthetic numerical
+tests do not certify physical convergence for a real material.
+
+Explicit verification (no build/download):
+
+```sh
+python tools/test_hse_low_gradient.py BUILD_RECORD COMPILED_NATIVE_PROBE NEW_OUTPUT
+mpiexec -n 2 python tools/test_fast_hse_low_gradient_mpi.py \
+  BUILD_RECORD FULL_K_BUNDLE REDUCED_K_BUNDLE NEW_OUTPUT
+# Replay the original local FDTD field: --drive ORIGINAL_ARRAYS_NPZ --point-index 1
+```
+
+Compile `tests/native/test_hse_low_gradient.f90` explicitly against matching new
+`hybrid_semilocal.mod` and library. The checks cover80-digit energy differences,
+density/screening/branch boundaries, spin/core paths and ordinary-gradient bytes.
+See `runtime/NOTICE.md` for formula provenance/licensing. Pinned sources and old
+binaries are not modified. Explicitly rebuild **both** the full-k serial reference
+worker and MPI library from the new source. Symmetry protocol1 alone does not
+identify this numerical fix.
+
+`probe_hse_low_gradient.py BUILD_RECORD NEW_JSON` intentionally still evaluates
+raw Libxc. Its `low_gradient_sensitivity_detected` can remain True with a fixed
+wrapper. Do not interpret that diagnostic as wrapper success/failure: retain the
+new verification results and source/binary hashes. Historical phase.23 integration
+fixtures remain; this fix is verified on the original phase0.
+
+Next: reduced internal-k MPI and broader initialization. Fast-PR-only policy,
+warning-only memory budgets and paused molecular work remain unchanged.

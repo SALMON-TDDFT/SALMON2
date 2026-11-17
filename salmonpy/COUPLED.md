@@ -428,5 +428,5 @@ NativeFastHSEBackend(...,allow_symmetry=True)は内部kランク1・factor-off T
 通常混在例は--hse-symmetry --hse-reference-bundle FULL_K_BUNDLEを明示する。
 Aが対称性を破ったときのInputErrorから、全体を戻すには--protect-steps／step_protectedを使う。
 直接／保護付き再開と2種類の場内LD・SBE・PBE-TDDFT・HSE混在を検証した。
-初期状態・場の局所方向・XCの適合性は別途確認する。極小勾配の既知の感度も含め、
+初期状態・場の局所方向・XCの適合性は別途確認する。極小勾配の安定評価と元の失敗例での検証も含め、
 [対称性ガイド](FAST_HSE_SYMMETRY.md)を参照。

@@ -157,5 +157,5 @@ Unknown/old ABI errors do not imply recovery. Use `step_protected` for whole FDT
 loop retry. Common direct/staged checkpoint integration is available.
 
 See [the symmetry guide](FAST_HSE_SYMMETRY.en.md) for mixed samples, exact scope and
-the known near-zero-gradient XC sensitivity. Connectivity/restart tests are not
+stable near-zero-gradient XC evaluation and regression checks. Connectivity/restart tests are not
 physical-convergence certificates.

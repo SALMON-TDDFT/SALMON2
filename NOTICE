@@ -28,3 +28,6 @@ Independent repository migration (2026-11-14):
 2026-11-15 source ownership migration: compatibility patches were replaced by
 complete bundled sources and verified replacement files. Original commits and
 legacy patch digests remain provenance, not current-source validation claims.
+
+Small-gradient WPBEh evaluation derives from Libxc 5.2.3 (M.A.L. Marques,
+MPL-2.0); see runtime/NOTICE.md and runtime/licenses/Libxc-MPL-2.0.txt.

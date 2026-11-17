@@ -1,6 +1,6 @@
 # 高速PR版HSEと対称性
 
-[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.4`
+[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.5`
 
 HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成・orbit再利用・ACEと対称性を
 中心に進めます。通常版HSEを代替エンジンにはしません。標準SALMONの対称性縮約とは演算が
@@ -124,18 +124,43 @@ native寿命を取得する前に拒否します。学習／PT-CNの対称性と
 対称性HSE1を検証しました。故障・保護付き復元と新規直接再開で、受理済みステップの再生なしに
 軌跡を維持します。合成初期状態の接続試験であり、物質・場の適合性と物理収束は別途確認します。
 
-## 既知の極小勾配XC感度
+## 極小勾配XCの安定評価
 
-このMacのLibxc5.2.3 HSE評価で、ほぼゼロの密度勾配に対する大きな微分感度を実測しました。
-合成状態で密度差約7e-15からポテンシャル差約0.016が生じ、全／縮約k点の電流差約5.7e-10が出ました。
-刻みを小さくしても消えず、FDTDや巻戻しなしのLibxc単独診断でも再現します。これは未解決です。
-smoothing／clamping・許容誤差の緩和・ソースやライブラリへのパッチは適用していません。
+Libxc5.2.3のHSE06は、WPBEh(0) − 0.25 WPBEh(ω) ＋ PBE相関を組み合わせます。
+WPBEh(0)のE1項とlog項を別々に微分すると、ほぼゼロの勾配で大きな項の相殺が起きます。
+元のphase0合成状態では全8／縮約4 k点の電流差約5.7e-10になり、刻みの縮小でも消えませんでした。
 
-`probe_hse_low_gradient.py BUILD_RECORD NEW_JSON` はハッシュ確認済みライブラリを明示的に読みます。
-`low_gradient_sensitivity_detected` を確認し、exit0や `status=diagnostic` を物理検証の合格と
-解釈しません。接続試験は本番HSEの精度保証ではなく、計算結果には感度の記録も残します。
-成功した混在fixtureは `--orbital-phase .23` を明示し、平坦勾配の試験節点を避けています。
-利用者のGS変更や一般的な数値対策ではありません。元のphase0の不一致も記録に保持しています。
+現在の高速PR用完全ソースでは、縮約勾配s≤1e-4で同じ式をu=s²で評価し、相殺を解析的に
+まとめてから微分します。捨てるE1級数の項は倍精度以下です。遮蔽交換のuが丸め誤差以下の
+場合は解析的二次極限を使い、相関は元のLibxcで評価します。範囲外の点のLibxc出力は変更しません。
+密度・勾配・Aのfloor／平滑化、許容誤差の緩和、通常HSEへの変更は行いません。
+スピンのスケーリングと固定coreの密度・勾配も検証します。
 
-次は、数学的に整合し検証された低勾配微分の扱いと、縮約内部k MPI・より広い初期化の検証です。
-高速PR版の演算と通常HSE非対応の方針は維持します。メモリ予算は警告のみ、分子の作業は保留です。
+元のphase0を変えず、32ステップで全／縮約k点の電流・エネルギー一致、FDTD結合、
+故障復帰・保護付き復元・新規プロセスでの直接再開を検証しました。
+通常のPBEは配列のバイト一致、高速HSE Taylor／PT-CNと混在は丸め誤差内の差を確認しました。
+合成状態の数値検証であり、実材料の物理収束の保証ではありません。
+
+明示的な検証入口（ビルド・ダウンロードは行いません）:
+
+```sh
+python tools/test_hse_low_gradient.py BUILD_RECORD COMPILED_NATIVE_PROBE NEW_OUTPUT
+mpiexec -n 2 python tools/test_fast_hse_low_gradient_mpi.py \
+  BUILD_RECORD FULL_K_BUNDLE REDUCED_K_BUNDLE NEW_OUTPUT
+# 元のFDTD局所場を使う場合: --drive ORIGINAL_ARRAYS_NPZ --point-index 1
+```
+
+native probeは `tests/native/test_hse_low_gradient.f90` を、対応する新しい
+`hybrid_semilocal.mod` とライブラリに対して明示的にコンパイルします。
+80桁エネルギー差分、密度・遮蔽係数・切替境界・スピン・coreと通常勾配のバイト一致を調べます。
+ライセンスと式の由来は `runtime/NOTICE.md`。元ソース・既存バイナリは変更しません。
+全k参照ワーカーとMPIライブラリの**両方**を新ソースから明示的に構築してください。
+対称性protocol1だけでは、この数値修正の有無は識別できません。
+
+`probe_hse_low_gradient.py BUILD_RECORD NEW_JSON` は今後も生のLibxcを診断します。
+wrapperを直しても `low_gradient_sensitivity_detected=True` になり得ます。
+この診断をwrapperの失敗・合格と取り違えず、新しい上記検証とソース／バイナリのハッシュを残します。
+過去のphase.23は接続用fixtureとして残しますが、今回の修正確認は元のphase0です。
+
+次は縮約内部k MPI・より広い初期化の検証です。高速PR版のみの方針を維持します。
+メモリ予算は警告のみ、分子の作業は保留です。
