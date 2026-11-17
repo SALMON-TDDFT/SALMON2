@@ -49,6 +49,7 @@ def main():
     for name in ('build', 'runtime', 'bundle', 'output'): parser.add_argument(name, type=Path)
     parser.add_argument('--fast-hse-build', type=Path, help='explicit fast-PR serial worker build record for hse-point')
     parser.add_argument('--fast-hse-mpi-build', type=Path, help='explicit native fast-PR host-MPI build record')
+    parser.add_argument('--hse-bundle', type=Path, help='optional separate fast-PR HSE GS bundle; default is BUNDLE')
     parser.add_argument('--hse-ranks', type=int, choices=(1, 2), default=1)
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
@@ -61,6 +62,7 @@ def main():
     parser.add_argument('--field-grid', type=int, nargs=3, default=(1, 1, 1), metavar=('PX', 'PY', 'PZ'))
     parser.add_argument('--compare', type=Path, help='compare against an existing same-physics run with another MPI decomposition')
     parser.add_argument('--steps', type=int, default=128)
+    parser.add_argument('--protect-steps', action='store_true', help='explicit whole-step numerical/ordinary-output rollback; requires current native transaction ABI')
     parser.add_argument('--without-ld', action='store_true', help='vacuum control for local LD regions')
     parser.add_argument('--save-at', type=int, help='stop after this step and save a replay checkpoint')
     parser.add_argument('--resume', type=Path, help='reconstruct and continue a replay checkpoint')
@@ -84,6 +86,8 @@ def main():
     if not np.isfinite(args.dt) or args.dt <= 0: parser.error('positive finite dt required')
     if (args.fast_hse_build is not None or args.fast_hse_mpi_build is not None) and args.layers is None:
         parser.error('fast HSE requires an explicit layer layout')
+    if args.hse_bundle is not None and args.fast_hse_build is None:
+        parser.error('--hse-bundle requires --fast-hse-build')
     if args.hse_ranks != 1 and args.fast_hse_mpi_build is None:
         parser.error('hse-ranks > 1 requires --fast-hse-mpi-build')
     if args.memory_budget_gib is not None and (not np.isfinite(args.memory_budget_gib) or args.memory_budget_gib <= 0):
@@ -111,6 +115,8 @@ def main():
         _, sbe = models()
         layout = json.loads(args.layers.read_text()) if args.layers is not None else None
         selected = {layer['material_id'] for layer in layout.get('layers', [])} if layout is not None else {'sbe-point','si-tddft'}
+        if args.hse_bundle is not None and 'hse-point' not in selected:
+            raise ValueError('--hse-bundle requires an hse-point layer')
         available = {'drude': materials[0], 'lorentz': materials[1]}
         if 'sbe-point' in selected:
             available['sbe-point'] = bind_material(sbe, key='sbe-point', identity='synthetic-two-band-v1')
@@ -123,7 +129,7 @@ def main():
             from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
             from salmonpy.fast_hse_mpi import NativeFastHSEBackend
             available['hse-point'] = MaterialBinding('hse-point',
-                FastHSEMaterialProvider(args.bundle, 'rt.inp', max_steps=args.steps),
+                FastHSEMaterialProvider(args.hse_bundle or args.bundle, 'rt.inp', max_steps=args.steps),
                 (FastHSEResponseBackend(args.fast_hse_build, output) if args.fast_hse_mpi_build is None
                  else NativeFastHSEBackend(args.fast_hse_mpi_build, output)))
         assembly = None
@@ -151,7 +157,7 @@ def main():
             return h.hexdigest()
         build = json.loads(args.build.read_text())
         assets = {}
-        if 'si-tddft' in selected or 'hse-point' in selected:
+        if 'si-tddft' in selected or ('hse-point' in selected and args.hse_bundle is None):
             assets = {str(p.relative_to(args.bundle)): digest_file(p)
                       for p in sorted(args.bundle.rglob('*')) if p.is_file()}
         signature = {'input': FDTDMPI(tuple(args.field_grid)).input_text(calculation),
@@ -166,6 +172,9 @@ def main():
         if 'hse-point' in selected:
             signature['fast_hse_backend'] = available['hse-point'].backend.identity
             signature['hse_ranks'] = args.hse_ranks
+            if args.hse_bundle is not None:
+                signature['hse_assets'] = {str(p.relative_to(args.hse_bundle)): digest_file(p)
+                    for p in sorted(args.hse_bundle.rglob('*')) if p.is_file()}
         restored = None
         if args.resume is not None:
             metadata = json.loads((args.resume/'checkpoint.json').read_text())
@@ -185,8 +194,11 @@ def main():
         memory_path=output/'memory-advice.json'
         if memory_enabled:
             from salmonpy._memory_advice import initial_advice
-            initial_advice(world,context,calculation,args.bundle,tuple(args.field_grid),sbe,budget,memory_reports,memory_path,
-                           kind="field" if context.group.role=="field" else bindings[context.group.point_ids[0]].key)
+            initial_advice(world,context,calculation,
+                    (args.hse_bundle or args.bundle) if context.group.point_ids and bindings[context.group.point_ids[0]].key=='hse-point' else args.bundle,
+                    tuple(args.field_grid),sbe,budget,memory_reports,memory_path,
+                           kind="field" if context.group.role=="field" else bindings[context.group.point_ids[0]].key,
+                           protected_steps=args.protect_steps)
         field = None
         if context.group.role == 'field':
             field = NativeEHField(context, calculation, args.build, output/'field', points=points, grid=tuple(args.field_grid))
@@ -244,9 +256,13 @@ def main():
             raise ValueError('direct save/stop must advance beyond restored step')
         if restored is not None and stop <= metadata['step']:
             raise ValueError('save-at must advance beyond the resumed checkpoint')
+        step_targets=None
+        if args.protect_steps:
+            from salmonpy.native_steps import native_step_targets
+            step_targets=native_step_targets(coupled)
         loop_start=_clock()
         for index in range(start, stop):
-            frame = coupled.step()
+            frame = coupled.step_protected(step_targets) if step_targets is not None else coupled.step()
             if frame is not None:
                 if restored is not None and index < metadata['step']:
                     for key, values in restored.items():
@@ -335,7 +351,7 @@ def main():
                 previous = frame['J_charge']; old_A = frame['A_over_c']
             np.savez(output/'response.npz', point_ids=list(points), A_over_c=A, E=E, j=j, serial_replay=replay)
             ids, counts = np.unique(geometry.material_ids(), return_counts=True)
-            report = {'status': 'passed', 'steps': args.steps, 'dt': dt, 'tddft_ranks': args.tddft_ranks if 'si-tddft' in selected else 0, 'field_grid': list(args.field_grid),
+            report = {'status': 'passed', 'protected_steps': args.protect_steps, 'steps': args.steps, 'dt': dt, 'tddft_ranks': args.tddft_ranks if 'si-tddft' in selected else 0, 'field_grid': list(args.field_grid),
                       'point_materials': {str(p): bindings[p].key for p in points},
                       'initial_charge_current': session.initial_current,
                       'outer_mpi_ranks':world.size,
@@ -375,7 +391,7 @@ def main():
             (output/'result.json').write_text(json.dumps(report, indent=2)+'\n')
             print(output)
     except BaseException:
-        # Native errors are not recoverable: avoid stranding peers in cleanup collectives.
+        # Unhandled errors remain fatal; --protect-steps handles only declared healthy-group rollback.
         import traceback
         traceback.print_exc()
         world.Abort(1)

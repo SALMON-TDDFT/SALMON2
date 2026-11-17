@@ -46,7 +46,7 @@ def main():
             if re.search(r'^#define '+f+r'\b',config,re.M):raise ValueError('unsupported profile: '+f)
         adapters=root/'salmonpy/native_adapters'
         if not adapters.exists():adapters=root.parent/'native_adapters'
-        names=['hse_checkpoint','tddft_context','fast_hse_mpi','parallel_bridge']
+        names=['step_output','hse_checkpoint','tddft_context','fast_hse_mpi','parallel_bridge']
         for name in names:
             path=(root/'runtime/sources/standard/src/salmonpy/parallel_bridge.f90' if name=='parallel_bridge' else adapters/(name+'.f90'))
             shutil.copy2(path,staged/(name+'.f90'))

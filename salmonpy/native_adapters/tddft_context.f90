@@ -4,6 +4,7 @@
 #include "config.h"
 module salmonpy_tddft_context
  use structures
+ use salmonpy_step_output
  use hse_checkpoint,only:numeric_payload,hse_checkpoint_install,hse_checkpoint_capture
  use exx_rt_state,only:s_exx_rt_state,rt_state_clear
  use exx_native,only:exx_bind_system,exx_unbind_system
@@ -11,12 +12,12 @@ module salmonpy_tddft_context
  use salmon_xc,only:finalize_xc
  use salmon_global
  use parallelization,only:nproc_size_global,nproc_group_global,nproc_id_global
- use communication,only:comm_summation
+ use communication,only:comm_summation,comm_bcast
  use sym_sub,only:use_symmetry
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
  private
- public::rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step,rt_current,rt_vector_potential
+ public::rt_step_transaction,rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step,rt_current,rt_vector_potential
  type fixed_settings
   real(8)::omega,electronic_temperature
   integer::grid(3),mesh(3),bands,energy_interval,electrons,hamil,exact_interval,warmup,teachers
@@ -68,11 +69,81 @@ type :: checkpoint_payload
   real(8) :: fields(3,5)
   integer :: Mit,accepted
 end type
+type(tddft_context),pointer,save::step_owner=>null()
+type(checkpoint_payload),allocatable,save::step_saved
+type(numeric_payload),allocatable,save::step_exchange
+type(s_xc_operator_payload),allocatable,save::step_xc
+real(8),save::step_cval
+logical,save::step_restored=.false.
+type(step_output_state),save::step_outputs
 type(tddft_context),pointer,save::pending_owner=>null()
 type(checkpoint_payload),allocatable,save::pending
 type(numeric_payload),allocatable,save::pending_hse
 integer(8),save::checkpoint_array_limit=0_8
 contains
+ subroutine rt_step_transaction(ctx,mode,status)
+ use communication,only:comm_get_max
+ type(tddft_context),pointer,intent(inout)::ctx
+ integer,intent(in)::mode
+ integer,intent(out)::status
+ integer::reference
+ status=0;reference=mode
+ call comm_bcast(reference,nproc_group_global)
+ if(mode/=reference.or.mode<0.or.mode>3)status=11
+ if(.not.associated(ctx))status=12
+ call comm_get_max(status,nproc_group_global)
+ if(status/=0)return
+ if(mode==0)then
+   if(associated(step_owner).or.associated(pending_owner))status=14
+   if(yn_out_dns_rt/='n'.or.yn_out_dns_ac_je/='n'.or.yn_out_micro_je/='n')status=15
+    if(yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n'.or.yn_out_current_decomposed/='n')status=15
+    if(projection_option/='no'.or.dm_unfold_option/='no'.or.yn_out_rvf_rt/='n')status=15
+ else if(mode/=2)then
+   if(.not.associated(step_owner,ctx))status=14
+   if(mode==1.and.step_restored)status=14
+ endif
+ call comm_get_max(status,nproc_group_global)
+ if(status/=0)return
+ select case(mode)
+ case(0)
+   allocate(step_saved,step_exchange,step_xc)
+   call hse_checkpoint_capture(ctx%hse,step_exchange,status)
+   call comm_get_max(status,nproc_group_global)
+   if(status==0)then
+     call checkpoint_copy(ctx,step_saved,.false.)
+     step_xc=ctx%system%xc_payload;step_cval=ctx%xc_func%cval
+     if(nproc_id_global==0)call step_output_capture(step_outputs,ctx%ofl,status)
+     call comm_get_max(status,nproc_group_global)
+   endif
+   if(status/=0)then
+     deallocate(step_saved,step_exchange,step_xc)
+   else
+     step_owner=>ctx;step_restored=.false.
+   endif
+ case(1)
+   call hse_checkpoint_install(ctx%hse,step_exchange)
+   call checkpoint_copy(ctx,step_saved,.true.)
+   ctx%system%xc_payload=step_xc;ctx%xc_func%cval=step_cval
+   block
+   use hamiltonian,only:update_kvector_nonlocalpt
+   call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
+   end block
+   step_restored=.true.
+   if(nproc_id_global==0)call step_output_close(step_outputs,status)
+ case(2)
+   if(associated(step_owner,ctx))then
+     if(nproc_id_global==0)then
+       call step_output_reopen(step_outputs,status)
+       if(status==0)call step_output_flush(step_outputs,status)
+     endif
+     deallocate(step_saved,step_exchange,step_xc);nullify(step_owner)
+     step_restored=.false.
+   endif
+ case(3)
+   if(nproc_id_global==0)call step_output_reopen(step_outputs,status)
+ end select
+ call comm_get_max(status,nproc_group_global)
+ end subroutine
  subroutine rt_input_config(value)
  type(s_rt_run_config),intent(out)::value
  value%delta_t=dt;value%max_steps=nt
@@ -292,6 +363,9 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  use sendrecv_grid,only:dealloc_cache
  type(tddft_context),pointer,intent(inout)::ctx
  if(.not.associated(ctx))return
+ if(associated(step_owner,ctx))then
+   deallocate(step_saved,step_exchange,step_xc);nullify(step_owner)
+ endif
  if(nproc_id_global==0)then
   close(ctx%ofl%fh_rt);close(ctx%ofl%fh_rt_energy)
  endif
@@ -355,6 +429,10 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  character(1)::extra
  logical::hse_loaded
  status=1;hse_loaded=.false.
+ ios=0
+ if(associated(step_owner).and.(restore.or.present(stage)))ios=14
+ call checkpoint_collective_status(ios)
+ if(ios/=0)return
  if(.not.present(stage).and.associated(pending_owner))return
  if(present(stage))then
   if(associated(pending_owner))then

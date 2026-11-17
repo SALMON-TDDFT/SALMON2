@@ -46,12 +46,63 @@ module salmonpy_eh_context
     real(8),allocatable :: current(:,:,:,:)
     integer :: step
   end type
+  type(restore_candidate),allocatable,save :: step_saved
+  logical,save :: step_restored=.false.
   type(restore_candidate),allocatable,save :: pending
   logical,save :: used=.false.
 #ifdef SALMONPY_RECOVERY_TESTING
   integer,save :: fault_stage=0,fault_rank=-1
 #endif
 contains
+integer(c_int) function sp_eh_step_transaction_protocol() bind(C)
+  sp_eh_step_transaction_protocol=1
+end function
+integer(c_int) function sp_eh_step_transaction(mode) bind(C)
+  use communication,only:comm_get_max
+  use ttm,only:use_ttm
+  use salmon_global,only:yn_obs_plane_em,yn_obs_plane_integral_em,base_directory
+  integer(c_int),value::mode
+  integer::reference,status
+  status=0;reference=mode
+  call comm_bcast(reference,nproc_group_global)
+  if(mode/=reference.or.mode<0.or.mode>3)status=11
+  if(.not.allocated(state))status=12
+  call comm_get_max(status,nproc_group_global)
+  if(status/=0)then
+    sp_eh_step_transaction=status;return
+  endif
+  if(mode==0)then
+    if(allocated(step_saved).or.allocated(pending))status=14
+    if(trim(base_directory)/='./'.and.trim(base_directory)/='.')status=15
+    if(use_ttm.or.state%fe%flag_lr.or.state%fe%flag_ase.or.state%fe%flag_art.or.state%fe%flag_o_restart)status=15
+    if(any(yn_obs_plane_em=='y').or.any(yn_obs_plane_integral_em=='y'))status=15
+    if(allocated(state%fe%iobs_num_ene))then
+      if(any(state%fe%iobs_num_ene>0))status=15
+    endif
+  else if(mode==1)then
+    if(.not.allocated(step_saved).or.step_restored)status=14
+  endif
+  call comm_get_max(status,nproc_group_global)
+  if(status/=0)then
+    sp_eh_step_transaction=status;return
+  endif
+  select case(mode)
+  case(0)
+    allocate(step_saved)
+    step_saved%fe=state%fe;step_saved%ld=state%ld
+    step_saved%current=state%current;step_saved%step=state%step
+    step_restored=.false.
+  case(1)
+    state%fe=step_saved%fe;state%ld=step_saved%ld
+    call move_alloc(step_saved%current,state%current)
+    state%step=step_saved%step;step_restored=.true.
+  case(2)
+    if(allocated(step_saved))deallocate(step_saved)
+    step_restored=.false.
+  end select
+  sp_eh_step_transaction=0
+end function
+
 integer(c_int) function sp_eh_checkpoint_protocol() bind(C)
   sp_eh_checkpoint_protocol=1
 end function
@@ -332,6 +383,7 @@ end function
     ios=0;filename=''
     if(.not.allocated(state))ios=1
     if(restore<0.or.restore>4)ios=1
+    if(allocated(step_saved).and.restore/=0)ios=14
     mode=restore
     call comm_bcast(mode,nproc_group_global)
     if(mode/=restore)ios=1
@@ -877,6 +929,7 @@ end function
   integer(c_int) function sp_eh_close() bind(C)
     sp_eh_close=1
     if(.not.allocated(state)) return
+    if(allocated(step_saved))deallocate(step_saved)
     if(state%step==state%capacity) call eh_finalize(state%fs,state%fe,state%ld)
     call ld_finalize(state%ld)
     call dealloc_cache(state%fs%srg_ng)

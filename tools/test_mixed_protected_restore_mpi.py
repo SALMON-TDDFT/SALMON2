@@ -77,11 +77,17 @@ def main():
         for key in left:
             np.testing.assert_array_equal(left[key],right[key],err_msg=key)
 
+    def advance(coupled):
+        if '--protect-steps' in sample_args:
+            from salmonpy.native_steps import native_step_targets
+            return coupled.step_protected(native_step_targets(coupled))
+        return coupled.step()
+
     def exercise(world,coupled,directory,signature,*,restore=False,frames=None,**kwargs):
         assert not restore, 'launch the save path for this live-state test'
         saved=original(world,coupled,directory,signature,frames=frames)
         assert signature['steps']>saved+3
-        expected=[coupled.step() for unused in range(2)]
+        expected=[advance(coupled) for unused in range(2)]
         root=Path(directory).parent
         before=freeze(coupled,root,'before-failure')
         called=[]
@@ -166,13 +172,13 @@ def main():
             assert error.original_preserved and not error.cleanup_errors
         after=freeze(coupled,root,'after-failure')
         assert before==after, 'state changed: '+str([key for key in before if before[key]!=after[key]])
-        expected.append(coupled.step())  # Original session remains usable.
+        expected.append(advance(coupled))  # Original session remains usable.
         count=coupled.step_index
         assert count==saved+3
         assert original(world,coupled,directory,signature,restore=True)==saved
         assert coupled.step_index==saved
         for frame in expected:
-            same_frame(coupled.step(),frame)
+            same_frame(advance(coupled),frame)
         assert coupled.step_index==count and not coupled.response.failed
         statuses=world.allgather(True)
         if world.rank==0:

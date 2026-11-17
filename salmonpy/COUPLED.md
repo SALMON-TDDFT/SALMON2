@@ -419,3 +419,5 @@ Pythonは宣言された版と全ランクの既知エラーを確認できる�
 ## 明示した契約での混在ステップ保護
 
 `CoupledStepper.step_protected(targets)` は自作コードと完全な退避・復元コールバックを接続する任意の入口です。[STEPPING.md](STEPPING.md) と6ランクの `examples/mpi_protected_step.py` を参照。native全体の保護は未対応で、個別ソルバーの復帰から推定しません。
+
+監査済みnative全体の保護は [NATIVE_STEPPING.md](NATIVE_STEPPING.md) の別プロトコルと `--protect-steps` で利用できます。別のHSE GSは `--hse-bundle`、同時TDDFT／HSEの例は `examples/mixed_tddft_hse_layers.json` です。

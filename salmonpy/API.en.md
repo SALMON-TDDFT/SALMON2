@@ -92,3 +92,5 @@ For one serial model contract, the explicit conformance checker and the point-MP
 Advisory memory APIs are MemoryEstimate/MemoryReport/memory_advice/process_memory in salmonpy.memory. Excess only warns; this is not admission or an RSS cap. See [MEMORY.en.md](MEMORY.en.md).
 
 `stepping.StepTarget`, `guarded_step` and `StepRecoveryError` are preview APIs for explicit complete backend rollback contracts. See the paired STEPPING guides.
+
+`native_steps.native_step_targets` is the preview bridge from audited native state/ordinary-output transactions to common protected steps. See the paired NATIVE_STEPPING guides.

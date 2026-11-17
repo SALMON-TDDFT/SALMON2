@@ -82,3 +82,5 @@ FortranのSTOP／abortを回復可能なPython例外にする変更ではあり�
 メモリ助言の公開入口はsalmonpy.memoryのMemoryEstimate／MemoryReport／memory_advice／process_memoryです。予算超過は警告のみで、実行可否や上限の保証ではありません。詳細は[MEMORY.md](MEMORY.md)。
 
 `stepping.StepTarget`・`guarded_step`・`StepRecoveryError` は明示した完全退避契約によるステップ保護のプレビュー入口です。STEPPING日英ガイドを参照してください。
+
+`native_steps.native_step_targets` は、監査済みnative状態と通常出力を共通の保護付きステップへつなぐプレビューAPIです。NATIVE_STEPPING日英ガイドを参照してください。

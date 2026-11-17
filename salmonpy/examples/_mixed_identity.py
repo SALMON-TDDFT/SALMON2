@@ -20,7 +20,6 @@ def sample_records(run_id,signature,points,bindings,*,constitutive,cell_ids,asse
     labels=({p['transport_id']:p['point_id'] for p in assembly.record()['points']} if assembly is not None
             else {p:'point-'+str(p) for p in points})
     assets=signature.get('assets',{})
-    input_assets={n:sha for n,sha in assets.items() if not n.startswith('data_for_restart/') and not n.endswith('.json')}
     entries=[]
     for point in points:
         binding=bindings[point]
@@ -33,9 +32,11 @@ def sample_records(run_id,signature,points,bindings,*,constitutive,cell_ids,asse
                 initial={'material':definition,'preparation':'builtin ground occupation/1'}
                 initial_id=mid+':ground'
             else:
-                definition={'kind':mid,'inputs':input_assets,
+                point_assets=signature.get('hse_assets',assets) if mid=='hse-point' else assets
+                point_inputs={n:sha for n,sha in point_assets.items() if not n.startswith('data_for_restart/') and not n.endswith('.json')}
+                definition={'kind':mid,'inputs':point_inputs,
                     'engine':signature.get('fast_hse_backend') if mid=='hse-point' else signature['library']}
-                initial={'assets':assets}
+                initial={'assets':point_assets}
                 initial_id=mid+':gs'
             record={'material_id':mid,'definition_digest':digest_record(definition),
                     'initial_state_id':initial_id,'initial_state_digest':digest_record(initial)}

@@ -71,10 +71,10 @@ failure after field update and an LD failure preserve every checked state;
 Admission, partial capture, rollback and cleanup failure cases are included.
 These are synthetic interface checks, not a physical-material prediction.
 
-**Native E/H/TDDFT/fast-PR HSE whole-step protection is not provided by these
-example callbacks.** Their individual numerical recovery/checkpoint protocols do
-not cover accepted output streams or a whole mixed transaction. No native targets
-are generated automatically; without explicit complete targets the call rejects
-before stepping. Native aggregate transaction/output support remains separate.
-Backup memory/time depends on the backend; budgets remain advisory. Importing
-this module does not initialize MPI, load kernels, compile or download anything.
+Audited aggregate native E/H/TDDFT/fast-PR HSE protection now connects through the
+separate versioned contract used by `native_steps.native_step_targets`. See
+[NATIVE_STEPPING.en.md](NATIVE_STEPPING.en.md). This light/custom example itself
+does not validate native output protection; individual recovery/checkpoint
+capabilities still do not imply whole-step atomicity. Backup cost depends on the
+backend and budgets remain advisory. Imports do not initialize MPI, load native
+libraries, compile or download anything.

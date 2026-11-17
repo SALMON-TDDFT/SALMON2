@@ -59,3 +59,16 @@ class MixedIdentityTests(unittest.TestCase):
         coupled,_,_,_=self.fixture();current=checkpoint_identity(coupled)
         check_identity(current,copy.deepcopy(current),'salmonpy.native-replay/2')
         with self.assertRaises(ValueError):check_identity(None,current,'salmonpy.native-replay/2')
+
+    def test_separate_hse_bundle_changes_only_hse_identity(self):
+        points={20:(20,20,20),30:(21,20,20)}
+        bindings={20:SimpleNamespace(key='si-tddft',material_record=None),
+                  30:SimpleNamespace(key='hse-point',material_record=None)}
+        signature={'library':'b'*64,'assets':{'rt.inp':'c'*64},
+                   'hse_assets':{'rt.inp':'d'*64},'fast_hse_backend':'hse-v1'}
+        first=sample_records('run',signature,points,bindings,constitutive={},cell_ids={})[0]
+        signature['hse_assets']['rt.inp']='e'*64
+        second=sample_records('run',signature,points,bindings,constitutive={},cell_ids={})[0]
+        self.assertEqual(first['points'][0],second['points'][0])
+        self.assertNotEqual(first['points'][1]['definition_digest'],second['points'][1]['definition_digest'])
+        self.assertNotEqual(first['points'][1]['initial_state_digest'],second['points'][1]['initial_state_digest'])

@@ -55,7 +55,7 @@ def main():
     adapters = root/'salmonpy/native_adapters'
     if not adapters.is_dir():
         adapters = root.parent/'native_adapters'
-    names = ('hse_checkpoint', 'tddft_context', 'fast_hse_worker')
+    names = ('step_output', 'hse_checkpoint', 'tddft_context', 'fast_hse_worker')
     for name in names:
         if not (adapters/(name+'.f90')).is_file():
             raise ValueError('missing adapter source: '+name)

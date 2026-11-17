@@ -35,6 +35,8 @@ class NativeRestoreCandidate:
     def stage(self):
         if self.ready or self.finished:
             raise InputError('candidate already staged or retired')
+        if getattr(self.owner, '_step_guard', None) is not None:
+            raise InputError('cannot stage checkpoint during a protected native step')
         if getattr(self.owner, "_restore_candidate", None) is not None:
             raise InputError("one pending candidate per native lifetime")
         self.owner._restore_candidate = self

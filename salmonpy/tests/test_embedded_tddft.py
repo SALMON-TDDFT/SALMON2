@@ -133,8 +133,14 @@ class EmbeddedTDDFTTest(unittest.TestCase):
             np.testing.assert_array_equal(state.A,np.zeros(3))
             self.assertEqual(state.steps,0)
             code[0]=0
-            np.testing.assert_array_equal(state.advance(np.zeros(3),np.ones(3)),np.zeros(3))
-            self.assertEqual(state.steps,1)
+            if protocol:
+                self.assertFalse(state.failed)
+                np.testing.assert_array_equal(state.advance(np.zeros(3),np.ones(3)),np.zeros(3))
+                self.assertEqual(state.steps,1)
+            else:
+                self.assertTrue(state.failed)
+                with self.assertRaises(InputError):state.advance(np.zeros(3),np.ones(3))
+                self.assertEqual(state.steps,0)
 
     def test_rejection_guarantee_requires_protocol_and_unanimous_status(self):
         from types import SimpleNamespace
@@ -150,7 +156,7 @@ class EmbeddedTDDFTTest(unittest.TestCase):
         import numpy as np
         from types import SimpleNamespace
         from salmonpy.embedded_tddft import _NativeState
-        from salmonpy.errors import NumericalError,RuntimeFailure
+        from salmonpy.errors import NumericalError,RuntimeFailure,InputError
         for declared,error in ((True,NumericalError),(False,RuntimeFailure)):
             result=[23]
             def step(old,new,current):current[:]=0.;return result[0]
@@ -163,5 +169,11 @@ class EmbeddedTDDFTTest(unittest.TestCase):
             self.assertEqual(state.steps,0)
             np.testing.assert_array_equal(state.A,np.zeros(3))
             result[0]=0
-            state.advance(np.zeros(3),np.ones(3))
-            self.assertEqual(state.steps,1)
+            if declared:
+                self.assertFalse(state.failed)
+                state.advance(np.zeros(3),np.ones(3))
+                self.assertEqual(state.steps,1)
+            else:
+                self.assertTrue(state.failed)
+                with self.assertRaises(InputError):state.advance(np.zeros(3),np.ones(3))
+                self.assertEqual(state.steps,0)

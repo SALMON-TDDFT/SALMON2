@@ -180,3 +180,7 @@ install(FILES "${ROOT}/tools/test_fast_hse_deep_recovery_mpi.py" DESTINATION sal
 install(FILES "${ROOT}/tools/test_eh_deep_recovery_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/salmonpy/stepping.py" "${ROOT}/salmonpy/STEPPING.md" "${ROOT}/salmonpy/STEPPING.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/native_steps.py" "${ROOT}/salmonpy/NATIVE_STEPPING.md" "${ROOT}/salmonpy/NATIVE_STEPPING.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/mixed_tddft_hse_layers.json" DESTINATION salmonpy/examples)
+install(FILES "${ROOT}/tools/test_native_protected_step_mpi.py" "${ROOT}/tools/test_native_step_admission_mpi.py" DESTINATION salmonpy/_runtime_source/tools)

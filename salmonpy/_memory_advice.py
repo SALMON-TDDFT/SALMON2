@@ -29,8 +29,11 @@ def _record(world, local, budget, label, records, path):
     return report
 
 
-def initial_advice(world,context,calculation,bundle,field_grid,model,budget,records,path,*,kind):
+def initial_advice(world,context,calculation,bundle,field_grid,model,budget,records,path,*,kind,protected_steps=False):
     rss,basis=process_memory()
+    unknown=('initialization workspaces and future solver allocations are not fully modeled',)
+    if protected_steps:
+        unknown+=('whole-step and per-component recovery backups coexist; native extra memory is not calibrated',)
     try:
         if context.group.role=='field':
             counts=calculation.geometry.grid.counts
@@ -51,7 +54,7 @@ def initial_advice(world,context,calculation,bundle,field_grid,model,budget,reco
             basis+='; electronic heuristic: 8*whole input wavefunction bytes per rank'
         live=None if rss is None else rss+storage
         estimate=MemoryEstimate(live,4*storage,RESERVE,basis,
-            ('initialization workspaces and future solver allocations are not fully modeled',))
+            unknown)
     except Exception as exc:
         estimate=MemoryEstimate(rss,None,RESERVE,basis,('initial estimate unavailable: '+str(exc),))
     return _record(world,estimate,budget,'mixed_initial_plan',records,path)

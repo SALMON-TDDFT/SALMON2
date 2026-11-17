@@ -26,6 +26,7 @@ def main():
     parser.add_argument('input')
     parser.add_argument('output')
     parser.add_argument('--material-ranks', type=int, choices=(1, 2), default=2)
+    parser.add_argument('--protect-steps', action='store_true', help='explicit whole-step rollback with current native transaction ABI')
     parser.add_argument('--steps', type=int, default=400)
     args = parser.parse_args()
     from mpi4py import MPI
@@ -62,10 +63,14 @@ def main():
             ).new_state(dt=dt, steps=args.steps)
         coupled = CoupledStepper.from_multiscale(context, {1: binding, 2: binding}, field)
         try:
+            targets=None
+            if args.protect_steps:
+                from salmonpy.native_steps import native_step_targets
+                targets=native_step_targets(coupled)
             history = []
             grids = [field.grid_A.copy()] if field is not None else []
             for _ in range(args.steps):
-                frame = coupled.step()
+                frame = coupled.step_protected(targets) if targets is not None else coupled.step()
                 if frame is not None:
                     history.append({
                         key: value.tolist() if isinstance(value, np.ndarray) else value
@@ -81,7 +86,7 @@ def main():
         np.savez(output / 'field.npz', x=field.x, grid_A=np.asarray(grids),
                  time=np.arange(args.steps + 1) * dt)
         (output / 'response.json').write_text(json.dumps({
-            'units': 'atomic', 'point_ids': plan.point_ids, 'timing': coupled.timing,
+            'units': 'atomic', 'protected_steps': args.protect_steps, 'point_ids': plan.point_ids, 'timing': coupled.timing,
             'history': history, 'initial_current': coupled.response.initial_current,
             'note': 'History starts at dt; initial feedback is zero, not a measured GS current.',
         }, indent=2) + '\n')
@@ -99,7 +104,7 @@ if __name__ == '__main__':
         MPI.COMM_WORLD.Abort(1)
     except BaseException:
         from mpi4py import MPI
-        # No cross-group rollback. A launcher timeout also bounds native hangs.
+        # Unhandled errors remain fatal; explicit protection requires a healthy returned error.
         import traceback
         traceback.print_exc()
         MPI.COMM_WORLD.Abort(1)

@@ -180,7 +180,7 @@ class _NativeState:
         self.timing=None  # declared once dt is known (create_state)
         self.lib=lib
         self.native=native;self.work=work;self.capacity=capacity
-        self.closed=False;self.initialized=False;self.steps=0;self.A=np.zeros(3)
+        self.closed=False;self.failed=False;self.initialized=False;self.steps=0;self.A=np.zeros(3)
 
     def _call(self,fn,*args):
         self.native._live()
@@ -196,7 +196,7 @@ class _NativeState:
         error=None
         try:
             old=np.array(old,dtype=np.float64,order='C');new=np.array(new,dtype=np.float64,order='C')
-            if self.closed or self.steps>=self.capacity:raise InputError('closed or exhausted native state')
+            if self.closed or self.failed or self.steps>=self.capacity:raise InputError('closed, failed or exhausted native state')
             if old.shape!=(3,) or new.shape!=(3,) or not np.isfinite(new).all():raise InputError('finite A vectors required')
             if not np.array_equal(old,self.A):raise InputError('stale A endpoint')
         except Exception as exc:error=str(exc)
@@ -214,6 +214,7 @@ class _NativeState:
             if _admission_rejected(self.lib,outcomes,allowed=(20,21,22,23,24,25),
                                    query_name='sp_tddft_recovery_protocol'):
                 raise NumericalError('native TDDFT step failed; accepted state restored without replay; retry permitted: '+str(outcomes))
+            self.failed=True
             raise RuntimeFailure('native step failed; numerical state is not guaranteed unchanged: '+str(outcomes))
         self.A=new.copy();self.steps+=1
         return -J  # Physical charge-current density, converted exactly once.

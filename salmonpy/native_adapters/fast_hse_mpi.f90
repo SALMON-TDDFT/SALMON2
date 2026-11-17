@@ -9,7 +9,7 @@ module salmonpy_fast_hse_mpi
  use communication,only:comm_is_attached,comm_get_globalinfo,comm_get_max,comm_bcast
  use parallelization,only:setup_parallel,nproc_group_global,nproc_size_global
  use salmonpy_tddft_context,only:tddft_context,rt_open,rt_step,rt_close,rt_input_config, &
-   rt_checkpoint,rt_current,rt_accepted_step,rt_vector_potential
+   rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_vector_potential
  use structures,only:s_rt_run_config
  implicit none
  private
@@ -18,6 +18,23 @@ module salmonpy_fast_hse_mpi
  logical,save::used=.false.,ready=.false.,failed=.false.
  real(8),save::accepted_A(3)=0d0
 contains
+integer(c_int) function sp_fast_hse_step_transaction_protocol() bind(C)
+  sp_fast_hse_step_transaction_protocol=1
+end function
+integer(c_int) function sp_fast_hse_step_transaction(mode) bind(C)
+  integer(c_int),value::mode
+  integer::status
+  sp_fast_hse_step_transaction=12
+  if(.not.attached_main_thread())return
+  status=0
+  if(.not.ready.or.failed.or..not.associated(state))status=12
+  call agree(status)
+  if(status/=0)return
+  call rt_step_transaction(state,mode,status)
+  if(status==0.and.mode==1)call rt_vector_potential(state,accepted_A,status)
+  call agree(status)
+  sp_fast_hse_step_transaction=status
+end function
 integer(c_int) function sp_fast_hse_recovery_protocol() bind(C)
   sp_fast_hse_recovery_protocol=1
 end function

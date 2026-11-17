@@ -5,6 +5,7 @@ set(SOURCES
     perflog.f90
     posix.c
     filesystem.f90
+    step_output.f90
     write_field.f90
     write_file3d.f90
     write.f90

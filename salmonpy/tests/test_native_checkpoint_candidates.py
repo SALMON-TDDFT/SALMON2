@@ -55,3 +55,10 @@ class NativeCandidateTests(unittest.TestCase):
         second.discard()
         self.assertEqual(calls,[(b'first.bin',2)])
         first.discard()
+
+    def test_stage_rejects_step_backup_without_reserving_or_native_call(self):
+        owner,calls=self.owner();owner._step_guard=object()
+        candidate=NativeRestoreCandidate(owner,'checkpoint','saved.bin')
+        with self.assertRaises(InputError):candidate.stage()
+        self.assertEqual(calls,[])
+        self.assertIsNone(getattr(owner,'_restore_candidate',None))

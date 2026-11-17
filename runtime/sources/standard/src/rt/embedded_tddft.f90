@@ -25,6 +25,7 @@ use hamiltonian, only: update_kvector_nonlocalpt
 use math_constants, only: pi
 use salmon_global
 use structures
+use salmonpy_step_output
 use parallelization, only: adjust_elapse_time, nproc_group_global
 use communication, only: comm_is_root, comm_sync_all, comm_bcast
 use salmon_xc, only: finalize_xc
@@ -82,6 +83,11 @@ type :: checkpoint_payload
   real(8) :: fields(3,5),worker_A(3),worker_current(3,2),accepted_A(3)
   integer :: Mit,itt
 end type
+type(checkpoint_payload),allocatable,save :: step_saved
+real(8),save :: step_saved_cval
+logical,save :: step_restored=.false.
+type(s_xc_operator_payload),allocatable,save :: step_saved_xc
+type(step_output_state),save :: step_outputs
 type(checkpoint_payload),allocatable,save :: pending
 real(8),save :: pending_xc_cval
 type(rt_context),allocatable,save :: state
@@ -90,6 +96,66 @@ real(8),save :: accepted_A(3)=0d0
 integer(8),save :: checkpoint_array_limit=0_8
 contains
 ! Protocol1: statuses10..14 reject collectively before numerical/latch changes.
+integer(c_int) function sp_tddft_step_transaction_protocol() bind(C)
+  sp_tddft_step_transaction_protocol=1
+end function
+integer(c_int) function sp_tddft_step_transaction(mode) bind(C)
+  use communication,only:comm_get_max,comm_get_globalinfo
+  integer(c_int),value::mode
+  integer::status,reference,group,rank,count
+  call comm_get_globalinfo(group,rank,count)
+  status=0;reference=mode
+  call comm_bcast(reference,group)
+  if(mode/=reference.or.mode<0.or.mode>3)status=11
+  if(.not.allocated(state))status=12
+  call comm_get_max(status,group)
+  if(status/=0)then
+    sp_tddft_step_transaction=status;return
+  endif
+  if(mode==0)then
+    if(allocated(step_saved).or.allocated(pending))status=14
+    if(yn_out_dns_rt/='n'.or.yn_out_dns_ac_je/='n'.or.yn_out_micro_je/='n')status=15
+    if(yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n'.or.yn_out_current_decomposed/='n')status=15
+    if(projection_option/='no'.or.dm_unfold_option/='no'.or.yn_out_rvf_rt/='n')status=15
+  else if(mode/=2)then
+    if(.not.allocated(step_saved))status=14
+    if(mode==1.and.step_restored)status=14
+  endif
+  call comm_get_max(status,group)
+  if(status/=0)then
+    sp_tddft_step_transaction=status;return
+  endif
+  select case(mode)
+  case(0)
+    allocate(step_saved,step_saved_xc)
+    call checkpoint_copy(step_saved,.false.)
+    step_saved_xc=state%system%xc_payload;step_saved_cval=state%xc_func%cval
+    step_restored=.false.
+    if(rank==0)call step_output_capture(step_outputs,state%ofl,status)
+    call comm_get_max(status,group)
+    if(status/=0)deallocate(step_saved,step_saved_xc)
+  case(1)
+    call checkpoint_copy(step_saved,.true.)
+    state%system%xc_payload=step_saved_xc;state%xc_func%cval=step_saved_cval
+    call update_kvector_nonlocalpt(state%info%ik_s,state%info%ik_e,state%system,state%ppg)
+    step_restored=.true.
+    if(rank==0)call step_output_close(step_outputs,status)
+  case(2)
+    if(allocated(step_saved))then
+      if(rank==0)then
+        call step_output_reopen(step_outputs,status)
+        if(status==0)call step_output_flush(step_outputs,status)
+      endif
+      deallocate(step_saved,step_saved_xc)
+    endif
+    step_restored=.false.
+  case(3)
+    if(rank==0)call step_output_reopen(step_outputs,status)
+  end select
+  call comm_get_max(status,group)
+  sp_tddft_step_transaction=status
+end function
+
 integer(c_int) function sp_tddft_error_protocol() bind(C)
   sp_tddft_error_protocol=1
 end function
@@ -296,6 +362,7 @@ end function
 integer(c_int) function sp_tddft_close() bind(C)
   sp_tddft_close=1
   if(.not.allocated(state)) return
+  if(allocated(step_saved))deallocate(step_saved,step_saved_xc)
   call timer_end(LOG_RT_ITERATION)
   call timer_disable_sub
   close(030)
@@ -334,6 +401,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   mode=restore
   call comm_bcast(mode,nproc_group_global)
   if(mode/=restore.or.restore<0.or.restore>4)status=2
+  if(allocated(step_saved).and.restore/=0)status=14
   if(restore==3.and..not.allocated(pending))status=2
   call comm_get_max(status,nproc_group_global)
   if(status/=0)then

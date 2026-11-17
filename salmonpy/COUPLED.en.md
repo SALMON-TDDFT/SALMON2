@@ -446,3 +446,5 @@ Run `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` with one/two ranks, OM
 ## Explicit mixed-step protection
 
 `CoupledStepper.step_protected(targets)` is an opt-in entry for complete backend-owned backup/rollback callbacks. See [STEPPING.en.md](STEPPING.en.md) and the six-rank `examples/mpi_protected_step.py`. Aggregate native transaction/output protection is not inferred from individual solver recovery.
+
+Audited native aggregate protection uses the separate protocol and `--protect-steps` described in [NATIVE_STEPPING.en.md](NATIVE_STEPPING.en.md). Use `--hse-bundle` for distinct HSE initial data and `examples/mixed_tddft_hse_layers.json` for simultaneous TDDFT/HSE.
