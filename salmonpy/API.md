@@ -125,9 +125,11 @@ RTの `temperature < -1e-12` 分岐など、正常入力の既存GS／RT選択�
 コミュニケータなどの共有依存は引き続き残ります。
 
 HSEは高速PR版を本筋に進めます。[対称性の対応範囲](FAST_HSE_SYMMETRY.md)で、今回検証した
-独立交換コアと、まだ拒否する対称性付きTDDFT／FDTD／checkpointを区別しています。
+独立交換コアと、まだ公開入口で拒否する対称性付きTDDFT／FDTD／checkpointを区別しています。
 コア試験だけで公開接続の対応範囲を広げたとは扱いません。
 
-高速PR版HSEの内部A検査は状態所有のCartesian操作・規格化方向で行う。対称性付きTDDFT／FDTD・保存復元は引き続き未対応。詳細は[対称性ガイド](FAST_HSE_SYMMETRY.md)。
+高速PR版HSEの内部A検査は状態所有のCartesian操作・規格化方向で行う。通常Python／native-Cの対称性付きTDDFT／FDTD・保存復元は引き続き未対応。詳細は[対称性ガイド](FAST_HSE_SYMMETRY.md)。
 
-内部高速PR交換コアのcheckpoint V2は対称性マップ／キャッシュに対応します。非縮約V1は維持し、対称性付きTDDFT／結合再開は禁止のままです。
+内部高速PR交換コアのcheckpoint V2は対称性マップ／キャッシュに対応します。非縮約V1は維持し、公開の対称性付きTDDFT／結合再開は禁止のままです。
+
+明示的な内部Fortran opt-inでは、内部kランク1・factor-off Taylorの対称性付きTDDFTと直接／候補再開を検証済み。共有対称化設定は不変・1プロセス1初期化。通常Python／C入口は既定で拒否し、内部status34を公開の再試行契約と解釈しない。詳細はFAST_HSE_SYMMETRY。

@@ -14,7 +14,7 @@ module salmonpy_tddft_context
  use parallelization,only:nproc_size_global,nproc_group_global,nproc_id_global
  use communication,only:comm_summation,comm_bcast
  use exx_native,only:exx_validate_vector_potential
- use sym_sub,only:use_symmetry
+ use sym_sub,only:use_symmetry,SymMatA,SymMatB,Amat,Bmat,Ainv,Binv
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
  private
@@ -175,13 +175,35 @@ contains
       out_rt_energy_step==value%energy_interval.and.all(num_rgrid==value%grid).and. &
       all(num_kgrid==value%mesh).and.nstate==value%bands.and.xc==value%functional.and.propagator==value%propagation
  end function
- subroutine rt_open(ctx,name,status,delta_t,openmp_mode,config)
+ logical function context_symmetry_matches(ctx) result(ok)
+ type(tddft_context),intent(in)::ctx
+ ok=.false.
+ ! Density/current symmetry still uses immutable process-wide tables. Until
+ ! those are extracted, refuse drift rather than combining different groups.
+ if(use_symmetry.neqv.ctx%system%kpoint_input%use_symmetry)return
+ if(.not.use_symmetry)then
+  ok=.true.;return
+ endif
+ if(.not.allocated(SymMatA).or..not.allocated(SymMatB))return
+ if(.not.allocated(ctx%system%kpoint_input%symmat_a).or..not.allocated(ctx%system%kpoint_input%symmat_b))return
+ if(any(shape(SymMatA)/=shape(ctx%system%kpoint_input%symmat_a)))return
+ if(any(shape(SymMatB)/=shape(ctx%system%kpoint_input%symmat_b)))return
+ if(any(lbound(SymMatA)/=1).or.any(lbound(SymMatB)/=1))return
+ if(any(SymMatA/=ctx%system%kpoint_input%symmat_a))return
+ if(any(SymMatB/=ctx%system%kpoint_input%symmat_b))return
+ if(any(Amat/=ctx%system%primitive_a).or.any(Bmat/=ctx%system%primitive_b))return
+ if(any(Ainv/=transpose(ctx%system%primitive_b)/(2d0*acos(-1d0))))return
+ if(any(Binv/=transpose(ctx%system%primitive_a)/(2d0*acos(-1d0))))return
+ ok=.true.
+ end function
+ subroutine rt_open(ctx,name,status,delta_t,openmp_mode,config,allow_symmetry)
  type(tddft_context),pointer,intent(inout)::ctx
  character(*),intent(in)::name
  integer,intent(out)::status
  character(*),optional,intent(in)::openmp_mode
  real(8),optional,intent(in)::delta_t
  type(s_rt_run_config),optional,intent(in)::config
+ logical,optional,intent(in)::allow_symmetry
  type(s_rt_run_config)::selected
  character(len(sysname))::saved_name
  logical::exists
@@ -218,7 +240,15 @@ contains
   if(nproc_ob/=1.or.any(nproc_rgrid/=1).or.nproc_k/=nproc_size_global)goto 900
  endif
  if(xc/='hse06'.or.yn_periodic/='y'.or.yn_spinorbit/='n'.or. &
-    yn_hse_wannier/='n'.or.use_symmetry.or.yn_md/='n'.or.yn_dc/='n'.or.trans_longi/='tr')goto 900
+    yn_hse_wannier/='n'.or.yn_md/='n'.or.yn_dc/='n'.or.trans_longi/='tr')goto 900
+ if(use_symmetry)then
+  ! Internal opt-in only. Existing worker/C/Python callers keep the default prohibition.
+  if(settings_pinned)goto 900
+  if(.not.present(allow_symmetry))goto 900
+  if(.not.allow_symmetry)goto 900
+  if(nproc_size_global/=1.or.exx_factor_mode/='off')goto 900
+  if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full')goto 900
+ endif
  if(yn_restart/='n'.or.e_impulse/=0d0.or.ae_shape1/='impulse'.or.ae_shape2/='none')goto 900
  if(yn_out_current_decomposed/='n'.or.yn_out_intraband_current/='n'.or.yn_out_dns_ac_je/='n'.or. &
     yn_out_mag_decomposed_rt/='n'.or.yn_out_mag_micro_rt/='n'.or.yn_out_spin_current_decomposed/='n'.or. &
@@ -274,7 +304,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  status=1;current=0d0;total_energy=0d0
  if(.not.associated(ctx))return
  guard_status=0
- if(.not.settings_match(ctx%settings))guard_status=2
+ if(.not.settings_match(ctx%settings).or..not.context_symmetry_matches(ctx))guard_status=2
  if(associated(pending_owner,ctx))guard_status=2
  if(ctx%checkpoint_failed)guard_status=2
  if(ctx%accepted>=ctx%rt%max_steps)guard_status=2
@@ -283,7 +313,8 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  enddo
  if(guard_status==0)then
   call exx_validate_vector_potential(ctx%system,ac,field_status)
-  if(field_status/=0)guard_status=2
+  if(field_status==1)guard_status=2
+  if(field_status==2)guard_status=34
  endif
  call comm_summation(guard_status,status,nproc_group_global)
  if(status/=0)return
@@ -339,7 +370,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  real(8)::matter(3,2)
  status=1;current=0d0
  if(.not.associated(ctx))return
- if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings))return
+ if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings).or..not.context_symmetry_matches(ctx))return
  if(ctx%accepted>ctx%Mit)then
   current=-ctx%rt%curr(:,ctx%accepted)
  else
@@ -451,6 +482,11 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
   endif
   if(stage==3)then
    if(.not.allocated(pending).or..not.allocated(pending_hse))return
+   ! Recheck the immutable process contract at commit, not just while staging.
+   ios=0
+   if(.not.settings_match(ctx%settings).or..not.context_symmetry_matches(ctx))ios=1
+   call checkpoint_collective_status(ios)
+   if(ios/=0)return
    call hse_checkpoint_install(ctx%hse,pending_hse)
    call checkpoint_copy(ctx,pending,.true.)
    call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
@@ -465,7 +501,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  if(.not.associated(ctx))ios=1
  call checkpoint_collective_status(ios)
  if(ios/=0)return
- if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings))ios=1
+ if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings).or..not.context_symmetry_matches(ctx))ios=1
  if(len_trim(path)==0)ios=1
  if(restore.and..not.present(stage).and.ctx%accepted/=ctx%Mit)ios=1
  if(xc/='hse06'.or.yn_spinorbit/='n'.or.yn_dc/='n'.or.yn_md/='n')ios=1
@@ -485,6 +521,13 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  call checkpoint_collective_status(allocation_status)
  if(allocation_status/=0)return
  call checkpoint_copy(ctx,copy,.false.)
+ if(.not.restore.and.ctx%system%kpoint_input%use_symmetry)then
+  ! Overlap caches are not serialized. Record their invalid state explicitly in
+  ! the symmetry profile; never mutate the live flags or change legacy V1 bytes.
+  copy%spsi_in%update_zwf_overlap=.true.
+  copy%spsi_out%update_zwf_overlap=.true.
+  copy%tpsi%update_zwf_overlap=.true.
+ endif
  if(restore)then
   open(newunit=u,file=trim(path),access='stream',form='unformatted',status='old',action='read',iostat=ios)
  else

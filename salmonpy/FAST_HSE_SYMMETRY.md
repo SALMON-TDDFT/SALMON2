@@ -1,6 +1,6 @@
 # 高速PR版HSEと対称性
 
-[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.2`
+[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.3`
 
 HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成・orbit再利用・ACEと対称性を
 中心に進めます。通常版HSEを代替エンジンにはしません。標準SALMONの対称性縮約とは演算が
@@ -10,8 +10,9 @@ HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成�
 |---|---|
 | 高速PR版の交換コア | 対称性マップ・位相キャッシュ・FFT資源を独立所有。周期・非スピン分極・CPU・full-q・内部kランク1を検証 |
 | 対称性／orbit／ACEの比較 | 縮約4代表k点と独立に列挙した全8k点。C2z／mirror-x、異なるセル・遮蔽係数・軌道 |
+| 内部Fortran TDDFT | 明示opt-in、1プロセス1初期化／内部k1、factor-off Taylor。直接／候補再開を検証 |
 | PythonのTDDFT／FDTD接続 | 対称性は引き続き拒否。既存の非縮約高速PR版接続はCOUPLEDを参照 |
-| 保存復元 | 内部交換コアV2はマップ／キャッシュ対応。対称性付きTDDFT／結合の直接・保護付き再開は禁止 |
+| 保存復元 | 内部交換コアV2と明示的内部TDDFTの直接／候補再開を検証。公開の結合再開は禁止 |
 | 対称性付き内部k MPI2 | 今回は未解放。テストのMPI2プロセスは各々COMM_SELFの交換コアを所有 |
 
 ## 独立した交換コアの所有
@@ -47,8 +48,8 @@ HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成�
 TDDFTアダプターでは数値状態のバックアップ／時間発展より前に検査し、既存の集団通信で
 失敗を共有します。独立したC2z／mirror-x、傾いたセル、微小／巨大な場、不正値、設定不整合、
 終了済みownerを検証しました。場とマップの境界の検査であり、対称性情報全体やnative初期化の
-保証ではありません。対称性付きTDDFTのopenと結合保存復元の禁止は維持し、対称性付き時間発展・
-再開への対応とは扱いません。明示ビルド用プローブは
+保証ではありません。通常worker／native-Cのopenと結合保存復元の禁止は維持し、公開の対称性付き時間発展・
+結合再開への対応とは扱いません。明示ビルド用プローブは
 `_runtime_source/tests/native/test_hse_symmetry_field.f90` です。
 
 ## 内部交換コアの対称性checkpoint
@@ -68,17 +69,46 @@ CPU・full-q・内部kランク1の交換コアについて、値だけの対称
 nativeプローブ `_runtime_source/tests/native/test_hse_symmetry_checkpoint.f90` で、full／ACE、
 star／orbits、キャッシュ有無、OMP1／2、MPI1／2プロセスの独立COMM_SELFコアを検証します。
 ownerの作り直しを含め、復元直後の作用・エネルギーと、その後のrefresh／actionのcheckpoint
-バイト列が連続実行と一致します。これは交換コアの保存復元であり、対称性付きTDDFT時間発展や
-FDTD再開への対応ではありません。Python／native TDDFTのopen禁止は維持します。学習／PT-CNの
+バイト列が連続実行と一致します。これは交換コアの保存復元です。別枠の内部TDDFT検証は次節を参照してください。
+FDTD再開や通常Python／native-C TDDFTのopen禁止は維持します。学習／PT-CNの
 対称性、縮約内部k MPI、対称性付き混在計算の失敗・再開は残作業です。
+
+## 明示的な内部TDDFTの検証
+
+内部Fortranの `rt_open(..., allow_symmetry=.true.)` で、交換コアとTDDFT全体のcheckpointを
+接続します。周期・非スピン分極・CPU・full-q・内部kランク1・factor-offのTaylor／ACEと、
+zを保つ対称群に限定します。full-actionは比較検証用のみです。初期化は1プロセス1回で、
+独立したTDDFTの実行には新しいプロセスを用意します。
+
+密度／電流の対称化情報はまだプロセス共通・不変です。フラグ・操作行列・格子・逆行列を所有入力と
+照合し、step／current／checkpointと、復元候補の反映直前に検査します。不一致では候補を反映せず、
+設定を戻せば反映を再試行できます。異なる物質の同一プロセス内共存や、不正な初期化資材からの
+制御された復帰を保証するものではありません。
+
+実Aの所有検査は、場が対称性を破る場合に内部status34を返します。バックアップ／時間発展前の
+拒否なので、内部呼び出し側はAを直して再試行できます。このstatusはまだ公開C／Pythonの再試行契約
+ではありません。通常のworker／native-Cはopt-inを指定しないため、対称性を拒否します。
+Python／FDTDの対応範囲は広げていません。
+
+nativeの `test_hse_symmetry_tddft.f90` と、補助ツール
+`prepare_fast_hse_symmetry_fixture.py`／`test_fast_hse_symmetry_tddft.py` を
+`_runtime_source/tests/native`／`_runtime_source/tools` に同梱します。対応するMPI高速PR版の
+モジュール／ライブラリへ明示的にコンパイルし、ハーネスへ
+`PROBE PSEUDO NEW_OUTPUT --ranks 2 --threads 2` を渡します。各プロセスは独立したCOMM_SELFへ
+接続し、縮約内部k MPI2ではありません。8^3格子・全8k点と縮約4k点のC2z／mirror-x合成状態で、
+電荷電流／エネルギーを比較し、奇数／偶数の直接・候補再開で内部トレースと最終checkpoint全体の
+バイト列が一致することを検証します。受理済みステップは再生しません。GS／光学収束の実計算例ではなく、
+初期状態作成でダウンロード・SCF・ビルドは行いません。
+
+対称性付き保存では、保存されない重なりキャッシュの無効フラグを保存用コピー内でtrueにそろえます。計算中のフラグと非縮約V1は変更しません。
 
 ## 次の接続作業
 
 縮約k点をTDDFT／FDTDへ解放する前に、次を実装・検証します。
 
-1. 状態所有の実A検査は実装済み。保存復元の準備後に対称性付き時間発展でも検証する。
+1. 所有する実A検査と内部TDDFTの再試行は検証済み。明示的な公開C／Pythonの受付契約へ接続する。
    軸フラグだけでは最終操作行列を保証できず、任意のA(t)は固定偏光で有効な縮約を破り得る。
-2. 内部コアのマップ・履歴・キャッシュ保存は実装済み。結合の直接／保護付き保存復元へ接続する。
+2. 内部コア・TDDFTの直接／候補再開は検証済み。公開の混在・保護付き保存復元へ接続する。
    所有ハンドルの複製や受理済みステップの再生に頼らない。
 3. 内部k MPIで代表点／starの分割を検証し、通常の混在サンプルで失敗・巻戻し・再開を確認する。
 

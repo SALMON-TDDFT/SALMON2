@@ -724,6 +724,8 @@ FAST_HSE_SYMMETRY日英ガイドとfast_hse_symmetryタスクを参照する。�
 MPI2プロセスのCOMM_SELF試験を、縮約k点の内部MPI2対応と解釈しない。状態所有の実A検査は実装済みだが、
 対称性マップ／履歴の完全な保存復元、対称性付き時間発展・MPI分割／混在再試行が通る前に既存の対称性禁止を解除しない。
 
-高速PR版HSEの内部A検査は状態所有のCartesian操作・規格化方向で行う。対称性付きTDDFT／FDTD・保存復元は引き続き未対応。詳細は[対称性ガイド](FAST_HSE_SYMMETRY.md)。
+高速PR版HSEの内部A検査は状態所有のCartesian操作・規格化方向で行う。通常Python／native-Cの対称性付きTDDFT／FDTD・保存復元は引き続き未対応。詳細は[対称性ガイド](FAST_HSE_SYMMETRY.md)。
 
-内部交換コアの対称性checkpoint V2は実装済み。非縮約V1は維持。復元先の静的マップ照合後に値のみ反映する。これは対称性付きTDDFT／FDTD再開への対応ではなく、open禁止を解除しない。詳細はFAST_HSE_SYMMETRY。
+内部交換コアの対称性checkpoint V2は実装済み。非縮約V1は維持。復元先の静的マップ照合後に値のみ反映する。これは公開の対称性付きTDDFT／FDTD再開への対応ではなく、通常open禁止を解除しない。詳細はFAST_HSE_SYMMETRY。
+
+明示的な内部Fortran opt-inでは、内部kランク1・factor-off Taylorの対称性付きTDDFTと直接／候補再開を検証済み。共有対称化設定は不変・1プロセス1初期化。通常Python／C入口は既定で拒否し、内部status34を公開の再試行契約と解釈しない。詳細はFAST_HSE_SYMMETRY。

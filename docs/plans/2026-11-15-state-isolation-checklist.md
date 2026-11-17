@@ -2,16 +2,18 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## Current audit — 2026-11-17 (takes precedence over historical status notes)
+## Current audit — 2026-11-18 (takes precedence over historical status notes)
 
 The dated sections below retain the scope at their completion time. Older statements such as "occupation remains shared" or "multiple field ranks remain open" are superseded by the later evidence, not separate unfinished tasks.
 
 ### Fast-PR HSE priority
 
 Project lead directs HSE development through the fast-PR profile with symmetry as
-central. Next HSE work is owned field-little-group checks, complete symmetry-map/
-history/cache persistence and reduced-k internal-MPI/mixed failure/restart tests.
-Do not open TDDFT/checkpoint symmetry guards from exchange-core evidence alone.
+central. Owned actual-A checks, exchange-map/cache persistence and explicit internal
+TDDFT direct/staged resume are verified in the bounded single-k profile. Next are
+public native-C/Python opt-in/retry and protected mixed connection, followed by
+reduced-k internal-MPI partition/failure/restart tests. Ordinary worker/C defaults
+still reject symmetry; do not infer public support from internal opt-in tests.
 The standard k-point port is deferred; its distinct arithmetic is not the target
 for modifying fast-PR symmetry. Conventional HSE remains unsupported.
 
@@ -601,3 +603,11 @@ Evidence: `../owned-hse-field-validation-2026-11-18.md`.
 - [ ] Symmetric TDDFT state integration and coupled direct/protected resume; reduced internal-k MPI and symmetric mixed failure/retry. Existing symmetric TDDFT open prohibition stays. No claim of learned/PT-CN symmetry or physical convergence; molecular work paused; budgets advisory.
 
 Evidence: `../symmetry-checkpoint-validation-2026-11-18.md`.
+
+### 2026-11-18 internal fast-PR symmetry TDDFT
+
+- [x] Explicit internal Fortran rt_open allow_symmetry opt-in for scalar CPU/full-q/internal-k1/factor-off Taylor, one initialization/process. Ordinary worker/C/Python defaults stay denied. Remaining process-common symmetry flags/operations/lattice/inverses guarded before step/current/checkpoint/staged commit.
+- [x] Full8/reduced4-k C2z/mirror-x synthetic TDDFT; ACE/full-action, MPI1OMP1/MPI2OMP2 independent COMM_SELF processes with different screening/12-13 step schedules. Odd/even direct/staged resume and final numerical checkpoints exact, zero accepted-step replay; corrected-A retry exact. Drift/truncation/trailing/default/learned/PT-CN/internal-k2/second-lifetime rejection verified. Symmetry archive overlap flags canonicalized only in copies; live flags/non-reduced V1 unchanged.
+- [ ] Public native-C/Python opt-in and field-admission retry contract, protected symmetric mixed/FDTD testing; reduced internal-k MPI partitions/failure/restart. No claim of arbitrary heterogeneous same-process initialization, learned/PT-CN symmetry or physical convergence. Molecular work paused; budgets advisory.
+
+Evidence: `../symmetry-tddft-validation-2026-11-18.md`.
