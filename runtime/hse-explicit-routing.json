@@ -69,6 +69,6 @@
   ],
   "scope": "explicit full-support fast HSE native ownership; serial and experimental k-only host-MPI CPU contexts, common immutable per-group configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "b6b9e7e38c4d2029cf81fbdf4942a51e003c2326ed7a7c83a05782b3998e3404",
+  "replacements_sha256": "8665fefb7adc246f7241770992a0e67ed2bf648da67dcf69eb68f9d74cd43fdb",
   "patch_sha256_role": "historical migration identity; no patch is applied"
 }

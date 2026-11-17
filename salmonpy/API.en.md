@@ -143,3 +143,7 @@ reject without changing the result object. This is selection of initial array
 layout, not full occupation-capacity/physical validation, SCF-input ownership or
 recoverable native initialization. No new public Python/C API is added; remaining
 k-point/symmetry/communicator and other solver dependencies still apply.
+
+Fast-PR HSE is the primary HSE path; see [the symmetry capability boundary](FAST_HSE_SYMMETRY.en.md)
+for the newly tested independent exchange core versus still-rejected symmetric
+TDDFT/FDTD/checkpoint profiles. Core evidence does not extend public connection capabilities.

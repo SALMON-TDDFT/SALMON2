@@ -224,6 +224,8 @@ contains
     ! 2 means the GS entry retains the legacy owner; 1 is a binding conflict.
     status=2
     if(theory/='dft'.or.yn_opt/='n')return
+    ! Keep automatic GS binding policy unchanged; explicit symmetry owners are audited separately.
+    if(system%kpoint_input%use_symmetry)return
     if(.not.native_owner_supported(system,info))return
     call exx_bind_system(system,owner,status)
   end subroutine
@@ -238,10 +240,54 @@ contains
     real(8) :: temperature
     call hse_occupation_input(system,nelec,temperature,nstate)
     ok=system_functional(system)=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
-      yn_dc=='n'.and.yn_hse_wannier=='n'.and.temperature<0d0.and..not.system%kpoint_input%use_symmetry.and. &
+      yn_dc=='n'.and.yn_hse_wannier=='n'.and.temperature<0d0.and. &
       info%isize_r==1.and.info%isize_o==1.and.info%isize_k>=1.and.info%numm==1.and. &
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.exx_kpoint_backend=='cpu'
+    if(.not.ok)return
+    if(system%kpoint_input%use_symmetry)then
+      ok=.false.
+      ! First explicit-owner symmetry scope: serial k, CPU full-q scalar exchange.
+      ! Learned/PT-CN symmetry needs its own history/persistence validation.
+      if(exx_factor_mode/='off')return
+      if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full')return
+      if(info%isize_k/=1.or.any(hse_q_reduction/=1).or.any(system%kmesh<1))return
+      if(.not.allocated(system%kpoint_input%symmat_a))return
+      if(.not.allocated(system%kpoint_input%symmat_b))return
+      if(any(shape(system%kpoint_input%symmat_a)/=shape(system%kpoint_input%symmat_b)))return
+      if(size(system%kpoint_input%symmat_a,1)/=3.or.size(system%kpoint_input%symmat_a,2)/=4)return
+      if(size(system%kpoint_input%symmat_a,3)<1)return
+      if(any(lbound(system%kpoint_input%symmat_a)/=1).or.any(lbound(system%kpoint_input%symmat_b)/=1))return
+      ok=.true.
+    endif
   end function
+  logical function owned_symmetry_grid_matches(system,mg) result(ok)
+    type(s_dft_system),intent(in)::system
+    type(s_rgrid),intent(in)::mg
+    integer(int64)::points
+    real(8)::scale,ratio
+    integer::i,j
+    ok=.false.
+    if(system%ngrid<1.or.any(mg%num<1))return
+    points=1_int64
+    do i=1,3
+      if(int(mg%num(i),int64)>int(system%ngrid,int64)/points)return
+      points=points*int(mg%num(i),int64)
+    enddo
+    if(points/=int(system%ngrid,int64))return
+    do i=1,3
+      if(.not.ieee_is_finite(system%hgs(i)))return
+      if(system%hgs(i)<=0d0)return
+      do j=1,3
+        if(.not.ieee_is_finite(system%primitive_a(j,i)))return
+      enddo
+      scale=maxval(abs(system%primitive_a(:,i)))
+      if(scale<=0d0)return
+      ratio=(scale/system%hgs(i))*sqrt(sum((system%primitive_a(:,i)/scale)**2))
+      if(.not.ieee_is_finite(ratio))return
+      if(abs(ratio-dble(mg%num(i)))>1d-4)return
+    enddo
+    ok=.true.
+  end function owned_symmetry_grid_matches
   function resolve_rt_context(rt_context,system) result(owner)
     implicit none
     type(s_exx_rt_state),target,optional,intent(inout)::rt_context
@@ -1151,6 +1197,16 @@ contains
         error stop 'Independent HSE owner requires serial full-support non-spinor configuration'
       endif
     endif
+    if(exx_state_owner%native_resources_enabled)then
+      if(system%kpoint_input%use_symmetry)then
+        if(.not.owned_symmetry_grid_matches(system,mg))then
+          if(present(rt_status))then
+            rt_status=2;return
+          endif
+          error stop 'Independent HSE symmetry requires matching owned full grid'
+        endif
+      endif
+    endif
     if(.not.exx_enabled(system))return
     if(theory=='tddft_response'.or.theory=='tddft_pulse')call factor_configure(system,info, &
       & rt_context=exx_state_owner)
@@ -1210,7 +1266,11 @@ contains
     if(system%kpoint_input%use_symmetry)mesh=system%kmesh(1)
     if(.not.system%kpoint_input%use_symmetry.and.product(system%kmesh)/=nk) &
       error stop 'EXX: full uniform k mesh required'
-    if(system%kpoint_input%use_symmetry.and.any(mg%num/=num_rgrid))error stop 'EXX symmetry requires the full real-space grid'
+    if(system%kpoint_input%use_symmetry)then
+      if(.not.exx_state_owner%native_resources_enabled)then
+        if(any(mg%num/=num_rgrid))error stop 'EXX symmetry requires the full real-space grid'
+      endif
+    endif
     thermal_spinor=yn_spinorbit=='y'.and.temperature>=0d0
     if(.not.system%kpoint_input%use_symmetry.and.maxval(abs(system%wtk-1d0/nk))>1d-12) &
       error stop 'HSE06: uniform k weights required'
@@ -1651,6 +1711,16 @@ contains
           rt_status=2;return
         endif
         error stop 'Independent HSE owner requires serial full-support non-spinor configuration'
+      endif
+    endif
+    if(exx_state_owner%native_resources_enabled)then
+      if(system%kpoint_input%use_symmetry)then
+        if(.not.owned_symmetry_grid_matches(system,mg))then
+          if(present(rt_status))then
+            rt_status=2;return
+          endif
+          error stop 'Independent HSE symmetry requires matching owned full grid'
+        endif
       endif
     endif
     if(.not.exx_enabled(system))return

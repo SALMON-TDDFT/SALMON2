@@ -6,6 +6,15 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 The dated sections below retain the scope at their completion time. Older statements such as "occupation remains shared" or "multiple field ranks remain open" are superseded by the later evidence, not separate unfinished tasks.
 
+### Fast-PR HSE priority
+
+Project lead directs HSE development through the fast-PR profile with symmetry as
+central. Next HSE work is owned field-little-group checks, complete symmetry-map/
+history/cache persistence and reduced-k internal-MPI/mixed failure/restart tests.
+Do not open TDDFT/checkpoint symmetry guards from exchange-core evidence alone.
+The standard k-point port is deferred; its distinct arithmetic is not the target
+for modifying fast-PR symmetry. Conventional HSE remains unsupported.
+
 ### Completed within measured scope
 
 - [x] GS mixing, normalization and occupation inputs; HSE electron-count/temperature/state-capacity routing; TDDFT electron-count diagnostics. Broader initialization and shared controls remain below.
@@ -566,3 +575,13 @@ Evidence: `../cell-grid-initialization-validation-2026-11-17.md`.
 - [ ] Full occupation-capacity/SCF-input ownership,remaining k/symmetry/communicator dependencies and arbitrary heterogeneous native GS/TDDFT initialization remain open. This closes only the initial orbital-selection slice;no new native initialization-failure/handle guarantee. Molecular work paused,budgets advisory only.
 
 Evidence: `../orbital-initialization-validation-2026-11-17.md`.
+
+### 2026-11-17 fast-PR HSE symmetry primary path
+
+- [x] Project lead: prioritize fast-PR HSE and symmetry. Standard k-point port deferred before tracked solver changes; distinct standard/fast-PR arithmetic preserved. No conventional HSE engine.
+- [x] Explicit symmetry EXX owners bounded to CPU scalar periodic full-q/internal-k1/factor-off/Taylor-ACE;test-only full-action comparison. Independent symmetry maps/phases/FFT resources;owned full-grid count/per-axis admission before refresh/action. Automatic GS binding unchanged;learned/PT-CN symmetry/internal-k2 still reject.
+- [x]16-case C2z/mirror-x4-rep vs independently enumerated full8-k fast kernel comparison: full/ACE,star/orbits,OMP1/2,MPI1/2 processes each COMM_SELF. Different per-process settings/call counts; finite values,interleaving,source update,grid/layout rejection,close/reopen. Max action difference~2.80e-16,energy~1.12e-16;old full-k reference bytes exact.
+- [x] Existing NON-reduced GS/mixed/protected retry/direct restore remain exact;source/installed545 tests(one skip each),sdist→wheel/native/object audits,packaged MPI2-process/OMP2 probe,installed mixed/1D fault-retry and paired JP/EN/AI scope guides. No Actions,budgets warning-only.
+- [ ] Next priority: owned actual-A little-group checks,complete symmetry-map/history/cache direct/protected persistence,then reduced internal-k MPI and mixed fault/resume. Current TDDFT/FDTD/checkpoint symmetry prohibitions remain. Core proof does not establish symmetric TDDFT or physical convergence. Molecular work paused.
+
+Evidence: `../fast-hse-symmetry-validation-2026-11-17.md`.

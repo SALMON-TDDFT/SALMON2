@@ -714,3 +714,12 @@ STEPPING日英ガイドとmanual.jsonのprotected_stepを参照。StepTargetのc
 ## native混在ステップと出力の保護
 
 NATIVE_STEPPING日英ガイドを参照。対応する新規ビルドとnative_step_targetsを明示し、step_protectedを全ランクで呼ぶ。通常例は--protect-steps。受理済み未flush行を先にflushし、失敗試行のRT／点観測追記を巻き戻して同じRTユニットを開き直す。仮の追記は一時的に見え得るため同時外部アクセス・クラッシュ原子性を保証しない。作業フォルダ直下の専用通常.dataのみ。密度などの未監査出力を黙って無効化せず事前拒否。未知native失敗・復元／解放失敗ではfailedを復活させない。targetはlive ownerに結び付くためcheckpoint反映で状態が置換されたら作り直す。Cpp候補とstep退避の同時利用は拒否。HSEは高速PRのみ。別GSは--hse-bundleで明示し、HSE固有の入力ハッシュと初期状態IDを保持する。メモリは退避同時保持の未較正費用と実測ピークを助言し、超過で停止しない。過去時間発展の再生はせず、再試行するのは拒否されたステップだけ。
+
+## HSEの本筋と対称性
+
+HSEは高速PR版を本筋にし、対称性・代表k点・star／orbit再利用・ACEを中心に進める。
+FAST_HSE_SYMMETRY日英ガイドとfast_hse_symmetryタスクを参照する。標準側の別の縮約演算や
+通常HSEへ合わせて高速版を変更しない。独立した対称性交換コアの検証と、TDDFT／FDTD接続・
+保存復元の対応を区別する。現在のコア対称性はCPU・非スピン分極・full-q・内部kランク1の限定範囲。
+MPI2プロセスのCOMM_SELF試験を、縮約k点の内部MPI2対応と解釈しない。実際のA(t)のlittle-group検査、
+対称性マップ／履歴の完全な保存復元、MPI分割／混在再試行が通る前に既存の対称性禁止を解除しない。

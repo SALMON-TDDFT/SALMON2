@@ -2,7 +2,8 @@
 
 The repository and wheel contain complete standard and fast-PR solver snapshots
 under `sources/`, with original licenses and acknowledgements. The only supported
-HSE implementation is the fast PR profile. `overrides/` holds completed source
+HSE implementation is the fast PR profile. HSE development prioritizes symmetry
+and this optimized profile; see [current symmetry scope](../salmonpy/FAST_HSE_SYMMETRY.en.md). `overrides/` holds completed source
 files for experimental stages. All copies are bound to inventories in
 `source-trees/`; there are no compatibility patch files or git-apply steps.
 
@@ -28,6 +29,8 @@ No source is compiled on import, and full solver compilation is not part of
 ordinary wheel installation. Prefer compatible prebuilt runtimes for users.
 
 ## 日本語
+
+HSEは高速PR版を本筋とし、対称性を中心に開発・検証します。対応範囲は[対称性ガイド](../salmonpy/FAST_HSE_SYMMETRY.md)を参照してください。
 
 本体ソースをリポジトリとwheelに同梱し、SALMONpyと同じ版で更新・検証します。
 固定した本体を検証して外部の新規ディレクトリへコピーし、段階別の完成形を配置します。
