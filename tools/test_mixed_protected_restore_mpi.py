@@ -13,6 +13,7 @@ import struct
 import shutil
 import sys
 from unittest.mock import patch
+from contextlib import nullcontext
 import numpy as np
 from mpi4py import MPI
 
@@ -20,6 +21,7 @@ from mpi4py import MPI
 def main():
     parser=argparse.ArgumentParser(add_help=False)
     parser.add_argument('--kernel')
+    parser.add_argument('--simulate-memory-probe-failure',action='store_true')
     args, sample_args=parser.parse_known_args()
     if args.kernel:
         from salmonpy import ld,sbe
@@ -136,6 +138,9 @@ def main():
                 'failure_step':saved+2,'continued_after_failure':True,
                 'all_original_state_bytes_preserved':True,'field_LD_materials':2,
                 'retry_future_steps_exact':3,'mixed_policy_rejected_before_stage':True,'invalid_history_rejected_before_stage':True,'restore_replayed_steps':0,
+                'memory_probe_failure_injected':args.simulate_memory_probe_failure,
+                'memory_budget_bytes':getattr(coupled,'memory_budget_bytes',None),
+                'memory_restore_reports':len([r for r in (getattr(coupled,'memory_reports',None) or []) if r['label']=='mixed_protected_restore']),
                 'backend_keys':sorted(set(signature['materials'].values())) if 'materials' in signature else []}
             np.savez(root/'protected-continuation.npz',**{key:np.asarray([frame[key] for frame in expected]) for key in expected[0]})
             (root/'protected-restore-validation.json').write_text(json.dumps(record,indent=2)+'\n')
@@ -144,7 +149,9 @@ def main():
         return saved
 
     sys.argv=['mpi_mixed_native',*sample_args]
-    with patch.object(coordinator,'checkpoint',exercise):
+    probe=(patch('salmonpy.memory._peak_rss',side_effect=OSError('injected resource probe failure'))
+           if args.simulate_memory_probe_failure and world.rank==world.size-1 else nullcontext())
+    with probe,patch.object(coordinator,'checkpoint',exercise):
         sample.main()
     assert completed and world.allreduce(1)==world.size
 

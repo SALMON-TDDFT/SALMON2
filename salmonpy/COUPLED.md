@@ -355,3 +355,5 @@ Apple Siliconで微視的8³格子・4×1×1 k点の合成入力を実測しま�
 native混在サンプルの場・電子・LD/SBE保存処理も `CheckpointTarget`／`execute_checkpoint` を通します。保存形式とnative-direct/2の互換情報は維持し、コールバック失敗を共有した後は次の処理へ進みません。完了情報の公開失敗も全ランクへ通知します。
 
 通常サンプルの`--direct-resume`は保護付き復元が既定です。場内LD・SBE・native TDDFT／高速PR HSEとPython側の時計・電流を、全群の候補成功後に反映します。古いABIと即時LOADのみの対象は読込前に拒否し、自動で従来方式へ切り替えません。明示的な従来方式は`--unprotected-direct-restore`です。途中失敗からの継続・再試行と保証範囲は[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。
+
+`--memory-budget-gib 4`は全MPIランク合計4GiBの助言予算です。通常状態と復元候補の同時保持分を報告し、超過時も停止しません。[MEMORY.md](MEMORY.md)を参照してください。

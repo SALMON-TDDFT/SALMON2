@@ -88,3 +88,5 @@ For one serial model contract, the explicit conformance checker and the point-MP
 `checkpointing.CheckpointTarget` and `execute_checkpoint` invoke backend-owned persistence after admission and return opaque results locally.
 
 `CheckpointState` / `restore_checkpoint` stage independent candidates before collective publication. AtomicRestoreError distinguishes preservation of live holders from candidate cleanup failures.
+
+Advisory memory APIs are MemoryEstimate/MemoryReport/memory_advice/process_memory in salmonpy.memory. Excess only warns; this is not admission or an RSS cap. See [MEMORY.en.md](MEMORY.en.md).

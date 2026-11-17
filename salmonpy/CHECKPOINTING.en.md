@@ -287,3 +287,5 @@ installed-wheel users do not need that override.
 Live rewind does not truncate native output files already written. Manage the
 trajectory with the saved frames plus subsequent step returns, or resume in a
 fresh MPI job/output directory to keep native output streams separate.
+
+Memory advice includes concurrent candidate storage; see [MEMORY.en.md](MEMORY.en.md). Exceeding the ordinary sample budget only warns and does not refuse protected restore.

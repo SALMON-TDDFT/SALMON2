@@ -33,6 +33,7 @@ def main():
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
     parser.add_argument('--layers', type=Path, help='native-layers/1 JSON referencing sbe-point, si-tddft, hse-point, drude, lorentz')
+    parser.add_argument('--memory-budget-gib', type=float, help='aggregate advisory memory budget across MPI ranks; warning only')
     parser.add_argument('--rank-budget', type=int, help='planning cap; defaults to the launched world size')
     parser.add_argument('--field-grid', type=int, nargs=3, default=(1, 1, 1), metavar=('PX', 'PY', 'PZ'))
     parser.add_argument('--compare', type=Path, help='compare against an existing same-physics run with another MPI decomposition')
@@ -58,6 +59,8 @@ def main():
         parser.error('fast HSE requires an explicit layer layout')
     if args.hse_ranks != 1 and args.fast_hse_mpi_build is None:
         parser.error('hse-ranks > 1 requires --fast-hse-mpi-build')
+    if args.memory_budget_gib is not None and (not np.isfinite(args.memory_budget_gib) or args.memory_budget_gib <= 0):
+        parser.error('positive finite memory-budget-gib required')
     if args.steps < 1: parser.error('positive steps required')
     if any(v < 1 for v in args.field_grid): parser.error('positive field-grid entries required')
     field_ranks = int(np.prod(args.field_grid))
@@ -151,6 +154,14 @@ def main():
                 raise ValueError('invalid replay checkpoint step/shape')
         history = []
         context = ParallelContext.create(world, plan)
+        budget=None if args.memory_budget_gib is None else int(args.memory_budget_gib*2**30)
+        memory_enabled=any(value is not None for value in world.allgather(budget))
+        memory_reports=[]
+        memory_path=output/'memory-advice.json'
+        if memory_enabled:
+            from salmonpy._memory_advice import initial_advice
+            initial_advice(world,context,calculation,args.bundle,tuple(args.field_grid),sbe,budget,memory_reports,memory_path,
+                           kind="field" if context.group.role=="field" else bindings[context.group.point_ids[0]].key)
         field = None
         if context.group.role == 'field':
             field = NativeEHField(context, calculation, args.build, output/'field', points=points, grid=tuple(args.field_grid))
@@ -159,6 +170,13 @@ def main():
             if binding.key=='hse-point' and np.max(np.abs(session.initial_current[point]))>1e-12:
                 raise ValueError('zero-initial FDTD requires negligible initial HSE current (<=1e-12 au); prepare a zero-current initial state')
         coupled = CoupledStepper(session, field)
+        coupled.memory_budget_bytes=budget
+        coupled.memory_report_path=memory_path
+        coupled.memory_reports=memory_reports if memory_enabled else None
+        if memory_enabled:
+            from salmonpy._memory_advice import live_advice
+            live_advice(world,budget,memory_reports,memory_path,
+                        children=any(hasattr(state,"_process") for state in session.states.values()))
         start = 0
         if args.direct_resume is not None:
             from salmonpy.examples._direct_checkpoint import checkpoint
@@ -187,6 +205,10 @@ def main():
             destination = output/'direct-checkpoint'
             checkpoint(world, coupled, destination, signature, frames=history)
         communication = session.communication_report()
+        if memory_enabled:
+            live_advice(world,budget,memory_reports,memory_path,
+                        children=any(hasattr(state,"_process") for state in session.states.values()),
+                        label='mixed_segment_end')
         session.close()
         if field is not None: field.close()
         context.close()

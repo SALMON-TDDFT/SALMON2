@@ -332,6 +332,8 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         errors=world.allgather(error)
         if any(errors): raise ValueError(str(errors))
     if restore and protected:
+        from salmonpy._memory_advice import restore_advice
+        restore_advice(world,coupled,root,data)
         error=None;history=None
         try:
             history=json.loads((root/'frames.json').read_text())
