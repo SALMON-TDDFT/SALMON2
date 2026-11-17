@@ -593,3 +593,11 @@ Evidence: `../fast-hse-symmetry-validation-2026-11-17.md`.
 - [ ] Complete symmetry-map/history/cache persistence; reduced internal-k MPI and symmetric mixed failure/retry/resume. Symmetric TDDFT/FDTD/checkpoints remain prohibited. No conventional HSE engine; molecular work paused; budgets advisory only.
 
 Evidence: `../owned-hse-field-validation-2026-11-18.md`.
+
+### 2026-11-18 fast-PR symmetry exchange checkpoint
+
+- [x] Internal exchange-core V2 saves value-only map/cache and existing numerical history. Fresh-owner static layout/identity match, bounded cache load, staged/validate-only reads and value-array moves; FFT/C/MPI ownership untouched. Non-reduced V1 bytes unchanged.
+- [x]32 full/ACE/star/orbits/cache0-1/OMP1-2/MPI1-2 COMM_SELF-process cases; independent C2z/mirror-x, reopen, exact action/energy/future checkpoint bytes, truncation/group/partition rejection preservation; cache-range/NaN guards. Existing non-reduced mixed/protected retry/direct restore exact.
+- [ ] Symmetric TDDFT state integration and coupled direct/protected resume; reduced internal-k MPI and symmetric mixed failure/retry. Existing symmetric TDDFT open prohibition stays. No claim of learned/PT-CN symmetry or physical convergence; molecular work paused; budgets advisory.
+
+Evidence: `../symmetry-checkpoint-validation-2026-11-18.md`.

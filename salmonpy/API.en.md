@@ -149,3 +149,5 @@ for the newly tested independent exchange core versus still-rejected symmetric
 TDDFT/FDTD/checkpoint profiles. Core evidence does not extend public connection capabilities.
 
 Fast-PR HSE now validates uniform A/c with owned Cartesian operations and a normalized direction internally. Symmetric TDDFT/FDTD and checkpoint admission remain unsupported. See [symmetry guide](FAST_HSE_SYMMETRY.en.md).
+
+Internal fast-PR exchange checkpoint V2 supports symmetry map/cache values. Non-reduced V1 is unchanged; symmetric TDDFT and coupled resume remain prohibited.

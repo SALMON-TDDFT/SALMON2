@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.1`
+[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.2`
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -13,7 +13,7 @@ the fast-PR algorithm.
 | Fast-PR exchange core | Independent symmetry maps/phase caches/FFT owners; tested scalar periodic CPU, full q, one internal k rank |
 | Symmetry/orbit/ACE comparison | Reduced4 k representatives vs independently enumerated full8 k points; C2z and mirror-x groups, different cells/omega/sources |
 | Python TDDFT/FDTD connection | Symmetry remains rejected; existing non-reduced fast-PR connection is documented in COUPLED |
-| Direct/protected checkpoint | Nonempty symmetry maps remain unsupported; no implication from core tests |
+| Checkpoint | Internal exchange-core V2 supports map/cache; symmetric TDDFT/direct-protected coupled resume still prohibited |
 | Symmetry internal MPI k2 | Not enabled by this change; two test MPI processes each own COMM_SELF cores |
 
 ## Independent exchange owners
@@ -59,9 +59,33 @@ The TDDFT adapter invokes the owner check before numerical backup/propagation
 and agrees guard failure collectively. Tests cover independent C2z/mirror-x
 owners, a rotated cell, tiny/huge fields, invalid values, stale configuration
 and closed owners. This checks the field/map boundary, not all symmetry data
-or native initialization. Symmetric TDDFT opening and checkpoint prohibitions
+or native initialization. Symmetric TDDFT opening and coupled-checkpoint prohibitions
 remain; symmetric time evolution and restart are not certified. The explicit
 native probe is `_runtime_source/tests/native/test_hse_symmetry_field.f90`.
+
+## Internal symmetry checkpoint
+
+The existing internal `hse_checkpoint_write/read/capture/install` now support a
+value-only symmetry map/cache for the admitted scalar CPU/full-q/internal-k1
+exchange core. Non-reduced owners still write V1 byte-for-byte. Symmetric owners
+write same-binary V2: retained map, kernel identity, source/ACE/history values and
+optional complete phase cache. The caller authenticates the archive and model;
+this raw stream is not a standalone portable interchange format.
+
+Initialize an independent matching owner/operator before reading (operator
+construction, no accepted time-step replay). The reader compares all static map
+values and trusted shapes before reading the bounded optional cache. It stages
+before installation; validate-only and staged reads leave the live state intact.
+A truncated stream, differing map/phase partition or malformed cache rejects.
+Installation moves value arrays only, leaving live FFT/C/MPI owners untouched.
+
+The native probe `_runtime_source/tests/native/test_hse_symmetry_checkpoint.f90`
+checks full/ACE, star/orbits, cache on/off, OMP1/2 and MPI1/2 processes using
+independent COMM_SELF cores. Restored action/energy and subsequent refresh/action
+checkpoint bytes match continuous core execution, including reopening an owner.
+This is exchange-core persistence, not symmetric TDDFT propagation or FDTD resume.
+The Python/native TDDFT open prohibition stays in force. Learned/PT-CN symmetry,
+reduced internal-k MPI and ordinary symmetric mixed failure/resume remain open.
 
 ## Next connection work
 
@@ -70,7 +94,7 @@ Before admitting reduced-k states into TDDFT/FDTD, implement and verify all of:
 1. The owned actual-A check is implemented; verify it in symmetric time evolution once persistence is ready.
    Axis flags alone do not certify the final operation matrices. Arbitrary A(t)
    can break a reduction valid for a fixed polarization.
-2. Preserve complete map/history/cache identity through direct and protected
+2. Internal core map/history/cache persistence is implemented; connect it through direct and protected
    save/restore without cloning resource handles or replaying accepted steps.
 3. Validate representative/star partitioning for internal k MPI, plus failure,
    rollback and resume in the ordinary mixed sample.

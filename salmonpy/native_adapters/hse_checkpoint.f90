@@ -6,6 +6,7 @@
 module hse_checkpoint
  use iso_fortran_env,only:int64
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ use exx_symmetry,only:s_exx_symmetry_map,symmetry_check_field
  use exx_rt_state,only:s_exx_rt_state
  use exx_ace,only:s_exx_ace
  use exx_factor_history,only:s_factor_history
@@ -14,6 +15,8 @@ module hse_checkpoint
  private
  public::hse_checkpoint_write,hse_checkpoint_read,numeric_payload,hse_checkpoint_install,hse_checkpoint_capture
  type numeric_payload
+  ! Value-only map/cache: no FFT plans, pointers or communicator ownership.
+  type(s_exx_symmetry_map),allocatable::symmetry
   logical::exx_freeze=.false.,exx_force_full_action=.false.
   logical::exx_adaptive_ready=.false.,exx_support_changed=.false.
   real(8)::exx_exchange_energy=0d0
@@ -60,12 +63,15 @@ contains
   if(.not.valid_payload(value))return
   limit=element_limit(state)
   status=0;magic='SALMONPY_HSE_NUMERIC_V1'
+  if(allocated(value%symmetry))magic='SALMONPY_HSE_NUMERIC_V2'
   write(unit,iostat=status)magic
   if(status/=0)return
   call io_metadata(unit,.false.,metadata,limit,status)
+  if(allocated(value%symmetry))call io_symmetry(unit,.false.,value%symmetry,state%native_symmetry,status)
   call io_numeric(unit,.false.,value,limit,status)
   if(status/=0)return
   magic='SALMONPY_HSE_COMPLETE_V1'
+  if(allocated(value%symmetry))magic='SALMONPY_HSE_COMPLETE_V2'
   write(unit,iostat=status)magic
  end subroutine
  subroutine hse_checkpoint_read(unit,state,status,validate_only,staged)
@@ -85,7 +91,8 @@ contains
   limit=element_limit(state)
   read(unit,iostat=status)magic
   if(status/=0)return
-  if(magic/='SALMONPY_HSE_NUMERIC_V1')then
+  if((magic/='SALMONPY_HSE_NUMERIC_V1'.or.allocated(candidate%symmetry)).and. &
+     (magic/='SALMONPY_HSE_NUMERIC_V2'.or..not.allocated(candidate%symmetry)))then
     status=1;return
   endif
   call io_metadata(unit,.true.,metadata,limit,status)
@@ -93,11 +100,24 @@ contains
   if(.not.same_metadata(metadata,expected))then
     status=1;return
   endif
+  if(allocated(candidate%symmetry))then
+    call io_symmetry(unit,.true.,candidate%symmetry,state%native_symmetry,status)
+    if(status/=0)return
+  endif
   call io_numeric(unit,.true.,candidate,limit,status)
   if(status/=0)return
   read(unit,iostat=status)magic
   if(status/=0)return
-  if(magic/='SALMONPY_HSE_COMPLETE_V1'.or..not.valid_payload(candidate))then
+  if(allocated(candidate%symmetry))then
+    if(magic/='SALMONPY_HSE_COMPLETE_V2')then
+      status=1;return
+    endif
+  else
+    if(magic/='SALMONPY_HSE_COMPLETE_V1')then
+      status=1;return
+    endif
+  endif
+  if(.not.valid_payload(candidate))then
     status=1;return
   endif
   if(present(validate_only))then
@@ -123,6 +143,7 @@ contains
   type(s_exx_rt_state),intent(inout)::state
   type(numeric_payload),intent(inout)::candidate
   ! Numerical-only commit. In particular, never assign the whole HSE state.
+  if(allocated(candidate%symmetry))call install_symmetry(state%native_symmetry,candidate%symmetry)
   state%exx_freeze=candidate%exx_freeze
   state%exx_force_full_action=candidate%exx_force_full_action
   state%exx_adaptive_ready=candidate%exx_adaptive_ready
@@ -206,6 +227,397 @@ contains
   state%native_kernel%pair_fft_pairs=candidate%kernel_pair_fft_pairs
 
  end subroutine
+ logical function valid_symmetry(map) result(ok)
+  type(s_exx_symmetry_map),intent(in)::map
+  integer::status,nf,nr,ns,ng,i,j,total
+  integer(int64)::points
+  ok=.false.
+  call symmetry_check_field(map,[0d0,0d0,0d0],status)
+  if(status/=0.or.any(map%n<1))return
+  nf=map%nfull;nr=map%nrep;ns=map%nsym
+  points=1_int64
+  do i=1,3
+    if(int(map%n(i),int64)>int(huge(0),int64)/points)return
+    points=points*int(map%n(i),int64)
+  enddo
+  ng=int(points)
+  if(.not.allocated(map%cart_rotation))return
+  if(any(lbound(map%cart_rotation)/=1))return
+  if(any(shape(map%cart_rotation)/=[3,3,ns]))return
+  if(.not.allocated(map%full_k))return
+  if(any(lbound(map%full_k)/=1))return
+  if(any(shape(map%full_k)/=[3,nf]))return
+  if(.not.allocated(map%rep_k))return
+  if(any(lbound(map%rep_k)/=1))return
+  if(any(shape(map%rep_k)/=[3,nr]))return
+  if(.not.allocated(map%rotation))return
+  if(any(lbound(map%rotation)/=1))return
+  if(any(shape(map%rotation)/=[3,3,ns]))return
+  if(.not.allocated(map%translation))return
+  if(any(lbound(map%translation)/=1))return
+  if(any(shape(map%translation)/=[3,ns]))return
+  if(.not.allocated(map%first))return
+  if(any(lbound(map%first)/=1))return
+  if(any(shape(map%first)/=[nr+1]))return
+  if(.not.allocated(map%owner))return
+  if(any(lbound(map%owner)/=1))return
+  if(any(shape(map%owner)/=[nf]))return
+  if(.not.allocated(map%operations))return
+  if(any(lbound(map%operations)/=1))return
+  if(any(shape(map%operations)/=[ns,nf]))return
+  if(.not.allocated(map%multiplicity))return
+  if(any(lbound(map%multiplicity)/=1))return
+  if(any(shape(map%multiplicity)/=[nf]))return
+  if(.not.allocated(map%grid))return
+  if(any(lbound(map%grid)/=1))return
+  if(any(shape(map%grid)/=[ng,ns]))return
+  block
+    integer::a,b,c
+    do a=1,size(map%h,1)
+      if(.not.ieee_is_finite(map%h(a)))return
+    enddo
+  end block
+  block
+    integer::a,b,c
+    do a=1,size(map%cell,1)
+    do b=1,size(map%cell,2)
+      if(.not.ieee_is_finite(map%cell(a,b)))return
+    enddo
+    enddo
+  end block
+  block
+    integer::a,b,c
+    do a=1,size(map%inverse_cell,1)
+    do b=1,size(map%inverse_cell,2)
+      if(.not.ieee_is_finite(map%inverse_cell(a,b)))return
+    enddo
+    enddo
+  end block
+  block
+    integer::a,b,c
+    do a=1,size(map%cart_rotation,1)
+    do b=1,size(map%cart_rotation,2)
+    do c=1,size(map%cart_rotation,3)
+      if(.not.ieee_is_finite(map%cart_rotation(a,b,c)))return
+    enddo
+    enddo
+    enddo
+  end block
+  block
+    integer::a,b,c
+    do a=1,size(map%full_k,1)
+    do b=1,size(map%full_k,2)
+      if(.not.ieee_is_finite(map%full_k(a,b)))return
+    enddo
+    enddo
+  end block
+  block
+    integer::a,b,c
+    do a=1,size(map%rep_k,1)
+    do b=1,size(map%rep_k,2)
+      if(.not.ieee_is_finite(map%rep_k(a,b)))return
+    enddo
+    enddo
+  end block
+  block
+    integer::a,b,c
+    do a=1,size(map%rotation,1)
+    do b=1,size(map%rotation,2)
+    do c=1,size(map%rotation,3)
+      if(.not.ieee_is_finite(map%rotation(a,b,c)))return
+    enddo
+    enddo
+    enddo
+  end block
+  block
+    integer::a,b,c
+    do a=1,size(map%translation,1)
+    do b=1,size(map%translation,2)
+      if(.not.ieee_is_finite(map%translation(a,b)))return
+    enddo
+    enddo
+  end block
+  if(any(map%h<=0d0))return
+  if(any(map%owner<1).or.any(map%owner>nr))return
+  if(any(map%grid<1).or.any(map%grid>ng))return
+  if(any(map%multiplicity<1).or.any(map%multiplicity>ns))return
+  if(map%max_little/=maxval(map%multiplicity))return
+  do i=1,nr
+    if(map%first(i+1)<=map%first(i).or.map%first(i)<1.or.map%first(i+1)>nf+1)return
+    if(any(map%owner(map%first(i):map%first(i+1)-1)/=i))return
+  enddo
+  do i=1,nf
+    if(any(map%operations(:map%multiplicity(i),i)<1))return
+    if(any(map%operations(:map%multiplicity(i),i)>ns))return
+  enddo
+  if(allocated(map%cached_phase).neqv.allocated(map%phase_offset))return
+  if(.not.allocated(map%cached_phase))then
+    if(map%cached_first/=1.or.map%cached_count/=0)return
+  else
+    if(map%cached_first/=1.or.map%cached_count/=nf)return
+    if(any(lbound(map%phase_offset)/=1).or.size(map%phase_offset)/=nf+1)return
+    if(map%phase_offset(1)/=0)return
+    total=0
+    do i=1,nf
+      if(map%multiplicity(i)>huge(0)-total)return
+      total=total+map%multiplicity(i)
+      if(map%phase_offset(i+1)/=total)return
+    enddo
+    if(any(lbound(map%cached_phase)/=1))return
+    if(any(shape(map%cached_phase)/=[ng,total]))return
+    do j=1,total;do i=1,ng
+      if(.not.ieee_is_finite(real(map%cached_phase(i,j),8)))return
+      if(.not.ieee_is_finite(aimag(map%cached_phase(i,j))))return
+    enddo;enddo
+  endif
+  ok=.true.
+ end function
+ subroutine install_symmetry(target,source)
+  type(s_exx_symmetry_map),intent(inout)::target,source
+  ! Map has only scalar/allocatable numerical values; moving allocatables cannot
+  ! duplicate FFT plans or allocate memory during the commit.
+  target%nfull=source%nfull
+  target%nrep=source%nrep
+  target%nsym=source%nsym
+  target%max_little=source%max_little
+  target%n=source%n
+  target%h=source%h
+  target%cell=source%cell
+  target%inverse_cell=source%inverse_cell
+  target%cached_first=source%cached_first
+  target%cached_count=source%cached_count
+  if(allocated(target%cart_rotation))deallocate(target%cart_rotation)
+  if(allocated(source%cart_rotation))call move_alloc(source%cart_rotation,target%cart_rotation)
+  if(allocated(target%full_k))deallocate(target%full_k)
+  if(allocated(source%full_k))call move_alloc(source%full_k,target%full_k)
+  if(allocated(target%rep_k))deallocate(target%rep_k)
+  if(allocated(source%rep_k))call move_alloc(source%rep_k,target%rep_k)
+  if(allocated(target%rotation))deallocate(target%rotation)
+  if(allocated(source%rotation))call move_alloc(source%rotation,target%rotation)
+  if(allocated(target%translation))deallocate(target%translation)
+  if(allocated(source%translation))call move_alloc(source%translation,target%translation)
+  if(allocated(target%first))deallocate(target%first)
+  if(allocated(source%first))call move_alloc(source%first,target%first)
+  if(allocated(target%owner))deallocate(target%owner)
+  if(allocated(source%owner))call move_alloc(source%owner,target%owner)
+  if(allocated(target%operations))deallocate(target%operations)
+  if(allocated(source%operations))call move_alloc(source%operations,target%operations)
+  if(allocated(target%multiplicity))deallocate(target%multiplicity)
+  if(allocated(source%multiplicity))call move_alloc(source%multiplicity,target%multiplicity)
+  if(allocated(target%grid))deallocate(target%grid)
+  if(allocated(source%grid))call move_alloc(source%grid,target%grid)
+  if(allocated(target%phase_offset))deallocate(target%phase_offset)
+  if(allocated(source%phase_offset))call move_alloc(source%phase_offset,target%phase_offset)
+  if(allocated(target%cached_phase))deallocate(target%cached_phase)
+  if(allocated(source%cached_phase))call move_alloc(source%cached_phase,target%cached_phase)
+ end subroutine
+ subroutine io_symmetry(unit,reading,value,expected,status)
+  integer,intent(in)::unit
+  logical,intent(in)::reading
+  type(s_exx_symmetry_map),intent(inout)::value
+  type(s_exx_symmetry_map),intent(in)::expected
+  integer,intent(inout)::status
+  integer::header(7),first,count,columns,i,allocation_status
+  logical::cached
+  if(status/=0)return
+  ! All static array sizes come from the independently initialized fresh map.
+  ! The stream cannot choose allocation sizes. The wrapper authenticated it first.
+  header=[value%nfull,value%nrep,value%nsym,value%max_little,value%n]
+  if(reading)then
+    read(unit,iostat=status)header
+    if(status/=0)return
+    if(any(header/=[expected%nfull,expected%nrep,expected%nsym,expected%max_little,expected%n]))then
+      status=1;return
+    endif
+  else
+    write(unit,iostat=status)header
+  endif
+  if(status/=0)return
+  if(reading)then
+    read(unit,iostat=status)value%h
+  else
+    write(unit,iostat=status)value%h
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%h/=expected%h))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%cell
+  else
+    write(unit,iostat=status)value%cell
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%cell/=expected%cell))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%inverse_cell
+  else
+    write(unit,iostat=status)value%inverse_cell
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%inverse_cell/=expected%inverse_cell))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%cart_rotation
+  else
+    write(unit,iostat=status)value%cart_rotation
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%cart_rotation/=expected%cart_rotation))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%full_k
+  else
+    write(unit,iostat=status)value%full_k
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%full_k/=expected%full_k))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%rep_k
+  else
+    write(unit,iostat=status)value%rep_k
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%rep_k/=expected%rep_k))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%rotation
+  else
+    write(unit,iostat=status)value%rotation
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%rotation/=expected%rotation))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%translation
+  else
+    write(unit,iostat=status)value%translation
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%translation/=expected%translation))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%first
+  else
+    write(unit,iostat=status)value%first
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%first/=expected%first))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%owner
+  else
+    write(unit,iostat=status)value%owner
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%owner/=expected%owner))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%operations
+  else
+    write(unit,iostat=status)value%operations
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%operations/=expected%operations))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%multiplicity
+  else
+    write(unit,iostat=status)value%multiplicity
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%multiplicity/=expected%multiplicity))then
+      status=1;return
+    endif
+  endif
+  if(reading)then
+    read(unit,iostat=status)value%grid
+  else
+    write(unit,iostat=status)value%grid
+  endif
+  if(status/=0)return
+  if(reading)then
+    if(any(value%grid/=expected%grid))then
+      status=1;return
+    endif
+  endif
+  cached=allocated(value%cached_phase);first=value%cached_first;count=value%cached_count
+  if(reading)then
+    read(unit,iostat=status)cached,first,count
+  else
+    write(unit,iostat=status)cached,first,count
+  endif
+  if(status/=0)return
+  if(first/=1.or.(cached.and.count/=expected%nfull).or.(.not.cached.and.count/=0))then
+    status=1;return
+  endif
+  if(reading)then
+    if(allocated(value%cached_phase))deallocate(value%cached_phase)
+    if(allocated(value%phase_offset))deallocate(value%phase_offset)
+    value%cached_first=first;value%cached_count=count
+    if(cached)then
+      columns=0
+      do i=1,expected%nfull
+        if(expected%multiplicity(i)>huge(0)-columns)then
+          status=1;return
+        endif
+        columns=columns+expected%multiplicity(i)
+      enddo
+      allocate(value%phase_offset(count+1),stat=allocation_status)
+      if(allocation_status/=0)then
+        status=1;return
+      endif
+      allocate(value%cached_phase(size(expected%grid,1),columns),stat=allocation_status)
+      if(allocation_status/=0)then
+        status=1;return
+      endif
+    endif
+  endif
+  if(cached)then
+    if(reading)then
+      read(unit,iostat=status)value%phase_offset,value%cached_phase
+    else
+      write(unit,iostat=status)value%phase_offset,value%cached_phase
+    endif
+    if(status/=0)return
+  endif
+  if(.not.valid_symmetry(value))status=1
+ end subroutine
  logical function supported(state) result(ok)
   type(s_exx_rt_state),intent(in)::state
   ok=.false.
@@ -213,7 +625,15 @@ contains
   if(any(state%native_kernel%n<1).or.state%native_kernel%ng<1.or.state%native_kernel%nk<1)return
   if(allocated(state%native_kernel%accelerator))return
   if(state%native_kernel%nq/=state%native_kernel%nk)return
-  if(state%native_symmetry%nfull/=0.or.state%native_symmetry%nrep/=0.or.state%native_symmetry%nsym/=0)return
+  if(state%native_symmetry%nfull/=0.or.state%native_symmetry%nrep/=0.or.state%native_symmetry%nsym/=0)then
+    if(.not.valid_symmetry(state%native_symmetry))return
+    if(any(state%native_symmetry%n/=state%native_kernel%n))return
+    if(state%native_symmetry%nfull/=state%native_kernel%nk)return
+    ! Bounded admitted core: complete phase coverage, no internal k partition.
+    if(state%native_kernel%phase_start/=1.or..not.allocated(state%native_kernel%phase))return
+    if(size(state%native_kernel%phase,2)/=state%native_symmetry%nfull)return
+    if(state%factor_experiment.or.state%factor_learned)return
+  endif
   if(state%ace%metric_distributed.or.state%initial_ace%metric_distributed.or. &
      state%midpoint_ace%metric_distributed.or.state%scf_damped_ace%metric_distributed)return
   ok=.true.
@@ -235,6 +655,7 @@ contains
   type(numeric_payload),intent(out)::value
   type(kernel_metadata),optional,intent(out)::metadata
   integer::axis
+  if(state%native_symmetry%nsym>0)value%symmetry=state%native_symmetry
   value%exx_freeze=state%exx_freeze
   value%exx_force_full_action=state%exx_force_full_action
   value%exx_adaptive_ready=state%exx_adaptive_ready
@@ -360,6 +781,9 @@ contains
   ok=.false.
   if(value%ace%metric_distributed.or.value%initial_ace%metric_distributed.or. &
     value%midpoint_ace%metric_distributed.or.value%scf_damped_ace%metric_distributed)return
+  if(allocated(value%symmetry))then
+    if(.not.valid_symmetry(value%symmetry))return
+  endif
   if(.not.ieee_is_finite(value%exx_exchange_energy).or..not.ieee_is_finite(value%ptcn_history_dt))return
   if(value%factor_step<0.or.value%ptcn_accepted_step<0.or.value%ptcn_history_dt<0d0)return
   if(allocated(value%factor_history))then

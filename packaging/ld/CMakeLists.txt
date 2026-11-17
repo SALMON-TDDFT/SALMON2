@@ -193,5 +193,6 @@ install(FILES "${ROOT}/tests/native/test_orbital_initialization.f90" DESTINATION
 
 install(FILES "${ROOT}/tests/native/test_hse_symmetry_resources.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 install(FILES "${ROOT}/tests/native/test_hse_symmetry_field.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+install(FILES "${ROOT}/tests/native/test_hse_symmetry_checkpoint.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
 install(FILES "${ROOT}/salmonpy/FAST_HSE_SYMMETRY.md" "${ROOT}/salmonpy/FAST_HSE_SYMMETRY.en.md" DESTINATION salmonpy)
