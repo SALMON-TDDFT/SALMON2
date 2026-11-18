@@ -41,7 +41,7 @@ class NativeGSInfo:
     residual: float
     tolerance: float
     iterations: int
-    converged: bool
+    converged: bool | None
     atoms: int
     bands: int
 
@@ -97,7 +97,7 @@ class NativeGSBackend:
 
 class NativeGSSession:
     def __init__(self,backend,native,lib):
-        self.backend=backend;self._native=native;self.lib=lib;self.closed=False;self._states={}
+        self.backend=backend;self._native=native;self.lib=lib;self.closed=False;self._states={};self._td_registry=None
     @property
     def comm(self):return self._native.context.solver_comm
     def _live(self):
@@ -153,14 +153,93 @@ class NativeGSSession:
         code=self._call(work,self.lib.sp_gs_create,b'gs.inp',c.byref(token))
         self._check(code)
         state=NativeGSState(self,token.value,work,material_id,calculation)
+        state._electrons=calculation.electrons
+        state._assets=tuple((calculation._pseudo_name(i),pp.data) for i,pp in enumerate(calculation.pseudopotentials))
         self._states[token.value]=state
         try:info=state.info
         except BaseException:
             state.close();raise
+        state._identity='salmonpy.retained-gs/1/'+hashlib.sha256(json.dumps(
+            [descriptor,self.backend.sha256,self.backend.decomposition,vars(info)],sort_keys=True).encode()).hexdigest()
         if not info.converged:
             warnings.warn(f'SCF not converged after {info.iterations} iterations '
                           f'(residual={info.residual:g}, tolerance={info.tolerance:g}); retaining the last iterate',
                           RuntimeWarning,stacklevel=2)
+        return state
+
+    def load(self,directory,input_file='rt.inp',*,material_id='material'):
+        """Read an existing GS checkpoint without SCF or a new restart bundle.
+
+        The input must describe that checkpoint. Integrity checks cannot establish
+        the physical provenance of unlabelled legacy binary data.
+        """
+        import re
+        from .embedded_tddft import NativeTDDFTMaterialProvider
+        from .bands import _input_groups,_scalar
+        from .config import _identifier
+        self._live();error=None
+        try:
+            _identifier(material_id,'material_id')
+            provider=NativeTDDFTMaterialProvider(directory,input_file)
+            initial=provider.prepare(None)
+            groups=_input_groups((initial.directory/initial.input_file).read_text())
+            electrons=int(_scalar(groups['system'],'nelec'))
+            if electrons<2:raise InputError('positive occupied electronic state required')
+            allowed={'calculation','control','units','system','pseudo','functional','rgrid','kgrid',
+                     'atomic_coor','atomic_red_coor','scf','analysis','parallel','tgrid','propagation','emfield'}
+            if set(groups)-allowed:raise InputError('unsupported checkpoint input groups: '+str(set(groups)-allowed))
+            groups={key:value for key,value in groups.items() if key not in ('tgrid','propagation','emfield','analysis')}
+            groups['calculation']="\n theory='dft'\n"
+            source=str(initial.directory/'data_for_restart').replace("'","''")+'/'
+            groups['control']=("\n sysname='gs', yn_restart='y', read_gs_restart_data='wfn', "
+                               "write_gs_restart_data='no', yn_self_checkpoint='n', base_directory='./', \n"
+                               f"directory_read_data='{source}'\n")
+            k,o,x,y,z=self.backend.decomposition
+            groups['parallel']=f'\n nproc_k={k},nproc_ob={o},nproc_rgrid={x},{y},{z}\n'
+            assets=[]
+            for body in groups.values():
+                clean=re.sub(r"![^\n]*",'',body)
+                for match in re.finditer(r"\b(file_pseudo|file_atom_coor|file_atom_red_coor|file_kgrid)\s*(?:\([^)]*\))?\s*=\s*(['\"])(.*?)\2",clean,re.I):
+                    name=match[3]
+                    if name=='none':continue
+                    path=Path(name)
+                    if path.is_absolute() or '..' in path.parts:raise InputError('bundle-relative input asset required')
+                    assets.append((name,(initial.directory/path).read_bytes()))
+            if not assets:raise InputError('explicit pseudopotential assets required')
+            text=''.join(f'&{key}\n{body}\n/\n' for key,body in groups.items())
+            if any(len(line)>256 for line in text.splitlines()):raise InputError('import input line exceeds native 256-character limit')
+            fn=getattr(self.lib,'sp_gs_import',None)
+            if fn is None:raise InputError('existing-GS import requires a matching runtime')
+            fn.argtypes=[c.c_char_p,c.POINTER(c.c_int64)];fn.restype=c.c_int
+            descriptor=(material_id,text,initial.manifest,tuple((n,hashlib.sha256(d).hexdigest()) for n,d in assets))
+        except Exception as exc:error=str(exc)
+        _agree(self.comm,error)
+        _agree(self.comm,'checkpoint inputs differ' if any(v!=descriptor for v in self.comm.allgather(descriptor)) else None)
+        work=None;error=None
+        if self.comm.rank==0:
+            try:
+                work=Path(tempfile.mkdtemp(prefix='gs-import-',dir=self.backend.work_root))
+                (work/'gs.inp').write_text(text)
+                for name,data in assets:
+                    (work/name).parent.mkdir(parents=True,exist_ok=True)
+                    (work/name).write_bytes(data)
+            except Exception as exc:error=str(exc)
+        error=self.comm.bcast(error,root=0);work=self.comm.bcast(work,root=0)
+        _agree(self.comm,error)
+        try:
+            provider.prepare(None)
+            if (work/'gs.inp').read_text()!=text:raise InputError('import input differs on this rank')
+            for name,data in assets:
+                if (work/name).read_bytes()!=data:raise InputError('import asset differs on this rank')
+        except Exception as exc:error=str(exc)
+        _agree(self.comm,error)
+        token=c.c_int64()
+        self._check(self._call(work,fn,b'gs.inp',c.byref(token)))
+        state=NativeGSState(self,token.value,work,material_id,None)
+        state._electrons=electrons;state._assets=tuple(assets)
+        state._identity='salmonpy.imported-gs/1/'+hashlib.sha256(json.dumps(
+            [descriptor,self.backend.sha256,self.backend.decomposition],sort_keys=True).encode()).hexdigest()
+        self._states[token.value]=state
         return state
 
     def resources(self):
@@ -171,6 +250,13 @@ class NativeGSSession:
     def close(self):
         if self.closed:return
         errors=[]
+        if self._td_registry is not None:
+            for model in sorted(self._td_registry._models,key=lambda value:value.model_token):
+                for state in sorted(model._states,key=lambda value:value.handle):
+                    try:state.close()
+                    except Exception as exc:errors.append(str(exc))
+            try:self._td_registry.close()
+            except Exception as exc:errors.append(str(exc))
         for token in sorted(self._states):
             try:self._states[token].close()
             except Exception as exc:errors.append(str(exc))
@@ -187,7 +273,10 @@ _QUANTITIES={'density':(1,'bohr^-3'),'occupations':(2,'1'),'eigenvalues':(3,'har
 class NativeGSState:
     def __init__(self,session,token,work,material_id,calculation):
         self.session=session;self._token=token;self.directory=work
-        self._material_id=material_id;self._calculation=calculation;self.closed=False
+        self._material_id=material_id;self._calculation=calculation;self._identity=None;self.closed=False
+        self._electrons=None;self._assets=()
+    @property
+    def identity(self):return self._identity
     @property
     def material_id(self):return self._material_id
     @property
@@ -201,16 +290,20 @@ class NativeGSState:
         self.session._check(self.session.lib.sp_gs_info(self._token,stats.ctypes.data,values.ctypes.data))
         if any(self.session.comm.allgather(not bool(np.isfinite(values).all()))):
             raise NumericalError('nonfinite retained GS metadata')
-        return NativeGSInfo(*map(float,values),int(stats[0]),bool(stats[1]),int(stats[2]),int(stats[3]))
+        return NativeGSInfo(*map(float,values),int(stats[0]),None if stats[1]<0 else bool(stats[1]),int(stats[2]),int(stats[3]))
     @property
     def energy_hartree(self):return self.info.energy_hartree
     @property
     def converged(self):return self.info.converged
     @property
     def iterations(self):return self.info.iterations
+    def tddft_model(self,*,dt,max_steps=1000):
+        from ._gs_tddft import open_model
+        return open_model(self,dt,max_steps)
     def array(self,quantity):
         self._live();error=None
         if quantity not in _QUANTITIES:error='unknown GS array quantity'
+        if quantity=='forces' and self._calculation is None:error='forces were not computed by existing-GS import'
         _agree(self.session.comm,error)
         code,unit=_QUANTITIES[quantity];ndim=c.c_int()
         shape=np.ones(7,dtype=np.int64);lower=np.ones(7,dtype=np.int64)

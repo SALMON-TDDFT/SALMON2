@@ -29,8 +29,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                     pp, ppg, ppn, unfold  )
+                     pp, ppg, ppn, unfold, memory_gs  )
   use inputoutput
+  use salmonpy_gs_seed, only: s_gs_seed,load_gs_seed
   use tddft_worker, only: worker_requested,worker_initial_A,worker_E_requested
   use math_constants, only: pi, zi
   use structures
@@ -64,6 +65,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use filesystem, only: open_filehandle
   use lcfo, only: init_conventional_from_dcdft
   implicit none
+  type(s_gs_seed),optional,intent(in) :: memory_gs
   integer,parameter :: Nd = 4
 
   real(8)       :: debye2au   ! [D]  -> [a.u.]
@@ -258,7 +260,10 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  if(yn_conventional_from_dcdft=='n') then
+  if(present(memory_gs))then
+    call load_gs_seed(memory_gs,system,mg,info,spsi_in)
+    Mit=0
+  else if(yn_conventional_from_dcdft=='n') then
     call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   else
   ! conventional TDDFT but wavefunctions are reconstructed from DC-LCFO data

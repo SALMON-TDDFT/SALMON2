@@ -2,6 +2,67 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
+## Latest actionable queue — 2026-11-18 (after functional test cleanup)
+
+This section takes precedence over all earlier dated status/check counts below.
+Historical unchecked bullets are scope records, not additional independent tasks.
+Source/tests/docs changes after HEAD d824b4c6 remain uncommitted; no push or
+GitHub Actions was performed for these changes.
+
+### Completed within measured scopes
+
+- [x] Explicit different-input fast-PR HSE model registry, complete symmetry/density
+  workspace switching, Python leases and direct restart; see latest validation below.
+
+- [x] Standard TDDFT: same-process different-input model registration/activation,
+  Python registry and ordinary material-ID/multi-point integration. Different
+  cell/grid/k/XC/decomposition and independent/direct-resume controls verified.
+- [x] Standard retained GS: independent native/Python owners. Existing-GS load
+  without SCF; owned in-memory GS→TDDFT seed, independent RT state creation after
+  GS close, interleaved GS loading/RT stepping. This slice does not test new SCF
+  interleaved with RT; no new GS/reference data is authorized.
+- [x] GS→TDDFT existing-file current parity and direct no-replay resume in5 cases:
+  PZ MPI1/orbital2/spatial2, Libxc-PBE orbital2, TB-mBJ spatial2. Analytic
+  real/complex empty-band redistribution also passes. Imported convergence is
+  unknown and uncomputed forces are rejected.
+- [x] Same-model fast-PR HSE full/reduced-k independent states, symmetry Taylor/
+  learned/PT-CN, internal MPI1/2, mixed FDTD and protected direct resume/retry.
+- [x] Functional test consolidation:620 unit methods (one skipped),83 files;
+  LD/SBE and existing-GS MPI runner7 cases pass. Removed redundant old entries.
+  Selected49→43 unit methods retain the identical581 traced runtime lines;
+  line tracing is not branch coverage or a physics certificate.
+- [x] Relevant JP/EN/AI guides, examples, test removal mapping and canonical
+  diagnostic records updated. Historical wheel637-test evidence predates the
+  latest test-only cleanup; latest source regression is620, not a new wheel run.
+
+### Remaining work (do not double-count historical notes)
+
+1. [ ] Commit/review and push the currently verified changes when requested;
+   retain CI quota-saving policy. HEAD remains d824b4c6.
+2. [ ] Connect the now-completed explicit different-input fast-PR HSE registry
+   to ordinary material-ID/ResponseSession/rank-plan assembly. Explicit same-process
+   input/symmetry switching is verified below; existing same-model assembly stays.
+   Specialized SOC/+U/DC ownership remains separate; molecular work stays paused.
+3. [ ] Retained GS checkpoint/export and portable archive/version migration:
+   physical GS identity, broader PP format/content coverage, inactive legacy
+   checkpoint canonicalization, changed subgroup/decomposition restoration.
+   Existing same-topology RT direct restore is already complete in measured scopes.
+4. [ ] Remaining shared initialization/I/O/timer/unscoped MPI resources and broader
+   recoverable initialization/allocation/I/O contracts. Current numerical rollback
+   and protected restore do not imply general STOP/OOM/MPI/process recovery or
+   threaded/concurrent GS/RT. New-SCF/RT interleaving remains unverified.
+5. [ ] Larger electronic grids/more points and communication/resource calibration;
+   Linux/Intel Mac/other runtime builds, packaging and matching distribution
+   evidence for the new native features. Budgets remain warning-only.
+
+Smaller/future: band-iteration warning policy; optional interpolation/subcycling
+and E-enabled runtime catalog publication. Converged physical benchmarks remain
+explicitly separate from implementation parity; new SCF/GS generation needs
+applicable authorization. No conventional HSE requirement or routine CI dispatch.
+
+Evidence: [memory bridge](../memory-gs-tddft-validation-2026-11-18.md),
+[test runner](../component-tests.md), [functional removal map](../functional-test-cleanup-2026-11-18.md).
+
 ## Retained standard GS handles and Python — 2026-11-18
 
 - [x] Stable heap owners for GS numerical arrays, XC and child communicators;
@@ -28,8 +89,10 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
   unapproved failed-library evidence saved to canonical
   calc2026/salmonpy-retained-gs-20261118; no GS restart/orbital/density collection.
   Local OneDrive writes verified; cloud sync unverified. No Actions dispatched.
-- [ ] Retained GS checkpoint and in-memory GS→TDDFT handoff; HSE/SOC/+U/DC GS,
-  simultaneous GS/TDDFT and broader GS initialization recovery remain separate.
+- [x] In-memory standard GS→TDDFT handoff, existing-GS import and independent RT states;
+  see 2026-11-18 memory bridge evidence below.
+- [ ] Retained GS checkpoint; HSE/SOC/+U/DC GS, concurrent GS/TDDFT and broader
+  GS initialization recovery remain separate.
 
 ## Standard GS model-owned input boundary — 2026-11-18
 
@@ -119,9 +182,9 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
   direct resume and independent sibling lifetimes retain parity (15 cases).
 - [x] Scalar IEEE restored-A checks retain all6 original elements; two-rank NaN/Inf
   corruption at each element rejects before publication (12 cases), valid resume exact.
-- [ ] Model registry and different-model activation,
-  remaining derived/global resource ownership and heterogeneous Python handles.
-  This owned-input step does not enable same-process heterogeneous live models.
+- [x] Standard registry/different-model activation and heterogeneous Python handles
+  completed in the newer registry section. Remaining specialized/common ownership
+  is tracked only in the latest queue above.
 
 ## Different TDDFT input audit — 2026-11-18
 
@@ -135,12 +198,10 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
   ignores unused fallback paths/flags, and old no-catalog direct archive resumes.
   Installed unequal per-material MPI (PBE2/TB-mBJ1) agrees within2e-12 absolute
   tolerance (largest current difference8.61e-19); no new GS/native build required.
-- [ ] Same-process heterogeneous native models remain unimplemented. Input records,
-  explicit initialization and parser/default ownership are complete. Remaining:
-  model-ID registry/activation; common cache/I/O/timer/MPI lifetime;
-  Python wiring and heterogeneous
-  cell/grid/k/PP/XC independent/restart validation. Existing state-owned numerical
-  payloads/child communicators are completed foundations, not unfinished duplicates.
+- [x] Standard same-process heterogeneous model registry/activation, Python wiring
+  and differing-input current/restart validation are completed in the newer registry
+  section. Fast-PR HSE heterogeneous input sharing and broader common ownership
+  remain in the latest queue; do not count the standard registry twice.
 - [ ] Generic allocation/I/O/MPI failure recovery, canonical archive migration,
   larger-scale calibration and additional platform distribution remain separate.
 
@@ -159,17 +220,18 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 - [x] Per-state charge-current sign, checkpoint current metadata admission and
   owner-local output journaling; default legacy create_state preserved.
 - [x] Paired guides, AI catalog and installed module/example/tool inventory updated.
-- [ ] Different-input model sharing and remaining common/specialized native ownership
-  remain separate work; common model parameters are not per-state settings here.
+- [x] Standard different-input sharing completed via explicit registry; common model
+  parameters remain per-model, not per-state. Specialized/common work is tracked
+  in the latest queue.
 
-## Current audit — 2026-11-18 (takes precedence over historical status notes)
+## Earlier shared-model audit — 2026-11-18 (superseded by latest queue)
 
 The dated sections below retain the scope at their completion time. Older statements such as "occupation remains shared" or "multiple field ranks remain open" are superseded by the later evidence, not separate unfinished tasks.
 
 ### Actionable status — Python shared-model audit
 
-This is the current queue. Historical unchecked items below record their earlier
-scope and must not be counted again as newly unfinished work.
+This is an earlier queue retained as evidence. Use the latest actionable queue
+at the beginning; do not count historical unchecked items again.
 
 - [x] Delivery throughbd27f0ed is committed and pushed to the independent
   SALMONpy branch. Ownership9f07fb54 and C handles8fe6cd15 are included.
@@ -1059,3 +1121,75 @@ arbitrary native reentrancy. Child MPI communicators currently retire at detach.
 
 See SHARED_HSE JP/EN and examples/shared_fast_hse.py. Numerical source kernels
 and checkpoint format unchanged; model allocator reuses the existing constructor.
+
+## 2026-11-18 — retained GS to TDDFT bridge
+
+- [x] Owned orbital/occupation/input seed at the existing RT restart-read boundary.
+- [x] Python `NativeGSState.tddft_model` and existing-GS `session.load` entry.
+- [x] Existing-file vs memory current parity; sibling/source-close independence.
+- [x] Direct checkpoint continuation without replay; MPI orbital/spatial checks.
+- [x] Synthetic real/complex empty-band redistribution; source regression (637 tests).
+- [x] Final installed-wheel637 tests (one skip), installed MPI2 public sample and
+  canonical hash/diagnostic evidence: calc2026/salmonpy-memory-gs-tddft-20261118.
+  Local OneDrive write verified; cloud synchronization unverified; no Actions dispatched.
+- [ ] General subgroup repartitioning, HSE and concurrent/threaded GS/RT ownership.
+
+No new SCF/reference GS generation is authorized in this validation slice.
+
+## 2026-11-18 — component regression consolidation
+
+- [x] Shared LD/SBE point-MPI test body, preserving model-specific checks; redundant
+  individual entry scripts and their model-selection compatibility branch removed.
+- [x] Explicit handles/memory-GS matrix runner; independent MPI lifetimes, per-case logs,
+  timing/status index, dry-run and failure reporting; no automatic builds/SCF/Actions.
+- [x] Four LD/SBE pre/post JSON records exactly equal, including currents/cleanup counts.
+- [x] Existing-GS MPI1/orbital2/spatial2 checks pass through the common runner.
+- [ ] Other native HSE/TDDFT scenarios remain separate where reference data or lifecycle differs.
+
+See docs/component-tests.md. Unit/error-case coverage remains unchanged.
+
+## 2026-11-18 — unit-test pruning after consolidation
+
+- [x] Repeated module-import contracts folded into public API import checks,
+  preserving explicit optional-MPI-unavailable and ASE/f90nml lazy-import checks.
+- [x] Five existence-only smoke tests removed; inventory or actual operation tests remain.
+- [x] GS link tests moved into native-GS tests; standard/HSE shared-model classes
+  grouped without removing numerical/ownership/failure assertions.
+- [x] Final626 tests pass (one skip), down from637; files87, down from89.
+  Evidence: calc2026/salmonpy-test-consolidation-20261118/unit-pruning.
+  No new native builds, GS runs or GitHub Actions.
+
+## 2026-11-18 — functional test consolidation
+
+- [x] LD numerical/ownership/input tests grouped in test_ld.py; SBE numerical/import/
+  ownership checks in test_sbe.py, with independent failure diagnostics retained.
+- [x] Six superseded test methods removed; unique immutable-settings/parser-type/
+  accepted-state checks transferred, repeated worker-start injection removed.
+- [x] Selected49→43 tests execute the same581 production lines (not branch coverage).
+- [x] Full620 tests pass, one skip; unit files83. MPI/physics/other-backend tests retained.
+- [x] Removal mapping and selected logs/JSON recorded in canonical
+  calc2026/salmonpy-test-consolidation-20261118/functional-cleanup; no GS/CI/build.
+
+See docs/functional-test-cleanup-2026-11-18.md.
+
+## 2026-11-18 — different-input fast-PR HSE registry
+
+- [x] Owned input/unit values, complete symmetry and density-map workspace;
+  no copying of numerical/XC/FFT/MPI owners; fresh coordinate parse allocations.
+- [x] Negative generation model tokens and positive state handles; register/spawn/
+  close and per-state model activation; old single/same-model behavior retained.
+- [x] Explicit Python open_registry/open_model, collective selection/cwd admission,
+  deterministic close and retained live children; idle child preserves reservation.
+- [x] Six MPI/OMP/general-cell/density-map cases: old-independent current/energy/
+  history, fresh state and direct7→24 resume exactly equal, no time replay.
+- [x] Density-map sharing bug reproduced before fix and resolved on original input.
+  Scalar IEEE NaN/+Inf/-Inf checks cover all6 old/new A entries, one-rank fault.
+- [x] Old same-model protected mixed probe matches8 stored traces; source620 and
+  installed620 tests pass (one skip each). Installed MPI2 sample and strict old-
+  independent comparison pass; JP/EN/AI/C header/example and wheel synchronized.
+- [x] Source/all-object prohibition audits; canonical evidence (no GS collection)
+  calc2026/salmonpy-hse-model-registry-20261118. Local cloud sync unverified; no CI.
+- [ ] Ordinary heterogeneous HSE material-ID/rank-plan assembly remains next;
+  changed topology, general failures, platforms/physical validation stay separate.
+
+See docs/hse-model-registry-validation-2026-11-18.md.

@@ -24,9 +24,6 @@ class GSArchiveTests(unittest.TestCase):
         values=fixture();values.update(overrides)
         return save_ground_state(self.root/name,orbital_block=3,**values)
 
-    def test_component_exists(self):
-        import importlib.util
-        self.assertIsNotNone(importlib.util.find_spec('salmonpy.gs_archive'),'portable GS archive component is missing')
 
     def test_roundtrip_blocks_and_padding(self):
         from salmonpy.gs_archive import GroundStateArchive

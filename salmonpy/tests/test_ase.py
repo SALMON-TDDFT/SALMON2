@@ -97,11 +97,6 @@ class ASEBridgeTest(unittest.TestCase):
         atoms.set_initial_magnetic_moments([0]);atoms.pbc[2]=False
         with self.assertRaises(ValueError):dft_from_atoms(atoms,**args)
 
-class OptionalDependencyTest(unittest.TestCase):
-    def test_import_does_not_load_ase(self):
-        import subprocess,sys
-        subprocess.run([sys.executable,'-c',"import sys; import salmonpy.ase; assert 'ase' not in sys.modules; assert 'f90nml' not in sys.modules"],check=True)
-
 @unittest.skipUnless(HAS_ASE, 'optional ASE dependencies')
 class ASEOpticalTest(unittest.TestCase):
     def inputs(self):

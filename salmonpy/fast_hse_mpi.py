@@ -25,7 +25,7 @@ from .fast_hse import _Initial, _input_text, _positive, _vector
 from .material_response import _response_timing
 from .tddft import _copy_bundle, _digest
 
-__all__ = ['NativeFastHSEBackend', 'NativeFastHSEModel']
+__all__ = ['NativeFastHSEBackend', 'NativeFastHSEModel', 'NativeFastHSERegistry']
 _used = False
 
 
@@ -252,6 +252,11 @@ class NativeFastHSEBackend:
         from ._shared_hse import _SessionGroup
         return _SessionGroup(self.open_model(initial,dt,context))
 
+    def open_registry(self,context):
+        """Explicit different-input models sharing one host-MPI attachment."""
+        from ._hse_registry import open_registry
+        return open_registry(self,context)
+
     def open_model(self, initial, dt, context):
         """Collectively share one immutable full-k GS and MPI lease among states."""
         return self._create(initial, None, dt, context, shared=True)
@@ -261,12 +266,12 @@ class NativeFastHSEBackend:
             raise InputError('shared_model uses ResponseSession/open_group or explicit open_model')
         return self._create(initial, point_id, dt, context, shared=False)
 
-    def _create(self, initial, point_id, dt, context, *, shared):
+    def _create(self, initial, point_id, dt, context, *, shared, registry=None):
         global _used
         comm = context.solver_comm
         error = None
         try:
-            if _used or embedded._used:
+            if registry is None and (_used or embedded._used):
                 raise InputError('one native lifetime per process; use a fresh MPI job')
             if threading.current_thread() is not threading.main_thread():
                 raise InputError('native fast HSE requires the main thread')
@@ -341,6 +346,14 @@ class NativeFastHSEBackend:
         _agree(comm,error)
         owner = (context if shared and hasattr(context,'closed') and hasattr(context,'_dependents')
                  else SimpleNamespace(solver_comm=comm,closed=False,_dependents=0))
+        if registry is not None:
+            from ._hse_registry import _ModelLease,_ModelLibrary,_RegisteredModel
+            native=_ModelLease(registry)
+            model=_RegisteredModel(native,_ModelLibrary(registry),work,dt,initial.max_steps,
+                                  propagator,self.identity,initial.manifest,symmetry=symmetry)
+            native.model=model
+            registry._models.add(model)
+            return model
         native = NativeParallelContext(owner,self.library,self.sha256)
         _used = embedded._used = True
         if shared:
@@ -488,3 +501,5 @@ class _State:
 
 
 from ._shared_hse import NativeFastHSEModel
+
+from ._hse_registry import NativeFastHSERegistry

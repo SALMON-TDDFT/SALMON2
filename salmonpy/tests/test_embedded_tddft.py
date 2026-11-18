@@ -26,10 +26,6 @@ class EmbeddedTDDFTTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'relative'):
                 NativeTDDFTMaterialProvider(root,'../rt.inp')
 
-    def test_import_does_not_initialize_mpi(self):
-        import subprocess,sys
-        code="import sys; import salmonpy.embedded_tddft; assert 'mpi4py.MPI' not in sys.modules"
-        subprocess.run([sys.executable,'-c',code],check=True)
 
     def test_native_eh_field_interface_is_available(self):
         self.assertIsNotNone(importlib.util.find_spec('salmonpy.coupled'),

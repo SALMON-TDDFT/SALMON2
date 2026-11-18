@@ -21,12 +21,39 @@ module sym_sub
   real(8),public :: Bmat(3,3), Binv(3,3) !   is the (reciprocal) lattice vector
   logical :: flag_init=.false.
 
+  public :: s_hse_symmetry_workspace,swap_hse_symmetry_workspace
+  type :: s_hse_symmetry_workspace
+    logical :: display=.false.,enabled=.false.,directions(3)=.false.,initialized=.false.
+    character(8) :: file='sym.dat'
+    real(8) :: a(3,3)=0d0,ai(3,3)=0d0,b(3,3)=0d0,bi(3,3)=0d0
+    real(8),allocatable :: r(:,:,:),sa(:,:,:),sb(:,:,:)
+  end type
+
   ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
   private :: salmon_all_finite,finite_real_1d,finite_real_2d
   interface salmon_all_finite
     module procedure finite_real_1d,finite_real_2d
   end interface
 contains
+  subroutine swap_hse_symmetry_workspace(value)
+    type(s_hse_symmetry_workspace),intent(inout) :: value
+    type(s_hse_symmetry_workspace) :: old
+    old%display=DISPLAY;old%enabled=use_symmetry;old%directions=use_symmetry_dir
+    old%initialized=flag_init;old%file=sym_file
+    if(flag_init)then
+      old%a=Amat;old%ai=Ainv;old%b=Bmat;old%bi=Binv
+    endif
+    call move_alloc(SymMatR,old%r)
+    call move_alloc(SymMatA,old%sa)
+    call move_alloc(SymMatB,old%sb)
+    DISPLAY=value%display;use_symmetry=value%enabled;use_symmetry_dir=value%directions
+    flag_init=value%initialized;sym_file=value%file
+    Amat=value%a;Ainv=value%ai;Bmat=value%b;Binv=value%bi
+    call move_alloc(value%r,SymMatR)
+    call move_alloc(value%sa,SymMatA)
+    call move_alloc(value%sb,SymMatB)
+    value=old
+  end subroutine
   function sp_fast_hse_symmetry_field_protocol() result(protocol) bind(C)
     use iso_c_binding,only:c_int
     integer(c_int)::protocol

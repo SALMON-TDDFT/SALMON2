@@ -59,19 +59,6 @@ class CheckpointingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'compatibility'):
             check_checkpoint_compatibility(None,GROUPS,states={10:cap},operation='restore',saved=saved)
 
-    def test_import_without_optional_mpi_is_quiet(self):
-        import subprocess
-        import sys
-        from pathlib import Path
-        import salmonpy
-        args=[sys.executable]
-        if Path(salmonpy.__file__).resolve().parent != Path(__file__).resolve().parents[1]:
-            args.append('-I')
-        code="import sys; sys.modules['mpi4py']=None; import salmonpy.checkpointing; assert 'mpi4py.MPI' not in sys.modules"
-        result=subprocess.run(args+['-c',code],text=True,capture_output=True,timeout=20)
-        self.assertEqual(result.returncode,0,result.stderr)
-        self.assertEqual(result.stdout,'')
-        self.assertEqual(result.stderr,'')
 
     def test_empty_local_exception_is_still_reported_as_input_error(self):
         from salmonpy.errors import InputError

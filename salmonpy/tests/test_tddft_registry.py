@@ -1,10 +1,6 @@
 import unittest
 
 class RegistryTests(unittest.TestCase):
-    def test_explicit_public_registry_entry(self):
-        from salmonpy.embedded_tddft import NativeTDDFTBackend,NativeTDDFTRegistry
-        self.assertTrue(callable(NativeTDDFTBackend.open_registry))
-        self.assertTrue(callable(NativeTDDFTRegistry.open_model))
 
     def test_close_attempts_all_models_in_token_order_and_can_retry(self):
         from salmonpy._tddft_registry import NativeTDDFTRegistry

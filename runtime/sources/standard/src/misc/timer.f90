@@ -246,6 +246,8 @@ contains
   subroutine timer_initialize
     use omp_lib, only: omp_get_max_threads
     implicit none
+    ! GS and RT share one host attachment; initialize timers only once.
+    if(allocated(log_time))return
     allocate(log_time(0:LOG_SIZE - 1,2))
     allocate(log_temp(0:LOG_SIZE - 1,2))
     allocate(log_time_t(0:LOG_SIZE - 1, 0:omp_get_max_threads()-1))

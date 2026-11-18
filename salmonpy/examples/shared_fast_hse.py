@@ -16,6 +16,7 @@ def main():
     from mpi4py import MPI
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('build','initial','output'):parser.add_argument(name,type=Path)
+    parser.add_argument('--second-initial',type=Path,help='different existing GS/input model on the same MPI attachment')
     parser.add_argument('--steps',type=int,default=16)
     parser.add_argument('--split',type=int,default=8)
     parser.add_argument('--dt',type=float,default=.001)
@@ -30,16 +31,23 @@ def main():
     if error:raise ValueError(error)
     context=SimpleNamespace(solver_comm=comm,point_ids=('point-a','point-b'),closed=False,_dependents=0)
     initial=FastHSEMaterialProvider(args.initial,max_steps=args.steps).prepare(context)
-    model=NativeFastHSEBackend(args.build,output,allow_symmetry=args.symmetry).open_model(initial,args.dt,context)
+    backend=NativeFastHSEBackend(args.build,output,allow_symmetry=args.symmetry)
+    registry=model=second_model=None
     states=[];continuous=[];second=[];resumed=[]
     saved=output/f'point-a-{comm.rank}.bin'
     def drive(index):
         t=index*args.dt
         return np.array([0.,0.,1e-4*np.sin(.3*t)])
     try:
+        registry=backend.open_registry(context) if args.second_initial is not None else None
+        model=registry.open_model(initial,args.dt) if registry else backend.open_model(initial,args.dt,context)
+        second_model=None
+        if registry:
+            second_initial=FastHSEMaterialProvider(args.second_initial,max_steps=args.steps).prepare(context)
+            second_model=registry.open_model(second_initial,args.dt)
         with model:
             a=model.new_state('point-a');states.append(a)
-            b=model.new_state('point-b');states.append(b)
+            b=(second_model or model).new_state('point-b');states.append(b)
             for index in range(1,args.steps+1):
                 continuous.append(np.r_[a.step(drive(index)),a.energy])
                 bfield=np.array([0.,0.,-7e-5*np.sin(.2*index*args.dt)]) if args.symmetry else np.array([1e-4*np.sin(.2*index*args.dt),0.,0.])
@@ -54,14 +62,17 @@ def main():
     finally:
         # Model exit prevents creation. Each state owns a lease and closes explicitly.
         for state in reversed(states):state.close()
-        model.close()
+        if model:model.close()
+        if second_model:second_model.close()
+        if registry:registry.close()
     assert context._dependents==0
     if comm.rank==0:
         (output/'result.json').write_text(json.dumps({'status':'pass','steps':args.steps,'split':args.split,
-            'replayed_steps':0,'model_identity':model.identity,'point_ids':['point-a','point-b'],
+            'replayed_steps':0,'model_identity':model.identity,
+            'second_model_identity':second_model.identity if second_model else model.identity,'point_ids':['point-a','point-b'],
             'A_unit':'A/c atomic units','current_unit':'charge current density atomic units',
             'energy_unit':'Hartree','caveat':'Composition/restart check, not material convergence.'},indent=2)+'\n')
-        print('Shared model: independent states and direct resume agree')
+        print('Independent states and direct resume agree'+(' across different models' if registry else ''))
 
 
 if __name__=='__main__':main()

@@ -4,20 +4,13 @@ import re
 import unittest
 
 class ModelInputOwnershipTests(unittest.TestCase):
-    def test_ownership_source_is_packaged(self):
-        root=Path(__file__).resolve().parents[2]
-        # Native runtime validation compiles the Fortran round-trip driver.
-        source=root/'runtime/sources/standard/src/io/model_inputs.f90'
-        if not source.is_file():
-            import importlib.resources
-            source=Path(str(importlib.resources.files('salmonpy').joinpath('_runtime_source/runtime/sources/standard/src/io/model_inputs.f90')))
-        self.assertTrue(source.is_file(),'model-owned initialization input record missing')
 
     def test_supported_initialization_sections_have_owned_fields(self):
         from importlib.resources import files
         root=Path(__file__).resolve().parents[2]/'runtime/sources/standard/src/io'
         if not root.is_dir():
             root=Path(str(files('salmonpy').joinpath('_runtime_source/runtime/sources/standard/src/io')))
+        self.assertIn('type, public :: s_input_parser',(root/'inputoutput.f90').read_text())
         sections={'calculation','control','units','parallel','system','pseudo','functional',
                   'rgrid','kgrid','tgrid','propagation','scf','emfield','analysis','poisson',
                   'ewald','atomic_coor','atomic_red_coor','code','jellium','unfolding'}

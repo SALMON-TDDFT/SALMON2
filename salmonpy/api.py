@@ -32,7 +32,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
  'salmonpy.builtin_materials': ('builtin_material_registry', 'material_from_catalog', 'ConfiguredMaterial', 'ConfiguredState', 'ConfiguredGroundState'),
  'salmonpy.c_material': ('CMaterial', 'CABIError'),
  'salmonpy.config': ('MaterialRegistry', 'MaterialCatalog', 'resolve_materials', 'load_materials'),
- 'salmonpy.fast_hse_mpi': ('NativeFastHSEBackend', 'NativeFastHSEModel'),
+ 'salmonpy.fast_hse_mpi': ('NativeFastHSEBackend', 'NativeFastHSEModel', 'NativeFastHSERegistry'),
  'salmonpy.fast_hse': ('FastHSEMaterialProvider', 'FastHSEResponseBackend'),
  'salmonpy.layers': ('NativeLayerAssembly', 'assemble_native_layers'),
  'salmonpy.coupled': ('NativeEHField', 'MultiscaleField', 'CoupledStepper', 'PacketCoupledStepper'),

@@ -10,7 +10,7 @@ extern "C" {
  * Model inputs and cwd remain immutable. Positive tokens are opaque, not pointers.
  * init and the legacy singleton init are exclusive over a process lifetime.
  * new starts from the original GS, not the current state of its live model token.
- * One model initialization/process; multi-context symmetry is not yet supported.
+ * Legacy calls select one immutable model; registry protocol1 selects independent models.
  * Each context owns dt, capacity, numerical state, output label and transactions.
  * dt is atomic time; A is Cartesian A/c in atomic units at step endpoints.
  * Aold must exactly match the accepted endpoint (query info after init/restore).
@@ -38,6 +38,16 @@ int sp_fast_hse_context_mpi_protocol(void);
 int sp_fast_hse_mpi_resources(int values[2]);
 int sp_fast_hse_model_protocol(void);
 int sp_fast_hse_model_new(double dt, int capacity, int64_t *handle, double j[3]);
+/* Explicit heterogeneous registry: negative model tokens, positive state tokens.
+ * Same attached k-only MPI group/main thread; host supplies each model's cwd.
+ * Model close stops new states while live children retain their inputs/resources.
+ * Choose registry registration or legacy initialization for an attachment lifetime. */
+int sp_fast_hse_registry_protocol(void);
+int sp_fast_hse_model_register(const char *path,double dt,int capacity,int symmetry,
+                              int64_t *model,int64_t *state,double j[3]);
+int sp_fast_hse_model_spawn(int64_t model,double dt,int capacity,int64_t *state,double j[3]);
+int sp_fast_hse_model_close(int64_t model);
+
 int sp_fast_hse_handle_new(int64_t model, double dt, int capacity,
                          int64_t *handle, double j[3]);
 int sp_fast_hse_handle_step(int64_t handle, const double a_old[3],

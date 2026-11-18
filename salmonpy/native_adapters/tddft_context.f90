@@ -18,6 +18,7 @@ module salmonpy_tddft_context
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
  private
+ public::rt_model_settings
  public::rt_history_info,rt_step_transaction,rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step,rt_current,rt_vector_potential
  type fixed_settings
   real(8)::omega,electronic_temperature
@@ -81,6 +82,11 @@ type(s_unfold) :: unfold
  end type
 integer(8),save::checkpoint_array_limit=0_8
 contains
+ subroutine rt_model_settings(reset)
+ logical,intent(in)::reset
+ settings_pinned=.not.reset
+ if(.not.reset)process_settings=capture_settings()
+ end subroutine
  subroutine rt_step_transaction(ctx,mode,status)
  use communication,only:comm_get_max
  type(tddft_context),pointer,intent(inout)::ctx
@@ -387,6 +393,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  real(8),intent(out)::current(3)
  integer,intent(out)::status
  real(8)::matter(3,2)
+ integer::finite_i
  status=1;current=0d0
  if(.not.associated(ctx))return
  if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings).or..not.context_symmetry_matches(ctx))return
@@ -401,7 +408,9 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
   ctx%spsi_in%update_zwf_overlap=.true.
   current=-sum(matter(:,1:ctx%system%nspin),dim=2)
  endif
- if(.not.all(ieee_is_finite(current)))return
+ do finite_i=1,3
+  if(.not.ieee_is_finite(current(finite_i)))return
+ enddo
  status=0
  end subroutine rt_current
  subroutine rt_vector_potential(ctx,A,status)
@@ -504,7 +513,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  type(fixed_settings)::saved_settings
  type(s_rt_run_config)::saved_run
  integer::u,ios,closing,allocation_status,header(32),expected(32)
- integer::hse_position,need_kernel
+ integer::hse_position,need_kernel,finite_i,finite_j
  logical::opened
  real(8)::cell(3,3),spacing(3),saved_initial_energy
  character(32)::magic
@@ -604,7 +613,11 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  if(ios==0)call checkpoint_io(u,restore,copy,ios)
  if(ios==0.and.restore)then
   if(copy%Mit/=ctx%Mit.or.copy%accepted<copy%Mit.or.copy%accepted>ctx%rt%max_steps)ios=1
-  if(.not.all(ieee_is_finite(copy%fields(:,1:4))))ios=1
+  do finite_j=1,4
+  do finite_i=1,3
+   if(.not.ieee_is_finite(copy%fields(finite_i,finite_j)))ios=1
+  enddo
+  enddo
   if(copy%energy%E_tot0/=saved_initial_energy)ios=1
  endif
  call checkpoint_collective_status(ios)

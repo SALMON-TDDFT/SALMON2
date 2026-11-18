@@ -6,6 +6,7 @@ use salmonpy_gs_model, only: s_gs_model
 use communication, only: comm_is_attached,comm_get_globalinfo,comm_bcast,comm_get_max,comm_child_counts
 implicit none
 private
+public :: borrow_gs
 type :: gs_owner
   type(s_gs_model) :: model
   type(s_gs_storage) :: state
@@ -43,7 +44,32 @@ subroutine lookup(token,index,status)
   if(status/=0)index=0
 end subroutine
 
+subroutine borrow_gs(token,gs,model,status)
+  integer(c_int64_t),intent(in) :: token
+  type(s_gs_storage),pointer,intent(out) :: gs
+  type(s_gs_model),pointer,intent(out) :: model
+  integer,intent(out) :: status
+  integer :: index
+  nullify(gs,model)
+  call lookup(token,index,status)
+  if(status/=0)return
+  gs=>slots(index)%owner%state
+  model=>slots(index)%owner%model
+end subroutine
+
 integer(c_int) function sp_gs_create(filename,token) bind(C)
+  character(c_char),intent(in) :: filename(*)
+  integer(c_int64_t),intent(out) :: token
+  sp_gs_create=create_gs(filename,token,.false.)
+end function
+
+integer(c_int) function sp_gs_import(filename,token) bind(C)
+  character(c_char),intent(in) :: filename(*)
+  integer(c_int64_t),intent(out) :: token
+  sp_gs_import=create_gs(filename,token,.true.)
+end function
+
+integer(c_int) function create_gs(filename,token,import_only)
   use math_constants, only: set_math_constants
   use parallelization, only: setup_parallel
   use timer, only: timer_initialize
@@ -52,7 +78,15 @@ integer(c_int) function sp_gs_create(filename,token) bind(C)
   type(gs_slot),allocatable :: enlarged(:)
   character(4096) :: path,expected
   integer :: group,rank,nproc,i,index,status,n
-  token=0;sp_gs_create=10
+  interface
+    integer(c_int) function sp_tddft_park_for_gs() bind(C)
+      import c_int
+    end function
+    subroutine sp_tddft_resume_after_gs() bind(C)
+    end subroutine
+  end interface
+  logical,intent(in) :: import_only
+  token=0;create_gs=10
   if(.not.comm_is_attached())return
   call comm_get_globalinfo(group,rank,nproc)
   path='';status=0
@@ -67,7 +101,12 @@ integer(c_int) function sp_gs_create(filename,token) bind(C)
   if(serial>=huge(serial)-prefix)status=14
   call comm_get_max(status,group)
   if(status/=0)then
-    sp_gs_create=status;return
+    create_gs=status;return
+  endif
+  status=sp_tddft_park_for_gs()
+  call comm_get_max(status,group)
+  if(status/=0)then
+    create_gs=status;return
   endif
   if(.not.initialized)then
     call set_math_constants
@@ -90,18 +129,19 @@ integer(c_int) function sp_gs_create(filename,token) bind(C)
   allocate(slots(index)%owner)
   call slots(index)%owner%model%load(trim(path),status)
   call comm_get_max(status,group)
-  if(status==0)call slots(index)%owner%model%run(status,slots(index)%owner%state)
+  if(status==0)call slots(index)%owner%model%run(status,slots(index)%owner%state,import_only)
   call comm_get_max(status,group)
+  call sp_tddft_resume_after_gs()
   if(status/=0)then
     call gs_storage_clear(slots(index)%owner%state)
     call slots(index)%owner%model%clear()
     deallocate(slots(index)%owner)
-    sp_gs_create=status;return
+    create_gs=status;return
   endif
   serial=serial+1
   token=prefix+serial
   slots(index)%token=token
-  sp_gs_create=0
+  create_gs=0
 end function
 
 integer(c_int) function sp_gs_info(token,stats,values) bind(C)
@@ -115,6 +155,7 @@ integer(c_int) function sp_gs_info(token,stats,values) bind(C)
   if(status/=0)return
   associate(s=>slots(index)%owner%state)
     stats=[s%iterations,merge(1,0,s%converged),s%system%nion,s%system%no]
+    if(s%imported)stats(2)=-1
     values=[s%energy%E_tot,s%residual,s%threshold]
   end associate
 end function
@@ -134,6 +175,9 @@ subroutine array_layout(s,quantity,ndim,shape_out,lower,status)
   case(3)
     ndim=3;shape_out(:3)=shape(s%energy%esp,kind=c_int64_t);lower(:3)=lbound(s%energy%esp,kind=c_int64_t)
   case(4)
+    if(s%imported)then
+      status=11;return
+    endif
     ndim=2;shape_out(:2)=shape(s%system%Force,kind=c_int64_t)
   case(5)
     ndim=7

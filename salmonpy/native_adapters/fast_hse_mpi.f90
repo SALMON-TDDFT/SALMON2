@@ -4,12 +4,15 @@
 ! thread collectively within the attached group. No world service is entered.
 #include "config.h"
 module salmonpy_fast_hse_mpi
+ use salmonpy_hse_model_inputs,only:s_hse_model_inputs
+ use sym_sub,only:s_hse_symmetry_workspace,swap_hse_symmetry_workspace
+ use sym_rho_sub,only:s_hse_density_workspace,swap_hse_density_workspace
  use iso_c_binding
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  use communication,only:comm_is_attached,comm_get_globalinfo,comm_get_max,comm_bcast
  use parallelization,only:setup_parallel,nproc_group_global,nproc_size_global
  use salmonpy_tddft_context,only:tddft_context,rt_open,rt_step,rt_close,rt_input_config, &
-   rt_history_info,rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_vector_potential
+   rt_history_info,rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_vector_potential,rt_model_settings
  use structures,only:s_rt_run_config
  implicit none
  private
@@ -21,6 +24,7 @@ module salmonpy_fast_hse_mpi
  ! Registry owns numerical contexts; the legacy selector is installed only
  ! during one synchronous call. Registry assignment copies pointers, not owners.
  type handle_slot
+  integer::model_index=0
   type(tddft_context),pointer::context=>null()
   integer(c_int64_t)::generation=0_c_int64_t
   real(8)::field(3)=0d0
@@ -31,6 +35,18 @@ module salmonpy_fast_hse_mpi
  integer(c_int64_t),parameter::handle_stride=2147483648_c_int64_t
  logical,save::handle_mode=.false.,model_symmetry=.false.
  integer,save::handle_group=0
+ type model_slot
+   type(s_hse_model_inputs),allocatable::values
+   type(s_hse_symmetry_workspace)::symmetry
+   type(s_hse_density_workspace)::density_symmetry
+   integer(c_int64_t)::generation=0
+   integer::children=0
+   logical::closed=.false.,symmetric=.false.
+ end type
+ type(model_slot),allocatable,save::models(:)
+ integer,save::active_model=0
+ logical,save::registry_mode=.false.
+
 
 contains
 integer(c_int) function sp_fast_hse_history_info(values) bind(C)
@@ -119,7 +135,7 @@ end function
  real(c_double),intent(out)::J(3)
  sp_fast_hse_init_symmetry=initialize(path,timestep,capacity,J,.true.)
  end function
- integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry)
+ integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry,registered)
  use inputoutput,only:read_input
  use math_constants,only:set_math_constants
  use plusU_global,only:read_Hubbard_parameters
@@ -130,6 +146,8 @@ end function
  use exx_worker_service,only:service_enabled
 #endif
  logical,intent(in)::allow_symmetry
+ logical,optional,intent(in)::registered
+ logical::registration,first_init
  character(c_char),intent(in)::path(*)
  real(c_double),value::timestep
  integer(c_int),value::capacity
@@ -142,15 +160,20 @@ end function
  initialize=1;J=0d0
  if(.not.attached_main_thread())return
  call c_path(path,filename,status)
- if(used.or.capacity<1.or.capacity>=huge(0))status=1
+ registration=.false.
+ if(present(registered))registration=registered
+ first_init=.not.used
+ if((used.and..not.registration).or.capacity<1.or.capacity>=huge(0))status=1
  if(.not.ieee_is_finite(timestep).or.timestep<=0d0)status=1
  inquire(file=trim(filename),exist=exists)
  if(.not.exists)status=1
  call agree(status)
  if(status/=0)return
  used=.true.
- call set_math_constants
- call setup_parallel
+ if(first_init)then
+  call set_math_constants
+  call setup_parallel
+ endif
  saved_dt=timestep;saved_capacity=capacity
  call comm_bcast(saved_dt,nproc_group_global)
  call comm_bcast(saved_capacity,nproc_group_global)
@@ -169,7 +192,7 @@ end function
  calc_mode='RT'
  call read_Hubbard_parameters
  call read_sw_symmetry(yn_symmetry)
- call timer_initialize
+ if(first_init)call timer_initialize
  call rt_input_config(config)
  config%delta_t=timestep;config%max_steps=capacity
  call rt_open(state,'native_fast_hse',status,config=config,allow_symmetry=allow_symmetry)
@@ -191,12 +214,14 @@ end function
  real(c_double),intent(in)::Aold(3),Anew(3)
  real(c_double),intent(out)::J(3),energy
  real(8)::reference(6)
- integer::status
+ integer::status,i
  sp_fast_hse_step=1;J=0d0;energy=0d0
  if(.not.attached_main_thread())return
  status=0
  if(.not.ready.or.failed.or..not.associated(state))status=1
- if(.not.all(ieee_is_finite(Aold)).or..not.all(ieee_is_finite(Anew)))status=1
+ do i=1,3
+  if(.not.ieee_is_finite(Aold(i)).or..not.ieee_is_finite(Anew(i)))status=1
+ enddo
  if(any(Aold/=accepted_A))status=1
  call agree(status)
  if(status/=0)return
@@ -369,6 +394,7 @@ subroutine handle_select(token,index,status)
  integer,intent(out)::index,status
  call handle_lookup(token,index,status)
  if(status/=0)return
+ if(handles(index)%model_index>0)call select_model(handles(index)%model_index)
  state=>handles(index)%context
  accepted_A=handles(index)%field;failed=handles(index)%broken;ready=.true.
 end subroutine
@@ -450,6 +476,12 @@ integer(c_int) function sp_fast_hse_handle_new(model,timestep,capacity,token,J) 
  call handle_lookup(model,parent,status)
  sp_fast_hse_handle_new=status
  if(status/=0)return
+ if(handles(parent)%model_index>0)then
+  if(models(handles(parent)%model_index)%closed)then
+   sp_fast_hse_handle_new=12;return
+  endif
+  call select_model(handles(parent)%model_index)
+ endif
  sp_fast_hse_handle_new=create_model_state(timestep,capacity,token,J)
 end function
 integer(c_int) function sp_fast_hse_model_new(timestep,capacity,token,J) bind(C)
@@ -462,7 +494,7 @@ integer(c_int) function sp_fast_hse_model_new(timestep,capacity,token,J) bind(C)
  if(.not.attached_main_thread())return
  call comm_get_globalinfo(group,rank,n)
  status=0
- if(.not.handle_mode.or.group/=handle_group)status=12
+ if(.not.handle_mode.or.group/=handle_group.or.registry_mode)status=12
  call agree(status)
  if(status/=0)return
  sp_fast_hse_model_new=create_model_state(timestep,capacity,token,J)
@@ -503,6 +535,8 @@ integer(c_int) function create_model_state(timestep,capacity,token,J)
  call agree(status)
  if(status==0)then
   handles(index)%context=>fresh;token=candidate
+  handles(index)%model_index=active_model
+  if(active_model>0)models(active_model)%children=models(active_model)%children+1
  else if(associated(fresh))then
   call rt_close(fresh)
  endif
@@ -590,6 +624,166 @@ integer(c_int) function sp_fast_hse_handle_close(token) bind(C)
  if(status/=0)return
  sp_fast_hse_handle_close=sp_fast_hse_close()
  call handle_unselect(index)
+ if(sp_fast_hse_handle_close==0.and.handles(index)%model_index>0)then
+  block
+  integer::owner
+  owner=handles(index)%model_index
+  models(owner)%children=models(owner)%children-1
+  handles(index)%model_index=0
+  call release_model(owner)
+  end block
+ endif
+end function
+
+subroutine park_model()
+ integer::old
+ if(active_model==0)return
+ old=active_model
+ call models(old)%values%capture()
+ call swap_hse_symmetry_workspace(models(old)%symmetry)
+ call swap_hse_density_workspace(models(old)%density_symmetry)
+ active_model=0
+end subroutine
+subroutine select_model(index)
+ integer,intent(in)::index
+ if(index==active_model)return
+ call park_model()
+ call models(index)%values%activate()
+ call swap_hse_symmetry_workspace(models(index)%symmetry)
+ call swap_hse_density_workspace(models(index)%density_symmetry)
+ model_symmetry=models(index)%symmetric
+ call rt_model_settings(.false.)
+ active_model=index
+end subroutine
+subroutine release_model(index)
+ integer,intent(in)::index
+ type(s_hse_symmetry_workspace)::empty
+ type(s_hse_density_workspace)::empty_density
+ if(.not.models(index)%closed.or.models(index)%children/=0)return
+ if(index==active_model)call park_model()
+ if(allocated(models(index)%values))deallocate(models(index)%values)
+ models(index)%symmetry=empty
+ models(index)%density_symmetry=empty_density
+end subroutine
+subroutine model_lookup(token,index,status)
+ integer(c_int64_t),intent(in)::token
+ integer,intent(out)::index,status
+ integer(c_int64_t)::number,generation
+ integer::parts(2),reference(2)
+ parts=transfer(token,parts);reference=parts
+ call comm_bcast(reference,nproc_group_global)
+ status=12;index=0
+ if(any(reference/=parts))then
+  status=11
+ else if(token<0.and.token/=-huge(token)-1.and.allocated(models))then
+  number=modulo(-token,handle_stride);generation=(-token)/handle_stride
+  if(number>=1.and.number<=size(models))then
+   index=int(number)
+   if(allocated(models(index)%values).and.models(index)%generation==generation)status=0
+  endif
+ endif
+ call agree(status)
+ if(status/=0)index=0
+end subroutine
+integer(c_int) function sp_fast_hse_registry_protocol() bind(C)
+ sp_fast_hse_registry_protocol=1
+end function
+integer(c_int) function sp_fast_hse_model_register(path,timestep,capacity,symmetry,model_token,state_token,J) bind(C)
+ character(c_char),intent(in)::path(*)
+ real(c_double),value::timestep
+ integer(c_int),value::capacity,symmetry
+ integer(c_int64_t),intent(out)::model_token,state_token
+ real(c_double),intent(out)::J(3)
+ type(model_slot),allocatable::grown(:)
+ character(4096)::filename,reference_path
+ integer::status,index,slot,i,group,rank,n,previous,ref_int(2)
+ real(8)::ref_dt
+ integer(c_int64_t)::candidate
+ logical::exists
+ model_token=0;state_token=0;J=0d0;sp_fast_hse_model_register=12
+ if(.not.attached_main_thread())return
+ call comm_get_globalinfo(group,rank,n)
+ call c_path(path,filename,status)
+ if(used.and..not.registry_mode)status=12
+ if(capacity<1.or.capacity>=huge(0).or.symmetry<0.or.symmetry>1)status=1
+ if(.not.ieee_is_finite(timestep).or.timestep<=0d0)status=1
+ inquire(file=trim(filename),exist=exists)
+ if(.not.exists)status=1
+ reference_path=filename;ref_int=[capacity,symmetry];ref_dt=timestep
+ call comm_bcast(reference_path,group);call comm_bcast(ref_int,group);call comm_bcast(ref_dt,group)
+ if(reference_path/=filename.or.any(ref_int/=[capacity,symmetry]).or.ref_dt/=timestep)status=11
+ call agree(status)
+ sp_fast_hse_model_register=status
+ if(status/=0)return
+ if(.not.allocated(models))allocate(models(4))
+ index=0
+ do i=1,size(models)
+  if(allocated(models(i)%values))cycle
+  if(models(i)%generation>=int(huge(0),c_int64_t))cycle
+  index=i;exit
+ enddo
+ if(index==0)then
+  index=size(models)+1
+  allocate(grown(size(models)*2));grown(:size(models))=models
+  call move_alloc(grown,models)
+ endif
+ previous=active_model
+ call park_model()
+ allocate(models(index)%values)
+ models(index)%generation=models(index)%generation+1
+ models(index)%children=0;models(index)%closed=.false.;models(index)%symmetric=symmetry==1
+ call rt_model_settings(.true.)
+ call handle_reserve(slot,candidate,status)
+ if(status==0)status=initialize(path,timestep,capacity,J,symmetry==1,.true.)
+ call agree(status)
+ if(status==0)then
+  call models(index)%values%capture()
+  active_model=index;model_symmetry=symmetry==1
+  handles(slot)%label='native_fast_hse'
+  handles(slot)%model_index=index
+  models(index)%children=1
+  handle_mode=.true.;registry_mode=.true.;handle_group=group
+  call handle_unselect(slot)
+  model_token=-(models(index)%generation*handle_stride+int(index,c_int64_t))
+  state_token=candidate
+ else
+  if(associated(state))call rt_close(state)
+  nullify(state);ready=.false.;failed=.false.
+  active_model=index;models(index)%closed=.true.
+  call release_model(index)
+  if(previous>0)call select_model(previous)
+ endif
+ sp_fast_hse_model_register=status
+end function
+integer(c_int) function sp_fast_hse_model_spawn(model,timestep,capacity,token,J) bind(C)
+ integer(c_int64_t),value::model
+ real(c_double),value::timestep
+ integer(c_int),value::capacity
+ integer(c_int64_t),intent(out)::token
+ real(c_double),intent(out)::J(3)
+ integer::index,status
+ token=0;J=0d0;sp_fast_hse_model_spawn=12
+ if(.not.attached_main_thread())return
+ call model_lookup(model,index,status)
+ if(status==0)then
+  if(models(index)%closed)status=12
+ endif
+ call agree(status)
+ sp_fast_hse_model_spawn=status
+ if(status/=0)return
+ call select_model(index)
+ sp_fast_hse_model_spawn=create_model_state(timestep,capacity,token,J)
+end function
+integer(c_int) function sp_fast_hse_model_close(model) bind(C)
+ integer(c_int64_t),value::model
+ integer::index,status
+ sp_fast_hse_model_close=12
+ if(.not.attached_main_thread())return
+ call model_lookup(model,index,status)
+ sp_fast_hse_model_close=status
+ if(status/=0)return
+ models(index)%closed=.true.
+ call release_model(index)
 end function
 
 end module

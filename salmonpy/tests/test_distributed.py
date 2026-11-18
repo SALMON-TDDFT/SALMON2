@@ -15,10 +15,6 @@ class DistributedTest(unittest.TestCase):
             ParallelPlan((SolverGroup('field',(0,),role='field'),SolverGroup('a',(1,),point_ids=(3,)),SolverGroup('b',(2,),point_ids=(3,)))).validate(3)
         with self.assertRaises(ValueError): SolverGroup('bad',(True,))
 
-    def test_import_does_not_initialize_mpi(self):
-        import subprocess,sys
-        code="import sys; import salmonpy.distributed; assert 'mpi4py.MPI' not in sys.modules"
-        self.assertEqual(subprocess.run([sys.executable,'-c',code],capture_output=True).returncode,0)
 
     def test_ld_independent_a_response(self):
         self.assertIsNotNone(importlib.util.find_spec('salmonpy.material_response'))

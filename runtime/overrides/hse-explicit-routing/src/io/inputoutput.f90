@@ -137,9 +137,10 @@ contains
     character(*),optional,intent(in)::input_path
     integer :: input_fh
     integer :: cur
-    integer :: ret = 0
+    integer :: ret
     character(256) :: buff, text
 
+    ret=0
     if (comm_is_root(nproc_id_global)) then
 
       fh_namelist = get_filehandle()
@@ -2081,6 +2082,11 @@ contains
        stop
     end if
 
+    if(allocated(atom_name))deallocate(atom_name)
+    if(allocated(Rion))deallocate(Rion)
+    if(allocated(Rion_red))deallocate(Rion_red)
+    if(allocated(kion))deallocate(kion)
+    if(allocated(flag_opt_atom))deallocate(flag_opt_atom)
     allocate(atom_name(natom))
     allocate(Rion(3,natom), Rion_red(3,natom),kion(natom), flag_opt_atom(natom))
     Rion     = 0d0

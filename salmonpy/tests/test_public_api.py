@@ -35,6 +35,14 @@ class PublicAPI(unittest.TestCase):
 import salmonpy
 assert not any(x in sys.modules for x in ('mpi4py', 'matplotlib.pyplot', 'ase'))
 assert salmonpy.__version__ == '0.1.0a5'
+# Import contracts formerly repeated in six module test files. Keep per-module
+# diagnostics, including ASE/f90nml laziness and the missing-MPI checkpoint path.
+import importlib
+for module in ('distributed', 'embedded_tddft', 'materials', 'c_material', 'ase', 'checkpointing'):
+    importlib.import_module('salmonpy.' + module)
+    assert 'mpi4py.MPI' not in sys.modules, module
+    if module == 'ase':
+        assert 'ase' not in sys.modules and 'f90nml' not in sys.modules, module
 '''
         import salmonpy
         args = [sys.executable]
@@ -42,6 +50,12 @@ assert salmonpy.__version__ == '0.1.0a5'
             args.append('-I')
         code += '\nassert salmonpy.__file__ == ' + repr(salmonpy.__file__)
         result = subprocess.run(args + ['-c', code], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(result.stderr, '')
+        # Preserve the separate unavailable-optional-dependency environment.
+        missing = "import sys; sys.modules['mpi4py']=None; import salmonpy.checkpointing; assert 'mpi4py.MPI' not in sys.modules"
+        result = subprocess.run(args + ['-c', missing], capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
         self.assertEqual(result.stderr, '')

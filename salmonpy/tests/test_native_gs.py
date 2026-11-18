@@ -1,15 +1,11 @@
 """Public retained GS contracts; real MPI numerical tests live in tools."""
-import importlib
+import importlib.util
+from pathlib import Path
+from unittest.mock import patch
 import unittest
 
 
 class NativeGSTests(unittest.TestCase):
-    def test_public_backend_and_state_entry(self):
-        module=importlib.import_module('salmonpy.native_gs')
-        self.assertTrue(callable(module.NativeGSBackend.open))
-        self.assertTrue(callable(module.NativeGSSession.run))
-        self.assertTrue(callable(module.NativeGSState.array))
-        self.assertTrue(callable(module.NativeGSState.close))
 
     def test_closed_rank_cannot_skip_collective_close(self):
         from types import SimpleNamespace
@@ -59,3 +55,46 @@ class NativeGSTests(unittest.TestCase):
             for name,value in [('decomposition',(1,2,1,1,1)),('library',Path('/tmp/other')),
                                ('work_root',Path('/tmp/other')),('sha256','different')]:
                 with self.assertRaises(AttributeError):setattr(backend,name,value)
+
+
+    def test_imported_force_is_explicitly_unavailable(self):
+        from salmonpy.native_gs import NativeGSState
+        from salmonpy.errors import InputError
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        session=SimpleNamespace(_live=lambda:None,comm=SimpleNamespace(allgather=lambda v:[v]),lib=Mock())
+        state=NativeGSState(session,1,None,'imported',None)
+        with self.assertRaisesRegex(InputError,'forces were not computed'):state.array('forces')
+        session.lib.sp_gs_array_info.assert_not_called()
+
+
+class NativeGSLinkTests(unittest.TestCase):
+    def tool(self):
+        root=Path(__file__).resolve().parents[2]
+        import salmonpy
+        path=Path(salmonpy.__file__).parent/'_runtime_source/tools/build_embedded_tddft.py'
+        if not path.exists():path=root/'tools/build_embedded_tddft.py'
+        spec=importlib.util.spec_from_file_location('gs_link_test',path)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        return module
+
+    def test_darwin_mpi_wrapper_does_not_interpose_blas_or_duplicate_sentinels(self):
+        tool=self.tool()
+        def show(command,**kwargs):
+            return 'gfortran\n' if command[-1]=='--showme:command' else '-L/mpi -Wl,-flat_namespace -lmpi_ignore -lmpi\n'
+        with patch.object(tool.sys,'platform','darwin'),patch.object(tool.subprocess,'check_output',side_effect=show):
+            library=tool.mpi_link_command(['mpifort','object.o','-lopenblas'],shared=True)
+            host=tool.mpi_link_command(['mpifort','probe.o','-lnative'])
+        self.assertEqual(library[0],'gfortran')
+        self.assertNotIn('-Wl,-flat_namespace',library)
+        self.assertIn('-Wl,-commons,use_dylibs',library)
+        self.assertLess(library.index('-lmpi'),library.index('-lmpi_ignore'))
+        self.assertIn('-dynamiclib',library);self.assertNotIn('-dynamiclib',host)
+
+    def test_linux_wrapper_and_flags_stay_intact(self):
+        tool=self.tool()
+        with patch.object(tool.sys,'platform','linux'),patch.object(tool.subprocess,'check_output') as probe:
+            original=['mpifort','object.o','-lopenblas']
+            self.assertEqual(tool.mpi_link_command(original,shared=True),['mpifort','-shared','object.o','-lopenblas'])
+            self.assertEqual(tool.mpi_link_command(original),original)
+            probe.assert_not_called()

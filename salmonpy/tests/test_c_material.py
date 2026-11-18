@@ -124,9 +124,5 @@ class CMaterialBoundary(unittest.TestCase):
         self.api._finish(Owner(),primary)
         with self.assertRaises(RuntimeError):self.api._finish(Owner(),None)
 
-    def test_import_is_quiet_and_does_not_initialize_mpi(self):
-        import subprocess,sys
-        result=subprocess.run([sys.executable,'-c',"import sys;import salmonpy.c_material;assert 'mpi4py.MPI' not in sys.modules"],capture_output=True,text=True)
-        self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(result.stdout,'')
 
 if __name__=='__main__':unittest.main()

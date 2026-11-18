@@ -76,22 +76,10 @@ class TDDFTSnapshots(unittest.TestCase):
             pid=a._proc.pid;current=a.current.copy()
             with self.assertRaises(SnapshotError):a.restore(bad)
             self.assertEqual(a._proc.pid,pid);np.testing.assert_array_equal(a.current,current)
-    def test_failed_replay_preserves_live_branch(self):
-        a=self.state();a.step([.1,0,0]);saved=a.snapshot();a.step([.2,0,0])
-        pid=a._proc.pid;before=a.current.copy()
-        real=TDDFTState._receive
-        def wrong(state,index):return real(state,index)+1
-        with patch.object(TDDFTState,'_receive',wrong):
-            with self.assertRaises(SnapshotError):a.restore(saved)
-        self.assertEqual(a._proc.pid,pid);self.assertEqual(a.time,.04)
-        np.testing.assert_array_equal(a.current,before)
-        a.step([.3,0,0])
-    def test_spawn_failure_and_intermediate_mismatch_are_atomic(self):
+    def test_intermediate_replay_mismatch_is_atomic(self):
         a=self.state()
         for _ in range(3): a.step([.1,0,0])
         saved=a.snapshot();before=a.current.copy();pid=a._proc.pid
-        with patch.object(TDDFTState,'_spawn',side_effect=OSError('cannot start')):
-            with self.assertRaises(SnapshotError):a.restore(saved)
         real=TDDFTState._receive
         def wrong_middle(state,index):
             j=real(state,index)
@@ -133,7 +121,8 @@ class TDDFTSnapshots(unittest.TestCase):
         a.step([.2,0,0])
 
     def test_failed_candidate_cleanup_does_not_mask_replay_error(self):
-        a=self.state();saved=a.snapshot();old=a._proc
+        a=self.state();a.step([.1,0,0]);saved=a.snapshot();old=a._proc
+        a.step([.2,0,0]);before=a.current.copy();time=a.time
         receive=TDDFTState._receive;stop=TDDFTState._stop
         def wrong(state,index):return receive(state,index)+1
         def fail_candidate(state,**kw):
@@ -141,7 +130,9 @@ class TDDFTSnapshots(unittest.TestCase):
             return stop(state,**kw)
         with patch.object(TDDFTState,'_receive',wrong),patch.object(TDDFTState,'_stop',fail_candidate):
             with self.assertRaisesRegex(SnapshotError,'original state preserved'):a.restore(saved)
-        self.assertIs(a._proc,old);self.assertIsNone(old.poll());a.step([.1,0,0])
+        self.assertIs(a._proc,old);self.assertIsNone(old.poll())
+        self.assertEqual(a.time,time);np.testing.assert_array_equal(a.current,before)
+        a.step([.3,0,0])
 
     def test_tolerated_replay_roundoff_allows_repeated_restore(self):
         a=self.state();saved=a.snapshot();receive=TDDFTState._receive

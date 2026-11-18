@@ -17,7 +17,27 @@ module sym_rho_sub
   integer,allocatable :: grid_list(:,:,:)
   integer :: nsym
 
+  public :: s_hse_density_workspace,swap_hse_density_workspace
+  type :: s_hse_density_workspace
+    integer :: first(3)=0,last(3)=0,grid(3)=0,comm=0,groups=0,operations=0
+    integer,allocatable :: counts(:),points(:,:,:)
+  end type
 contains
+  subroutine swap_hse_density_workspace(value)
+    type(s_hse_density_workspace),intent(inout) :: value
+    type(s_hse_density_workspace) :: old
+    if(allocated(nl))then
+      old%first=is;old%last=ie;old%grid=num;old%comm=icomm_r
+      old%groups=ng;old%operations=nsym
+    endif
+    call move_alloc(nl,old%counts)
+    call move_alloc(grid_list,old%points)
+    is=value%first;ie=value%last;num=value%grid;icomm_r=value%comm
+    ng=value%groups;nsym=value%operations
+    call move_alloc(value%counts,nl)
+    call move_alloc(value%points,grid_list)
+    value=old
+  end subroutine
 
   subroutine init_sym_rho( num_, is_, ie_, icomm_r_ )
     implicit none

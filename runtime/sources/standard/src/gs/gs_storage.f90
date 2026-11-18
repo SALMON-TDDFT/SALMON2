@@ -7,7 +7,7 @@ implicit none
 private
 public :: s_gs_storage,gs_storage_clear
 type :: s_gs_storage
-  logical :: active=.false.,xc_live=.false.,converged=.false.
+  logical :: active=.false.,xc_live=.false.,converged=.false.,imported=.false.
   integer :: mpi_child_owner=0,iterations=0,report_status=0
   real(8) :: residual=0d0,threshold=0d0
 type(s_rgrid) :: lg

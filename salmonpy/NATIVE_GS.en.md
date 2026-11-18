@@ -61,7 +61,7 @@ management slot high-water. Closing one owner preserves siblings; closing all
 returns live children to zero. Retained management slots are distinct from leaks.
 
 Python scope matches existing DFT settings: periodic full-k unpolarized fixed-ion
-PZ/Libxc-PZ/PBE. Fast-PR HSE, SOC/+U/DC GS, direct in-memory GS→TDDFT handoff,
+PZ/Libxc-PZ/PBE. Fast-PR HSE, SOC/+U/DC GS,
 checkpoint/restart, concurrent threads and simultaneous GS/TDDFT are separate.
 One native electronic attachment lifetime per process. Info, arrays and close are
 also collective. Close every owner before host MPI finalization.
@@ -81,3 +81,42 @@ The example `mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTP
 uses coarse grids/four iterations for ownership verification, not converged
 material properties. It writes normal native diagnostics/progress, but no automatic
 GS restart bundle. See [the native contract](native_adapters/standard_gs.h).
+
+## Existing GS and in-memory TDDFT
+
+`session.load(directory, input_file="rt.inp", material_id="silicon")` reads an
+existing GS checkpoint using the supplied matching input, without SCF and without
+writing a new GS restart bundle. Every rank must see unchanged source files.
+Legacy binary integrity is checked; physical provenance is the caller's responsibility.
+Imported `info.converged` is `None`, not a claim of converged SCF. Its residual and
+tolerance fields are zero sentinels, not measured SCF convergence diagnostics.
+Forces are not computed on import; requesting them raises an error.
+
+```python
+with backend.open(context) as session:
+    gs = session.load(existing_bundle, material_id="silicon")
+    model = gs.tddft_model(dt=0.003, max_steps=100)
+    gs.close()
+    first = model.new_state("first")
+    second = model.new_state("second")
+    j = first.step([0.0001, 0, 0])  # transverse, A/c -> charge current j
+    first.checkpoint(checkpoint_path)  # each rank needs a distinct path
+    # A fresh state's checkpoint(..., restore=True) restores without time replay.
+    first.close()
+    second.close()
+    model.close()
+```
+
+The model owns a copy of initial orbitals, occupations and input values. Closing GS
+preserves the model; new states are independent and start at the same initial GS.
+A retained GS produced by `session.run` provides the same `tddft_model` method.
+GS imports/solves and RT steps may be interleaved sequentially within one session.
+Session close retires all RT models/states before releasing the native attachment.
+Model creation currently inherits the GS subgroup and decomposition, supports the
+standard periodic full-k unpolarized fixed-ion path, and rejects too many orbital
+ranks for occupied RT bands. No automatic MPI repartitioning or thread concurrency.
+Use a runtime exporting `sp_tddft_memory_gs_protocol()==1` and `sp_gs_import`.
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.memory_gs BUILD EXISTING_GS NEW_WORK
+```

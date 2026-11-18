@@ -20,6 +20,10 @@
 #include "config.h"
 module salmonpy_tddft_context
 use tddft_worker
+use salmonpy_gs_seed, only: s_gs_seed
+use salmonpy_embedded_gs, only: borrow_gs
+use salmonpy_gs_storage, only: s_gs_storage
+use salmonpy_gs_model, only: s_gs_model
 use density_matrix, only: calc_current
 use hamiltonian, only: update_kvector_nonlocalpt
 use math_constants, only: pi
@@ -60,6 +64,7 @@ end type
 ! Registry tokens own models; state contexts borrow their immutable model owner.
 type :: rt_model
   type(s_input_parser) :: parser
+  type(s_gs_seed),allocatable :: seed
   type(s_model_inputs) :: runtime_inputs
   type(s_model_optimization) :: optimization
   type(s_model_xc_workspace) :: xc_workspace
@@ -68,6 +73,8 @@ type :: rt_model
   integer(c_int64_t) :: token=0_c_int64_t
   real(8) :: initial_A(3)=0d0
 end type
+type(s_gs_seed),pointer,save :: pending_gs=>null()
+logical,save :: gs_timers_suspended=.false.,gs_saved_worker=.false.
 type :: rt_context
   type(rt_model),pointer :: model=>null()
 type(checkpoint_payload),allocatable :: step_saved,pending
@@ -183,6 +190,68 @@ subroutine release_model(owner)
   if(associated(model,owner))nullify(model)
   deallocate(owner);nullify(owner)
 end subroutine
+integer(c_int) function sp_tddft_memory_gs_protocol() bind(C)
+  sp_tddft_memory_gs_protocol=1
+end function
+integer(c_int) function sp_tddft_park_for_gs() bind(C)
+  integer :: status
+  status=0
+  if(associated(state).or.(used.and..not.registry_mode))status=12
+  call handle_agree(status)
+  sp_tddft_park_for_gs=status
+  if(status/=0)return
+  call park_active_model()
+  gs_saved_worker=worker_embedded;worker_embedded=.false.
+  if(model_timers_alive)then
+    call timer_end(LOG_RT_ITERATION)
+    call timer_disable_sub
+    call timer_end(LOG_TOTAL)
+    model_timers_alive=.false.;gs_timers_suspended=.true.
+  endif
+end function
+subroutine sp_tddft_resume_after_gs() bind(C)
+  worker_embedded=gs_saved_worker
+  if(gs_timers_suspended.and.live_contexts()>0)then
+    call timer_begin(LOG_TOTAL)
+    call timer_enable_sub
+    call timer_begin(LOG_RT_ITERATION)
+    model_timers_alive=.true.
+  endif
+  gs_timers_suspended=.false.
+end subroutine
+integer(c_int) function sp_tddft_model_from_gs(gs_token,timestep,capacity,decomposition,model_token,state_token,J) bind(C)
+  integer(c_int64_t),value :: gs_token
+  real(c_double),value :: timestep
+  integer(c_int),value :: capacity
+  integer(c_int),intent(in) :: decomposition(5)
+  integer(c_int64_t),intent(out) :: model_token,state_token
+  real(c_double),intent(out) :: J(3)
+  type(s_gs_storage),pointer :: gs
+  type(s_gs_model),pointer :: gs_model
+  type(s_gs_seed),target :: seed
+  integer :: status
+  model_token=0;state_token=0;J=0d0
+  call borrow_gs(gs_token,gs,gs_model,status)
+  if(status==0)then
+    seed%decomposition=[gs%info%npk,gs%info%nporbital,gs%info%nprgrid]
+    if(any(decomposition/=seed%decomposition))status=11
+    if(associated(pending_gs))status=12
+  endif
+  call handle_agree(status)
+  sp_tddft_model_from_gs=status
+  if(status/=0)return
+  call gs_model%copy_inputs(seed%inputs)
+  seed%psi=gs%spsi
+  seed%occupations=gs%system%rocc
+  seed%grid=gs%lg%num;seed%core_start=gs%mg%is;seed%core_end=gs%mg%ie
+  seed%orbital_start=gs%info%io_s;seed%orbital_end=gs%info%io_e
+  seed%k_start=gs%info%ik_s;seed%k_end=gs%info%ik_e
+  pending_gs=>seed
+  sp_tddft_model_from_gs=sp_tddft_model_register('memory-gs'//c_null_char,timestep,capacity, &
+      [0d0,0d0,0d0],decomposition,model_token,state_token,J)
+  nullify(pending_gs)
+end function
+
 integer(c_int) function sp_tddft_registry_protocol() bind(C)
   sp_tddft_registry_protocol=1
 end function
@@ -711,8 +780,10 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   enddo
   if(any(decomposition<1))status=10
   if(product(real(decomposition,8))/=real(admission_size,8))status=10
-  inquire(file=trim(filename),exist=exists)
-  if(.not.exists)status=10
+  if(.not.associated(pending_gs))then
+    inquire(file=trim(filename),exist=exists)
+    if(.not.exists)status=10
+  endif
   call comm_get_max(status,admission_group)
   if(status/=0)then
     sp_tddft_init=status;return
@@ -741,7 +812,18 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
     call setup_parallel
   endif
   allocate(model)
-  call read_input(trim(filename),model%parser)
+  if(associated(pending_gs))then
+    allocate(model%seed)
+    model%seed=pending_gs
+    call model%seed%inputs%activate(status)
+    theory='tddft_pulse';yn_restart='n';yn_self_checkpoint='n';yn_reset_step_restart='n'
+    sysname='rt';base_directory='./';directory_read_data='./data_for_restart/'
+    propagator='middlepoint';trans_longi='tr';yn_predictor_corrector='n'
+    call worker_configure()
+    call model%parser%values%capture()
+  else
+    call read_input(trim(filename),model%parser)
+  endif
   calc_mode='RT'
   call read_sw_symmetry(yn_symmetry)
   if(first_init)call timer_initialize
@@ -802,7 +884,7 @@ call initialization_rt( state%Mit, state%system, state%energy, state%ewald, stat
                         state%srg, state%srg_scalar,  &
                         state%spsi_in, state%spsi_out, state%tpsi, state%rho, state%rho_jm, state%rho_s,  &
                         state%V_local, state%Vbox, state%Vh, state%Vh_stock1, state%Vh_stock2, state%Vxc, state%Vpsl,&
-                        state%pp, state%ppg, state%ppn, state%unfold )
+                        state%pp, state%ppg, state%ppn, state%unfold, owner%seed )
 
 if(worker_requested()) then
   state%system%vec_Ac=worker_initial_A

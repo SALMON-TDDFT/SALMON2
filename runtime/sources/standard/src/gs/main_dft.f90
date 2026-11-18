@@ -23,7 +23,7 @@ implicit none
 private
 public :: gs_solve
 contains
-subroutine gs_solve(ctx,release_requests,retain)
+subroutine gs_solve(ctx,release_requests,retain,import_only)
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -58,6 +58,7 @@ use lcfo
 use atomic_orbital, only: verify_atomic_orbital_consistency !!DEBUG
 implicit none
 logical,intent(in) :: release_requests,retain
+logical,optional,intent(in) :: import_only
 type(s_gs_storage),intent(inout) :: ctx
 integer :: report_unit,report_status,report_flag
 character(64) :: report_header
@@ -117,6 +118,20 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           ctx%pp, ctx%ppg, ctx%ppn,   &
                           ctx%xc_func, ctx%mixing )
 
+! Import existing checkpoint through the original initialization, without SCF or writes.
+if(present(import_only))then
+  if(import_only)then
+    call timer_end(LOG_INIT_GS)
+    call timer_end(LOG_TOTAL)
+    if(release_requests)then
+      call dealloc_cache(ctx%srg)
+      call dealloc_cache(ctx%srg_scalar)
+    endif
+    ctx%iterations=Miter
+    ctx%imported=.true.
+    return
+  endif
+endif
 Miopt = 0
 nopt_max = 1
 if(yn_opt=='y') call initialization_opt(Miopt,ctx%opt,ctx%system,flag_opt_conv,nopt_max,ctx%ofl)

@@ -1,6 +1,6 @@
 # Python shared fast-PR HSE model
 
-[日本語](SHARED_HSE.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.4`
+[日本語](SHARED_HSE.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.5`
 
 `NativeFastHSEBackend.open_model(initial, dt, context)` returns a
 `NativeFastHSEModel`. It verifies/copies one immutable material/symmetry input bundle and
@@ -65,11 +65,11 @@ The model context manager does not close surviving states: always close them in
 `finally`. A never-initialized closed model releases its unused Python reservation.
 No MPI cleanup is triggered by Python garbage collection.
 
-Scope: one immutable **full-k or symmetry-reduced-k** model/process, existing k-only MPI1/2
+Scope of the legacy `open_model` route: one immutable **full-k or symmetry-reduced-k** model/process, existing k-only MPI1/2
 backend and CPU/main-thread rules. Legacy `create_state` remains single-lifetime;
 choose it or `open_model` for a process. An explicitly rebuilt runtime must expose
-both handle protocol1 and model protocol1. Different symmetry groups or heterogeneous same-process inputs, automatic multipoint rank reassignment and
-threaded entry are separate work. With context_mpi_protocol1, initialization children retire at owner close.
+both handle protocol1 and model protocol1. The explicit heterogeneous registry below
+adds different-input models. Automatic rank reassignment and threaded entry remain separate. With context_mpi_protocol1, initialization children retire at owner close.
 Unscoped/model children remain attachment-owned until detach; repeated creation
 is not an unlimited resource guarantee.
 Budgets and physical-convergence advice remain advisory; inputs are not changed.
@@ -183,6 +183,70 @@ The shared density symmetry map uses MPI_COMM_SELF for the k-only, one-rank
 r-space group so closing its last constructor does not invalidate siblings.
 Other grid decompositions retain their supplied communicator. Unscoped children
 remain attachment-owned; native initialization crashes/allocation/MPI failures,
-arbitrary different inputs and concurrent entry remain outside this guarantee.
+unrestricted profiles and concurrent entry remain outside this guarantee.
+The explicit registry below additionally owns/swaps each model's density symmetry map.
 Older runtimes still work in their documented scope but retain children until
 detach. Rebuild explicitly for the new retirement behavior; never patch a binary.
+
+## Different-input HSE models in one process
+
+`backend.open_registry(context)` returns `NativeFastHSERegistry` on one existing
+host-MPI subgroup. `registry.open_model(initial, dt)` validates/copies each model
+once; its first `new_state` registers input/unit/symmetry values. Subsequent states
+start independently from that model's GS. The old `open_model` and `create_state`
+routes remain unchanged. Choose a registry or legacy route for an attachment
+lifetime; import never attaches/builds/downloads a native runtime.
+
+```python
+backend = NativeFastHSEBackend(build_json, work_root, allow_symmetry=True)
+with backend.open_registry(context) as registry:
+    first = registry.open_model(initial_a, .001)
+    second = registry.open_model(initial_b, .002)
+    states = []
+    try:
+        a = first.new_state("material-a")
+        states.append(a)
+        b = second.new_state("material-b")
+        states.append(b)
+        ja = a.step([0., 0., 1e-4])
+        jb = b.step([0., 0., -7e-5])
+        a.checkpoint(rank_checkpoint_path, False)
+        restored = first.new_state("restored-a")
+        states.append(restored)
+        restored.checkpoint(rank_checkpoint_path, True)
+    finally:
+        for state in reversed(states):
+            state.close()
+```
+
+Inputs may have different cells, k representation, propagation/history
+settings and symmetry tables. The existing Python provider still requires atomic
+units (`unit_system=au`); owning unit tables does not lift that contract.
+Each model owns its input values, unit tables,
+complete symmetry workspace and density-symmetrization map. State selection restores
+its model before step/checkpoint/transaction/close. Numerical/XC/exchange/FFT/MPI
+owners remain per state; they are never copied as part of model selection.
+All subgroup ranks select the same model and call on the main thread. The
+process working directory is changed synchronously and restored by the adapter;
+this is not thread-safe concurrent embedding.
+
+Closing a model stops new states while existing states keep their model alive.
+Closing the registry closes model factories; its native attachment stays until
+the last state closes. Close states explicitly, before host communicator/MPI
+retirement. An idle model cannot release the registry's process reservation.
+Collective model mismatch and work-directory failure are checked before native
+calls. General Fortran STOP/allocation/MPI/process failure recovery is unchanged.
+
+Use a current explicitly built/audited runtime exposing
+`sp_fast_hse_registry_protocol()==1`; old runtimes do not acquire this feature.
+The public C registry ABI is in native_adapters/fast_hse_handles.h. C hosts supply
+the selected model's working directory; positive state and negative model tokens
+are opaque generation IDs. Same MPI subgroup/k-only MPI1/2 applies throughout;
+changed-topology restore and automatic heterogeneous registry wiring in ordinary
+material-ID/rank-plan assembly are separate. Existing same-model assembly stays.
+
+Run the existing example with `--second-initial OTHER_GS --symmetry` to use two
+prepared models. `--symmetry` permits the actual supplied symmetry declarations;
+every retained group still checks the real drive, including x/y/circular A.
+No projection/clamping is performed. Validation uses existing/synthetic GS inputs,
+not converged material property benchmarks. Resource advice remains warning-only.

@@ -1,6 +1,6 @@
 # Pythonから共有する高速PR版HSEモデル
 
-[English](SHARED_HSE.en.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.4`
+[English](SHARED_HSE.en.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.5`
 
 `NativeFastHSEBackend.open_model(initial, dt, context)` が `NativeFastHSEModel` を返します。
 不変の物質・対称性入力を一度だけ検証・コピーし、ホストのMPIコミュニケータに一度接続します。
@@ -59,11 +59,11 @@ nativeハンドルはこれと別です。各状態はA・電流・時計・容�
 native初期化を一度も試していないモデルの終了は、未使用のPython予約も解放します。
 PythonのGCからMPI終了処理は呼びません。
 
-対象は、プロセスごとに一つの不変な**全k点または対称性による縮約k点**モデル、既存backendのk点MPI1／2、
+従来の `open_model` の対象は、プロセスごとに一つの不変な**全k点または対称性による縮約k点**モデル、既存backendのk点MPI1／2、
 CPU・メインスレッドの範囲です。従来の `create_state` は1寿命のままで、同じプロセスでは
 こちらか `open_model` のどちらかを選びます。handle protocol1とmodel protocol1を備えた
-ランタイムを明示的にビルドしてください。異なる対称群や物質入力の同一プロセス実行、
-複数点の自動ランク再配置、スレッド実行は別作業です。context_mpi_protocol1では初期化時の子コミュニケータを状態終了時に解放します。
+ランタイムを明示的にビルドしてください。異なる入力の同一プロセス実行は後述の明示的レジストリで扱います。
+自動ランク再配置とスレッド実行は別作業です。context_mpi_protocol1では初期化時の子コミュニケータを状態終了時に解放します。
 所有者のない共通資源はdetachまで保持し、無制限の生成・終了は保証しません。資源予算と物理収束の助言は警告扱いで、入力を自動変更しません。
 AはCartesian A/cの原子単位、jは電荷電流密度（SALMON物質電流の負）、dtは原子時間、energyはHartreeです。
 x／y／z・円偏光を指定できます。
@@ -158,6 +158,60 @@ XC・交換・FFT資源、その状態のコミュニケータの順に解放し
 k点並列では実空間群が1ランクなので、共通の密度対称化写像はMPI_COMM_SELFを使い、
 最後に初期化した状態の終了が兄弟の通信先を無効化しないようにします。他の格子分割は
 渡されたコミュニケータを維持します。所有者のない共通資源は接続終了時に解放します。
-初期化中のクラッシュ・確保失敗・MPI異常、任意の異種入力や並行呼出しの保証ではありません。
+初期化中のクラッシュ・確保失敗・MPI異常、無制限の入力プロファイルや並行呼出しの保証ではありません。
+後述の明示的レジストリはモデルごとの密度対称化マップも所有・切替します。
 従来ランタイムは従来範囲で動きますが、子はdetachまで残ります。新しい解放方式には
 明示的に再ビルドし、固定バイナリを書き換えないでください。
+
+## 異なる入力のHSEモデルを同一プロセスで扱う
+
+`backend.open_registry(context)` が一つの既存MPI群に接続した
+`NativeFastHSERegistry` を返します。`registry.open_model(initial, dt)` はモデルごとに
+入力を一度検証・コピーし、最初の `new_state` でnative側に登録します。その後も元のGSから
+独立した状態を作れます。従来の `open_model`／`create_state` の経路は維持します。
+接続の生存期間ではレジストリ経路か従来経路を選びます。import時の接続・ビルド・取得はありません。
+
+```python
+backend = NativeFastHSEBackend(build_json, work_root, allow_symmetry=True)
+with backend.open_registry(context) as registry:
+    first = registry.open_model(initial_a, .001)
+    second = registry.open_model(initial_b, .002)
+    states = []
+    try:
+        a = first.new_state("material-a")
+        states.append(a)
+        b = second.new_state("material-b")
+        states.append(b)
+        ja = a.step([0., 0., 1e-4])
+        jb = b.step([0., 0., -7e-5])
+        a.checkpoint(rank_checkpoint_path, False)
+        restored = first.new_state("restored-a")
+        states.append(restored)
+        restored.checkpoint(rank_checkpoint_path, True)
+    finally:
+        for state in reversed(states):
+            state.close()
+```
+
+セル・k点表現・時間発展／学習設定・対称性表の異なる入力を扱えます。
+既存Python providerは原子単位（`unit_system=au`）を要求し、この制約は維持します。単位表の所有分離は単位指定の拡張を意味しません。
+入力値・単位表・対称性作業領域と密度対称化マップを各モデルが所有し、step／checkpoint／
+transaction／closeの前に対象モデルへ切り替えます。電子状態・XC・交換・FFT・MPIの所有者を
+丸ごとコピーする方式ではありません。全ランクで同じモデルを選び、メインスレッドから
+同じ順序で呼びます。作業ディレクトリを同期的に切り替えて元へ戻すため、スレッド同時実行には未対応です。
+
+モデルを閉じると新規状態の作成を停止し、既存状態は継続できます。レジストリを閉じても
+最後の状態を閉じるまでnative接続を保ちます。状態を明示的に閉じてからホストMPIを終了してください。
+未初期化モデルの終了で接続全体の予約を解除しません。モデル選択不一致・ディレクトリ変更失敗は
+native呼出し前に集合検査します。一般のSTOP・確保失敗・MPI／プロセス異常の復帰保証は増やしていません。
+
+`sp_fast_hse_registry_protocol()==1` を持つ、明示ビルド・監査したランタイムが必要です。
+C契約はnative_adapters/fast_hse_handles.hにあります。Cホストは対象モデルの作業ディレクトリを
+指定し、正の状態IDと負のモデルIDを不透明な世代付き識別子として扱います。
+同じMPI群・k点並列1／2ランクの範囲です。異なるMPI分割への復元や、通常の物質ID／ランク計画からの
+異種HSEレジストリ自動組立ては別作業です。従来の同一モデルの組立ては維持します。
+
+既存サンプルに `--second-initial OTHER_GS --symmetry` を付けると、二つの準備済みモデルを使います。
+`--symmetry` は入力の実際の対称性設定を許可する指定で、各保持群がx／y／円偏光を含む実際のAを
+引き続き検査します。投影・切捨ては行いません。検証は既存・合成GSによる実装整合性の確認で、
+物性の収束保証ではありません。資源予算は従来どおり警告扱いです。

@@ -10,7 +10,15 @@ int sp_gs_protocol(void);
  * Create computes SCF. Unconverged SCF still succeeds and retains the last iterate.
  * Handles retain numerical/XC/MPI owners, with unique tokens invalidated at close. */
 int sp_gs_create(const char *filename,int64_t *token);
-/* stats: iterations, native convergence flag, atoms, bands.
+/* Import existing wfn with yn_restart=y/read_gs_restart_data=wfn; no SCF or GS writes.
+ * Imported forces are unavailable (array_info/read return11). */
+int sp_gs_import(const char *filename,int64_t *token);
+/* Owned GS→RT seed. Same subgroup/decomposition; inputs A/c and returned charge j.
+ * Model owns a copy and survives source GS close. RT registry manages returned handles. */
+int sp_tddft_memory_gs_protocol(void);
+int sp_tddft_model_from_gs(int64_t gs,double dt,int capacity,const int decomposition[5],
+                          int64_t *model,int64_t *state,double j[3]);
+/* stats: iterations, native convergence flag (-1 unknown on import), atoms, bands.
  * values: total Hartree energy, residual, tolerance. */
 int sp_gs_info(int64_t token,int stats[4],double values[3]);
 /* q:1 density,2 occupations,3 eigenvalues,4 force,5 orbital. Fortran-order arrays;

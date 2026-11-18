@@ -66,7 +66,7 @@ SALMON本体が記録した収束フラグ、原子数、バンド数を返し�
 ## 対応範囲と導入
 
 Python入口は既存DFT設定と同じ周期・全k点・非スピン偏極・固定イオンのPZ、Libxc-PZ/PBEです。
-高速PR-HSE、SOC／+U／DC、GSからTDDFTへのメモリ上での直接受け渡し、保存／再開、
+高速PR-HSE、SOC／+U／DC、保存／再開、
 スレッド並行や同時GS／TDDFTは今回の対応外です。1プロセスでnative電子計算の接続は1生存期間です。
 ハンドルの参照・配列取得・closeも群内の集合呼出しです。全状態を閉じてからホストMPIを終了します。
 
@@ -85,3 +85,39 @@ Linuxの既存リンク方式は維持します。今回の実測はApple Silico
 これは粗い格子・4反復の所有確認用です。物性の収束確認を済ませた入力ではありません。
 GS再開バンドルは自動出力しません。通常のSALMON診断テキストと進捗出力は生成します。
 公開native契約は [standard_gs.h](native_adapters/standard_gs.h) を参照してください。
+
+## 既存GSの読み込みとメモリ上のTDDFT接続
+
+`session.load(directory, input_file="rt.inp", material_id="silicon")` は、対応する
+入力と既存GSを読み込みます。SCFを回さず、新たなGS再開データも書きません。
+全ランクから変更されていない元ファイルを参照できる必要があります。整合性検査は
+旧形式バイナリの物理的な由来を証明しないため、入力との対応は利用者が確認します。
+読み込み時の `info.converged` は `None` です。residual/tolerance のゼロは未測定を示し、
+収束したという意味ではありません。読み込みでは力を計算しないため、forcesの取得は拒否します。
+
+```python
+with backend.open(context) as session:
+    gs = session.load(existing_bundle, material_id="silicon")
+    model = gs.tddft_model(dt=0.003, max_steps=100)
+    gs.close()
+    first = model.new_state("first")
+    second = model.new_state("second")
+    j = first.step([0.0001, 0, 0])  # transverse、A/c → 電荷電流j
+    first.checkpoint(checkpoint_path)  # ランクごとに異なる保存先を指定
+    # 新しい状態で checkpoint(..., restore=True) とすれば時間発展の再計算なしで復元
+    first.close()
+    second.close()
+    model.close()
+```
+
+モデルが初期軌道・占有数・入力値のコピーを所有するため、GSを閉じた後も状態を作れます。
+複数状態は同じ初期GSから独立に進みます。`session.run` が返すGSも同じ
+`tddft_model` を使えます。GS読み込み・計算とRTステップは同一セッション内で順次
+切り替えられます。セッションを閉じると、RT状態・モデルを先に閉じて接続を解放します。
+現在はGSのMPI群・分割を引き継ぐ標準周期系・全k点・非スピン分極・固定イオンの経路です。
+占有RTバンド数を超える軌道並列数は拒否します。自動再分割やスレッド同時実行には未対応です。
+`sp_tddft_memory_gs_protocol()==1` と `sp_gs_import` を持つランタイムを明示的に使います。
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.memory_gs BUILD EXISTING_GS NEW_WORK
+```

@@ -20,6 +20,7 @@ module salmonpy_gs_model
     procedure :: load => gs_model_load
     procedure :: run => gs_model_run
     procedure :: clear => gs_model_clear
+    procedure :: copy_inputs => gs_model_copy_inputs
   end type
 contains
   subroutine gs_model_load(self,path,status)
@@ -44,8 +45,8 @@ contains
     status=0
   end subroutine
 
-  subroutine gs_model_run(self,status,state)
-    use salmon_global, only: calc_mode
+  subroutine gs_model_run(self,status,state,import_only)
+    use salmon_global, only: calc_mode,yn_restart,read_gs_restart_data
     use code_optimization, only: modx,mody,modz
     use plusU_global, only: PLUS_U_ON
     use communication, only: comm_is_attached,comm_begin_children,comm_end_children,comm_release_children
@@ -53,6 +54,7 @@ contains
     class(s_gs_model),intent(inout) :: self
     integer,intent(out) :: status
     type(s_gs_storage),optional,target,intent(inout) :: state
+    logical,optional,intent(in) :: import_only
     type(s_gs_storage),target :: temporary
     type(s_gs_storage),pointer :: selected
     type(s_model_inputs) :: previous
@@ -82,6 +84,18 @@ contains
       call comm_release_children(child_owner)
       return
     endif
+    if(present(import_only))then
+      if(import_only)then
+        if(yn_restart/='y'.or.read_gs_restart_data/='wfn')then
+          call previous%activate(restore_status)
+          call initialize_inputoutput_units
+          call comm_end_children(child_owner)
+          call comm_release_children(child_owner)
+          status=2
+          return
+        endif
+      endif
+    endif
     call initialize_inputoutput_units
     had_optimization=allocated(modx).or.allocated(mody).or.allocated(modz)
     if(had_optimization)call park_model_optimization(old_optimization)
@@ -91,7 +105,7 @@ contains
     old_symmetry=.false.;old_directions=.false.
     call swap_symmetry_switch(old_symmetry,old_directions)
     calc_mode='GS'
-    call gs_solve(selected,.true.,present(state))
+    call gs_solve(selected,.true.,present(state),import_only)
     call comm_end_children(child_owner)
     if(present(state))then
       state%mpi_child_owner=child_owner
@@ -110,6 +124,12 @@ contains
     if(present(state))then
       if(state%report_status/=0)status=3
     endif
+  end subroutine
+
+  subroutine gs_model_copy_inputs(self,values)
+    class(s_gs_model),intent(in) :: self
+    type(s_model_inputs),intent(out) :: values
+    values=self%parser%values
   end subroutine
 
   subroutine gs_model_clear(self)

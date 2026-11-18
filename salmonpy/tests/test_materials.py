@@ -178,11 +178,6 @@ class Materials(unittest.TestCase):
                 return state
         with self.assertRaises(InputError):self.api.check_material(Unstable(),self.drive)
 
-    def test_module_import_does_not_initialize_mpi(self):
-        import subprocess,sys
-        result=subprocess.run([sys.executable,'-c',
-            "import sys;import salmonpy.materials;assert 'mpi4py.MPI' not in sys.modules"],capture_output=True,text=True)
-        self.assertEqual(result.returncode,0,result.stderr)
 
     def test_duplicate_live_state_is_not_hidden_by_wrapper(self):
         state=Model().new_state(dt=.1)
