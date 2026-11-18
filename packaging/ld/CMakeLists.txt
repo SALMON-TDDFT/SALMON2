@@ -241,3 +241,7 @@ install(FILES "${ROOT}/salmonpy/examples/mixed_shared_tddft_layers.json" "${ROOT
 install(FILES "${ROOT}/tools/test_python_shared_tddft_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/salmonpy/SHARED_TDDFT.md" "${ROOT}/salmonpy/SHARED_TDDFT.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/examples/_tddft_materials.py" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/salmonpy/examples/mixed_distinct_tddft_layers.json" "${ROOT}/salmonpy/examples/distinct_tddft_materials.json" DESTINATION salmonpy/examples)

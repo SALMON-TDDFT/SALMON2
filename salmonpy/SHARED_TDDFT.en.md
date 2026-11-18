@@ -115,3 +115,81 @@ execution and direct resume, including a late rank-local restore failure/retry.
 These small existing fixtures verify ownership and numerical parity, not
 material convergence. No new GS data is collected and no Fortran kernels change.
 See [native C contract](STANDARD_HANDLES.en.md) for lower-level entry points.
+
+## Different material inputs: current boundary and remaining work
+
+Different TDDFT inputs can run in **separate MPI material groups**. Each group can
+share multiple states of its own immutable material. Add `--tddft-materials FILE`
+to the ordinary `mpi_mixed_native` sample with `--layers` to declare arbitrary
+TDDFT material IDs, instead of only the built-in `si-tddft` ID. Example:
+
+```json
+{
+  "schema": "salmonpy.native-tddft-materials/1",
+  "materials": {
+    "silicon-pbe": {
+      "bundle": "./pbe-initial",
+      "input_file": "rt.inp",
+      "decomposition": [1, 2, 1, 1, 1],
+      "points_per_group": 2
+    },
+    "silicon-tbmbj": {
+      "bundle": "./tbmbj-initial",
+      "decomposition": [1, 2, 1, 1, 1],
+      "points_per_group": 2
+    }
+  }
+}
+```
+
+Paths are relative to the catalog, or absolute local paths. Prepare complete
+GS/PP/input bundles on a login/management machine and transfer them before a job;
+no internet, downloads or compilation are required by the loader. Default input
+is `rt.inp`, decomposition is `[1,1,1,1,1]`, width is1. Width1 uses a separate
+legacy state; width>1 explicitly uses the shared profile above. Decomposition is
+(k, orbital, x, y, z); its product sets ranks per material group. Different IDs
+never share a native model, even if their input bytes happen to match. All groups
+use the coupling dt; this does not introduce subcycling.
+
+Layer `material_id` selects one catalog ID. The provided
+`mixed_distinct_tddft_layers.json` places SBE1 + PBE2 + TB-mBJ2 points, a gap and
+two local LD materials. With width2/inner MPI2, launch6 ranks (field1+SBE1+PBE2+
+TB-mBJ2); width1 requires10. Copy `distinct_tddft_materials.json` alongside your
+local bundles and edit references before use:
+
+```sh
+mpiexec -n 6 python -m salmonpy.examples.mpi_mixed_native \
+  STANDARD_BUILD SERIAL_RUNTIME DEFAULT_INITIAL NEW_OUTPUT \
+  --layers mixed_distinct_tddft_layers.json --tddft-materials materials.json \
+  --steps 128 --dt .003 --protect-steps
+```
+
+The positional `DEFAULT_INITIAL` remains the compatibility fallback for the
+built-in `si-tddft` or HSE ID. It is not read for custom IDs. A catalog entry for
+`si-tddft` overrides that fallback; unused default flags/paths are not restart
+conditions. Per-material input hashes, initial-state identity, MPI plan and memory
+advice use each actual bundle. `sbe-point`, `hse-point`, `drude`, `lorentz` remain
+reserved built-ins. A shared catalog can include unused declarations. Unknown
+fields, duplicate keys and invalid decomposition reject before native setup;
+resource estimates stay advisory. The existing aggregate direct save/resume
+and protected failure/retry work across all material groups.
+
+**Same-process different-input models remain unimplemented.** Current C handles
+select an `rt_context`, while `model_new` uses the single already-read model;
+there is no native model-ID registry or second independent input constructor.
+The remaining work is:
+
+1. Own immutable model input/defaults and initialization data separately from
+   process globals (`read_input`, parallel setup, global XC/profile controls).
+2. Construct and select more than one model without changing a live sibling;
+   step/restore must use the selected model's dt/capacity/XC and geometry controls.
+3. Complete ownership of common caches, I/O/timers and non-child MPI resources,
+   then define model-local teardown. Specialized SOC/+U/DC remain separate scope.
+4. Connect model handles to Python and verify different cell/grid/k/PP/XC inputs,
+   independent controls, destruction order and direct restore.
+
+State wavefunctions, density/XC payload, clocks, protected/staged state and
+initialization child communicators are already owned; they need not be rewritten.
+No completion percentage is justified by counting these unequal tasks. Current
+PBE/TB-mBJ connection tests use two existing Si inputs and check implementation
+parity, not two-species physical accuracy or same-process reentrancy.

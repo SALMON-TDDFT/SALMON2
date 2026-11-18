@@ -83,3 +83,70 @@ PZ・Libxc-PZ/PBE・TB-mBJ自動／固定について、MPI1・軌道2・空間2
 復元途中失敗・再試行を比較します。小さい既存入力による所有権・数値一致の検証であり、
 物性の収束保証ではありません。新しいGSデータの収集やFortranカーネル変更は行いません。
 低水準の規約は [native C契約](STANDARD_HANDLES.md) を参照してください。
+
+## 異なる物質入力：現在の対応と残作業
+
+**別々のMPI物質群なら、異なる入力のTDDFTを同時に使えます。** 各群の中では同じ物質入力の
+複数点を共有できます。通常サンプルの `--layers` と `--tddft-materials FILE` を組み合わせ、
+物質IDごとにローカルの初期状態、入力ファイル、並列分割、共有点数を指定します。
+
+```json
+{
+  "schema": "salmonpy.native-tddft-materials/1",
+  "materials": {
+    "silicon-pbe": {
+      "bundle": "./pbe-initial",
+      "input_file": "rt.inp",
+      "decomposition": [1, 2, 1, 1, 1],
+      "points_per_group": 2
+    },
+    "silicon-tbmbj": {
+      "bundle": "./tbmbj-initial",
+      "decomposition": [1, 2, 1, 1, 1],
+      "points_per_group": 2
+    }
+  }
+}
+```
+
+相対パスはカタログの場所から解決します。絶対ローカルパスも使えます。
+管理・ログインノードなどでGS・擬ポテンシャル・入力一式を準備し、計算前に転送してください。
+ローダーによる通信・ダウンロード・ビルドはありません。
+既定は `input_file="rt.inp"`、分割 `[1,1,1,1,1]`、共有点数1です。
+点数1は従来の別状態経路、2以上は上記の共有プロファイルを使います。
+分割はk・軌道・x・y・zで、積がその物質群のランク数です。
+入力が同じでも異なるIDは別モデル・別群に置きます。結合dtは全群共通で、サブサイクルは導入しません。
+
+層配置の `material_id` がカタログ内のIDを選びます。
+同梱の `mixed_distinct_tddft_layers.json` はSBE1点、PBE2点、TB-mBJ2点、真空と2種類のLDを配置します。
+内部MPI2・共有点数2なら場1＋SBE1＋PBE2＋TB-mBJ2で6ランク、共有点数1なら10ランクです。
+`distinct_tddft_materials.json` を入力の近くへコピーして参照を編集します。
+
+```sh
+mpiexec -n 6 python -m salmonpy.examples.mpi_mixed_native \
+  STANDARD_BUILD SERIAL_RUNTIME DEFAULT_INITIAL NEW_OUTPUT \
+  --layers mixed_distinct_tddft_layers.json --tddft-materials materials.json \
+  --steps 128 --dt .003 --protect-steps
+```
+
+位置引数 `DEFAULT_INITIAL` は既存の `si-tddft`／HSE用の互換既定値です。
+カタログの独自IDだけを使う場合は読みません。カタログの `si-tddft` は既定値を上書きします。
+未使用の既定値・パスは再開条件に含めません。
+入力ハッシュ、初期状態の識別情報、MPI配置、資源助言は各物質の実際の入力を参照します。
+`sbe-point`、`hse-point`、`drude`、`lorentz` は予約済みです。
+カタログの未使用項目は残せます。未知の項目、重複キー、不正な分割はnative初期化前に拒否します。
+資源の不足見積もりは警告のみです。既存の一括直接保存／再開と保護付き失敗・再試行も使えます。
+
+**同一プロセス内に異なる入力のモデルを複数置く部分は未実装です。**
+現在のCハンドルは `rt_context` を切り替えますが、`model_new` は最初に読んだ1モデルを使います。
+別モデルIDの登録や第2入力の独立初期化はまだありません。残る工程は次の4段階です。
+
+1. `read_input`、並列初期化、共有XC・プロファイル設定から、不変のモデル入力・既定値・初期化データを分離。
+2. 生存中の状態を変えずに別モデルを構築・選択し、step／復元を選択モデルのdt・容量・XC・形状条件へ接続。
+3. 共通キャッシュ、I/O・タイマー、初期化子通信以外のMPI資源の所有権とモデル別終了処理を整理。SOC／+U／DCは別の範囲。
+4. Pythonのモデルハンドルへ接続し、異なるセル・格子・k点・擬ポテンシャル・XC、終了順、独立比較、直接復元を検証。
+
+波動関数、密度・XCペイロード、時刻、保護・復元候補、初期化時の子通信はすでに状態ごとに所有しています。
+これらを最初から作り直す必要はありません。各工程の規模が違うため、項目数だけで完了率は出せません。
+今回のPBE／TB-mBJ接続テストは既存のSi入力2種類による実装一致の確認です。
+異元素の物性精度や同一プロセス内での異入力モデル対応を保証する試験ではありません。

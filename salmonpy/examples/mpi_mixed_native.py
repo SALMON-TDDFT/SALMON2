@@ -57,6 +57,7 @@ def main():
     parser.add_argument('--hse-ranks', type=int, choices=(1, 2), default=1)
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
+    parser.add_argument('--tddft-materials',type=Path,help='offline native-tddft-materials/1 JSON: per-ID bundle, input_file, decomposition, points_per_group')
     parser.add_argument('--layers', type=Path, help='native-layers/1 JSON referencing sbe-point, si-tddft, hse-point, drude, lorentz')
     parser.add_argument('--run-id', default='mixed-example', help='explicit experiment/run identity; fixture default mixed-example')
     parser.add_argument('--legacy-checkpoint-identity', action='store_true', help='explicit unidentified session for old checkpoint readers; cannot bypass identified archives')
@@ -96,6 +97,7 @@ def main():
         parser.error('--hse-symmetry requires native HSE and --hse-reference-bundle')
     if args.hse_reference_bundle is not None and not args.hse_symmetry:
         parser.error('--hse-reference-bundle requires --hse-symmetry')
+    if args.tddft_materials is not None and args.layers is None:parser.error('tddft-materials requires --layers')
     if args.tddft_points_per_group<1:parser.error('positive tddft-points-per-group required')
     if args.tddft_points_per_group>1 and args.layers is None:parser.error('tddft grouping requires --layers')
     if args.hse_points_per_group<1 or (args.hse_points_per_group>1 and args.fast_hse_mpi_build is None):
@@ -134,10 +136,16 @@ def main():
         available = {'drude': materials[0], 'lorentz': materials[1]}
         if 'sbe-point' in selected:
             available['sbe-point'] = bind_material(sbe, key='sbe-point', identity='synthetic-two-band-v1')
-        if 'si-tddft' in selected:
-            available['si-tddft'] = MaterialBinding('si-tddft',
-                NativeTDDFTMaterialProvider(args.bundle, 'rt.inp', max_steps=args.steps),
-                NativeTDDFTBackend(args.build, output, decomposition=(1, args.tddft_ranks, 1, 1, 1),shared_model=args.tddft_points_per_group>1))
+        from salmonpy.examples._tddft_materials import MaterialInput,load_materials
+        standard_inputs={'si-tddft':MaterialInput(args.bundle.resolve(),'rt.inp',
+                         (1,args.tddft_ranks,1,1,1),args.tddft_points_per_group)}
+        if args.tddft_materials is not None:standard_inputs.update(load_materials(args.tddft_materials))
+        standard_inputs={key:value for key,value in standard_inputs.items() if key in selected}
+        for key,spec in standard_inputs.items():
+            available[key]=MaterialBinding(key,
+                NativeTDDFTMaterialProvider(spec.bundle,spec.input_file,max_steps=args.steps),
+                NativeTDDFTBackend(args.build,output,decomposition=spec.decomposition,
+                                   shared_model=spec.points_per_group>1))
         if 'hse-point' in selected:
             if args.fast_hse_build is None: raise ValueError('hse-point requires --fast-hse-build')
             from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
@@ -154,11 +162,12 @@ def main():
                                  SolverGroup('tddft', tuple(range(field_ranks+1, world.size)), point_ids=(20,))))
         else:
             from salmonpy.layers import assemble_native_layers
-            rank_settings = {key: count for key, count in {'sbe-point': 1, 'si-tddft': args.tddft_ranks, 'hse-point': args.hse_ranks}.items() if key in selected}
+            rank_settings = {key: count for key, count in {'sbe-point': 1, 'hse-point': args.hse_ranks,
+                             **{key:spec.ranks for key,spec in standard_inputs.items()}}.items() if key in selected}
             assembly = assemble_native_layers(layout, available,
                 grid=grid, dt=dt, steps=args.steps, source=calculation.source, field_grid=tuple(args.field_grid),
                 ranks_per_point=rank_settings, rank_budget=args.rank_budget if args.rank_budget is not None else world.size,
-                points_per_group=({**({'si-tddft':args.tddft_points_per_group} if args.tddft_points_per_group>1 else {}),
+                points_per_group=({**{key:spec.points_per_group for key,spec in standard_inputs.items() if spec.points_per_group>1},
                                    **({'hse-point':args.hse_points_per_group} if args.hse_points_per_group>1 else {})} or None))
             if assembly.record()['required_ranks'] != world.size:
                 raise ValueError(f"launch exactly {assembly.record()['required_ranks']} ranks for this layout")
@@ -173,7 +182,7 @@ def main():
             return h.hexdigest()
         build = json.loads(args.build.read_text())
         assets = {}
-        if 'si-tddft' in selected or ('hse-point' in selected and args.hse_bundle is None):
+        if (args.tddft_materials is None and 'si-tddft' in selected) or ('hse-point' in selected and args.hse_bundle is None):
             assets = {str(p.relative_to(args.bundle)): digest_file(p)
                       for p in sorted(args.bundle.rglob('*')) if p.is_file()}
         signature = {'input': FDTDMPI(tuple(args.field_grid)).input_text(calculation),
@@ -186,6 +195,14 @@ def main():
                          for k in ('eigen','momentum','nonlocal_velocity','weights','lattice'))
                          + repr((sbe.electrons,sbe.correction_order,sbe.nonlocal_correction)).encode()).hexdigest()}
         if args.tddft_points_per_group>1:signature['tddft_points_per_group']=args.tddft_points_per_group
+        if args.tddft_materials is not None:
+            signature.pop('tddft_ranks',None)
+            signature.pop('tddft_points_per_group',None)
+            signature['standard_material_inputs']={key:{'input_file':spec.input_file,
+                'decomposition':list(spec.decomposition),'points_per_group':spec.points_per_group,
+                'assets':{str(p.relative_to(spec.bundle)):digest_file(p)
+                    for p in sorted(spec.bundle.rglob('*')) if p.is_file()}}
+                for key,spec in standard_inputs.items()}
         if 'hse-point' in selected:
             signature['fast_hse_backend'] = available['hse-point'].backend.identity
             signature['hse_ranks'] = args.hse_ranks
@@ -216,8 +233,10 @@ def main():
         memory_path=output/'memory-advice.json'
         if memory_enabled:
             from salmonpy._memory_advice import initial_advice
-            initial_advice(world,context,calculation,
-                    (args.hse_bundle or args.bundle) if context.group.point_ids and bindings[context.group.point_ids[0]].key=='hse-point' else args.bundle,
+            material_key=bindings[context.group.point_ids[0]].key if context.group.point_ids else None
+            advice_bundle=(standard_inputs[material_key].bundle if material_key in standard_inputs else
+                           (args.hse_bundle or args.bundle) if material_key=='hse-point' else args.bundle)
+            initial_advice(world,context,calculation,advice_bundle,
                     tuple(args.field_grid),sbe,budget,memory_reports,memory_path,
                            kind="field" if context.group.role=="field" else bindings[context.group.point_ids[0]].key,
                            protected_steps=args.protect_steps)
@@ -337,12 +356,13 @@ def main():
             peaks = np.max(abs(j), axis=(0, 2))
             if not np.all(peaks > 0): raise AssertionError('nonzero response required for both electronic materials')
             replay = np.empty_like(j)
-            initial = None
+            initials = {}
             try:
-                if any(b.key == 'si-tddft' for b in bindings.values()):
-                    initial = TDDFTInitialState.from_salmon(args.bundle, 'rt.inp', executable=(SalmonExecutable(args.runtime, digest_file(args.runtime))
-                                                                      if args.runtime.is_file() else load_runtime(args.runtime)),
-                                                          max_steps=args.steps, threads=1)
+                for key,spec in standard_inputs.items():
+                    initials[key]=TDDFTInitialState.from_salmon(spec.bundle,spec.input_file,
+                        executable=(SalmonExecutable(args.runtime,digest_file(args.runtime))
+                            if args.runtime.is_file() else load_runtime(args.runtime)),
+                        max_steps=args.steps,threads=1)
                 for column, point in enumerate(points):
                     is_sbe = bindings[point].key == 'sbe-point'
                     is_hse = bindings[point].key == 'hse-point'
@@ -359,7 +379,7 @@ def main():
                         else:
                             reference_provider = binding.provider
                         state = reference.create_state(reference_provider.prepare(local),point,dt,local)
-                    else: state = sbe.new_state(dt=dt) if is_sbe else initial.new_state(dt=dt)
+                    else: state = sbe.new_state(dt=dt) if is_sbe else initials[bindings[point].key].new_state(dt=dt)
                     try:
                         old = np.zeros(3)
                         for n in range(args.steps):
@@ -369,7 +389,7 @@ def main():
                     if is_sbe: np.testing.assert_array_equal(j[:, column], replay[:, column])
                     else: np.testing.assert_allclose(j[:, column], replay[:, column], rtol=2e-10, atol=2e-12)
             finally:
-                if initial is not None: initial.close()
+                for initial in initials.values():initial.close()
             previous = np.zeros((len(points), 3)); old_A = np.zeros((len(points), 3))
             for n, frame in enumerate(history, 1):
                 np.testing.assert_array_equal(frame['J_previous'], previous)
@@ -378,7 +398,7 @@ def main():
                 previous = frame['J_charge']; old_A = frame['A_over_c']
             np.savez(output/'response.npz', point_ids=list(points), A_over_c=A, E=E, j=j, serial_replay=replay)
             ids, counts = np.unique(geometry.material_ids(), return_counts=True)
-            report = {'status': 'passed', 'protected_steps': args.protect_steps, 'steps': args.steps, 'dt': dt, 'tddft_ranks': args.tddft_ranks if 'si-tddft' in selected else 0, 'field_grid': list(args.field_grid),
+            report = {'status': 'passed', 'protected_steps': args.protect_steps, 'steps': args.steps, 'dt': dt, 'tddft_ranks': standard_inputs['si-tddft'].ranks if 'si-tddft' in standard_inputs else 0, 'field_grid': list(args.field_grid),
                       'point_materials': {str(p): bindings[p].key for p in points},
                       'initial_charge_current': session.initial_current,
                       'outer_mpi_ranks':world.size,
@@ -397,6 +417,8 @@ def main():
                       'checkpoint_validation': getattr(coupled, 'checkpoint_validation', None),
                       'identity':identity,
                       'scope': 'tiny native E/H fixture; fixed-binary/input/topology restart; no physical convergence claim'}
+            if args.tddft_materials is not None:
+                report['standard_material_inputs'] = signature['standard_material_inputs']
             if assembly is not None:
                 report['assembly'] = assembly.record()
                 report['ld_materials'] = {str(v): k for k, v in assembly.record()['constitutive_material_ids'].items()}

@@ -32,7 +32,8 @@ def sample_records(run_id,signature,points,bindings,*,constitutive,cell_ids,asse
                 initial={'material':definition,'preparation':'builtin ground occupation/1'}
                 initial_id=mid+':ground'
             else:
-                point_assets=signature.get('hse_assets',assets) if mid=='hse-point' else assets
+                point_assets=(signature.get('hse_assets',assets) if mid=='hse-point' else
+                    signature.get('standard_material_inputs',{}).get(mid,{}).get('assets',assets))
                 point_inputs={n:sha for n,sha in point_assets.items() if not n.startswith('data_for_restart/') and not n.endswith('.json')}
                 definition={'kind':mid,'inputs':point_inputs,
                     'engine':signature.get('fast_hse_backend') if mid=='hse-point' else signature['library']}

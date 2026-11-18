@@ -72,3 +72,20 @@ class MixedIdentityTests(unittest.TestCase):
         self.assertEqual(first['points'][0],second['points'][0])
         self.assertNotEqual(first['points'][1]['definition_digest'],second['points'][1]['definition_digest'])
         self.assertNotEqual(first['points'][1]['initial_state_digest'],second['points'][1]['initial_state_digest'])
+
+    def test_catalog_assets_identify_each_material_independently(self):
+        from salmonpy.examples._mixed_identity import digest_record
+        points={1:(19,20,20),2:(20,20,20)}
+        bindings={k:SimpleNamespace(key=mid,material_record=None) for k,mid in ((1,'pbe'),(2,'tbmbj'))}
+        signature={'library':'b'*64,'assets':{'rt.inp':'a'*64},
+                   'standard_material_inputs':{'pbe':{'assets':{'rt.inp':'c'*64}},
+                                               'tbmbj':{'assets':{'rt.inp':'d'*64}}}}
+        first=sample_records('run',signature,points,bindings,constitutive={},cell_ids={})[0]
+        for point,mid in zip(first['points'],('pbe','tbmbj')):
+            assets=signature['standard_material_inputs'][mid]['assets']
+            self.assertEqual(point['initial_state_digest'],digest_record({'assets':assets}))
+        signature['standard_material_inputs']['tbmbj']['assets']['rt.inp']='e'*64
+        second=sample_records('run',signature,points,bindings,constitutive={},cell_ids={})[0]
+        self.assertEqual(first['points'][0],second['points'][0])
+        self.assertNotEqual(first['points'][1]['definition_digest'],second['points'][1]['definition_digest'])
+        self.assertNotEqual(first['points'][1]['initial_state_digest'],second['points'][1]['initial_state_digest'])

@@ -2,6 +2,26 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
+## Different TDDFT input audit — 2026-11-18
+
+- [x] Different inputs can use separate native MPI groups. Normal sample now accepts
+  an offline per-material-ID catalog for bundle/input/decomposition/shared-point
+  width; serial controls, asset identity and resource advice follow each material.
+- [x] Two distinct Si XC inputs (PBE/TB-mBJ), two points each, internal MPI2:
+  shared6 vs separate10 ranks match bitwise; protected63→128 direct resume
+  matches continuous with zero replay, including late-rank failure/retry.
+- [x] Source and installed614 tests each (one skip); installed catalog restart
+  ignores unused fallback paths/flags, and old no-catalog direct archive resumes.
+  Installed unequal per-material MPI (PBE2/TB-mBJ1) agrees within2e-12 absolute
+  tolerance (largest current difference8.61e-19); no new GS/native build required.
+- [ ] Same-process heterogeneous native models remain unimplemented. Four stages:
+  immutable model input/defaults/initialization ownership; model-ID registry and
+  activation; common cache/I/O/timer/MPI lifetime; Python wiring and heterogeneous
+  cell/grid/k/PP/XC independent/restart validation. Existing state-owned numerical
+  payloads/child communicators are completed foundations, not unfinished duplicates.
+- [ ] Generic allocation/I/O/MPI failure recovery, canonical archive migration,
+  larger-scale calibration and additional platform distribution remain separate.
+
 ## Standard Python shared-model update — 2026-11-18
 
 - [x] `NativeTDDFTBackend.open_model` / `NativeTDDFTModel`, one immutable model/work
@@ -50,7 +70,7 @@ scope and must not be counted again as newly unfinished work.
   serializer ownership, generation tokens, original-GS recreation and direct
   restart. Fixed common dt/capacity/decomposition. Python shared factory and
   ordinary standard multipoint session integration are now implemented opt-in.
-- [x] Latest source/installed suites:611 tests each, one skip each; sdist→wheel,
+- [x] Latest source/installed suites:614 tests each, one skip each; sdist→wheel,
   hashes, installed MPI/example, paired guides and AI catalog verified locally.
 
 Remaining work, grouped rather than duplicating historical bullets:
