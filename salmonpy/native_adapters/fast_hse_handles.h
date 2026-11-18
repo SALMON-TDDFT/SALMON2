@@ -33,6 +33,9 @@ int sp_fast_hse_handle_init(const char *path, double dt, int capacity,
  * Requires a successful handle_init and model protocol1. */
 /* Optional capability: immutable same-symmetry model with independent states. */
 int sp_fast_hse_shared_symmetry_protocol(void);
+/* Context initialization children retire at close; diagnostic live/slot counts. */
+int sp_fast_hse_context_mpi_protocol(void);
+int sp_fast_hse_mpi_resources(int values[2]);
 int sp_fast_hse_model_protocol(void);
 int sp_fast_hse_model_new(double dt, int capacity, int64_t *handle, double j[3]);
 int sp_fast_hse_handle_new(int64_t model, double dt, int capacity,

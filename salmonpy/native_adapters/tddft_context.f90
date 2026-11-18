@@ -12,7 +12,7 @@ module salmonpy_tddft_context
  use salmon_xc,only:finalize_xc
  use salmon_global
  use parallelization,only:nproc_size_global,nproc_group_global,nproc_id_global
- use communication,only:comm_summation,comm_bcast
+ use communication,only:comm_summation,comm_bcast,comm_begin_children,comm_end_children,comm_release_children
  use exx_native,only:exx_validate_vector_potential
  use sym_sub,only:use_symmetry,SymMatA,SymMatB,Amat,Bmat,Ainv,Binv
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
@@ -39,6 +39,7 @@ type :: checkpoint_payload
 end type
  type tddft_context
  private
+ integer::mpi_child_owner=0
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_dft_system)  :: system
@@ -210,7 +211,7 @@ contains
  type(s_rt_run_config)::selected
  character(len(sysname))::saved_name
  logical::exists
- integer::i
+ integer::i,child_owner
  status=1
 #if defined(USE_OPENACC) || defined(USE_FFTW)
  goto 900
@@ -270,10 +271,19 @@ contains
  status=0
 900 call checkpoint_collective_status(status)
  if(status/=0)return
- allocate(ctx)
+ call comm_begin_children(child_owner,status)
+ call checkpoint_collective_status(status)
+ if(status/=0)then
+  call comm_end_children(child_owner)
+  call comm_release_children(child_owner)
+  return
+ endif
+ allocate(ctx);ctx%mpi_child_owner=child_owner
  call exx_bind_system(ctx%system,ctx%hse,status)
  call checkpoint_collective_status(status)
  if(status/=0)then
+  call comm_end_children(child_owner)
+  call comm_release_children(child_owner)
   deallocate(ctx);return
  endif
  ! SYSname is a construction-only output label; no numerical setting is switched.
@@ -289,6 +299,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
                         ctx%V_local, ctx%Vbox, ctx%Vh, ctx%Vh_stock1, ctx%Vh_stock2, ctx%Vxc, ctx%Vpsl,&
                         ctx%pp, ctx%ppg, ctx%ppn, ctx%unfold, run_config=selected )
  sysname=saved_name
+ call comm_end_children(child_owner)
  ctx%run_settings=selected
  ctx%settings=capture_settings()
  process_settings=ctx%settings;settings_pinned=.true.
@@ -424,6 +435,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  call finalize_xc(ctx%xc_func)
  call exx_unbind_system(ctx%system)
  call rt_state_clear(ctx%hse)
+ call comm_release_children(ctx%mpi_child_owner)
  deallocate(ctx)
  nullify(ctx)
  end subroutine

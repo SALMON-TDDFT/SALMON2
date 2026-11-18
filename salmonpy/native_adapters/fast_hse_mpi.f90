@@ -422,6 +422,17 @@ integer(c_int) function sp_fast_hse_handle_init(path,timestep,capacity,symmetry,
  endif
  sp_fast_hse_handle_init=status
 end function
+integer(c_int) function sp_fast_hse_context_mpi_protocol() bind(C)
+ sp_fast_hse_context_mpi_protocol=1
+end function
+integer(c_int) function sp_fast_hse_mpi_resources(values) bind(C)
+ use communication,only:comm_child_counts
+ integer(c_int),intent(out)::values(2)
+ values=0;sp_fast_hse_mpi_resources=12
+ if(.not.attached_main_thread())return
+ call comm_child_counts(values(1),values(2))
+ sp_fast_hse_mpi_resources=0
+end function
 integer(c_int) function sp_fast_hse_shared_symmetry_protocol() bind(C)
  sp_fast_hse_shared_symmetry_protocol=1
 end function

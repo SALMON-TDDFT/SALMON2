@@ -22,7 +22,7 @@ contains
   subroutine init_sym_rho( num_, is_, ie_, icomm_r_ )
     implicit none
     integer,intent(in) :: num_(3),is_(3),ie_(3),icomm_r_
-    integer :: i1,i2,i3,isym,j1,j2,j3
+    integer :: i1,i2,i3,isym,j1,j2,j3,rank_r,size_r
     integer,allocatable :: icheck(:,:,:),itmp(:),icheck1(:,:,:)
     real(8) :: r1,r2,r3,t1,t2,t3
 
@@ -38,6 +38,10 @@ contains
     is=is_-1
     ie=ie_-1
     icomm_r=icomm_r_
+    ! k-only contexts have a one-rank r group. The common immutable density
+    ! map must not borrow the last context's retireable communicator.
+    call comm_get_groupinfo(icomm_r_,rank_r,size_r)
+    if(size_r==1)icomm_r=COMM_GROUP_SELF
     nsym=size(SymMatA,3)
 
     allocate( icheck(0:num(1)-1,0:num(2)-1,0:num(3)-1) ); icheck=0

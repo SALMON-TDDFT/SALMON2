@@ -227,3 +227,5 @@ install(FILES "${ROOT}/salmonpy/examples/mixed_shared_hse_layers.json" "${ROOT}/
 install(FILES "${ROOT}/tools/test_shared_mixed_restore_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/tools/test_shared_symmetry_hse_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_hse_mpi_resource_owners.py" DESTINATION salmonpy/_runtime_source/tools)

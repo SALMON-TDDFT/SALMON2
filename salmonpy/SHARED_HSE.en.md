@@ -1,6 +1,6 @@
 # Python shared fast-PR HSE model
 
-[日本語](SHARED_HSE.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.3`
+[日本語](SHARED_HSE.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.4`
 
 `NativeFastHSEBackend.open_model(initial, dt, context)` returns a
 `NativeFastHSEModel`. It verifies/copies one immutable material/symmetry input bundle and
@@ -69,8 +69,9 @@ Scope: one immutable **full-k or symmetry-reduced-k** model/process, existing k-
 backend and CPU/main-thread rules. Legacy `create_state` remains single-lifetime;
 choose it or `open_model` for a process. An explicitly rebuilt runtime must expose
 both handle protocol1 and model protocol1. Different symmetry groups or heterogeneous same-process inputs, automatic multipoint rank reassignment and
-threaded entry are separate work. Child communicators remain attachment-owned
-until final detach; repeated creation is not an unlimited resource guarantee.
+threaded entry are separate work. With context_mpi_protocol1, initialization children retire at owner close.
+Unscoped/model children remain attachment-owned until detach; repeated creation
+is not an unlimited resource guarantee.
 Budgets and physical-convergence advice remain advisory; inputs are not changed.
 A is Cartesian A/c in atomic units, j is charge-current density (minus SALMON
 matter current), dt atomic time and energy Hartree. x/y/z/circular drive is allowed.
@@ -166,3 +167,22 @@ A non-symmetric PBE point can generate components incompatible with the HSE
 retained group even when the incident pulse is along z. The tested combined PBE
 fixture is such a negative case; use full-k HSE for it. Full-k PBE/HSE mixtures
 remain supported and were regression-tested with the new runtime.
+
+## Per-context MPI initialization resources
+
+A newly built runtime exposing `sp_fast_hse_context_mpi_protocol()==1` tags
+communicators created during each synchronous state initialization with a unique
+owner ID. `state.close()` releases its request caches, XC/exchange/FFT owners and
+then those communicators. Other states and the host communicator stay live.
+Registry slots are reused without reusing owner IDs during an attachment.
+`sp_fast_hse_mpi_resources(int values[2])` reports live tracked children and registry
+slots for explicit native diagnostics (all subgroup ranks, main thread). It is
+not an estimate of process memory or a general MPI resource count.
+
+The shared density symmetry map uses MPI_COMM_SELF for the k-only, one-rank
+r-space group so closing its last constructor does not invalidate siblings.
+Other grid decompositions retain their supplied communicator. Unscoped children
+remain attachment-owned; native initialization crashes/allocation/MPI failures,
+arbitrary different inputs and concurrent entry remain outside this guarantee.
+Older runtimes still work in their documented scope but retain children until
+detach. Rebuild explicitly for the new retirement behavior; never patch a binary.

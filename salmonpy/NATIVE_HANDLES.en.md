@@ -60,8 +60,9 @@ another from the survivor, and proves the old token stays invalid. It is a
 composition demonstration, not a physically converged material calculation.
 
 Shared model input, symmetry, initialization, I/O/timer and MPI ownership are
-still bounded. Child MPI communicators are retained by the attachment until
-`sp_detach`; this is not a promise of unlimited create/close cycling. Close all
+still bounded. With context_mpi_protocol1, initialization child communicators retire at state
+close; unscoped children stay until `sp_detach`. This is not a promise of unlimited
+create/close cycling. Close all
 handles before detaching, then let the host finalize MPI. Heterogeneous models,
 arbitrary communicator changes and concurrent/threaded entry are not enabled.
 Stable token identity does not establish portable checkpoint files: inactive

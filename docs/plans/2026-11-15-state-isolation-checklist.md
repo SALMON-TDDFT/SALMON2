@@ -11,7 +11,7 @@ The dated sections below retain the scope at their completion time. Older statem
 This is the current queue. Historical unchecked items below record their earlier
 scope and must not be counted again as newly unfinished work.
 
-- [x] Delivery through7cddd3e9 is committed and pushed to the independent
+- [x] Delivery through26d60b50 is committed and pushed to the independent
   SALMONpy branch. Ownership9f07fb54 and C handles8fe6cd15 are included.
 - [x] Low-gradient Libxc HSE correction, full/reduced-k parity and internal MPI1/2.
 - [x] Cell/atom/grid/k-star/representative weights, PP references/KY records and
@@ -22,6 +22,9 @@ scope and must not be counted again as newly unfinished work.
 - [x] Explicit Python same-model shared model: independent dt/capacity/state/output,
   one work copy/attachment, idle recreation and direct save/resume. Independent
   and preceding singleton trajectories match in six MPI/OpenMP cases.
+- [x] Fast-PR HSE rt_open MPI children are context-owned and retired at close;
+  bounded registry reuse, independent sibling/control, full/reduced-k MPI1/2
+  verified. Standard TDDFT and unscoped/common ownership remain separate.
 - [x] Latest source/installed suites:603 tests each, one skip each; sdist→wheel,
   hashes, installed MPI/example, paired guides and AI catalog verified locally.
 
@@ -37,8 +40,9 @@ Remaining work, grouped rather than duplicating historical bullets:
    for LD/SBE/HSE128-step compatible local fields; arbitrary PBE fields may break
    retained symmetry and require full-k, as recorded in the validation.
    Different symmetry groups within one process remain in item3, not enabled here.
-3. [ ] Broader GS/TDDFT different-input ownership; per-context MPI subgroup
-   retirement, common initialization/I/O/timers and specialized SOC/+U/DC resources.
+3. [ ] Broader GS/TDDFT different-input ownership; standard-TDDFT and remaining
+   unscoped/common MPI resources, common initialization/I/O/timers and specialized
+   SOC/+U/DC resources. Fast-PR initialization-child retirement is complete.
    Same-model HSE token identity is complete within its documented boundary.
 4. [ ] Extend defined recovery beyond the verified numerical/staged-restore
    subset: initialization, allocation/I/O and unsupported native error paths.
@@ -56,7 +60,7 @@ for fixed-dt mixed calculations. Converged physical benchmarks remain material /
 user-owned. Molecular work is paused; budget excess warns; conventional HSE and
 routine Actions are not pending requirements.
 
-Evidence: [normal shared mixed-session validation](../validation/2026-11-18-shared-hse-mixed-session.md) and [shared symmetry validation](../validation/2026-11-18-shared-symmetry-hse.md).
+Evidence: [normal shared mixed-session validation](../validation/2026-11-18-shared-hse-mixed-session.md) [shared symmetry validation](../validation/2026-11-18-shared-symmetry-hse.md), and [context MPI retirement](../validation/2026-11-18-context-mpi-ownership.md).
 
 ### Fast-PR HSE priority
 
@@ -65,9 +69,9 @@ actual-A admission, general cells and learned Taylor/PT-CN persistence are verif
 on the established internal-MPI1/2 routes. Explicit C/Python same-model sharing is
 now available for full/reduced-k states of one immutable symmetry model. The factory
 is integrated into normal mixed point/rank assembly. Next address remaining
-different-input ownership and context resource retirement.
-Do not confuse completed separate-group symmetry support with still-open
-same-process multi-context symmetry. Standard-solver symmetry arithmetic remains
+different-input ownership and remaining common/context resources.
+Same-model full/reduced-k multi-context symmetry is complete within the measured
+scope; different-input or different-group sharing remains open. Standard-solver symmetry arithmetic remains
 a distinct port; no physical-convergence or cross-platform certificate is implied.
 
 ### Completed within measured scope
