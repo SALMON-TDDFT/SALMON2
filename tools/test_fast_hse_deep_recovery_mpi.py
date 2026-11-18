@@ -22,6 +22,8 @@ def main():
     fault_step=int(sys.argv[sys.argv.index('--fault-step')+1]) if '--fault-step' in sys.argv else 4
     overflow_A=float(sys.argv[sys.argv.index('--overflow-A')+1]) if '--overflow-A' in sys.argv else 1e200
     world=MPI.COMM_WORLD
+    symmetry='--symmetry' in sys.argv[4:]
+    axis=2 if symmetry else 0
     split='--split' in sys.argv[4:]
     assert world.size==(4 if split else 2)
     group=world.rank//2 if split else 0
@@ -40,7 +42,7 @@ def main():
     comm.Barrier()
     ctx=SimpleNamespace(solver_comm=comm,point_ids=(1,))
     initial=FastHSEMaterialProvider(gs,'rt.inp',max_steps=steps).prepare(ctx)
-    state=NativeFastHSEBackend(build,out).create_state(initial,1,.001,ctx)
+    state=NativeFastHSEBackend(build,out,allow_symmetry=symmetry).create_state(initial,1,.001,ctx)
     checkpoint=state.lib.sp_fast_hse_checkpoint;checkpoint.argtypes=[c.c_char_p,c.c_int];checkpoint.restype=c.c_int
     def save(tag):
         p=out/f'{tag}-{comm.rank}.bin'
@@ -51,7 +53,7 @@ def main():
     rows=[];cases=[]
     ptcn='hse_ptcn' in (Path(gs)/'rt.inp').read_text().lower()
     for step in range(1,steps+1):
-        value=np.array([.001*np.sin(.2*step),0.,0.])
+        value=np.zeros(3);value[axis]=.001*np.sin(.2*step)
         if not baseline and step==fault_step:
             attempts=[('overflow',None)]
             if faults and ptcn:attempts.append(('ptcn-solver',32))
@@ -61,7 +63,8 @@ def main():
                 if stage is not None:
                     fn=state.lib.sp_fast_hse_test_fault;fn.argtypes=[c.c_int,c.c_int];fn.restype=c.c_int
                     assert fn(stage,1)==0
-                drive=np.array([overflow_A,0.,0.]) if stage is None else value
+                drive=value.copy()
+                if stage is None:drive[axis]=overflow_A
                 try:state.advance(A,drive)
                 except NumericalError:pass
                 else:raise AssertionError('deep error was not returned')

@@ -24,3 +24,13 @@ initialization no longer assumes a z field; actual vectors are checked per step.
 The A/B symmetry comparison uses the existing initialization tolerance to avoid
 roundoff-only rejections. Original snapshots remain intact; manifests record
 complete-file before/after hashes. No installed binary is patched.
+
+# Symmetry-local learning histories and PT-CN
+
+Explicit-routing ownership, initialization and numeric checkpoint admission now
+accept the existing rank-local representative Taylor/PT-CN histories. Propagation
+and fitting formulas are retained. PT-CN electron-count diagnostics use only
+active k weights, avoiding a shape mismatch with padded reduced-k storage.
+Histories and native capability/diagnostic adapters are SALMONpy modifications
+under the existing Apache-2.0 distribution; original fast-PR snapshots and source
+provenance remain unchanged.

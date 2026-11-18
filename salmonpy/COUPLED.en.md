@@ -452,7 +452,7 @@ Audited native aggregate protection uses the separate protocol and `--protect-st
 ## Fast-PR HSE symmetry opt-in
 
 NativeFastHSEBackend(...,allow_symmetry=True) is bounded to internal-k1/2,
-factor-off Taylor. The ordinary mixed sample explicitly selects --hse-symmetry
+Taylor/PT-CN with matching mode capability. The ordinary mixed sample explicitly selects --hse-symmetry
 --hse-reference-bundle FULL_K_BUNDLE. Use --protect-steps/step_protected to roll
 back the entire loop when InputError rejects a symmetry-breaking A. Direct/protected
 resume and local two-LD/SBE/PBE-TDDFT/HSE mixtures are tested. Material/field/XC

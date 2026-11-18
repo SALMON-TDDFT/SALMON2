@@ -29,6 +29,7 @@ def main():
     parser.add_argument('--point-index', type=int, default=1)
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--steps', type=int, default=32)
+    parser.add_argument('--require-history',choices=('taylor','ptcn'))
     args = parser.parse_args()
     world = MPI.COMM_WORLD
     if world.size != 2*args.group_size:
@@ -53,14 +54,21 @@ def main():
         provider = FastHSEMaterialProvider(bundle, max_steps=args.steps)
         state = NativeFastHSEBackend(args.build, folder, allow_symmetry=True).create_state(
             provider.prepare(context), 0, args.dt, context)
-        currents, energies = [], []
+        currents, energies, histories = [], [], []
         try:
             for A in drive:
                 currents.append(state.step(A))
                 energies.append(state.energy)
+                if args.require_history:
+                    from salmonpy.fast_hse_mpi import _history_info
+                    histories.append(_history_info(state.lib))
         finally:
             state.close()
-        np.savez(folder/'result.npz', current=currents, energy=energies, A_over_c=drive)
+        if args.require_history:
+            history=np.array(histories);start=0 if args.require_history=='taylor' else 2;prediction=4 if start==0 else 5
+            assert np.any((history[:,start]>0)&(history[:,start+1]==history[:,start])),'history did not become ready'
+            assert np.any(history[:,prediction]==1),'learned prediction was never used'
+        np.savez(folder/'result.npz', current=currents, energy=energies, A_over_c=drive, history=histories)
         world.Barrier()
         if world.rank == 0:
             with np.load(args.output/str(args.group_size)/'result.npz', allow_pickle=False) as reduced:

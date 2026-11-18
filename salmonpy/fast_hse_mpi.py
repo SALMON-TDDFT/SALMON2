@@ -145,6 +145,36 @@ def _require_cell_protocol(lib,groups,symmetry,operations=None):
                 break
 
 
+def _symmetry_factor(groups,propagator):
+    body=groups.get('functional','')
+    factor=_scalar(body,'exx_factor_mode',default='off')
+    if factor not in ('off','strict','learned') or (propagator=='hse_taylor4_full' and factor!='off'):
+        raise InputError('symmetry requires a supported fast-PR factor mode; full-action remains factor-off test-only')
+    if propagator=='hse_ptcn' and factor!='off':
+        from ._hse_geometry import _numeric
+        if factor!='learned' or _numeric(body,'exx_factor_exact_interval',integer=True,default=8)[0]!=1:
+            raise InputError('learned PT-CN requires exx_factor_mode=learned and exx_factor_exact_interval=1, matching the native update contract')
+    return factor
+
+
+def _history_info(lib):
+    query=getattr(lib,'sp_fast_hse_history_info',None)
+    if query is None:raise InputError('native history diagnostics unavailable')
+    values=np.zeros(8,dtype=np.int32)
+    query.argtypes=[np.ctypeslib.ndpointer(dtype=np.int32,shape=(8,),flags='C_CONTIGUOUS')]
+    query.restype=c.c_int
+    if query(values)!=0:raise RuntimeFailure('native history diagnostics failed')
+    return values
+
+
+def _require_history_protocol(lib,factor,propagator):
+    if factor=='off' and propagator in ('hse_taylor4','hse_taylor4_full'):return
+    query=getattr(lib,'sp_fast_hse_symmetry_history_protocol',None)
+    if query is None:raise InputError('native core has no symmetry history protocol; rebuild explicitly with current sources')
+    query.argtypes=[];query.restype=c.c_int
+    if query()!=1:raise InputError('unsupported native symmetry history protocol')
+
+
 def _initializer(lib, allow_symmetry, group_size=1):
     if not allow_symmetry:
         return lib.sp_fast_hse_init
@@ -177,7 +207,8 @@ class NativeFastHSEBackend:
     each group has one shared work copy and one point. Errors can invalidate the
     whole MPI job; native process-terminating failures are not recoverable.
     allow_symmetry is explicit, identity-bound and restricted to one/two internal
-    ranks/factor-off Taylor; see FAST_HSE_SYMMETRY for numerical limitations.
+    ranks; Taylor strict/learned and PT-CN need the matching history capability.
+    See FAST_HSE_SYMMETRY for numerical limitations.
     """
     supported_group_sizes = (1,2)
     execution = 'collective'
@@ -239,9 +270,7 @@ class NativeFastHSEBackend:
                 raise InputError('symmetry input requires explicit allow_symmetry=True')
             operations = None
             if symmetry:
-                factor = _scalar(groups.get('functional',''), 'exx_factor_mode', default='off')
-                if factor != 'off' or propagator not in ('hse_taylor4','hse_taylor4_full'):
-                    raise InputError('symmetry requires factor-off fast-PR Taylor (full-action is test-only)')
+                factor = _symmetry_factor(groups,propagator)
                 operations = _symmetry_preflight(initial.directory/'sym.dat',
                     symmetry_setting)
             grid=preflight(initial.directory,groups,operations)
@@ -278,6 +307,7 @@ class NativeFastHSEBackend:
             lib = c.CDLL(str(self.library))
             _configure(lib)
             _require_cell_protocol(lib,groups,symmetry,operations)
+            if symmetry:_require_history_protocol(lib,factor,propagator)
             initializer = _initializer(lib,self.allow_symmetry,comm.size)
         except Exception as exc:
             error = str(exc)

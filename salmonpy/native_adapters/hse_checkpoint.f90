@@ -67,7 +67,8 @@ contains
   write(unit,iostat=status)magic
   if(status/=0)return
   call io_metadata(unit,.false.,metadata,limit,status)
-  if(allocated(value%symmetry))call io_symmetry(unit,.false.,value%symmetry,state%native_symmetry,status)
+  if(allocated(value%symmetry))call io_symmetry(unit,.false.,value%symmetry,state%native_symmetry,status, &
+      state%native_kernel%phase_start,size(state%native_kernel%phase,2))
   call io_numeric(unit,.false.,value,limit,status)
   if(status/=0)return
   magic='SALMONPY_HSE_COMPLETE_V1'
@@ -101,7 +102,8 @@ contains
     status=1;return
   endif
   if(allocated(candidate%symmetry))then
-    call io_symmetry(unit,.true.,candidate%symmetry,state%native_symmetry,status)
+    call io_symmetry(unit,.true.,candidate%symmetry,state%native_symmetry,status, &
+      state%native_kernel%phase_start,size(state%native_kernel%phase,2))
     if(status/=0)return
   endif
   call io_numeric(unit,.true.,candidate,limit,status)
@@ -412,12 +414,13 @@ contains
   if(allocated(target%cached_phase))deallocate(target%cached_phase)
   if(allocated(source%cached_phase))call move_alloc(source%cached_phase,target%cached_phase)
  end subroutine
- subroutine io_symmetry(unit,reading,value,expected,status)
+ subroutine io_symmetry(unit,reading,value,expected,status,phase_first,phase_count)
   integer,intent(in)::unit
   logical,intent(in)::reading
   type(s_exx_symmetry_map),intent(inout)::value
   type(s_exx_symmetry_map),intent(in)::expected
   integer,intent(inout)::status
+  integer,intent(in)::phase_first,phase_count
   integer::header(7),first,count,columns,i,allocation_status
   logical::cached
   if(status/=0)return
@@ -584,9 +587,16 @@ contains
     write(unit,iostat=status)cached,first,count
   endif
   if(status/=0)return
-  if((cached.neqv.allocated(expected%cached_phase)).or. &
-     first/=expected%cached_first.or.count/=expected%cached_count)then
-    status=1;return
+  ! Cache presence is optional optimization state, not partition identity.
+  ! Pin any saved cache to trusted kernel ownership before indexing/allocating.
+  if(cached)then
+    if(first/=phase_first.or.count/=phase_count)then
+      status=1;return
+    endif
+  else
+    if(first/=1.or.count/=0)then
+      status=1;return
+    endif
   endif
   if(reading)then
     if(allocated(value%cached_phase))deallocate(value%cached_phase)
@@ -643,7 +653,7 @@ contains
       if(state%native_symmetry%cached_first/=state%native_kernel%phase_start)return
       if(state%native_symmetry%cached_count/=size(state%native_kernel%phase,2))return
     endif
-    if(state%factor_experiment.or.state%factor_learned)return
+    ! Local representative histories use the existing bounded history payload.
   endif
   if(state%ace%metric_distributed.or.state%initial_ace%metric_distributed.or. &
      state%midpoint_ace%metric_distributed.or.state%scf_damped_ace%metric_distributed)return

@@ -73,6 +73,10 @@ module exx_native
   end interface
 public::exx_recovery_status
 contains
+  integer(c_int) function sp_fast_hse_symmetry_history_protocol() bind(C)
+    use iso_c_binding,only:c_int
+    sp_fast_hse_symmetry_history_protocol=1_c_int
+  end function
   integer function exx_recovery_status(system) result(code)
     type(s_dft_system),intent(in)::system
     type(s_exx_rt_state),pointer::owner
@@ -248,9 +252,10 @@ contains
     if(system%kpoint_input%use_symmetry)then
       ok=.false.
       ! Explicit-owner symmetry scope: one/two k ranks, CPU full-q scalar exchange.
-      ! Learned/PT-CN symmetry needs its own history/persistence validation.
-      if(exx_factor_mode/='off')return
-      if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full')return
+      ! Histories belong to local representatives and use the same full-q action.
+      if(exx_factor_mode/='off'.and.exx_factor_mode/='strict'.and.exx_factor_mode/='learned')return
+      if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full'.and.propagator/='hse_ptcn')return
+      if(propagator=='hse_taylor4_full'.and.exx_factor_mode/='off')return
       if(info%isize_k>2.or.info%isize_k>system%nk.or.any(hse_q_reduction/=1).or.any(system%kmesh<1))return
       if(.not.allocated(system%kpoint_input%symmat_a))return
       if(.not.allocated(system%kpoint_input%symmat_b))return

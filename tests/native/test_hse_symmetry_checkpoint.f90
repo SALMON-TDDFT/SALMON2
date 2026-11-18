@@ -132,6 +132,14 @@ contains
   open(newunit=archive,status='scratch',access='stream',form='unformatted')
   call hse_checkpoint_write(archive,owner,status)
   if(status/=0)stop 101
+  ! Optional cache presence must not refuse an otherwise identical owner.
+  if(.not.allocated(owner%native_symmetry%cached_phase))then
+    call symmetry_cache_phases(owner%native_symmetry,owner%native_kernel%phase_start, &
+      size(owner%native_kernel%phase,2))
+    rewind(archive);call hse_checkpoint_read(archive,owner,status)
+    if(status/=0.or.allocated(owner%native_symmetry%cached_phase))stop 121
+    call assert_bytes(owner,archive)
+  endif
   if(allocated(owner%native_symmetry%cached_phase))then
     open(newunit=u,status='scratch',access='stream',form='unformatted')
     saved_count=owner%native_symmetry%cached_count;owner%native_symmetry%cached_count=-1
@@ -316,11 +324,11 @@ contains
   case(1)
    wrong%num=[4,2,8];wrong%ie=wrong%num
   case(2)
-   info%isize_k=2
+   info%isize_k=3
   case(3)
-   exx_factor_mode='learned'
+   exx_factor_mode='invalid'
   case(4)
-   propagator='hse_ptcn'
+   propagator='unsupported'
   end select
   call exx_refresh(s,wrong,info,psi,rt_status=status)
   if(status/=2)stop 23

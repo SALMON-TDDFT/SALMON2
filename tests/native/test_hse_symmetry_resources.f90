@@ -207,11 +207,11 @@ contains
   case(1)
    wrong%num=[4,2,8];wrong%ie=wrong%num
   case(2)
-   info%isize_k=2
+   info%isize_k=3
   case(3)
-   exx_factor_mode='learned'
+   exx_factor_mode='invalid'
   case(4)
-   propagator='hse_ptcn'
+   propagator='unsupported'
   end select
   call exx_refresh(s,wrong,info,psi,rt_status=status)
   if(status/=2)stop 23

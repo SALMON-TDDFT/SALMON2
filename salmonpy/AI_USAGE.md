@@ -751,3 +751,5 @@ k-star・擬ポテンシャル内容・再開バイナリとの互換性や全�
 形式不正の拒否と物理収束を区別する。collective create_stateへ全solverランクで参加する。
 
 高速PR版HSEの外場A/cはCartesianの3成分で、z限定ではありません。x/yや円偏光には実際の全時刻のAとセル・原子配置を保つ対称群を選ぶか、対応する全k点初期状態を使います。一般セルとz非保存群には新コアのcapabilityが必要です。波形の投影・微小成分の切捨て・群の自動変更はしません。詳細はFAST_HSE_SYMMETRY.md／FAST_HSE_SYMMETRY.en.mdを参照してください。
+
+対称性付き高速PRのTaylor strict／learnedとPT-CNには `sp_fast_hse_symmetry_history_protocol()==1` を持つ明示ビルドを使います。学習PT-CNは既存方式どおり exact interval=1・predictor_corrector=n。設定を自動変更しません。履歴・ready・予測状態を保存し、受理済み時刻を再生せずに再開します。異なるモデルを同一プロセスで自由に混在できるとは説明しません。

@@ -281,7 +281,7 @@ contains
  call comm_summation(local_number,number,info%icomm_ko)
  call comm_get_max([gr],gmax,1,info%icomm_rko)
  gr=gmax(1)
- target=sum(system%rocc(:,:,1)*spread(system%wtk,1,system%no))
+ target=sum(system%rocc(:,:,1)*spread(system%wtk(:system%nk),1,system%no))
  if(.not.ieee_is_finite(number).or..not.ieee_is_finite(gr))code=1
  if(gr>1d-8.or.abs(number-target)>1d-7)code=1
  call comm_get_max(code,info%icomm_rko)

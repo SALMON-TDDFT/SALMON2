@@ -29,11 +29,12 @@ def main():
     parser.add_argument('--steps', type=int, default=32)
     parser.add_argument('--group-size', type=int, choices=(1,2), default=1)
     parser.add_argument('--admission-fault', choices=('truncated','nonfinite','nonclosed','cell','cell-metric','cell-singular','atoms','grid','grid-translation','k-shift','k-count','pseudo','gs-info','gs-occupation','gs-wfn'))
+    parser.add_argument('--require-history',choices=('taylor','ptcn'))
     parser.add_argument('--polarization',choices=('x','y','z','circular-xy'),default='z')
     parser.add_argument('--split', type=int, default=7)
     args = parser.parse_args()
-    if not 3 < args.split < args.steps:
-        raise ValueError('require 3 < split < steps')
+    if not 0 < args.split < args.steps or args.steps < 4:
+        raise ValueError('require 0 < split < steps and at least four steps for the rejection check')
     world = MPI.COMM_WORLD
     if world.size % args.group_size:
         raise ValueError('world size must be divisible by group size')
@@ -133,7 +134,7 @@ def main():
             with np.load(trace) as expected:
                 np.testing.assert_array_equal(state.current, expected['current'])
                 np.testing.assert_array_equal(state.A, expected['A'])
-        rows = []
+        rows = [];histories=[]
         for step in range(first+1, args.steps+1):
             if step == 4:
                 before = root / 'before-field.bin'
@@ -156,15 +157,23 @@ def main():
                 state.checkpoint(shard, False)
                 saved_current = state.current.copy()
             if step > args.split:
+                if args.require_history:
+                    from salmonpy.fast_hse_mpi import _history_info
+                    histories.append(_history_info(state.lib))
                 rows.append(np.r_[state.current, state.energy])
         if args.mode == 'save':
-            np.savez(trace, trace=np.array(rows), current=saved_current, A=endpoint(args.split))
+            np.savez(trace, trace=np.array(rows), current=saved_current, A=endpoint(args.split),history=histories)
             state.checkpoint(target / 'final.bin', False)
         else:
             with np.load(trace) as expected:
                 np.testing.assert_array_equal(np.array(rows), expected['trace'])
+                if args.require_history:np.testing.assert_array_equal(histories,expected['history'])
             state.checkpoint(root / 'final.bin', False)
             assert (root / 'final.bin').read_bytes() == (target / 'final.bin').read_bytes()
+        if args.require_history:
+            history=np.array(histories);start=0 if args.require_history=='taylor' else 2;prediction=4 if start==0 else 5
+            assert np.any((history[:,start]>0)&(history[:,start+1]==history[:,start]))
+            assert np.any(history[:,prediction]==1)
         (root / 'result.json').write_text(json.dumps(dict(status='passed', mode=args.mode,
             point_id=point, internal_ranks=comm.size, steps=args.steps, resumed_calls=args.steps-first,
             elapsed_steps_replayed=0, field_rejection_preserved=True,

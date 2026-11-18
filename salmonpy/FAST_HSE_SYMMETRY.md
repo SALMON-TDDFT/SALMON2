@@ -1,6 +1,6 @@
 # 高速PR版HSEと対称性
 
-[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.9`
+[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.10`
 
 HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成・orbit再利用・ACEと対称性を
 中心に進めます。通常版HSEを代替エンジンにはしません。標準SALMONの対称性縮約とは演算が
@@ -10,8 +10,8 @@ HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成�
 |---|---|
 | 高速PR版の交換コア | 対称性マップ・位相キャッシュ・FFT資源を独立所有。周期・非スピン分極・CPU・full-q・内部kランク1／2を検証 |
 | 対称性／orbit／ACEの比較 | 縮約4代表k点と独立に列挙した全8k点。C2z／mirror-x、異なるセル・遮蔽係数・軌道 |
-| 内部Fortran TDDFT | 明示opt-in、1プロセス1初期化／内部k1／2、factor-off Taylor。直接／候補再開を検証 |
-| Python／native-C／FDTD | 新プロトコルの明示opt-in。group1／2・factor-off Taylorの保護付き混在を検証。既定は拒否 |
+| 内部Fortran TDDFT | 明示opt-in、1プロセス1初期化／内部k1／2、Taylor／PT-CN（学習含む）。直接／候補再開を検証 |
+| Python／native-C／FDTD | 新プロトコルの明示opt-in。group1／2・Taylor／PT-CNの混在を検証。既定は拒否 |
 | 保存復元 | 内部交換コアV2と明示的内部TDDFTの直接／候補再開を検証。限定した公開の保護付き混在再開を検証 |
 | 対称性付き内部k MPI2 | 専用capabilityを持つ新ライブラリで明示対応。全／縮約比較と直接再開を検証 |
 
@@ -22,8 +22,7 @@ HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成�
 全格子検査にはそのsystemのngrid・primitiveセル・格子幅を使い、共有num_rgridには依存しません。
 対応するrt_status入口では、格子次元／点数の不一致や未対応owner分割をrefresh／actionの変更前に
 拒否します。それ以外の不正な対称操作・原子配置・重みはnative停止の対象であり、一般的な
-数値異常復帰を保証するものではありません。新しいコア範囲はexx_factor_mode='off'とTaylor／ACE
-または比較用full-actionに限定し、学習／PT-CNの対称性は更新前に拒否します。
+数値異常復帰を保証するものではありません。コアはTaylor／ACE、既存のstrict／learned履歴、PT-CNに対応します。比較用full-actionはfactor-offのみです。新しい組合せには後述の履歴capabilityが必要です。
 
 セル・物質・対称群を変更する際は新しいownerを作り、生存中の所有設定を書き換えません。
 軌道の更新は既存のrefresh契約で行います。FFTプラン・コミュニケータを所有する状態を
@@ -70,13 +69,12 @@ nativeプローブ `_runtime_source/tests/native/test_hse_symmetry_checkpoint.f9
 star／orbits、キャッシュ有無、OMP1／2、MPI1／2プロセスの独立COMM_SELFコアを検証します。
 ownerの作り直しを含め、復元直後の作用・エネルギーと、その後のrefresh／actionのcheckpoint
 バイト列が連続実行と一致します。これは交換コアの保存復元です。別枠の内部TDDFT検証は次節を参照してください。
-既定のPython／native-C TDDFTの拒否は維持します。限定した公開opt-inは後節を参照してください。学習／PT-CNの
-対称性、縮約内部k MPI、対称性付き混在計算の失敗・再開は残作業です。
+既定のPython／native-C TDDFTの拒否は維持します。限定した公開opt-inは後節を参照してください。対称性付き履歴・内部k MPI・混在接続の現在の範囲は後節を参照してください。
 
 ## 明示的な内部TDDFTの検証
 
 内部Fortranの `rt_open(..., allow_symmetry=.true.)` で、交換コアとTDDFT全体のcheckpointを
-接続します。周期・非スピン分極・CPU・full-q・内部kランク1／2・factor-offのTaylor／ACEと、
+接続します。周期・非スピン分極・CPU・full-q・内部kランク1／2・Taylor／ACE／PT-CNと、
 各時刻の実A/cを保つ対称群を使います。x/y/zや円偏光を固定z条件で制限しません。full-actionは比較検証用のみです。初期化は1プロセス1回で、
 独立したTDDFTの実行には新しいプロセスを用意します。
 
@@ -108,8 +106,7 @@ nativeの `test_hse_symmetry_tddft.f90` と、補助ツール
 `sp_fast_hse_symmetry_protocol()==1` が必要です。新initの引数は従来と同じ
 `(const char *path, double dt, int capacity, double J[3])` です。opt-inをbackendの識別情報に
 含め、内部kランク1／2を許可します。入力操作行列は変更しません。未対応・未知のプロトコルは
-native寿命を取得する前に拒否します。学習／PT-CNの対称性は未対応、full-actionは
-比較検証用のみです。
+native寿命を取得する前に拒否します。学習／PT-CNには履歴capabilityが必要です。full-actionは比較検証用のみです。
 
 有限かつ全ランク一致のstatus34と専用プロトコルが揃った場合だけ、Pythonは受理状態を保つ
 `InputError` を返します。Aを修正してから再試行します。群は入射偏光だけでなく、実際のFDTD局所場と
@@ -170,8 +167,8 @@ wrapperを直しても `low_gradient_sensitivity_detected=True` になり得ま�
 
 内部2ランクでは `sp_fast_hse_symmetry_kmpi_protocol()==1` が追加で必要です。
 旧ライブラリはnative寿命の取得前に拒否します。CPU・非スピン分極・周期・full-q・
-factor-off Taylorの範囲を維持し、各ランクが連続した代表k点とそのstar位相を所有します。
-空の担当範囲、実空間／軌道分割、学習／PT-CN対称性は今回の対象外です。
+各ランクが連続した代表k点とそのstar位相を所有します。学習／PT-CNの履歴も各ランクの代表点ごとに保持します。
+空の担当範囲、実空間／軌道分割の拡張は対象外です。
 
 保存時は全k点を各ランクへ複製せず、担当範囲の位相キャッシュを保存します。
 復元先で独立に初期化した範囲・MPIランク数・担当と照合し、不一致を拒否します。
@@ -262,4 +259,23 @@ python tools/test_fast_hse_general_cell_mpi.py \
 # --roundoff-reference-build ADMISSION_REFERENCE を任意で追加します。
 ```
 
-再開では同一バイナリ・同一モデル・同一MPI分割を使います。checkpoint形式と保存配列は変更していません。学習／PT-CNの対称性、一般の空間群、実空間分割の拡張は別の残作業です。
+再開では同一バイナリ・同一モデル・同一MPI分割を使います。checkpoint形式と保存配列は変更していません。一般の空間群、実空間分割の拡張は別の残作業です。
+
+## 対称性付き学習とPT-CN
+
+`allow_symmetry=True` のまま、既存の `hse_taylor4`（factor off／strict／learned）と `hse_ptcn`（off／learned）を利用できます。新しい組合せは `sp_fast_hse_symmetry_history_protocol()==1` を持つコアから明示ビルドしたライブラリが必要です。従来のfactor-off Taylorだけに不要な新capabilityは要求しません。
+
+学習Taylorの `exx_factor_exact_interval` は既存の教師更新間隔です。学習PT-CNは既存方式と同じく **`exx_factor_exact_interval=1`、`yn_predictor_corrector='n'`** を使います。勝手にパラメーターや方式を変更しません。入力は状態作成前に決めてください。
+
+履歴は各ランクの代表k点に属し、係数・教師履歴・ready／predictionフラグ・受理時刻・PT-CNのdtを従来の数値payloadへ保存します。直接再開で受理済みステップを再生しません。実際の予測使用と、復元後の履歴診断の一致も検査します。新しい可搬形式や同一プロセス内の複数TDDFT対応を意味しません。
+
+```sh
+python tools/test_fast_hse_symmetry_history_mpi.py \
+  NEW_HISTORY_BUILD FULL_K_BUNDLE REDUCED_K_BUNDLE NEW_OUTPUT
+```
+
+この開発用試験は既存の合成factor-off fixtureから明示的に試験条件を作ります。内部MPI1/2、全8／縮約4k点、学習前後のsplit3／7／13、異なる遮蔽係数の独立2群、直接再開、禁止方向の場の拒否・再試行を確認します。実材料のGSを自動変換するものではありません。学習Taylor／PT-CNは学習後の数値overflowでも、履歴を含む状態を維持し、修正したAで再試行すると独立した連続実行にビット一致します。
+
+通常FDTD混在例は、対応する縮約・全k点の両方の入力束で同じ伝播法・学習条件を指定します。計算中の適応や学習方式への自動切替はありません。
+
+位相キャッシュの有無は最適化状態として復元し、新しいownerで確保済みかどうかだけでは拒否しません。保存されたキャッシュの範囲は、独立初期化したkernelのMPI位相所有範囲と確保前に照合します。静的map、寸法・有限性・切断検査は維持します。

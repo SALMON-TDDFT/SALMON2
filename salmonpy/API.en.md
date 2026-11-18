@@ -146,9 +146,9 @@ k-point/symmetry/communicator and other solver dependencies still apply.
 
 Fast-PR is the only supported HSE engine. `NativeFastHSEBackend(build_record, work_root,
 allow_symmetry=True)` explicitly permits scalar periodic CPU/full-q/internal-k1/2,
-factor-off Taylor symmetry. Shared symmetry settings are immutable, one native
+Taylor/PT-CN symmetry with matching mode capability. Shared symmetry settings are immutable, one native
 lifetime per process. The default False and existing C init remain symmetry-denied.
-Learned/PT-CN symmetry and reduced internal-k MPI2 are unsupported.
+Internal-k2 requires sp_fast_hse_symmetry_kmpi_protocol()==1. Taylor strict/learned and PT-CN require sp_fast_hse_symmetry_history_protocol()==1; learned PT-CN keeps interval=1 and predictor_corrector=n.
 
 `sp_fast_hse_init_symmetry` has the existing init arguments and declares
 `sp_fast_hse_symmetry_protocol()==1`. Only unanimous finite status34 with that

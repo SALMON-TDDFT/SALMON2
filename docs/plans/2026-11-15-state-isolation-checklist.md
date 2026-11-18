@@ -758,3 +758,26 @@ by these structural checks. Resource budget advice does not enforce a rank/memor
 
 Historical axis-aligned-only and fixed-z restrictions above describe older
 binaries; use the current guide and corrected explicitly built runtime.
+
+## 2026-11-18 — Symmetry histories and PT-CN
+
+- [x] Admit existing Taylor strict/learned and PT-CN off/learned with explicit
+  native history capability; old factor-off Taylor requirements unchanged.
+- [x] Rank-local representative history payloads retained; no new restart format.
+- [x] PT-CN electron target slices active weights to match reduced rocc shape.
+- [x] Read-only local diagnostics prove actual history readiness/prediction use.
+- [x] Full8/reduced4-k, MPI1/2, independent material groups, splits3/7/13 direct
+  resume and byte-identical future current/energy/history diagnostics.
+- [x] Learned Taylor/PT-CN deep numeric overflow after training preserves state
+  bytes and output files; retry matches an independent continuous baseline.
+- [x] FDTD/LD/SBE/learned-HSE mixed examples match full-k fast-PR reference.
+- [x] Nonuniform27→15-k learned PT-CN with uneven MPI ownership, own resume;
+  circular-xy learned PT-CN full/reduced comparison.
+- [x] Native resource/checkpoint probes: MPI2 processes with independent cores,
+  OMP1/2, full/ACE, stars/orbits, optional cache presence across fresh owner.
+
+Optional phase-cache allocation is not MPI identity; its trusted phase span still
+must match before allocation. Learned CN interval1 is an existing method contract,
+not an extra accuracy restriction. Historical learned/PT-CN-unavailable notes
+above are superseded. Remaining next work: broader state/input/I/O/MPI/timer
+ownership and stable native handles, larger environments/scaling and archives.

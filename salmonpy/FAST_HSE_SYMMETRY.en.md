@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.9`
+[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.10`
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -12,8 +12,8 @@ the fast-PR algorithm.
 |---|---|
 | Fast-PR exchange core | Independent symmetry maps/phase caches/FFT owners; tested scalar periodic CPU, full q, one/two internal k ranks |
 | Symmetry/orbit/ACE comparison | Reduced4 k representatives vs independently enumerated full8 k points; C2z and mirror-x groups, different cells/omega/sources |
-| Internal Fortran TDDFT | Explicit opt-in, one initialization/process/internal-k1/2, factor-off Taylor; direct/staged resume tested |
-| Python/native-C/FDTD | Explicit new-protocol allow_symmetry opt-in; groups1/2 factor-off Taylor, protected mixed tests; default remains denied |
+| Internal Fortran TDDFT | Explicit opt-in, one initialization/process/internal-k1/2, Taylor/PT-CN including learned modes; direct/staged resume tested |
+| Python/native-C/FDTD | Explicit new-protocol allow_symmetry opt-in; groups1/2 Taylor/PT-CN, mixed tests; default remains denied |
 | Checkpoint | Internal exchange V2 and explicit internal TDDFT direct/staged resume tested; bounded public protected mixed resume tested |
 | Symmetry internal MPI k2 | Explicit new capability; full/reduced comparison and direct resume verified |
 
@@ -27,8 +27,7 @@ shared num_rgrid. Dimension/count mismatch or an unsupported owner layout reject
 before refresh/action mutation when using the declared rt_status entry. Other
 invalid symmetry operations/atoms/weights may still terminate native execution.
 The admission result is not a general numerical-failure recovery guarantee.
-The new core scope requires exx_factor_mode='off' and Taylor/ACE or the test-only
-full-action variant; learned/PT-CN symmetry still rejects before mutation.
+The core admits Taylor/ACE with off/strict/learned factors and PT-CN with off/learned factors. New combinations require the history capability described below; full-action remains factor-off test-only.
 
 Create a fresh owner when changing cell/material/group settings; mutating live
 owned configuration is not a supported way to change the model. Update source
@@ -85,14 +84,13 @@ checks full/ACE, star/orbits, cache on/off, OMP1/2 and MPI1/2 processes using
 independent COMM_SELF cores. Restored action/energy and subsequent refresh/action
 checkpoint bytes match continuous core execution, including reopening an owner.
 This is exchange-core persistence; the separate internal TDDFT tests are described below.
-Ordinary/default Python/native-C init stays symmetry-denied; the explicit opt-in is described below. Learned/PT-CN symmetry,
-reduced internal-k MPI and ordinary symmetric mixed failure/resume remain open.
+Ordinary/default Python/native-C init stays symmetry-denied; the explicit opt-in is described below. Current learned/PT-CN symmetry, internal-k MPI and ordinary mixed failure/resume coverage are described below.
 
 ## Explicit internal TDDFT validation
 
 An internal Fortran `rt_open(..., allow_symmetry=.true.)` opt-in now connects the
 exchange core to the complete TDDFT checkpoint path. It is bounded to scalar
-periodic CPU/full-q, one/two internal k ranks, factor-off Taylor/ACE and a retained
+periodic CPU/full-q, one/two internal k ranks, Taylor/ACE or PT-CN and a retained
 group preserving the actual A/c at each step. Full-action is test-only. One initialization per process is
 allowed; initialize a fresh process for each independent TDDFT lifetime.
 
@@ -129,8 +127,7 @@ The default False selects existing `sp_fast_hse_init`. True requires
 has the same `(const char *path, double dt, int capacity, double J[3])` arguments.
 The opt-in is included in backend identity, admits one/two internal k ranks, and never
 changes the supplied operation matrices. Missing/unknown protocols reject before
-acquiring a native lifetime. Learned/PT-CN symmetry stays
-unsupported; full-action remains test-only.
+acquiring a native lifetime. Learned/PT-CN symmetry requires the history capability; full-action remains test-only.
 
 Only unanimous finite status34 plus the specific protocol becomes a Python
 `InputError` preserving the accepted state. Correct A before retrying. A reduced
@@ -201,9 +198,9 @@ warning-only memory budgets and paused molecular work remain unchanged.
 
 Two internal ranks additionally require `sp_fast_hse_symmetry_kmpi_protocol()==1`.
 Old libraries reject before acquiring a native lifetime. The scalar periodic
-CPU/full-q/factor-off Taylor profile is unchanged. Each rank owns contiguous
+CPU/full-q profile is unchanged. Each rank owns contiguous
 representatives and their star phases. Empty ownership, real-space/orbital
-partitioning and learned/PT-CN symmetry are outside this validation.
+partitioning remains outside this validation; local representative histories are covered below.
 
 Archives store rank-local phase caches rather than replicating all k points per
 rank. Restore compares these to independently initialized ownership and the
@@ -321,5 +318,41 @@ python tools/test_fast_hse_general_cell_mpi.py \
 ```
 
 Resume still requires the same binary/model/MPI partition; checkpoint encoding
-and arrays are unchanged. Learned/PT-CN symmetry, arbitrary space groups and
+and arrays are unchanged. Arbitrary space groups and
 broader real-space partitions remain separate work.
+
+## Symmetry learned histories and PT-CN
+
+With `allow_symmetry=True`, use existing `hse_taylor4` off/strict/learned factors
+or `hse_ptcn` off/learned factors. New combinations require an explicitly built
+library with `sp_fast_hse_symmetry_history_protocol()==1`. Ordinary factor-off
+Taylor does not require this additional capability.
+
+Taylor uses its existing `exx_factor_exact_interval` teacher cadence. Learned
+PT-CN requires **`exx_factor_exact_interval=1` and `yn_predictor_corrector='n'`**,
+as in the existing native method. Parameters/methods are not automatically changed.
+Choose them before creating a state.
+
+Histories belong to rank-local representatives. Existing numeric payloads retain
+coefficients, teachers, ready/prediction flags, accepted counters and PT-CN dt;
+direct resume replays no accepted steps. Tests verify actual prediction use and
+identical history diagnostics after restore. This adds neither a portable archive
+format nor unrestricted multiple TDDFT contexts per process.
+
+```sh
+python tools/test_fast_hse_symmetry_history_mpi.py \
+  NEW_HISTORY_BUILD FULL_K_BUNDLE REDUCED_K_BUNDLE NEW_OUTPUT
+```
+
+This developer test explicitly derives synthetic test inputs from existing
+factor-off fixtures. It covers internal MPI1/2, full8/reduced4 k points, split3/7/13
+before/after training, two independent screening groups, direct resume and
+state-preserving incompatible-field rejection/retry. It does not convert arbitrary
+real-material GS data. Learned Taylor/PT-CN also retain all saved state/history
+after post-training numerical overflow; corrected retries match an independent
+continuous trajectory bit-for-bit.
+
+For the ordinary FDTD mixed sample, supply matching reduced/full-k bundles with
+the same propagator and learning conditions. No mid-run method switching occurs.
+
+Optional phase-cache presence is restored as optimization state; a freshly initialized owner need not already have that allocation. Saved cache ranges are checked against trusted kernel MPI phase ownership before allocation. Static map, shape, finiteness and truncation validation remains active.

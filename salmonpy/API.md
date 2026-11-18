@@ -125,9 +125,8 @@ RTの `temperature < -1e-12` 分岐など、正常入力の既存GS／RT選択�
 コミュニケータなどの共有依存は引き続き残ります。
 
 HSEは高速PR版のみです。`NativeFastHSEBackend(build_record, work_root, allow_symmetry=True)` で
-対称性を明示的に許可できます。内部kランク1／2・周期・非スピン分極・CPU・full-q・factor-off
-Taylorに限定し、共有の対称化設定は不変、1プロセス1寿命です。既定値Falseと既存C入口は
-対称性を拒否します。内部2ランクはsp_fast_hse_symmetry_kmpi_protocol()==1が必要。学習／PT-CN対称性は未対応です。
+対称性を明示的に許可できます。内部kランク1／2・周期・非スピン分極・CPU・full-qのTaylor／PT-CNに対応し、共有の対称化設定は不変、1プロセス1寿命です。既定値Falseと既存C入口は
+対称性を拒否します。内部2ランクはsp_fast_hse_symmetry_kmpi_protocol()==1が必要。Taylor strict／learned・PT-CNにはsp_fast_hse_symmetry_history_protocol()==1が必要です。学習PT-CNは既存方式どおりinterval=1・predictor_corrector=nを指定します。
 
 新C入口 `sp_fast_hse_init_symmetry` は既存initと同じ引数で、
 `sp_fast_hse_symmetry_protocol()==1` を宣言します。全ランクの有限なstatus34とこの宣言を

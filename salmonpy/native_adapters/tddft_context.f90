@@ -18,7 +18,7 @@ module salmonpy_tddft_context
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
  private
- public::rt_step_transaction,rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step,rt_current,rt_vector_potential
+ public::rt_history_info,rt_step_transaction,rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step,rt_current,rt_vector_potential
  type fixed_settings
   real(8)::omega,electronic_temperature
   integer::grid(3),mesh(3),bands,energy_interval,electrons,hamil,exact_interval,warmup,teachers
@@ -246,8 +246,10 @@ contains
   if(settings_pinned)goto 900
   if(.not.present(allow_symmetry))goto 900
   if(.not.allow_symmetry)goto 900
-  if(nproc_size_global<1.or.nproc_size_global>2.or.exx_factor_mode/='off')goto 900
-  if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full')goto 900
+  if(nproc_size_global<1.or.nproc_size_global>2)goto 900
+  if(exx_factor_mode/='off'.and.exx_factor_mode/='strict'.and.exx_factor_mode/='learned')goto 900
+  if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full'.and.propagator/='hse_ptcn')goto 900
+  if(propagator=='hse_taylor4_full'.and.exx_factor_mode/='off')goto 900
  endif
  if(yn_restart/='n'.or.e_impulse/=0d0.or.ae_shape1/='impulse'.or.ae_shape2/='none')goto 900
  if(yn_out_current_decomposed/='n'.or.yn_out_intraband_current/='n'.or.yn_out_dns_ac_je/='n'.or. &
@@ -416,6 +418,26 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  call rt_state_clear(ctx%hse)
  deallocate(ctx)
  nullify(ctx)
+ end subroutine
+ subroutine rt_history_info(ctx,values,status)
+ ! Rank-local read-only diagnostics; no propagation, MPI or checkpoint mutation.
+ type(tddft_context),pointer,intent(in)::ctx
+ integer,intent(out)::values(8),status
+ values=0;status=1
+ if(.not.associated(ctx))return
+ if(ctx%checkpoint_failed)return
+ if(allocated(ctx%hse%factor_history))then
+   values(1)=size(ctx%hse%factor_history)
+   values(2)=count(ctx%hse%factor_history%ready)
+ endif
+ if(allocated(ctx%hse%ptcn_history))then
+   values(3)=size(ctx%hse%ptcn_history)
+   values(4)=count(ctx%hse%ptcn_history%ready)
+ endif
+ values(5)=merge(1,0,ctx%hse%factor_prediction_installed)
+ values(6)=merge(1,0,ctx%hse%ptcn_predicted)
+ values(7)=ctx%hse%factor_step;values(8)=ctx%hse%ptcn_accepted_step
+ status=0
  end subroutine
  subroutine rt_probe_write(ctx,unit)
  ! Synthetic verification payload only: not a restart or a user GS archive.

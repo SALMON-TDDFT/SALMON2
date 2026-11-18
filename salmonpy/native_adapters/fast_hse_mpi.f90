@@ -9,7 +9,7 @@ module salmonpy_fast_hse_mpi
  use communication,only:comm_is_attached,comm_get_globalinfo,comm_get_max,comm_bcast
  use parallelization,only:setup_parallel,nproc_group_global,nproc_size_global
  use salmonpy_tddft_context,only:tddft_context,rt_open,rt_step,rt_close,rt_input_config, &
-   rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_vector_potential
+   rt_history_info,rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_vector_potential
  use structures,only:s_rt_run_config
  implicit none
  private
@@ -19,6 +19,15 @@ module salmonpy_fast_hse_mpi
  logical,save::used=.false.,ready=.false.,failed=.false.
  real(8),save::accepted_A(3)=0d0
 contains
+integer(c_int) function sp_fast_hse_history_info(values) bind(C)
+ integer(c_int),intent(out)::values(8)
+ integer::status
+ values=0;sp_fast_hse_history_info=1
+ if(.not.attached_main_thread())return
+ if(.not.ready.or.failed.or..not.associated(state))return
+ call rt_history_info(state,values,status)
+ sp_fast_hse_history_info=status
+end function
 integer(c_int) function sp_fast_hse_step_transaction_protocol() bind(C)
   sp_fast_hse_step_transaction_protocol=1
 end function
