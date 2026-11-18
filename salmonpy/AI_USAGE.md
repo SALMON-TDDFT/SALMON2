@@ -761,3 +761,5 @@ NativeFastHSEBackend.open_model(initial,dt,context)で入力を一度だけ検�
 同一物質・セル・kメッシュ・対称操作の共有HSEは allow_symmetry=True で縮約k点にも対応する。shared_symmetry_protocol1の明示ビルドが必要。外場が実際の保持群に適合することを検査し、群や外場を自動変更しない。通常混在セッションはshared_model=Trueとpoints_per_groupを明示する。
 
 context_mpi_protocol1の新しい高速PRランタイムでは、rt_open初期化で作った子コミュニケータは状態所有とし、state.closeで通信要求・XC／FFT資源の後に解放する。共通資源・ホストMPIは維持する。異種入力対応や全MPI資源の独立化、初期化異常復帰まで完了とは説明しない。
+
+標準TDDFTのcontext_mpi_protocol1は初期化〜初期電流の子コミュニケータを状態終了時に回収し、pending復元候補も破棄する。一native寿命／プロセスの制約は維持する。ホストMPI継続と多重状態対応を混同しない。MPIラッパーの内部コンパイラ指定もビルド記録に残す。

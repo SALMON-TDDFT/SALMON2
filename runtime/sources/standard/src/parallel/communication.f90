@@ -23,7 +23,9 @@ module communication
   integer, public, parameter :: COMM_PROC_NULL  = MPI_PROC_NULL
 
   integer, private :: embedded_comm = MPI_COMM_NULL
-  integer, allocatable, private :: embedded_children(:)
+  integer, allocatable, private :: embedded_children(:),embedded_child_owner(:)
+  integer, private :: active_child_owner=0,next_child_owner=0
+  public :: comm_begin_children,comm_end_children,comm_release_children,comm_child_counts
   public :: comm_attach, comm_detach
 
   ! call once
@@ -328,7 +330,10 @@ contains
       return
     end if
     call MPI_Comm_dup(parent,embedded_comm,ierr)
-    if(ierr==MPI_SUCCESS) allocate(embedded_children(0))
+    if(ierr==MPI_SUCCESS)then
+      allocate(embedded_children(0),embedded_child_owner(0))
+      active_child_owner=0;next_child_owner=0
+    endif
   end subroutine
 
   subroutine comm_detach(ierr)
@@ -344,15 +349,59 @@ contains
     do i=size(embedded_children),1,-1
       if(embedded_children(i)/=MPI_COMM_NULL) call MPI_Comm_free(embedded_children(i),ierr)
     end do
-    deallocate(embedded_children)
+    deallocate(embedded_children,embedded_child_owner)
+    active_child_owner=0;next_child_owner=0
     call MPI_Comm_free(embedded_comm,ierr)
   end subroutine
 
   subroutine track_embedded_group(group)
     integer,intent(in) :: group
+    integer :: i
     if(embedded_comm/=MPI_COMM_NULL.and.group/=MPI_COMM_NULL) then
+      ! Reuse vacant slots; owner IDs prevent an old context releasing new ones.
+      do i=1,size(embedded_children)
+        if(embedded_children(i)/=MPI_COMM_NULL)cycle
+        embedded_children(i)=group;embedded_child_owner(i)=active_child_owner
+        return
+      enddo
       embedded_children=[embedded_children,group]
+      embedded_child_owner=[embedded_child_owner,active_child_owner]
     end if
+  end subroutine
+
+  subroutine comm_begin_children(owner,status)
+    integer,intent(out) :: owner,status
+    owner=0;status=0
+    if(embedded_comm==MPI_COMM_NULL)return
+    if(active_child_owner/=0.or.next_child_owner==huge(0))then
+      status=1;return
+    endif
+    next_child_owner=next_child_owner+1
+    owner=next_child_owner;active_child_owner=owner
+  end subroutine
+
+  subroutine comm_end_children(owner)
+    integer,intent(in) :: owner
+    if(active_child_owner==owner)active_child_owner=0
+  end subroutine
+
+  subroutine comm_release_children(owner)
+    integer,intent(in) :: owner
+    integer :: i,group
+    ! owner0 belongs to the attachment/standalone path, never a context.
+    if(owner<=0.or..not.allocated(embedded_children))return
+    do i=size(embedded_children),1,-1
+      if(embedded_child_owner(i)/=owner)cycle
+      group=embedded_children(i)
+      if(group/=MPI_COMM_NULL)call comm_free_group(group)
+    enddo
+  end subroutine
+
+  subroutine comm_child_counts(live,slots)
+    integer,intent(out) :: live,slots
+    live=0;slots=0
+    if(.not.allocated(embedded_children))return
+    live=count(embedded_children/=MPI_COMM_NULL);slots=size(embedded_children)
   end subroutine
 
   subroutine comm_init
@@ -429,7 +478,9 @@ contains
     if (igroup /= MPI_COMM_NULL) then
       if(allocated(embedded_children)) then
         do i=1,size(embedded_children)
-          if(embedded_children(i)==igroup) embedded_children(i)=MPI_COMM_NULL
+          if(embedded_children(i)==igroup)then
+            embedded_children(i)=MPI_COMM_NULL;embedded_child_owner(i)=0
+          endif
         end do
       end if
       owned_group=igroup

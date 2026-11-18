@@ -505,3 +505,36 @@ Generation-checked same-model C contexts have a separate [native handle entry](N
 
 
 [Shared HSE multipoint placement and protected direct resume](SHARED_HSE.en.md#normal-mixed-mpi-sessions).
+
+## Standard TDDFT initialization MPI retirement
+
+A newly explicitly built standard runtime exposes
+`sp_tddft_context_mpi_protocol()==1`. Communicators created during embedded TDDFT
+initialization and its initial-current evaluation belong to that state. On close,
+staged numeric restore candidates and protected buffers are discarded, request
+caches and XC resources are finalized, and then its child communicators are
+released. The host parent and unscoped attachment-owned children stay live until
+their normal owner closes them. Checkpoint encoding and propagation order remain
+unchanged. The **one native lifetime/process** restriction remains: retiring MPI
+resources does not make native TDDFT reentrant or permit a second initialization.
+
+For explicit ABI diagnostics, `int sp_tddft_resources(int values[4])` reports
+tracked live children, registry slots, pending-restore-payload presence and live
+TDDFT-state presence. Call on the main thread in the subgroup's normal order.
+The small registry may retain vacant slots until detach; zero live children is
+not a claim that all MPI/process memory is zero. These are experimental native
+diagnostics, not a required method for custom Python backends.
+
+PZ, Libxc-PZ/PBE and TB-mBJ automatic/fixed-c were compared against the preceding
+runtime with two orbital or two real-space ranks. Currents match exactly; close
+with a pending candidate returns tracked children/payload/state counts to zero
+and leaves host collectives usable. Ordinary mixed full-k PBE/HSE/FDTD direct
+restart and protected failed-restore retry remain covered. MPI/process failures,
+initialization/allocation failures and different-input multi-context support are
+separate work. Older runtimes retain their existing behavior; rebuild explicitly
+when this retirement feature is required, rather than patching a fixed library.
+
+MPI compiler wrappers must select an OpenMP-capable compiler. If a wrapper uses
+a C compiler without OpenMP, select a supported compiler through that MPI's wrapper
+configuration before building; the wrapper name alone does not identify its
+underlying compiler. Record this choice with the build command.

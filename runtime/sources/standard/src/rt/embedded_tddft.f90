@@ -27,7 +27,8 @@ use salmon_global
 use structures
 use salmonpy_step_output
 use parallelization, only: adjust_elapse_time, nproc_group_global
-use communication, only: comm_is_root, comm_sync_all, comm_bcast
+use communication, only: comm_is_root, comm_sync_all, comm_bcast, &
+  comm_begin_children,comm_end_children,comm_release_children,comm_child_counts
 use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
@@ -42,6 +43,7 @@ implicit none
 private
 public :: sp_tddft_init,sp_tddft_step,sp_tddft_close,sp_tddft_checkpoint
 type :: rt_context
+integer :: mpi_child_owner=0
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_dft_system)  :: system
@@ -95,6 +97,19 @@ logical,save :: used=.false.
 real(8),save :: accepted_A(3)=0d0
 integer(8),save :: checkpoint_array_limit=0_8
 contains
+integer(c_int) function sp_tddft_context_mpi_protocol() bind(C)
+  sp_tddft_context_mpi_protocol=1
+end function
+! Read-only diagnostics: live tracked children, registry slots, pending payload,
+! allocated state. This is not total MPI usage or process memory.
+integer(c_int) function sp_tddft_resources(values) bind(C)
+  integer(c_int),intent(out)::values(4)
+  values=0
+  call comm_child_counts(values(1),values(2))
+  if(allocated(pending))values(3)=1
+  if(allocated(state))values(4)=1
+  sp_tddft_resources=0
+end function
 ! Protocol1: statuses10..14 reject collectively before numerical/latch changes.
 integer(c_int) function sp_tddft_step_transaction_protocol() bind(C)
   sp_tddft_step_transaction_protocol=1
@@ -185,7 +200,7 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   integer(c_int),intent(in) :: decomposition(5)
   real(c_double),intent(out) :: J(3)
   character(4096) :: filename
-  integer :: i,status,reference_capacity,reference_decomposition(5),admission_group,admission_rank,admission_size
+  integer :: i,status,reference_capacity,reference_decomposition(5),admission_group,admission_rank,admission_size,child_owner
   real(8) :: reference_dt,reference_A(3)
   character(4096) :: reference_filename
   logical :: exists
@@ -240,7 +255,14 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   call read_sw_symmetry(yn_symmetry)
   call timer_initialize
   quiet=.false.
-  allocate(state)
+  call comm_begin_children(child_owner,status)
+  call comm_get_max(status,nproc_group_global)
+  if(status/=0)then
+    call comm_end_children(child_owner)
+    call comm_release_children(child_owner)
+    sp_tddft_init=16;return
+  endif
+  allocate(state);state%mpi_child_owner=child_owner
 call timer_begin(LOG_TOTAL)
 
 call initialization_rt( state%Mit, state%system, state%energy, state%ewald, state%rt, state%md, &
@@ -263,6 +285,7 @@ if(worker_requested()) then
   J=sum(state%worker_current(:,1:state%system%nspin),dim=2)
 end if
 
+  call comm_end_children(child_owner)
   state%itt=state%Mit
   call comm_sync_all
   call timer_enable_sub
@@ -375,12 +398,14 @@ integer(c_int) function sp_tddft_close() bind(C)
     endif
   endif
   if(allocated(step_saved))deallocate(step_saved,step_saved_xc)
+  if(allocated(pending))deallocate(pending)
   call timer_end(LOG_RT_ITERATION)
   call timer_disable_sub
   close(030)
-  call finalize_xc(state%xc_func)
   call dealloc_cache(state%srg)
   call dealloc_cache(state%srg_scalar)
+  call finalize_xc(state%xc_func)
+  call comm_release_children(state%mpi_child_owner)
   deallocate(state)
   ! Other SALMON module configuration remains process-owned. Do not reopen.
   sp_tddft_close=0

@@ -229,3 +229,5 @@ install(FILES "${ROOT}/tools/test_shared_mixed_restore_mpi.py" DESTINATION salmo
 install(FILES "${ROOT}/tools/test_shared_symmetry_hse_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/tools/test_hse_mpi_resource_owners.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_tddft_mpi_resource_owner.py" DESTINATION salmonpy/_runtime_source/tools)
