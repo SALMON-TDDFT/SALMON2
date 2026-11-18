@@ -1,12 +1,15 @@
 # 標準TDDFTの同一モデルnativeハンドル
 
+**更新:** Pythonの共有モデルと通常の複数点配置への接続も実装済みです。
+[Python共有モデル](SHARED_TDDFT.md) を参照してください。既定の別状態経路は維持します。
+
 [English](STANDARD_HANDLES.en.md) · Topic: `standard_tddft_handles` · Revision: `2026-11-18.1`
 
 明示的にビルドした標準host-MPIランタイムが `sp_tddft_handle_protocol()==1` と
 `sp_tddft_model_protocol()==1` を提供します。対応ヘッダーは
 [native_adapters/standard_tddft_handles.h](native_adapters/standard_tddft_handles.h)です。
-これは実験的な**native C／C++入口**です。既存Pythonの `NativeTDDFTBackend.create_state` と
-通常MPI配置は一群一点・一プロセス一native寿命のままです。Python共有モデルへの接続は次の作業です。
+このnative C／C++入口を使うPython共有モデルと通常の複数点配置も利用できます。
+明示的な共有指定がない場合は、既存の `create_state` と一群一点の経路を維持します。
 
 同一プロセス／モデルでは、物質・セル・全k点・擬ポテンシャル・XC入力を共通不変にします。
 周期・対称性なし・非スピン分極・固定イオンのPZ／TB-mBJ／Libxc-PZ/PBE、中点伝播・transverseが対象です。

@@ -149,3 +149,5 @@ Before provider preparation, ResponseSession validates optional backend.supporte
 
 
 [Shared HSE multipoint placement and protected direct resume](SHARED_HSE.en.md#normal-mixed-mpi-sessions).
+
+For opt-in standard TDDFT shared models and multipoint groups, see [SHARED_TDDFT.en.md](SHARED_TDDFT.en.md).

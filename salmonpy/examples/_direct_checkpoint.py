@@ -217,6 +217,8 @@ def _restore_protected(world,coupled,root,data,compatibility,verification,histor
             if hasattr(state,'native'):
                 candidate=NativeRestoreCandidate(state,'sp_tddft_checkpoint',root/_state_filename(r,point,world.rank))
                 updates.extend(((state,'steps',step),(state,'A',A)))
+                if 'current' in data['states'][str(point)] and hasattr(state,'current'):
+                    updates.append((state,'current',np.array(data['states'][str(point)]['current'],dtype=float)))
                 native.append(candidate)
             elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
                 candidate=NativeRestoreCandidate(state,'sp_fast_hse_checkpoint',root/_state_filename(r,point,world.rank))
@@ -328,8 +330,9 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
                     index = list(r.context.plan.point_ids).index(point)
                     if A.shape!=(3,) or not np.isfinite(A).all() or not np.array_equal(A,np.asarray(data['response_A'])[index]):
                         raise ValueError('checkpoint material A differs from response history')
-                    if getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
-                        current = np.asarray(data['states'][str(point)]['current'],dtype=float)
+                    if (getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1' or
+                            hasattr(state,'current')):
+                        current = np.asarray(data['states'][str(point)].get('current'),dtype=float)
                         if current.shape!=(3,) or not np.isfinite(current).all():
                             raise ValueError('invalid checkpoint material current')
     except Exception as exc: error = str(exc)
@@ -404,7 +407,11 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
             native_call(state, 'sp_tddft_checkpoint', _state_filename(r,point,world.rank))
             if restore:
                 state.steps = data['step']; state.A = np.asarray(data['states'][key]['A'])
-            else: data['states'][key] = {'A': state.A.tolist()}
+                if 'current' in data['states'][key] and hasattr(state,'current'):
+                    state.current=np.array(data['states'][key]['current'],dtype=float)
+            else:
+                data['states'][key] = {'A': state.A.tolist()}
+                if hasattr(state,'current'):data['states'][key]['current']=state.current.tolist()
         elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
             state.checkpoint(root/_state_filename(r,point,world.rank), restore=restore)
             if restore:

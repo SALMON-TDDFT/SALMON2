@@ -129,3 +129,20 @@ class LayerAssemblyTests(unittest.TestCase):
         with patch.object(self,'materials',return_value=materials):
             assembly=self.assemble(d,points_per_group={'sbe':2})
         self.assertEqual(assembly.parallel_plan.groups[1].point_ids,(1,2))
+
+    def test_standard_shared_factory_is_explicit_and_preserves_placement(self):
+        from salmonpy.embedded_tddft import NativeTDDFTBackend
+        from unittest.mock import patch
+        backend=object.__new__(NativeTDDFTBackend)
+        backend.identity='standard';backend.shared_model=False;backend.decomposition=(1,2,1,1,1)
+        materials=self.materials();old=materials['td'];materials['td']=MaterialBinding('td',old.provider,backend)
+        d=layout();d['layers'][1]['thickness']=4.
+        with patch.object(self,'materials',return_value=materials):
+            with self.assertRaisesRegex(ValueError,'shared_model=True'):
+                self.assemble(d,points_per_group={'td':2},ranks_per_point={'sbe':1,'td':2},rank_budget=5)
+            backend.shared_model=True
+            grouped=self.assemble(d,points_per_group={'td':2},ranks_per_point={'sbe':1,'td':2},rank_budget=5)
+            separate=self.assemble(d,ranks_per_point={'sbe':1,'td':2},rank_budget=7)
+        self.assertEqual(grouped.record()['required_ranks'],5)
+        self.assertEqual(dict(grouped.points),dict(separate.points))
+        self.assertEqual(grouped.parallel_plan.groups[-1].point_ids,(2,3))

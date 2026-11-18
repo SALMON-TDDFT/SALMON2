@@ -185,6 +185,7 @@ def native_step_targets(coupled,*,custom_targets=()):
     """
     from .coupled import NativeEHField,MultiscaleField
     from .embedded_tddft import _NativeState
+    from ._shared_tddft import _SharedState as SharedTDDFTState
     from .fast_hse_mpi import _State as FastHSEState
     from .materials import _EndpointState
     from .sbe import SBEState
@@ -211,9 +212,9 @@ def native_step_targets(coupled,*,custom_targets=()):
             if type(owner) is NativeEHField:
                 backup=_NativeBackup(owner,comm,'sp_eh_step_transaction',owner.directory,
                     ('A','E','step_index','failed','closed'))
-            elif type(owner) is _NativeState:
+            elif type(owner) in (_NativeState,SharedTDDFTState):
                 backup=_NativeBackup(owner,comm,'sp_tddft_step_transaction',owner.work,
-                    ('A','steps','failed','closed'))
+                    ('A','steps','failed','closed')+(('current',) if type(owner) is SharedTDDFTState else ()))
             elif type(owner) is FastHSEState:
                 backup=_NativeBackup(owner,comm,'sp_fast_hse_step_transaction',owner.work,
                     ('A','current','energy','steps','failed','closed'))

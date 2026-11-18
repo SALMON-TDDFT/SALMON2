@@ -126,8 +126,8 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
                 width=grouping.get(mid,1)
                 if width>1:
                     from .fast_hse_mpi import NativeFastHSEBackend
-                    if type(model.backend) is NativeTDDFTBackend:
-                        raise InputError('native TDDFT requires one point per group')
+                    if type(model.backend) is NativeTDDFTBackend and not model.backend.shared_model:
+                        raise InputError('multiple TDDFT points require shared_model=True')
                     if type(model.backend) is NativeFastHSEBackend and not model.backend.shared_model:
                         raise InputError('multiple HSE points require shared_model=True')
                 electronic[mid]=model

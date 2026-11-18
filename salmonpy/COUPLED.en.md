@@ -542,3 +542,5 @@ underlying compiler. Record this choice with the build command.
 The one-lifetime statements above describe the legacy Python/singleton route.
 [Standard native handles](STANDARD_HANDLES.en.md) add a separate same-model C ABI;
 they are not yet connected to a Python shared factory or ordinary multipoint plans.
+
+For opt-in standard TDDFT shared models and multipoint groups, see [SHARED_TDDFT.en.md](SHARED_TDDFT.en.md).

@@ -502,3 +502,5 @@ OpenMPに対応しない場合は、MPIのラッパー設定で対応するも�
 
 上記の一寿命制約は従来のPython／singleton入口です。[標準nativeハンドル](STANDARD_HANDLES.md)は
 別の同一モデルC ABIを提供しますが、Python共有生成器・通常の複数点配置への接続はまだです。
+
+標準TDDFTの明示的な共有モデルと複数点配置は [SHARED_TDDFT.md](SHARED_TDDFT.md) を参照。

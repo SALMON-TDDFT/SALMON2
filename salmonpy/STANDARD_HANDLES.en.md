@@ -5,9 +5,10 @@
 An explicitly built standard host-MPI runtime now exposes
 `sp_tddft_handle_protocol()==1` and `sp_tddft_model_protocol()==1`. The matching
 header is [native_adapters/standard_tddft_handles.h](native_adapters/standard_tddft_handles.h).
-This is the experimental **native C/C++ interface**. The existing Python
-`NativeTDDFTBackend.create_state` and normal MPI plans still use one point/group
-and one native lifetime/process; a Python shared-model factory is subsequent work.
+The native C/C++ contract also backs the opt-in Python
+`NativeTDDFTBackend.open_model` / `NativeTDDFTModel` and normal multipoint sessions.
+See [Python sharing](SHARED_TDDFT.en.md) for usage. Default `create_state` and
+one-point plans retain the legacy path.
 
 One process/model uses an immutable periodic, non-symmetric, unpolarized, fixed-ion
 PZ/TB-mBJ/Libxc-PZ/PBE input with middlepoint transverse propagation. **dt, capacity,

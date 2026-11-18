@@ -1,4 +1,4 @@
-"""Ordinary mixed sample with a handled late shared-HSE restore failure.
+"""Ordinary mixed sample with a handled late shared-material restore failure.
 
 Pass normal mpi_mixed_native arguments including --direct-resume. Optional
 --kernel LIB injects an explicitly built LD/SBE kernel for a source checkout.
@@ -16,6 +16,7 @@ from mpi4py import MPI
 def main():
     parser=argparse.ArgumentParser(add_help=False)
     parser.add_argument('--kernel')
+    parser.add_argument('--material-key',default='hse-point',help='binding with at least two points to fault late')
     args,sample_args=parser.parse_known_args()
     if args.kernel:
         from salmonpy import ld,sbe
@@ -62,7 +63,7 @@ def main():
         if not kwargs.get('restore'):return original(world,coupled,root,signature,**kwargs)
         output=Path(sample_args[3]).resolve()
         before=freeze(coupled,output,'before')
-        hse=[p for p,b in coupled.response.bindings.items() if b.key=='hse-point']
+        hse=[p for p,b in coupled.response.bindings.items() if b.key==args.material_key]
         assert len(hse)>=2
         last=max(hse);stage=NativeRestoreCandidate.stage
         fired=False
@@ -70,9 +71,10 @@ def main():
             nonlocal fired
             value=stage(candidate)
             state=candidate.owner
-            if getattr(state,'point_id',None)==last and state._native.context.solver_comm.rank==state._native.context.solver_comm.size-1:
+            native=getattr(state,'native',None) or getattr(state,'_native',None)
+            if getattr(state,'point_id',None)==last and native.context.solver_comm.rank==native.context.solver_comm.size-1:
                 fired=True
-                raise RuntimeError('injected after last HSE candidate staged')
+                raise RuntimeError('injected after last material candidate staged')
             return value
         NativeRestoreCandidate.stage=fail_late
         try:
@@ -87,7 +89,7 @@ def main():
         result=original(world,coupled,root,signature,**kwargs)
         if world.rank==0:
             (output/'shared-restore-validation.json').write_text(json.dumps({'status':'pass',
-                'late_point':last,'original_states_and_outputs_preserved':True,'retry_succeeded':True,
+                'late_point':last,'material_key':args.material_key,'original_states_and_outputs_preserved':True,'retry_succeeded':True,
                 'replayed_steps':0},indent=2)+'\n')
         return result
     coordinator.checkpoint=checkpoint

@@ -2,6 +2,24 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
+## Standard Python shared-model update — 2026-11-18
+
+- [x] `NativeTDDFTBackend.open_model` / `NativeTDDFTModel`, one immutable model/work
+  copy, independent point states, common dt/capacity/decomposition.
+- [x] Opt-in normal layer/session grouping; independent/shared and direct resume
+  are bitwise equal for LD/SBE/two-TDDFT128-step mixed run (inner orbital MPI2).
+  Handled late-rank restore failure retains all owners; retry matches continuous.
+  The combined LD/SBE/TDDFT2/HSE2 layout also matches independent execution
+  and direct protected restart (10 independent vs6 shared ranks,128 steps).
+- [x] Five standard XC profiles × MPI1/orbital2/spatial2:15 public-model
+  independent/direct-continuation cases pass; final output-collision retry and
+  mixed-epoch shard rejection verified in three MPI configurations.
+- [x] Per-state charge-current sign, checkpoint current metadata admission and
+  owner-local output journaling; default legacy create_state preserved.
+- [x] Paired guides, AI catalog and installed module/example/tool inventory updated.
+- [ ] Different-input model sharing and remaining common/specialized native ownership
+  remain separate work; common model parameters are not per-state settings here.
+
 ## Current audit — 2026-11-18 (takes precedence over historical status notes)
 
 The dated sections below retain the scope at their completion time. Older statements such as "occupation remains shared" or "multiple field ranks remain open" are superseded by the later evidence, not separate unfinished tasks.
@@ -30,9 +48,9 @@ scope and must not be counted again as newly unfinished work.
   orbital2/rgrid2 match old traces; one lifetime/process stays in effect.
 - [x] Standard same-model native C handles: per-context protection/pending/XC/A/
   serializer ownership, generation tokens, original-GS recreation and direct
-  restart. Fixed common dt/capacity/decomposition; Python shared factory and
-  ordinary standard multipoint session integration are next, not already enabled.
-- [x] Latest source/installed suites:603 tests each, one skip each; sdist→wheel,
+  restart. Fixed common dt/capacity/decomposition. Python shared factory and
+  ordinary standard multipoint session integration are now implemented opt-in.
+- [x] Latest source/installed suites:611 tests each, one skip each; sdist→wheel,
   hashes, installed MPI/example, paired guides and AI catalog verified locally.
 
 Remaining work, grouped rather than duplicating historical bullets:
@@ -47,8 +65,8 @@ Remaining work, grouped rather than duplicating historical bullets:
    for LD/SBE/HSE128-step compatible local fields; arbitrary PBE fields may break
    retained symmetry and require full-k, as recorded in the validation.
    Different symmetry groups within one process remain in item3, not enabled here.
-3. [ ] Connect standard native C handles to a Python shared model and normal
-   multipoint sessions. Then broader GS/TDDFT different-input ownership; remaining
+3. [ ] Standard native C handles now connect to an opt-in Python shared model and normal
+   multipoint sessions (see SHARED_TDDFT). Remaining: broader GS/TDDFT different-input ownership; remaining
    unscoped/common MPI resources, common initialization/I/O/timers and specialized
    SOC/+U/DC resources. Fast-PR and standard-TDDFT initialization-child retirement are complete.
    Same-model HSE token identity is complete within its documented boundary.

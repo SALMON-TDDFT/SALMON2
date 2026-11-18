@@ -52,6 +52,7 @@ def main():
     parser.add_argument('--hse-bundle', type=Path, help='optional separate fast-PR HSE GS bundle; default is BUNDLE')
     parser.add_argument('--hse-symmetry', action='store_true', help='explicit fast-PR symmetry opt-in; native HSE group1/2 with matching mode capability')
     parser.add_argument('--hse-reference-bundle', type=Path, help='explicit equivalent full-k HSE bundle for serial comparison')
+    parser.add_argument('--tddft-points-per-group',type=int,default=1,help='explicit shared standard TDDFT points per native group')
     parser.add_argument('--hse-points-per-group',type=int,default=1,help='explicit shared same-model HSE points per native group')
     parser.add_argument('--hse-ranks', type=int, choices=(1, 2), default=1)
     parser.add_argument('--dt', type=float, default=.003)
@@ -95,6 +96,8 @@ def main():
         parser.error('--hse-symmetry requires native HSE and --hse-reference-bundle')
     if args.hse_reference_bundle is not None and not args.hse_symmetry:
         parser.error('--hse-reference-bundle requires --hse-symmetry')
+    if args.tddft_points_per_group<1:parser.error('positive tddft-points-per-group required')
+    if args.tddft_points_per_group>1 and args.layers is None:parser.error('tddft grouping requires --layers')
     if args.hse_points_per_group<1 or (args.hse_points_per_group>1 and args.fast_hse_mpi_build is None):
         parser.error('positive hse-points-per-group; grouping requires fast-hse-mpi-build')
     if args.hse_ranks != 1 and args.fast_hse_mpi_build is None:
@@ -134,7 +137,7 @@ def main():
         if 'si-tddft' in selected:
             available['si-tddft'] = MaterialBinding('si-tddft',
                 NativeTDDFTMaterialProvider(args.bundle, 'rt.inp', max_steps=args.steps),
-                NativeTDDFTBackend(args.build, output, decomposition=(1, args.tddft_ranks, 1, 1, 1)))
+                NativeTDDFTBackend(args.build, output, decomposition=(1, args.tddft_ranks, 1, 1, 1),shared_model=args.tddft_points_per_group>1))
         if 'hse-point' in selected:
             if args.fast_hse_build is None: raise ValueError('hse-point requires --fast-hse-build')
             from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
@@ -155,7 +158,8 @@ def main():
             assembly = assemble_native_layers(layout, available,
                 grid=grid, dt=dt, steps=args.steps, source=calculation.source, field_grid=tuple(args.field_grid),
                 ranks_per_point=rank_settings, rank_budget=args.rank_budget if args.rank_budget is not None else world.size,
-                points_per_group={'hse-point':args.hse_points_per_group} if args.hse_points_per_group>1 else None)
+                points_per_group=({**({'si-tddft':args.tddft_points_per_group} if args.tddft_points_per_group>1 else {}),
+                                   **({'hse-point':args.hse_points_per_group} if args.hse_points_per_group>1 else {})} or None))
             if assembly.record()['required_ranks'] != world.size:
                 raise ValueError(f"launch exactly {assembly.record()['required_ranks']} ranks for this layout")
             calculation = assembly.calculation; geometry = calculation.geometry
@@ -181,6 +185,7 @@ def main():
                      'sbe_model': hashlib.sha256(b''.join(np.asarray(getattr(sbe, k)).tobytes()
                          for k in ('eigen','momentum','nonlocal_velocity','weights','lattice'))
                          + repr((sbe.electrons,sbe.correction_order,sbe.nonlocal_correction)).encode()).hexdigest()}
+        if args.tddft_points_per_group>1:signature['tddft_points_per_group']=args.tddft_points_per_group
         if 'hse-point' in selected:
             signature['fast_hse_backend'] = available['hse-point'].backend.identity
             signature['hse_ranks'] = args.hse_ranks

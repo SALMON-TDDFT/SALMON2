@@ -105,6 +105,28 @@ class DirectCheckpointTests(unittest.TestCase):
                 checkpoint(self.world(),coupled,p,{'steps':128},restore=True)
             self.assertFalse(coupled.response.failed)
 
+    def test_standard_current_rejected_before_staging(self):
+        from unittest.mock import Mock
+        import numpy as np
+        for bad in (None, [0.,0.], [0.,float('inf'),0.]):
+            with self.subTest(current=bad), tempfile.TemporaryDirectory() as d:
+                p=Path(d)
+                data={'step':64,'J':[[0.,0.,0.]],'response_A':[[0.,0.,0.]],
+                      'states':{'1':{'A':[0.,0.,0.],'current':bad}}}
+                (p/'rank-0.json').write_text(json.dumps(data));(p/'frames.json').write_text('[]')
+                files={n:digest(p/n) for n in ('rank-0.json','frames.json')}
+                (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/1',
+                    'signature':{'steps':128},'ranks':1,'step':64,'files':files}))
+                state=SimpleNamespace(native=object(),current=np.zeros(3),checkpoint=Mock(),
+                                      lib=SimpleNamespace(sp_tddft_checkpoint=Mock()))
+                coupled=self.coupled();coupled.response.states={1:state}
+                coupled.response.context=SimpleNamespace(plan=SimpleNamespace(point_ids=(1,)))
+                with self.assertRaisesRegex(ValueError,'invalid checkpoint material current'):
+                    checkpoint(self.world(),coupled,p,{'steps':128},restore=True,protected=True)
+                state.checkpoint.assert_not_called()
+                np.testing.assert_array_equal(state.current,np.zeros(3))
+                self.assertFalse(coupled.response.failed)
+
     def test_multiple_worker_files_cannot_collide(self):
         from salmonpy.examples._direct_checkpoint import _state_filename
         state=lambda:SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1')

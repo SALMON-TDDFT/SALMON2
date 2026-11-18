@@ -104,3 +104,5 @@ PointRun自体の直列専用という制約やrestart未対応は維持しま�
 
 
 [共有HSEの複数点配置と保護付き直接再開](SHARED_HSE.md#通常の混在mpiセッション).
+
+標準TDDFTの明示的な共有モデルと複数点配置は [SHARED_TDDFT.md](SHARED_TDDFT.md) を参照。

@@ -235,3 +235,9 @@ install(FILES "${ROOT}/tools/test_tddft_mpi_resource_owner.py" DESTINATION salmo
 install(FILES "${ROOT}/salmonpy/STANDARD_HANDLES.md" "${ROOT}/salmonpy/STANDARD_HANDLES.en.md" DESTINATION salmonpy)
 install(FILES "${ROOT}/salmonpy/native_adapters/standard_tddft_handles.h" DESTINATION salmonpy/native_adapters)
 install(FILES "${ROOT}/tools/test_standard_tddft_handles_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/_shared_tddft.py" "${ROOT}/salmonpy/_native_group.py" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/mixed_shared_tddft_layers.json" "${ROOT}/salmonpy/examples/mixed_shared_tddft_hse_both_layers.json" DESTINATION salmonpy/examples)
+install(FILES "${ROOT}/tools/test_python_shared_tddft_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/SHARED_TDDFT.md" "${ROOT}/salmonpy/SHARED_TDDFT.en.md" DESTINATION salmonpy)
