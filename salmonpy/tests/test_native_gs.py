@@ -67,6 +67,78 @@ class NativeGSTests(unittest.TestCase):
         with self.assertRaisesRegex(InputError,'forces were not computed'):state.array('forces')
         session.lib.sp_gs_array_info.assert_not_called()
 
+    def test_retained_gamma_archive_roundtrip_and_source_independence(self):
+        import tempfile
+        import numpy as np
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from salmonpy.native_gs import NativeGSState, NativeGSArray, NativeGSInfo
+        from salmonpy.dft import DFT, Pseudopotential
+        from salmonpy.gs_archive import GroundStateArchive
+        model=DFT((2,),np.diag([8.,9.,10.]),[[0.,0.,0.]],
+                  (Pseudopotential(2,0,'_rps.dat',b'synthetic only'),),2,2,(8,10,12),(1,1,1))
+        comm=SimpleNamespace(size=1,rank=0,allgather=lambda v:[v])
+        session=SimpleNamespace(_live=lambda:None,comm=comm,backend=SimpleNamespace(
+            decomposition=(1,1,1,1,1),sha256='a'*64))
+        state=NativeGSState(session,1,None,'film-a',model);state._identity='synthetic-owner'
+        shape=(8,10,12);real=np.arange(8*10*12*2,dtype=float).reshape((*shape,2))/1000
+        waves=real+1j*(real+.125)
+        padded=np.full((10,14,18,1,2,1,1),complex(999,999))
+        padded[1:9,2:12,3:15,0,:,0,0]=waves
+        arrays={'density':NativeGSArray(np.ones(shape),(1,1,1),'density','bohr^-3'),
+                'orbitals':NativeGSArray(padded,(0,-1,-2,1,1,1,1),'orbitals','native'),
+                'occupations':NativeGSArray(np.array([2.,0.]).reshape(2,1,1),(1,1,1),'occupations','1'),
+                'eigenvalues':NativeGSArray(np.array([-1.,.5]).reshape(2,1,1),(1,1,1),'eigenvalues','hartree')}
+        state.array=Mock(side_effect=lambda q:arrays[q])
+        info=NativeGSInfo(-2.,1e-5,1e-9,7,False,1,2)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(NativeGSState,'info',new_callable=unittest.mock.PropertyMock,return_value=info):
+            target=Path(tmp)/'archive'
+            with self.assertWarnsRegex(RuntimeWarning,'not converged'):
+                archive=state.export_archive(target,orbital_block=1)
+            expected=waves.transpose(3,2,1,0)[None].copy()
+            np.testing.assert_array_equal(archive.wavefunctions(0),expected[0])
+            self.assertEqual(archive.metadata['provenance']['material_id'],'film-a')
+            self.assertFalse(archive.metadata['provenance']['converged'])
+            np.testing.assert_allclose(archive.array('density'),2*abs(expected[0,0])**2,rtol=1e-15,atol=0)
+            self.assertEqual(padded[0,0,0,0,0,0,0],999+999j)
+            with self.assertRaises(FileExistsError):state.export_archive(target)
+            old=arrays['orbitals']
+            arrays['orbitals']=NativeGSArray(padded,(5,5,5,1,1,1,1),'orbitals','native')
+            with self.assertRaisesRegex(ValueError,'halos'):
+                state.export_archive(Path(tmp)/'invalid-halo')
+            self.assertFalse((Path(tmp)/'invalid-halo').exists())
+            arrays['orbitals']=old
+            # Real native orbitals are returned by the public reader as complex+0j.
+            padded.imag[:]=0
+            with self.assertWarns(RuntimeWarning):
+                real_archive=state.export_archive(Path(tmp)/'real-archive')
+            np.testing.assert_array_equal(real_archive.wavefunctions(0),expected[0].real.astype(complex))
+            padded[:]=0;state.closed=True
+            reopened=GroundStateArchive.open(target)
+            np.testing.assert_array_equal(reopened.wavefunctions(0),expected[0])
+            with self.assertRaises(ValueError):reopened.wavefunctions(0).flat[0]=0
+
+    def test_retained_export_rejects_unknown_layout_before_writing(self):
+        import tempfile
+        import numpy as np
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from salmonpy.native_gs import NativeGSState
+        from salmonpy.errors import InputError
+        from salmonpy.dft import DFT,Pseudopotential
+        model=DFT((2,),np.eye(3)*8,[[0,0,0]],
+                  (Pseudopotential(2,0,'_rps.dat',b'synthetic'),),2,1,(8,8,8),(1,1,1))
+        comm=SimpleNamespace(size=1,allgather=lambda v:[v])
+        session=SimpleNamespace(_live=lambda:None,comm=comm,backend=SimpleNamespace(decomposition=(1,1,1,1,1)))
+        state=NativeGSState(session,1,None,'a',None);state.array=Mock()
+        with tempfile.TemporaryDirectory() as tmp:
+            target=Path(tmp)/'archive'
+            with self.assertRaisesRegex(InputError,'DFT'):state.export_archive(target)
+            state._calculation=model;comm.size=2
+            with self.assertRaisesRegex(InputError,'serial'):state.export_archive(target)
+            self.assertFalse(target.exists());state.array.assert_not_called()
+
+
 
 class NativeGSLinkTests(unittest.TestCase):
     def tool(self):

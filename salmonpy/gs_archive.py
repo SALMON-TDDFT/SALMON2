@@ -130,13 +130,27 @@ def _metadata(m):
 
 
 def _export_provenance(p):
-    keys={'schema','source_manifest_sha256','target_sha256','exporter_sha256','density_source',
-          'eigenvalue_source','native_real_orbital','local_channels','record_environment'}
-    if type(p) is not dict or not keys<=set(p) or set(p)-keys-{'kpoint_source'} or p['schema']!='salmonpy.gs-native-export/1':raise InputError('invalid GS export provenance')
-    if any(not _sha(p[k]) for k in ('source_manifest_sha256','target_sha256','exporter_sha256')):raise InputError('invalid GS export provenance hashes')
-    if (p['density_source']!='reconstructed_from_native_orbitals' or p['eigenvalue_source']!='native/gs_eigen.data'
-            or type(p['native_real_orbital']) is not bool):raise InputError('unsupported GS export semantics')
-    if 'kpoint_source' in p and p['kpoint_source']!='native/gs_k.data':raise InputError('unsupported kpoint provenance')
+    retained=type(p) is dict and p.get('schema')=='salmonpy.retained-gs-export/1'
+    if retained:
+        keys={'schema','material_id','state_identity','target_sha256','converged',
+              'iterations','density_source','local_channels'}
+        if set(p)!=keys:raise InputError('invalid retained GS export provenance')
+        from .config import _identifier
+        _identifier(p['material_id'],'material_id')
+        if type(p['state_identity']) is not str or not p['state_identity'] or not _sha(p['target_sha256']):
+            raise InputError('invalid retained GS identity/runtime')
+        if type(p['converged']) is not bool or type(p['iterations']) is not int or p['iterations']<0:
+            raise InputError('invalid retained GS convergence record')
+        if p['density_source']!='reconstructed_from_native_orbitals':
+            raise InputError('unsupported retained GS density semantics')
+    else:
+        keys={'schema','source_manifest_sha256','target_sha256','exporter_sha256','density_source',
+              'eigenvalue_source','native_real_orbital','local_channels','record_environment'}
+        if type(p) is not dict or not keys<=set(p) or set(p)-keys-{'kpoint_source'} or p['schema']!='salmonpy.gs-native-export/1':raise InputError('invalid GS export provenance')
+        if any(not _sha(p[k]) for k in ('source_manifest_sha256','target_sha256','exporter_sha256')):raise InputError('invalid GS export provenance hashes')
+        if (p['density_source']!='reconstructed_from_native_orbitals' or p['eigenvalue_source']!='native/gs_eigen.data'
+                or type(p['native_real_orbital']) is not bool):raise InputError('unsupported GS export semantics')
+        if 'kpoint_source' in p and p['kpoint_source']!='native/gs_k.data':raise InputError('unsupported kpoint provenance')
     channels=p['local_channels'];seen=set()
     if type(channels) is not list or not channels:raise InputError('invalid local channels')
     for c in channels:
@@ -144,6 +158,7 @@ def _export_provenance(p):
                 or not 1<=c['atomic_number']<=118 or c['atomic_number'] in seen or type(c['local_channel']) is not int
                 or not 0<=c['local_channel']<=4):raise InputError('invalid local channels')
         seen.add(c['atomic_number'])
+    if retained:return
     env=p['record_environment']
     if type(env) is not dict or set(env)!={'GFORTRAN_CONVERT_UNIT'} or type(env['GFORTRAN_CONVERT_UNIT']) is not str:raise InputError('invalid GS record environment')
     if env['GFORTRAN_CONVERT_UNIT'].lower() not in ('','native','swap','big_endian','little_endian'):raise InputError('unsupported GS record environment')

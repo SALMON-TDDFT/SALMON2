@@ -62,7 +62,8 @@ returns live children to zero. Retained management slots are distinct from leaks
 
 Python scope matches existing DFT settings: periodic full-k unpolarized fixed-ion
 PZ/Libxc-PZ/PBE. Fast-PR HSE, SOC/+U/DC GS,
-checkpoint/restart, concurrent threads and simultaneous GS/TDDFT are separate.
+full SCF checkpoint/restart and threaded GS/TDDFT are separate; sequential
+GS/RT interleaving and portable array export are described below.
 One native electronic attachment lifetime per process. Info, arrays and close are
 also collective. Close every owner before host MPI finalization.
 
@@ -120,3 +121,47 @@ Use a runtime exporting `sp_tddft_memory_gs_protocol()==1` and `sp_gs_import`.
 ```sh
 mpiexec -n 2 python -m salmonpy.examples.memory_gs BUILD EXISTING_GS NEW_WORK
 ```
+
+## Explicit portable export from a retained GS
+
+For a serial Gamma state created by `session.run`, use:
+
+```python
+from salmonpy.gs_archive import GroundStateArchive
+
+archive = gs.export_archive("new-portable-gs", orbital_block=16)
+# Closing or subsequently changing native owners does not change the archive.
+gs.close()
+archive = GroundStateArchive.open("new-portable-gs")
+u = archive.wavefunctions(0)  # (band,z,y,x), read-only
+```
+
+This uses the existing GS/2 format and needs no new native ABI or compilation.
+It preserves orbital/occupation/eigenvalue values, removes orbital halos using
+physical density bounds, and reconstructs density in band order from occupations
+and orbitals. The original mixed density is not exported. Material ID, GS identity,
+runtime hash, recorded convergence, iteration count and pseudopotential hashes/local
+channels are retained as provenance. Pseudopotential bytes are not embedded.
+Unconverged SCF only warns and exports the last iterate. Existing destinations
+are preserved; failed writes clean their newly claimed incomplete archive.
+
+Current export scope is a DFT-owned, periodic unpolarized fixed-ion Gamma state
+with a serial subgroup. Existing-file imported owners lack an immutable DFT model
+and cannot use this entry yet; multi-k/MPI retained export remains future work.
+These are export limits, not restrictions on normal GS/TDDFT calculations.
+The first implementation is verified with synthetic real/complex-shaped native
+arrays, asymmetric halos and noncubic grids; real retained-GS export and resulting
+TDDFT parity have not yet been measured. No new SCF or real GS collection was
+performed for this change.
+
+This is an array interchange export, not a full SCF restart: mixing history,
+forces, solver resources and original mixed density are not saved.
+`GroundStateArchive.open` reads portable arrays; it does not restore a native GS
+handle. Native import still uses the separately documented, explicitly built
+paired converter and its runtime/potential restrictions in [GS_ARCHIVE.en.md](GS_ARCHIVE.en.md).
+The optional sample `python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT
+--export-archives` explicitly computes its two coarse Gamma examples and saves
+archives (one rank only). Four SCF iterations are an ownership demo, not physical
+convergence; this optional sample was not run in the present no-new-GS campaign.
+Export copies full native orbital buffers including halos and creates reconstructed
+density/chunk buffers; orbital_block controls disk chunks, not peak memory.

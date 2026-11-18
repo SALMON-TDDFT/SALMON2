@@ -85,3 +85,9 @@ initial = archive.tddft_initial_state(converter=converter, executable=engine,
 ```
 
 Multi-k states support the existing `state.save_checkpoint('new-history')` and `state.restore_checkpoint('new-history')` on a freshly created identical model with fixed dt. The GS/2 archive and paired converter/runtime/potentials must be supplied separately; checkpoints store history, without duplicating GS arrays. Synthetic 2/3/6/8-point and nonuniform two-point tests saved after six steps, restored in a fresh Python process, and matched the following 20 steps bitwise. Two states with different interleaved input histories, including continuation after closing a sibling, matched independent runs bitwise. Each state owns a separate worker process; these results do not establish multiple native TDDFT contexts inside one process.
+
+## Retained native owners
+
+`NativeGSState.export_archive` adds a serial Gamma DFT-owned export entry.
+See [NATIVE_GS.en.md](NATIVE_GS.en.md) for scope, provenance and measured limits.
+It is not a complete SCF checkpoint or native GS-handle restoration.

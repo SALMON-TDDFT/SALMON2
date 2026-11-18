@@ -300,6 +300,75 @@ class NativeGSState:
     def tddft_model(self,*,dt,max_steps=1000):
         from ._gs_tddft import open_model
         return open_model(self,dt,max_steps)
+    def export_archive(self,directory,*,orbital_block=16):
+        """Export a serial Gamma DFT-owned GS to portable GS/2 arrays.
+
+        Reconstruct density from orbitals. This is not a complete SCF checkpoint;
+        mixing history, live native resources and forces are not serialized.
+        """
+        from .dft import DFT
+        from .gs_archive import save_ground_state
+        self._live()
+        model=self.calculation
+        if not isinstance(model,DFT):
+            raise InputError('export requires the immutable DFT model of a retained computed GS')
+        if self.session.comm.size!=1 or self.session.backend.decomposition!=(1,1,1,1,1):
+            raise InputError('retained GS export currently requires a serial subgroup')
+        if model.kmesh!=(1,1,1):
+            raise InputError('retained GS export currently supports Gamma only')
+        destination=Path(directory).expanduser()
+        if destination.exists():raise FileExistsError(destination)
+        info=self.info
+        if info.atoms!=len(model.numbers) or info.bands!=model.states:
+            raise InputError('retained GS metadata differs from the DFT model')
+        density=self.array('density')
+        orbitals=self.array('orbitals')
+        occupations=self.array('occupations')
+        eigenvalues=self.array('eigenvalues')
+        if density.values.shape!=model.grid or density.lower_indices!=(1,1,1):
+            raise InputError('unsupported retained periodic density grid layout')
+        expected=(model.states,1,1)
+        for array in (occupations,eigenvalues):
+            if array.values.shape!=expected or array.lower_indices!=(1,1,1):
+                raise InputError('unsupported retained orbital/k/spin layout')
+        values=orbitals.values
+        lower=orbitals.lower_indices
+        if (values.ndim!=7 or len(lower)!=7 or values.shape[3:]!=(1,model.states,1,1)
+                or lower[3:]!=(1,1,1,1)):
+            raise InputError('unsupported retained spin/orbital/k/image layout')
+        # Density bounds define the physical region; orbitals additionally carry halos.
+        starts=tuple(density.lower_indices[i]-lower[i] for i in range(3))
+        if any(start<0 or start+n>values.shape[i] for i,(start,n) in enumerate(zip(starts,model.grid))):
+            raise InputError('retained orbital halos do not cover the physical grid')
+        region=tuple(slice(start,start+n) for start,n in zip(starts,model.grid))
+        waves=values[region+(0,slice(None),0,0)].transpose(3,2,1,0)[None]
+        occ=occupations.values[:,:,0].T
+        # Match the existing GS/1 exporter: preserve waves/occupations and derive rho.
+        rho=np.zeros(tuple(reversed(model.grid)))
+        try:
+            with np.errstate(over='raise',invalid='raise'):
+                for band in range(model.states):
+                    rho+=occ[0,band]*(waves[0,band].real**2+waves[0,band].imag**2)
+        except FloatingPointError as exc:
+            raise NumericalError('nonfinite reconstructed retained GS density') from exc
+        if not info.converged:
+            warnings.warn('SCF not converged; exporting the retained last iterate without '
+                          'certifying physical convergence',RuntimeWarning,stacklevel=2)
+        provenance=dict(schema='salmonpy.retained-gs-export/1',material_id=self.material_id,
+            state_identity=self.identity,target_sha256=self.session.backend.sha256,
+            converged=info.converged,iterations=info.iterations,
+            density_source='reconstructed_from_native_orbitals',
+            local_channels=[dict(atomic_number=p.atomic_number,local_channel=p.local_channel)
+                            for p in model.pseudopotentials])
+        references=[dict(atomic_number=p.atomic_number,filename=model._pseudo_name(i),
+                         sha256=p.sha256,source='retained DFT model')
+                    for i,p in enumerate(model.pseudopotentials)]
+        return save_ground_state(destination,wavefunctions=waves,density=rho,
+            eigenvalues=eigenvalues.values[:,:,0].T,occupations=occ,kpoints=[[0.,0.,0.]],weights=[1.],
+            cell_bohr=model.cell,fractional_positions=model.fractional_positions,
+            atomic_numbers=list(model.numbers),electrons=model.electrons,energy_hartree=info.energy_hartree,
+            xc=model.xc,pseudopotentials=references,orbital_block=orbital_block,provenance=provenance)
+
     def array(self,quantity):
         self._live();error=None
         if quantity not in _QUANTITIES:error='unknown GS array quantity'

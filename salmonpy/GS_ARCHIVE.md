@@ -150,3 +150,9 @@ initial = archive.tddft_initial_state(converter=converter, executable=engine,
 ```
 
 複数k点でも、`state.save_checkpoint('new-history')`と、新しく作った同一モデル・固定dtの状態での`state.restore_checkpoint('new-history')`を使えます。GS/2アーカイブと対応する変換器・ランタイム・擬ポテンシャルは別途必要です。チェックポイントは履歴だけを持ち、GS配列を複製しません。合成試験では2・3・6・8点と不均一重み2点について、6ステップ保存後に別Pythonプロセスで復元し、その後20ステップがビット一致しました。異なる入力履歴の2状態を交互に進めた結果、片方を閉じた後の継続も、独立実行とビット一致しました。これは各状態が専用ワーカープロセスを持つ経路の検証であり、ネイティブTDDFTの同一プロセス内での複数コンテキスト対応を示すものではありません。
+
+## 保持native GSからの保存
+
+`NativeGSState.export_archive` で直列Γ点・DFT設定を保持するGSを保存できます。
+対象範囲・来歴・検証の限界は [NATIVE_GS.md](NATIVE_GS.md) を参照してください。
+完全なSCFチェックポイントやnative GSハンドルの復元ではありません。

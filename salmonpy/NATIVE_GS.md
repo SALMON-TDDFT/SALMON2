@@ -121,3 +121,43 @@ with backend.open(context) as session:
 ```sh
 mpiexec -n 2 python -m salmonpy.examples.memory_gs BUILD EXISTING_GS NEW_WORK
 ```
+
+## 保持GSからの明示的なポータブル保存
+
+`session.run` で作った直列・Γ点の状態は、既存のGS/2形式へ保存できます。
+
+```python
+from salmonpy.gs_archive import GroundStateArchive
+
+archive = gs.export_archive("new-portable-gs", orbital_block=16)
+gs.close()
+archive = GroundStateArchive.open("new-portable-gs")
+u = archive.wavefunctions(0)  # (band,z,y,x)、読み取り専用
+```
+
+新しいnative ABIやコンパイルは不要です。波動関数・占有数・固有値を保持し、
+密度の実領域の添字を使って波動関数のハローを除外します。保存する密度は
+占有数と波動関数からバンド順に再構成し、元の混合密度は保存しません。
+物質ID・GS識別子・ランタイムのハッシュ・記録された収束フラグ・反復数・
+擬ポテンシャルのハッシュと局所チャネルを来歴として残します。
+擬ポテンシャル本体は同梱しません。SCF未収束は警告のみで最後の状態を保存します。
+既存の保存先は上書きせず、書き込み失敗時は新規作成中の不完全な保存先を除去します。
+
+現段階の対象は、DFT設定を保持する周期・非スピン分極・固定イオン・Γ点・
+直列サブグループの状態です。既存ファイルから読み込んだGSは不変DFT設定を
+持たないため未対応で、保持GSの複数k点・MPI保存も残作業です。
+これは保存機能の範囲で、通常のGS/TDDFT計算の制限は増やしません。
+非立方格子・非対称ハロー・実数／複素数相当の合成native配列で確認しました。
+実GSでの書き出しと、その後のTDDFT結果の一致は未測定です。
+今回は新たなSCF計算も実GSの収集も行っていません。
+
+これは配列の交換形式で、完全なSCF再開ではありません。混合履歴・力・ソルバー資源・
+元の混合密度は保存しません。`GroundStateArchive.open` は配列を読み込みますが、
+native GSハンドルを復元しません。nativeへの取り込みは
+[GS_ARCHIVE.md](GS_ARCHIVE.md) の明示的な対応コンバーターとランタイム・
+擬ポテンシャルの条件に従います。
+サンプルの `python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT --export-archives`
+は、明示的に2つの粗いΓ点GSを計算して保存します（1ランクのみ）。
+4反復は所有権の確認用で物理的な収束を保証しません。今回の検証ではこのSCFサンプルは
+実行していません。保存時はハローを含む全波動関数のコピー、再構成密度、チャンク用の
+メモリが必要です。`orbital_block` は保存単位で、ピークメモリの上限ではありません。

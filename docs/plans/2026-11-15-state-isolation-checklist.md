@@ -7,8 +7,8 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 This section takes precedence over all earlier dated status/check counts below.
 Historical unchecked bullets are scope records, not additional independent tasks.
 Verified GS handoff/HSE registry/test cleanup committed as cd0841fe [skip ci].
-Subsequent ordinary HSE assembly changes are verified but uncommitted. No push
-or GitHub Actions was performed for these changes.
+Ordinary HSE assembly committed as 2340787d [skip ci]. No push or Actions.
+Subsequent retained-GS portable export is uncommitted; synthetic validation only.
 
 ### Completed within measured scopes
 
@@ -33,17 +33,18 @@ or GitHub Actions was performed for these changes.
   Selected49→43 unit methods retain the identical581 traced runtime lines;
   line tracing is not branch coverage or a physics certificate.
 - [x] Relevant JP/EN/AI guides, examples, test removal mapping and canonical
-  diagnostic records updated. Historical wheel637-test evidence predates the
-  latest test-only cleanup; latest source regression is620, not a new wheel run.
+  diagnostic records updated. Mixed-HSE source/wheel regressions are620; retained portable export source
+  regression is622 (one skip), with no new wheel run for that Python-only slice.
 
 ### Remaining work (do not double-count historical notes)
 
 1. [ ] Commit/review and push the currently verified changes when requested;
-   retain CI quota-saving policy. HEAD is cd0841fe.
+   retain CI quota-saving policy. HEAD is 2340787d.
 2. [x] Connect the different-input fast-PR HSE registry to ordinary material-ID/
    ResponseSession/rank-plan assembly. Grouped4/separate6 and protected aggregate
    save8/resume24 are exact. Specialized SOC/+U/DC remain separate; molecular work paused.
-3. [ ] Retained GS checkpoint/export and portable archive/version migration:
+3. [ ] Retained GS checkpoint and portable archive/version migration:
+   serial Gamma DFT-owned GS/2 export is implemented (synthetic validation only);
    physical GS identity, broader PP format/content coverage, inactive legacy
    checkpoint canonicalization, changed subgroup/decomposition restoration.
    Existing same-topology RT direct restore is already complete in measured scopes.
@@ -1211,3 +1212,21 @@ See docs/hse-model-registry-validation-2026-11-18.md.
 
 Evidence: docs/hse-layer-assembly-validation-2026-11-18.md and canonical
 calc2026/salmonpy-hse-layer-assembly-20261118. Local cloud sync unverified.
+
+
+## 2026-11-19 — retained GS portable array export
+
+- [x] Commit mixed HSE assembly as2340787d [skip ci]; no push/Actions.
+- [x] NativeGSState.export_archive connects serial Gamma DFT-owned arrays to GS/2;
+  physical density bounds remove asymmetric orbital halos; density reconstructed.
+- [x] Material ID/runtime/GS identity/convergence/local-channel provenance validated;
+  warning-only unconverged exports, new destinations only, source state unchanged.
+- [x] Synthetic noncubic complex arrays roundtrip exactly; reopened arrays independent
+  after source changes/close, malformed layout rejected. Source622 tests, one skip.
+- [x] JP/EN/AI guides and explicit opt-in serial sample updated; sample SCF not run.
+- [ ] Real retained-GS export/TDDFT parity, retained multi-k/MPI export, imported-owner
+  physical metadata and native handle restore remain unverified/not implemented.
+- [ ] Complete SCF checkpoint (including mixing) and changed-decomposition restore.
+
+No new SCF, no real GS data collected, no native rebuild, no CI. Portable array
+readback is not native GS restoration. See docs/retained-gs-export-validation-2026-11-19.md.
