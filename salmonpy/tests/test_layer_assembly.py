@@ -56,7 +56,11 @@ class LayerAssemblyTests(unittest.TestCase):
 
     def test_budget_never_silently_subsamples(self):
         d=layout();d['layers'][0]['transverse_cells']=[3,3]
-        with self.assertRaisesRegex(ValueError,'required.*12|12.*budget'):self.assemble(d)
+        with self.assertWarnsRegex(RuntimeWarning,'required.*12|12.*budget'):
+            assembly=self.assemble(d)
+        self.assertEqual(assembly.record()['required_ranks'],12)
+        assembly.parallel_plan.validate(12)
+        with self.assertRaises(ValueError):assembly.parallel_plan.validate(4)
 
     def test_forbidden_overlap_and_bad_inputs(self):
         d=layout();d['layers'].pop(2)

@@ -89,7 +89,7 @@ BANDS.mdを参照してください。`bands.BandStructure.from_salmon` と `.pl
 明示してください。経路上の価電子帯上端を全域のVBMと呼ばないでください。
 
 バンドの計算入口は `BandInitialState.from_salmon` → `run(BandPath, ...)`。
-初期束の外の新規保存先、対応した監査済み実行ファイルを使い、未収束を成功扱いしません。
+初期束の外の新規保存先、対応した監査済み実行ファイルを使い、SCF未収束だけでは停止せず警告して後続へ進めます。実行完了とSCF収束を区別し、`GroundStateResult.converged` と `ground-state.json` の `converged` を確認して未収束を収束済みと説明しません。残差・閾値・反復数は保存されます。破損出力・非有限値・native実行失敗は引き続きエラーです。
 
 ASE連携は任意の独立モジュール `salmonpy.ase`。ASE.mdを参照。
 `run_bands` は構造を照合し、ASEのk点列をそのまま計算します。Calculator・力は独立したASE_CALCULATOR.mdの対応範囲を参照してください。

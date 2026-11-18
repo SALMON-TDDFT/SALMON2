@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import hashlib
 import json
+import warnings
 import numpy as np
 from .fdtd import SalmonExecutable
 from .sbe import _integer
@@ -85,12 +86,15 @@ def _read_status(path):
         rows=Path(path).read_text().splitlines()
         if len(rows)!=4 or rows[0]!='SALMONPY_GS_V1': raise InputError('unsupported status report')
         flag,iterations=map(int,rows[1].split());residual,tolerance,energy=map(float,rows[2].split())
-        if flag!=1 or iterations<1 or rows[3]!='rho_dne' or not np.isfinite([residual,tolerance,energy]).all():
-            raise InputError('not converged or invalid status')
-        if not 0<=residual<tolerance: raise InputError('residual exceeds threshold')
-        return dict(iterations=iterations,residual=residual,tolerance=tolerance,energy_hartree=energy)
+        if flag not in (0,1) or iterations<1 or rows[3]!='rho_dne' or not np.isfinite([residual,tolerance,energy]).all():
+            raise InputError('invalid status')
+        if residual<0 or tolerance<=0: raise InputError('invalid residual or tolerance')
+        converged=bool(flag==1 and residual<tolerance)
+        if not converged:
+            warnings.warn(f'SCF not converged after {iterations} iterations (residual={residual:.6g}, tolerance={tolerance:.6g}); continuing with the saved state', RuntimeWarning, stacklevel=2)
+        return dict(iterations=iterations,residual=residual,tolerance=tolerance,energy_hartree=energy,converged=converged)
     except (OSError,ValueError) as exc:
-        raise RuntimeFailure('GS convergence not confirmed; inspect gs_status.dat and stdout.log') from exc
+        raise RuntimeFailure('Invalid or missing GS status; inspect gs_status.dat and stdout.log') from exc
 
 
 def _read_forces(path,natoms):
@@ -259,6 +263,7 @@ class GroundStateResult:
     directory: Path
     energy_hartree: float
     iterations: int
+    converged: bool=True
 
     @classmethod
     def open(cls,directory):
@@ -280,7 +285,9 @@ class GroundStateResult:
         status=_read_status(root/'native/gs_status.dat')
         if status['energy_hartree']!=record['energy_hartree'] or status['iterations']!=record['iterations']:
             raise InputError('inconsistent GS metadata')
-        return cls(root,status['energy_hartree'],status['iterations'])
+        if 'converged' in record and record['converged'] != status['converged']:
+            raise InputError('inconsistent GS convergence metadata')
+        return cls(root,status['energy_hartree'],status['iterations'],status['converged'])
 
     @property
     def forces_hartree_per_bohr(self):

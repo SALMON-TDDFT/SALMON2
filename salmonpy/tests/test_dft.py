@@ -28,7 +28,11 @@ class DFTTest(unittest.TestCase):
             p.write_text('SALMONPY_GS_V1\n1 37\n1e-10 1e-9 -31.25\nrho_dne\n')
             self.assertEqual(_read_status(p)['iterations'],37)
             p.write_text(p.read_text().replace('1 37','0 37'))
-            with self.assertRaisesRegex(RuntimeError,'converg'):_read_status(p)
+            with self.assertWarnsRegex(RuntimeWarning,'SCF.*not converged'):
+                self.assertFalse(_read_status(p)['converged'])
+            for values in ('nan 1e-9 -31.25', '-1 1e-9 -31.25', '1e-10 0 -31.25'):
+                p.write_text('SALMONPY_GS_V1\n0 37\n'+values+'\nrho_dne\n')
+                with self.assertRaises(RuntimeError):_read_status(p)
             with self.assertRaises((ValueError,FileNotFoundError)):GroundStateResult.open(tmp)
 
     def test_extra_native_files_rejected_on_reopen(self):
@@ -87,14 +91,16 @@ class WarmStartTest(unittest.TestCase):
             def native(*args, **kw):
                 work = Path(kw['cwd'])
                 kw['stdout'].write('end SALMON\n'); kw['stdout'].flush()
-                (work/'gs_status.dat').write_text('SALMONPY_GS_V1\n1 5\n1e-12 1e-9 -1.0\nrho_dne\n')
+                (work/'gs_status.dat').write_text('SALMONPY_GS_V1\n0 5\n1e-5 1e-9 -1.0\nrho_dne\n')
                 (work/'gs_forces.dat').write_text('SALMONPY_FORCES_V1\n1\n0 0 0\n')
                 restart = work/'data_for_restart'; restart.mkdir()
                 for name in ('info.bin','occupation.bin','wfn.bin'):
                     (restart/name).write_bytes(name.encode())
                 return SimpleNamespace(returncode=0)
-            with patch('subprocess.run', side_effect=native):
+            with patch('subprocess.run', side_effect=native), self.assertWarns(RuntimeWarning):
                 source = model.run(engine, root/'source')
+            self.assertFalse(source.converged)
+            self.assertFalse(json.loads((source.directory/'ground-state.json').read_text())['converged'])
             original = (source.directory/'ground-state.json').read_bytes()
             displaced = replace(model, fractional_positions=[[.01,0,0]])
             with patch('subprocess.run', side_effect=native) as run:

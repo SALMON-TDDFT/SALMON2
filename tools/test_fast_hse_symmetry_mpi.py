@@ -28,7 +28,7 @@ def main():
     parser.add_argument('--checkpoint', type=Path, required=True)
     parser.add_argument('--steps', type=int, default=32)
     parser.add_argument('--group-size', type=int, choices=(1,2), default=1)
-    parser.add_argument('--admission-fault', choices=('truncated','nonfinite','nonclosed','cell','cell-metric','cell-orientation','atoms','grid','grid-translation'))
+    parser.add_argument('--admission-fault', choices=('truncated','nonfinite','nonclosed','cell','cell-metric','cell-orientation','atoms','grid','grid-translation','k-shift','k-count','pseudo','gs-info','gs-occupation','gs-wfn'))
     parser.add_argument('--split', type=int, default=7)
     args = parser.parse_args()
     if not 3 < args.split < args.steps:
@@ -62,9 +62,22 @@ def main():
     if args.admission_fault:
         geometry_fault = args.admission_fault in ('cell','cell-metric','cell-orientation','atoms','grid','grid-translation')
         path = bundle/('rt.inp' if geometry_fault and args.admission_fault != 'grid-translation' else 'sym.dat')
-        original = path.read_text()
+        asset_fault = args.admission_fault in ('k-shift','k-count','pseudo','gs-info','gs-occupation','gs-wfn')
+        if asset_fault:
+            name={'k-shift':'rt.inp','k-count':'rt.inp','pseudo':'pseudo1_rps.dat','gs-info':'data_for_restart/info.bin','gs-occupation':'data_for_restart/occupation.bin','gs-wfn':'data_for_restart/wfn.bin'}[args.admission_fault]
+            path=bundle/name
+        original_bytes=path.read_bytes()
+        original = original_bytes if asset_fault else original_bytes.decode()
         if comm.rank == comm.size-1:
-            if args.admission_fault == 'cell':
+            if asset_fault:
+                if args.admission_fault=='k-shift':
+                    damaged=original.replace(b'num_kgrid=2,2,2',b'num_kgrid=2,2,2,dk_shift=.1,0,0')
+                elif args.admission_fault=='k-count':
+                    damaged=original.replace(b'num_kgrid=2,2,2',b'num_kgrid=3,2,2')
+                elif args.admission_fault=='pseudo':damaged=b''
+                elif args.admission_fault=='gs-occupation':damaged=original[:4]+np.array([np.nan],dtype='=f8').tobytes()+original[12:]
+                else:damaged=original[:-1]
+            elif args.admission_fault == 'cell':
                 damaged = original.replace('al=8,8,8','al=0,8,8')
             elif args.admission_fault == 'cell-metric':
                 damaged = original.replace('al=8,8,8','al=8,8,8,al_vec1=8,0,0,al_vec2=0,8,0,al_vec3=1,0,8')
@@ -86,17 +99,17 @@ def main():
                 damaged = '1 0 0 0\n0 1 0 0\n0 0 1 0\n0 -1 0 0\n1 0 0 0\n0 0 1 0\n'
             if damaged == original:
                 raise ValueError('admission-fault requires the canonical synthetic fixture')
-            path.write_text(damaged)
+            path.write_bytes(damaged if asset_fault else damaged.encode())
         try:
             invalid_provider = FastHSEMaterialProvider(bundle,max_steps=args.steps)
             rejected = backend.create_state(invalid_provider.prepare(context), point, .001, context)
         except InputError as error:
-            assert ('HSE geometry' if geometry_fault else 'sym.dat') in str(error)
+            assert ('HSE assets' if asset_fault else 'HSE geometry' if geometry_fault else 'sym.dat') in str(error), str(error)
             assert not fast_hse_mpi._used and not embedded_tddft._used
         else:
             rejected.close()
             raise AssertionError('malformed rank-local symmetry admitted')
-        path.write_text(original)
+        path.write_bytes(original_bytes)
         comm.Barrier()
     state = backend.create_state(provider.prepare(context), point, .001, context)
     target = args.checkpoint.resolve() / f'rank-{world.rank}'

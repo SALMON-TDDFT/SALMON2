@@ -99,3 +99,13 @@ Ehrenfest electron/ion propagation. Isolated systems, non-collinear spin and
 Ehrenfest remain first-release targets requiring native interface work.
 Crystalline TDDFT uses **transverse** (`trans_longi='tr'`) as its standard;
 Longitudinal is an explicitly chosen field component, not a default.
+
+## Unconverged SCF results
+
+Failure to meet the SCF threshold is advisory: the Calculator returns the current
+finite energy/forces with a RuntimeWarning and retains the result for warm start
+and TDDFT. Inspect `last_ground_state.converged` (False when unconverged).
+`ground-state.json` retains `converged`, residual, tolerance and iterations;
+`status="complete"` means execution completed, not SCF convergence. Invalid or
+missing output, nonfinite values and failed native execution remain errors.
+The same policy applies to `DFT.run` and `GroundStateResult.open`.

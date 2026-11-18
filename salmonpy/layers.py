@@ -8,6 +8,7 @@ from dataclasses import dataclass, asdict
 from decimal import Decimal, ROUND_CEILING
 from itertools import product
 import math
+import warnings
 from collections.abc import Mapping
 from types import MappingProxyType
 import numpy as np
@@ -124,7 +125,8 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
                         'cell_start':lo,'cell_stop':hi,'ranks_per_point':rank_count})
         boxes.append((lo,hi,mid,kind,name,rank_count))
     if set(ranks_per_point)!=set(electronic): raise InputError('rank settings required only for selected electronic materials; LD is field-local')
-    if needed>budget: raise InputError(f'required ranks {needed} exceed rank budget {budget}; no cells were subsampled')
+    if needed>budget:
+        warnings.warn(f'required ranks {needed} exceed rank budget {budget}; continuing planning without subsampling; launch with {needed} ranks', RuntimeWarning, stacklevel=2)
     if not electronic: raise InputError('mixed assembly requires electronic points; use FDTD for LD-only calculations')
     # Validate geometry without allocating a full material-ID volume.
     coords=grid.coordinates;source_index=int(np.argmin(abs(coords[axis]-source.position)))

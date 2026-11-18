@@ -223,7 +223,9 @@ class NativeFastHSEBackend:
                     raise InputError('symmetry requires factor-off fast-PR Taylor (full-action is test-only)')
                 operations = _symmetry_preflight(initial.directory/'sym.dat',
                     symmetry_setting)
-            preflight(initial.directory,groups,operations)
+            grid=preflight(initial.directory,groups,operations)
+            from ._hse_assets import preflight as assets_preflight
+            assets_preflight(initial.directory,groups,operations,grid,comm.size)
             groups['tgrid'] = groups.get('tgrid','') + '\n dt='+format(dt,'.17g')+', nt='+str(initial.max_steps)+'\n'
             groups['parallel'] = groups.get('parallel','') + '\n nproc_k='+str(comm.size)+', nproc_ob=1, nproc_rgrid=1,1,1\n'
             text = '\n'.join('&'+k+v+'/' for k,v in groups.items())+'\n'

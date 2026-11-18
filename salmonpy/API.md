@@ -141,3 +141,7 @@ Taylorに限定し、共有の対称化設定は不変、1プロセス1寿命で
 縮約k点の内部2ランクと同一分割での直接再開に対応します。追加のnative k-MPI capabilityが必要です。分割変更による再開は未対応。詳しくは対称性ガイドを参照してください。
 
 NativeFastHSEBackendはnative寿命前に周期セル・格子・原子入力を読み取り検査し、群内でInputErrorを合意します。入力を直してproviderを作り直せます。再開バイナリの互換性や全native初期化の安全性は別契約です。詳しくは対称性ガイドを参照してください。
+
+SCFの閾値未達は `RuntimeWarning` として通知し、有限で読み出せる結果を後続へ渡します。
+`GroundStateResult.converged` と保存JSONの `converged` が収束状態を表します。
+保存JSONの `status='complete'` は実行完了を意味し、収束済みを意味しません。

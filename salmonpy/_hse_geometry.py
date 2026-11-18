@@ -60,31 +60,35 @@ def _values(text, limit, integer=False):
     return values
 
 
-def _numeric(body,name,size=1,integer=False):
-    result = np.zeros(size,dtype=np.int64 if integer else float)
+def _indices(index,size,name):
+    if index is None:
+        positions = list(range(size))
+    else:
+        selector = index[1:-1].strip()
+        if re.fullmatch('[0-9]+',selector):
+            start=int(selector)-1
+            if not 0<=start<size:_fail(name+' index outside array')
+            positions=list(range(start,size))
+        else:
+            parts=selector.split(':')
+            if len(parts) not in (2,3) or any(x.strip() and re.fullmatch('[0-9]+',x.strip()) is None for x in parts):
+                _fail(name+' has unsupported array selector')
+            start=int(parts[0]) if parts[0].strip() else 1
+            stop=int(parts[1]) if parts[1].strip() else size
+            step=int(parts[2]) if len(parts)==3 and parts[2].strip() else 1
+            if not 1<=start<=size or not 1<=stop<=size or step<1 or start>stop:
+                _fail(name+' invalid array section')
+            positions=list(range(start-1,stop,step))
+    return positions
+
+
+def _numeric(body,name,size=1,integer=False,default=0,array=False):
+    result = np.full(size,default,dtype=np.int64 if integer else float)
     for key,index,text in _assignments(body):
         if key != name:
             continue
-        if index is None:
-            positions = list(range(size))
-        else:
-            if size == 1:
-                _fail(name+' is scalar')
-            selector = index[1:-1].strip()
-            if re.fullmatch('[0-9]+',selector):
-                start=int(selector)-1
-                if not 0<=start<size:_fail(name+' index outside array')
-                positions=list(range(start,size))
-            else:
-                parts=selector.split(':')
-                if len(parts) not in (2,3) or any(x.strip() and re.fullmatch('[0-9]+',x.strip()) is None for x in parts):
-                    _fail(name+' has unsupported array selector')
-                start=int(parts[0]) if parts[0].strip() else 1
-                stop=int(parts[1]) if parts[1].strip() else size
-                step=int(parts[2]) if len(parts)==3 and parts[2].strip() else 1
-                if not 1<=start<=size or not 1<=stop<=size or step<1 or start>stop:
-                    _fail(name+' invalid array section')
-                positions=list(range(start-1,stop,step))
+        if index is not None and size==1 and not array:_fail(name+' is scalar')
+        positions=_indices(index,size,name)
         values=_values(text,len(positions),integer)
         result[positions[:len(values)]]=values
     return result
@@ -193,7 +197,8 @@ def preflight(root,groups,operations=None):
     natom=int(_numeric(system,'natom',integer=True)[0]);nelem=int(_numeric(system,'nelem',integer=True)[0])
     if natom<1 or nelem<1:_fail('positive natom and nelem required')
     fractional,species=_atoms(root,groups,cell,natom,nelem)
-    if operations is None:return
+    grid.setflags(write=False)
+    if operations is None:return grid
     for operation in operations:
         rotation=operation[:,:3];translation=operation[:,3]
         cartesian=cell@rotation@inverse
@@ -224,3 +229,5 @@ def preflight(root,groups,operations=None):
             if len(candidates)!=1 or int(candidates[0]) in used:
                 _fail('symmetry does not uniquely preserve atom positions/species')
             used.add(int(candidates[0]))
+
+    return grid

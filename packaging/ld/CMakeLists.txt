@@ -204,3 +204,5 @@ install(FILES "${ROOT}/tools/test_hse_low_gradient.py" "${ROOT}/tools/test_fast_
 install(FILES "${ROOT}/tests/native/test_hse_low_gradient.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
 install(FILES "${ROOT}/salmonpy/_hse_geometry.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/_hse_assets.py" DESTINATION salmonpy)

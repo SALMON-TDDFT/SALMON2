@@ -703,3 +703,38 @@ Larger MPI partitions and checkpoint repartitioning are not implied by MPI2 resu
 
 This supersedes the cell/atom/grid subset of older unchecked initialization notes.
 GS/TDDFT ownership, learned/PT-CN symmetry, environment/scaling and portable archive work remain separate.
+
+## 2026-11-18 — Warning-first restriction audit
+
+- [x] Layer rank budget is advisory; all points and required ranks are preserved.
+  Actual communicator-size/decomposition validation remains an execution requirement.
+- [x] Finite GS occupation range/electron-sum discrepancies warn without mutation.
+- [x] Removed default full-orbital finiteness rescan from state creation; size checks remain.
+- [x] Memory budgets were already advisory. JP/EN coupled guides and AI JSON synchronized.
+- [x] Six asset admission faults on two independent MPI2 groups: collective rejection,
+  repair/retry and bit-identical current/energy; fresh-process own direct resume.
+  Mixed LD/SBE/field/reduced-HSE and ordinary PBE/Taylor/PT-CN regressions pass.
+- [x] Native KY trailing columns, continued records and implicit signed exponents
+  accepted; non-KY content coverage and legacy GS physical identity remain open.
+- [x] SCF threshold failure warns and preserves usable finite results, with explicit
+  converged=False and residual/tolerance/iterations; warm start/TDDFT remain usable.
+- [ ] Band-iteration convergence policy remains separate from SCF handling.
+
+Local source suite: 581 tests, one skip. Source-distribution-to-wheel and native
+library hash check passed. No GitHub Actions used. No numerical kernel changed.
+
+SCF warning-first validation: actual Si one-iteration SCF, reopen/force access and
+2-step TDDFT current completed with finite outputs. No native kernel changes.
+
+## 2026-11-18 — k/PP/GS structural admission
+
+- [x] Generated uniform mesh, native odd Gamma behavior, affine retained stars,
+  representative count/weights and bounded native ownership checks.
+- [x] PP species references/readability/suffixes and plain scalar KY records.
+- [x] Legacy global GS metadata/occupations/byte lengths; optional explicit deep scan.
+- [x] Finite occupation range/sum differences remain warning-only and unmodified.
+- [ ] Physical GS identity requires a richer archive; legacy records lack it.
+- [ ] Non-KY content admission and general native initialization recovery remain open.
+
+General cells and learned/PT-CN symmetry remain subsequent native work, unchanged
+by these structural checks. Resource budget advice does not enforce a rank/memory cap.
