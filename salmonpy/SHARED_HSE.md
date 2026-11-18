@@ -215,3 +215,30 @@ C契約はnative_adapters/fast_hse_handles.hにあります。Cホストは対�
 `--symmetry` は入力の実際の対称性設定を許可する指定で、各保持群がx／y／円偏光を含む実際のAを
 引き続き検査します。投影・切捨ては行いません。検証は既存・合成GSによる実装整合性の確認で、
 物性の収束保証ではありません。資源予算は従来どおり警告扱いです。
+
+## 通常の異種モデル層組立て
+
+各HSEのMaterialBindingで `NativeFastHSEBackend(..., registry_model=True)` を指定し、
+`assemble_native_layers(..., model_groups={"hse-models": ["hse-a", "hse-b"]})` へ渡します。
+物質ごとのprovider／初期GSと、マクロ点ごとの状態を保持します。同じHSE群では内部ランク数、
+ライブラリ、作業ルート、対称性の許可設定を揃えます。標準TDDFTとHSEは別のnative群を使います。
+既定のランク計画と `shared_model=True` の経路は維持します。
+
+`salmonpy.examples.mixed_hse_models` は通常の層組立て、FDTD内のLD、SBE、二つのHSE物質IDと
+保護付き直接保存／再開を接続する例です。materials JSONは既存の
+`salmonpy.native-tddft-materials/1` 形式を使い、この例がHSE providerを明示選択します。
+ファイル名からbackendを推測しません。物質ごとに `[2,1,1,1,1]` などのk点並列を指定します。
+同梱 `mixed_hse_models_layers.json` にID・並び・厚みを定義し、`--layers` で置き換えられます。
+`--separate` は比較用の独立MPI群を作ります。40³場・8³電子格子の小さい3D接続試験で、物性精度の例ではありません。
+
+```sh
+mpiexec -n 4 python -m salmonpy.examples.mixed_hse_models FIELD_BUILD HSE_BUILD MATERIALS_JSON NEW_OUTPUT
+mpiexec -n 6 python -m salmonpy.examples.mixed_hse_models FIELD_BUILD HSE_BUILD MATERIALS_JSON NEW_OUTPUT --separate --compare GROUPED_OUTPUT
+```
+
+全体を `--steps 32` として `--save-at 8` で保存し、新しい出力先に
+`--resume SAVED_OUTPUT/checkpoint --compare CONTINUOUS_OUTPUT` で再開します。
+物質ごとの内部ランク数と入力は同じに保ちます。モデルごとに一意な出力名を使い、対称性入力用の
+ファイル番号が他状態と衝突しない最新ランタイムを指定してください。
+
+入力雛形は `examples/mixed_hse_models_inputs.json` です。bundleを手元の既存GSへ書き換えて使います。

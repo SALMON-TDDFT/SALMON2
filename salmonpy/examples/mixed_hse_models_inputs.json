@@ -1,0 +1,27 @@
+{
+  "schema": "salmonpy.native-tddft-materials/1",
+  "materials": {
+    "hse-a": {
+      "bundle": "./prepared/hse-a",
+      "input_file": "rt.inp",
+      "decomposition": [
+        2,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "hse-b": {
+      "bundle": "./prepared/hse-b",
+      "input_file": "rt.inp",
+      "decomposition": [
+        2,
+        1,
+        1,
+        1,
+        1
+      ]
+    }
+  }
+}

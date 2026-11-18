@@ -216,11 +216,14 @@ class NativeFastHSEBackend:
     execution = 'collective'
     reduction = 'leader'
 
-    def __init__(self, build_record, work_root, *, allow_symmetry=False, shared_model=False):
+    def __init__(self, build_record, work_root, *, allow_symmetry=False, shared_model=False, registry_model=False):
         if type(allow_symmetry) is not bool:
             raise InputTypeError('allow_symmetry must be boolean')
         if type(shared_model) is not bool:
             raise InputTypeError('shared_model must be boolean')
+        if type(registry_model) is not bool:raise InputTypeError("registry_model must be boolean")
+        if shared_model and registry_model:raise InputError("choose shared_model or registry_model")
+        self.registry_model=registry_model
         self.shared_model = shared_model
         self.allow_symmetry = allow_symmetry
         self.supported_group_sizes = (1,2)
@@ -243,10 +246,23 @@ class NativeFastHSEBackend:
             identity.append('symmetry-v1')
         if shared_model:
             identity.append('shared-model-v1')
+        if registry_model:identity.append('registry-model-v1')
         self.identity = 'salmonpy.fast-hse-mpi/1/' + hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
     def open_group(self, initial, dt, context):
         """Optional ResponseSession-owned factory; default route stays unchanged."""
+        if getattr(self,'registry_model',False):
+            resources=getattr(context,'group_resources',None)
+            if resources is None:raise InputError('registry_model requires session-owned group resources')
+            key='salmonpy.fast-hse.registry/1'
+            registry=resources.get(key)
+            if registry is None:
+                registry=self.open_registry(context)
+                resources[key]=registry
+            elif (registry.backend.sha256,registry.backend.work_root,registry.backend.allow_symmetry)!=(self.sha256,self.work_root,self.allow_symmetry):
+                raise InputError('one HSE registry group requires matching library, work root and symmetry permission')
+            from ._shared_hse import _SessionGroup
+            return _SessionGroup(registry.open_model(initial,dt))
         if not self.shared_model:
             return None
         from ._shared_hse import _SessionGroup
@@ -262,8 +278,8 @@ class NativeFastHSEBackend:
         return self._create(initial, None, dt, context, shared=True)
 
     def create_state(self, initial, point_id, dt, context):
-        if self.shared_model:
-            raise InputError('shared_model uses ResponseSession/open_group or explicit open_model')
+        if self.shared_model or getattr(self,"registry_model",False):
+            raise InputError('shared/registry model uses ResponseSession/open_group or explicit model API')
         return self._create(initial, point_id, dt, context, shared=False)
 
     def _create(self, initial, point_id, dt, context, *, shared, registry=None):

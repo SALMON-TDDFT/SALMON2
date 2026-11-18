@@ -310,7 +310,7 @@ contains
   subroutine read_SymMat( flag )
     implicit none
     logical,intent(out) :: flag
-    integer,parameter :: unit=1001
+    integer :: unit
     integer :: i, j, nsym
 
     inquire( FILE=sym_file, EXIST=flag )
@@ -321,7 +321,7 @@ contains
        if ( DISPLAY ) write(*,*) "symmetry-operation file is found ( "//sym_file//" )."
     end if
 
-    open( unit, file='sym.dat', status='old' )
+    open( newunit=unit, file='sym.dat', status='old' )
 
     i=0
     do

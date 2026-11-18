@@ -250,3 +250,33 @@ prepared models. `--symmetry` permits the actual supplied symmetry declarations;
 every retained group still checks the real drive, including x/y/circular A.
 No projection/clamping is performed. Validation uses existing/synthetic GS inputs,
 not converged material property benchmarks. Resource advice remains warning-only.
+
+## Ordinary heterogeneous layer assembly
+
+Use `NativeFastHSEBackend(..., registry_model=True)` in each HSE MaterialBinding
+and `assemble_native_layers(..., model_groups={"hse-models": ["hse-a", "hse-b"]})`.
+Each material retains its own provider/initial GS and every macrocell its own state.
+Equal inner rank counts, one matching library/work root and matching symmetry
+permission are required within the HSE group. Standard TDDFT and HSE still use
+separate native groups. Default plans and `shared_model=True` remain unchanged.
+
+`salmonpy.examples.mixed_hse_models` demonstrates ordinary native layer assembly,
+FDTD-local LD, SBE, two HSE input IDs and protected direct save/resume. Its
+`materials` JSON uses the existing `salmonpy.native-tddft-materials/1` local input
+schema; this example explicitly chooses HSE providers, rather than guessing a
+backend from filenames. Use k-only decomposition, e.g. `[2,1,1,1,1]`, per material.
+The packaged `mixed_hse_models_layers.json` fixes layer IDs/order/thickness;
+`--layers` accepts another layout. `--separate` creates independent material
+groups for comparison. This40³/8³ small 3D fixture tests interfaces, not precision.
+
+```sh
+mpiexec -n 4 python -m salmonpy.examples.mixed_hse_models FIELD_BUILD HSE_BUILD MATERIALS_JSON NEW_OUTPUT
+mpiexec -n 6 python -m salmonpy.examples.mixed_hse_models FIELD_BUILD HSE_BUILD MATERIALS_JSON NEW_OUTPUT --separate --compare GROUPED_OUTPUT
+```
+
+Use `--save-at 8` with total `--steps 32`; resume into a new output with
+`--resume SAVED_OUTPUT/checkpoint --compare CONTINUOUS_OUTPUT`. Each material's
+inner rank count and complete inputs must stay the same. Use a current runtime
+with unique model output labels and collision-free symmetry input units.
+
+The local-input template is `examples/mixed_hse_models_inputs.json`; replace bundle paths with your existing matching GS inputs.

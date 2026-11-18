@@ -135,7 +135,7 @@ end function
  real(c_double),intent(out)::J(3)
  sp_fast_hse_init_symmetry=initialize(path,timestep,capacity,J,.true.)
  end function
- integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry,registered)
+ integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry,registered,output_name)
  use inputoutput,only:read_input
  use math_constants,only:set_math_constants
  use plusU_global,only:read_Hubbard_parameters
@@ -146,6 +146,8 @@ end function
  use exx_worker_service,only:service_enabled
 #endif
  logical,intent(in)::allow_symmetry
+ character(*),optional,intent(in)::output_name
+ character(80)::selected_name
  logical,optional,intent(in)::registered
  logical::registration,first_init
  character(c_char),intent(in)::path(*)
@@ -195,7 +197,9 @@ end function
  if(first_init)call timer_initialize
  call rt_input_config(config)
  config%delta_t=timestep;config%max_steps=capacity
- call rt_open(state,'native_fast_hse',status,config=config,allow_symmetry=allow_symmetry)
+ selected_name='native_fast_hse'
+ if(present(output_name))selected_name=output_name
+ call rt_open(state,trim(selected_name),status,config=config,allow_symmetry=allow_symmetry)
  call agree(status)
  if(status/=0)then
   failed=.true.;return
@@ -734,12 +738,14 @@ integer(c_int) function sp_fast_hse_model_register(path,timestep,capacity,symmet
  models(index)%children=0;models(index)%closed=.false.;models(index)%symmetric=symmetry==1
  call rt_model_settings(.true.)
  call handle_reserve(slot,candidate,status)
- if(status==0)status=initialize(path,timestep,capacity,J,symmetry==1,.true.)
+ if(status==0)then
+  write(handles(slot)%label,'(a,i0,a,i0)')'native_hse_m',index,'_g',models(index)%generation
+  status=initialize(path,timestep,capacity,J,symmetry==1,.true.,trim(handles(slot)%label))
+ endif
  call agree(status)
  if(status==0)then
   call models(index)%values%capture()
   active_model=index;model_symmetry=symmetry==1
-  handles(slot)%label='native_fast_hse'
   handles(slot)%model_index=index
   models(index)%children=1
   handle_mode=.true.;registry_mode=.true.;handle_group=group

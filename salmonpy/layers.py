@@ -55,7 +55,7 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
     authoritative, including the half-cell shift for an even transverse count.
     Null material_id means a vacuum gap. No implicit interface gap is inserted.
     model_groups maps group IDs to material-ID lists; all selected points share
-    that group. ranks_per_point must agree; standard TDDFT uses registry_model.
+    that group. ranks_per_point must agree; standard TDDFT and heterogeneous HSE use registry_model.
     """
     data = _copy_json(layout)
     _object(data, 'layout', ('schema','length_unit','axis','origin_cell','layers'))
@@ -169,10 +169,15 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
         hse=[electronic[mid].backend for mid in mids if type(electronic[mid].backend) is NativeFastHSEBackend]
         for mid in mids:
             backend=electronic[mid].backend
-            if type(backend) is NativeFastHSEBackend and totals[mid]>1 and not backend.shared_model:
+            if type(backend) is NativeFastHSEBackend and totals[mid]>1 and not (backend.shared_model or getattr(backend,"registry_model",False)):
                 raise InputError('multiple HSE points require shared_model=True')
-        if len(hse)>1 or (hse and native):
-            raise InputError('HSE supports one native model owner per group; use separate groups')
+        if hse and native:
+            raise InputError('standard TDDFT and HSE require separate native groups')
+        if len(hse)>1:
+            if not all(getattr(b,'registry_model',False) for b in hse):
+                raise InputError('multiple HSE models require registry_model=True')
+            if len({(b.sha256,str(b.work_root),b.allow_symmetry) for b in hse})!=1:
+                raise InputError('HSE registry group requires matching library/work root/symmetry permission')
     needed=nf+sum(ranks_per_point[mids[0]] for mids in combined.values())+sum(
         ((count+grouping.get(mid,1)-1)//grouping.get(mid,1))*ranks_per_point[mid]
         for mid,count in totals.items() if mid not in membership)

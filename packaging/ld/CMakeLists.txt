@@ -270,3 +270,5 @@ install(FILES "${ROOT}/tools/test_retained_gs_mpi.py" DESTINATION salmonpy/_runt
 install(FILES "${ROOT}/salmonpy/_hse_registry.py" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/tools/test_hse_registry_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/examples/mixed_hse_models.py" "${ROOT}/salmonpy/examples/mixed_hse_models_layers.json" "${ROOT}/salmonpy/examples/mixed_hse_models_inputs.json" DESTINATION salmonpy/examples)

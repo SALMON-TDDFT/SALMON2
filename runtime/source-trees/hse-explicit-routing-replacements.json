@@ -198,7 +198,7 @@
     },
     "src/symmetry/symmetry.f90": {
       "before_sha256": "85b4098863c13947eddbd2c95ded856ccb67cdebec942980efdd74fe4a359962",
-      "after_sha256": "ecad790fcb5cbaa3d62b0353ac9d4ba8451bb9d3de7a9e012ca22388b0b55c74",
+      "after_sha256": "21d95bc0504eadbe953f759c2d60d686ad95fcbc748a83b42af78f279b2e7b47",
       "source": "overrides/hse-explicit-routing/src/symmetry/symmetry.f90"
     },
     "src/symmetry/symmetry_rho.f90": {

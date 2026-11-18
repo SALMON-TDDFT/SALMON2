@@ -177,7 +177,7 @@ class HeterogeneousLayerGroupsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'overlap'):
             self.assemble(model_groups={'film':['sbe','td']},points_per_group={'sbe':2})
 
-    def test_two_native_hse_owners_do_not_form_a_valid_group(self):
+    def test_native_hse_group_requires_registry_and_matching_runtime(self):
         from unittest.mock import patch
         from salmonpy.fast_hse_mpi import NativeFastHSEBackend
         materials=self.materials()
@@ -187,6 +187,15 @@ class HeterogeneousLayerGroupsTests(unittest.TestCase):
             materials[mid]=MaterialBinding(mid,materials[mid].provider,backend)
         with patch.object(self,'materials',return_value=materials):
             with self.assertRaisesRegex(ValueError,'HSE'):
+                self.assemble(model_groups={'film':['sbe','td']})
+            for binding in materials.values():
+                if type(getattr(binding,'backend',None)) is NativeFastHSEBackend:
+                    binding.backend.registry_model=True;binding.backend.shared_model=False
+                    binding.backend.sha256='same';binding.backend.work_root='work';binding.backend.allow_symmetry=True
+            valid=self.assemble(model_groups={'film':['sbe','td']})
+            self.assertEqual(valid.record()['required_ranks'],3)
+            materials['td'].backend.sha256='other'
+            with self.assertRaisesRegex(ValueError,'matching'):
                 self.assemble(model_groups={'film':['sbe','td']})
 
     def test_one_hse_material_multiple_points_requires_shared_model(self):

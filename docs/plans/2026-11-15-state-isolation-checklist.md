@@ -6,8 +6,9 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 This section takes precedence over all earlier dated status/check counts below.
 Historical unchecked bullets are scope records, not additional independent tasks.
-Source/tests/docs changes after HEAD d824b4c6 remain uncommitted; no push or
-GitHub Actions was performed for these changes.
+Verified GS handoff/HSE registry/test cleanup committed as cd0841fe [skip ci].
+Subsequent ordinary HSE assembly changes are verified but uncommitted. No push
+or GitHub Actions was performed for these changes.
 
 ### Completed within measured scopes
 
@@ -38,11 +39,10 @@ GitHub Actions was performed for these changes.
 ### Remaining work (do not double-count historical notes)
 
 1. [ ] Commit/review and push the currently verified changes when requested;
-   retain CI quota-saving policy. HEAD remains d824b4c6.
-2. [ ] Connect the now-completed explicit different-input fast-PR HSE registry
-   to ordinary material-ID/ResponseSession/rank-plan assembly. Explicit same-process
-   input/symmetry switching is verified below; existing same-model assembly stays.
-   Specialized SOC/+U/DC ownership remains separate; molecular work stays paused.
+   retain CI quota-saving policy. HEAD is cd0841fe.
+2. [x] Connect the different-input fast-PR HSE registry to ordinary material-ID/
+   ResponseSession/rank-plan assembly. Grouped4/separate6 and protected aggregate
+   save8/resume24 are exact. Specialized SOC/+U/DC remain separate; molecular work paused.
 3. [ ] Retained GS checkpoint/export and portable archive/version migration:
    physical GS identity, broader PP format/content coverage, inactive legacy
    checkpoint canonicalization, changed subgroup/decomposition restoration.
@@ -1189,7 +1189,25 @@ See docs/functional-test-cleanup-2026-11-18.md.
   independent comparison pass; JP/EN/AI/C header/example and wheel synchronized.
 - [x] Source/all-object prohibition audits; canonical evidence (no GS collection)
   calc2026/salmonpy-hse-model-registry-20261118. Local cloud sync unverified; no CI.
-- [ ] Ordinary heterogeneous HSE material-ID/rank-plan assembly remains next;
+- [x] Ordinary heterogeneous HSE material-ID/rank-plan assembly completed below;
   changed topology, general failures, platforms/physical validation stay separate.
 
 See docs/hse-model-registry-validation-2026-11-18.md.
+
+## 2026-11-18 — ordinary heterogeneous HSE material groups
+
+- [x] Commit preceding verified work as cd0841fe [skip ci]; no push/Actions.
+- [x] registry_model=True/open_group session resources and model_groups layer
+  assembly; matching library/root/symmetry and rank checks, existing defaults kept.
+- [x] Offline material-ID catalog/layout templates and mixed_hse_models example:
+  native FDTD/LD + SBE + two different HSE models, independent per-point states.
+- [x] Fixed symmetry-file unit1001 collision and unique registered initial labels;
+  protected output capture retained. Current/energy/history still equal old control.
+- [x] Grouped4 vs separate6,32-step A/E/j and material energy columns exact;
+  aggregate protected save8 +24 resumed steps exact, zero replay.
+- [x] Source620/installed620 tests (one skip each), installed example exact;
+  guides/AI/templates/source inventories and canonical selected evidence updated.
+- [x] Source/application-object audits; no GS collected/new SCF, no Actions.
+
+Evidence: docs/hse-layer-assembly-validation-2026-11-18.md and canonical
+calc2026/salmonpy-hse-layer-assembly-20261118. Local cloud sync unverified.
