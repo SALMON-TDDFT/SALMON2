@@ -9,7 +9,9 @@ Historical unchecked bullets are scope records, not additional independent tasks
 Verified GS handoff/HSE registry/test cleanup committed as cd0841fe [skip ci].
 Ordinary HSE assembly2340787d and Gamma portable exportb66b97fd committed and
 pushed to salmonpy/codex/salmonpy-state-inputs-recovery with [skip ci].
-Subsequent regular-mesh/MPI retained export is uncommitted; synthetic validation only.
+Regular-mesh/MPI export committed asd67ce847 and pushed with [skip ci].
+Referenced-k-file import fix and declared-input metadata are uncommitted;
+existing-GS/native checks below. No new push or Actions this slice.
 
 ### Completed within measured scopes
 
@@ -40,14 +42,16 @@ Subsequent regular-mesh/MPI retained export is uncommitted; synthetic validation
 ### Remaining work (do not double-count historical notes)
 
 1. [ ] Commit/review and push the currently verified changes when requested;
-   retain CI quota-saving policy. HEAD is b66b97fd; preceding work pushed; regular-mesh export uncommitted.
+   retain CI quota-saving policy. HEAD is d67ce847; preceding work pushed; referenced-k-file import fix uncommitted.
 2. [x] Connect the different-input fast-PR HSE registry to ordinary material-ID/
    ResponseSession/rank-plan assembly. Grouped4/separate6 and protected aggregate
    save8/resume24 are exact. Specialized SOC/+U/DC remain separate; molecular work paused.
-3. [ ] Retained GS checkpoint and portable archive/version migration:
+3. [ ] Complete retained GS/SCF checkpoint and portable archive/version migration:
    regular-mesh DFT-owned GS/2 collective export is implemented (synthetic validation only);
    physical GS identity, broader PP format/content coverage, inactive legacy
    checkpoint canonicalization, changed subgroup/decomposition restoration.
+   Portable GS/2→new retained GS initialization now works through explicit conversion
+   and compatible MPI splits. This is not full SCF/cache or RT checkpoint repartitioning.
    Existing same-topology RT direct restore is already complete in measured scopes.
 4. [ ] Remaining shared initialization/I/O/timer/unscoped MPI resources and broader
    recoverable initialization/allocation/I/O contracts. Current numerical rollback
@@ -1266,3 +1270,97 @@ docs/retained-gs-multik-validation-2026-11-19.md. Local storage only; sync unver
   native GS handle restore/full SCF mixing checkpoint/changed-topology restoration.
 
 See docs/retained-gs-mpi-export-validation-2026-11-19.md for final wheel/results.
+
+
+## 2026-11-19 — existing-GS referenced k-table import
+
+- [x] Commit/push regular-k/MPI exportd67ce847 to salmonpy remote [skip ci].
+- [x] Copy/hash/retain native file_kw assets with relative directories; preserve
+  quoted ! in filenames. Missing required files fail before native initialization.
+- [x] Shared existing-GS runner --external-k: PZ2-k MPI orbital2/spatial2,
+  Libxc-PBE8-k orbital2, TB-mBJ8-k spatial2 and unchanged regular control.
+  Currents, independent states and direct no-replay restart are bit-exact.
+- [x] Missing k-table while RT is active leaves GS resources/current unchanged;
+  subsequent valid loading and RT continue. No new SCF/reference GS generated.
+- [ ] Imported canonical physical model/portable export, full native GS/SCF mixing
+  restoration and changed-topology restore remain; no claim of physical convergence.
+
+See docs/gs-external-k-import-validation-2026-11-19.md for final records.
+
+- Final import slice: source624/installed624 tests (one skip each), installed native
+  external-k orbital2/file/current/resume/missing-asset comparison pass. Offline
+  sdist/wheel audits/hashes pass; original electronic library reused by recorded SHA.
+  Evidence: canonical calc2026/salmonpy-gs-k-table-import-20261119 (no GS arrays).
+
+
+## 2026-11-19 — local declared GS input descriptions
+
+- [x] GSInputMetadata/describe_gs_input and retained input_metadata snapshots;
+  optional f90nml metadata extra, no dependency/native/MPI work on ordinary load.
+- [x] Explicit cell/coordinate units/species/grid/k/XC/PP descriptions, unknown
+  defaults/unsupported fields remain unknown. Source ID is not physical identity.
+- [x] Captured input/assets and convergence remain available after GS close,
+  detached immutable/JSON results; imported provenance/convergence remain unknown.
+- [x] Synthetic units/indexed species/nonorthogonal/external coordinate/unknown/
+  dependency/mutation tests; existing PZ/PBE/TB-mBJ MPI current/resume controls pass.
+- [ ] Full physical GS identity/native effective model binding/imported portable
+  export, SCF-mixing checkpoint and changed-topology restoration remain separate.
+
+See docs/gs-input-metadata-validation-2026-11-19.md for final wheel/results.
+
+- Final metadata slice: source626/installed626 tests (one skip each), installed
+  native MPI4 and public metadata example MPI2 pass. Import loads no parser/MPI;
+  offline wheel source/object/hash audits pass. No new SCF/electronic rebuild/CI.
+  Evidence: canonical calc2026/salmonpy-gs-input-metadata-20261119 (no GS arrays).
+
+
+## 2026-11-19 — portable arrays to retained native GS
+
+- [x] load_archive: matching collective selections/environment, root-only explicit
+  conversion into new caller-owned bundle, receipt/hash verification and GS load.
+- [x] Immutable archive_origin retains input archive ID/convergence claim separately
+  from current imported convergence(None); default ID inherited, explicit ID honored.
+- [x] Known marker/integer-record mismatch rejects; legacy unknown compiler/source
+  evidence warns. No new restrictions on ordinary GS run/load or implicit compiler.
+- [x] Audited/probed converter uses unchanged extracted I/O from existing validated
+  serial runtime. No solver rebuild/new SCF/real GS collection.
+- [x] Synthetic native orbitals/occupations exact; MPI2 orbital/spatial/k contexts
+  and PBE orbital compare currents to independent file route; direct8+8 resume,
+  independent states, conversion failure ownership and retry exact.
+- [ ] Complete native SCF mixing/cache/iteration restore and arbitrary RT checkpoint
+  repartitioning remain separate. Archived energy/eigenvalues are not native records.
+
+See docs/portable-retained-gs-validation-2026-11-19.md for final wheel/evidence.
+
+- Gamma complex-array import explicitly stages an equivalent k table before GS
+  initialization, avoiding native DFT's real allocation. Actual Gamma orbital/
+  spatial readback/current/independent/direct-resume controls pass. Full-SCF
+  restoration remains separate; no imaginary component is discarded.
+
+- Final portable-load slice: source627/installed627 tests (one skip each), six
+  actual native synthetic cases (PZ/PBE, Gamma and two-k) plus installed PBE/Gamma
+  and repeated shared-session public sample pass. Converter/wheel audits/hashes
+  pass. No new electronic build/SCF/real GS collection/CI. Evidence:
+  calc2026/salmonpy-portable-retained-gs-20261119. Complete SCF caches remain open.
+
+
+## 2026-11-19 — GS/2-imported retained re-export
+
+- [x] Capture small source metadata/eigen/geometry/k arrays, no wavefunction cache;
+  GS/2-imported live owners re-export after source removal. Legacy models not guessed.
+- [x] Native orbitals/occupations and derived density separated from carried source
+  model/sampling/eigenvalue/energy; new validated reexport provenance, con=None.
+- [x] Complex reads preserve signed-zero bits without arithmetic; NaN/Inf rejection
+  remains collective. Computed-DFT export arithmetic/old provenance preserved.
+- [x] Source synthetic MPI Gamma/PZ/PBE/k/orbital/spatial/nonuniform save/load/current
+  comparisons and active-RT partial-write failure/source-owner preservation/retry pass.
+- [ ] Full native SCF mixing/cache/iteration snapshot and arbitrary RT checkpoint
+  migration remain separate; reimport creates a new model with its own identity.
+
+See docs/gs-reexport-validation-2026-11-19.md for final wheel/evidence.
+
+- Final re-export slice: source628/installed628 tests (one skip each), seven source
+  actual-MPI synthetic cases and installed PBE/Gamma/nonuniform cases pass. Public
+  sample repeats with reexport_to and legacy current hash unchanged. Computed
+  archive b66b97fd file parity, source removal, signed-zero and nonfinite checks pass.
+  Evidence: calc2026/salmonpy-gs-reexport-20261119; no real GS arrays/SCF/CI.

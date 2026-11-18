@@ -172,3 +172,8 @@ completed execution, not convergence.
 For explicit sequential heterogeneous standard-model switching in one process, see [TDDFT_REGISTRY.en.md](TDDFT_REGISTRY.en.md).
 
 [Retained GS handles and Python](NATIVE_GS.en.md).
+
+`salmonpy.gs_input.GSInputMetadata` / `describe_gs_input` and retained
+`state.input_metadata()` expose immutable declared-input descriptions. The optional
+metadata extra is loaded only on explicit use; source fingerprints do not certify
+physical GS identity or native restore compatibility. See the retained-GS guide.

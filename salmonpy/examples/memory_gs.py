@@ -7,7 +7,6 @@ import argparse
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
-from mpi4py import MPI
 from salmonpy.native_gs import NativeGSBackend
 
 
@@ -16,7 +15,10 @@ def main():
     parser.add_argument('build',type=Path)
     parser.add_argument('initial',type=Path)
     parser.add_argument('work',type=Path)
-    args=parser.parse_args();comm=MPI.COMM_WORLD
+    parser.add_argument('--describe-input',action='store_true',help='show captured declared input metadata; requires metadata extra')
+    args=parser.parse_args()
+    from mpi4py import MPI
+    comm=MPI.COMM_WORLD
     if comm.rank==0:args.work.mkdir(parents=True,exist_ok=False)
     comm.Barrier()
     context=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
@@ -24,7 +26,17 @@ def main():
     with backend.open(context) as session:
         gs=session.load(args.initial,material_id='silicon')
         model=gs.tddft_model(dt=.003,max_steps=24)
+        description=None;error=None
+        if args.describe_input:
+            if comm.rank==0:
+                try:description=gs.input_metadata()
+                except Exception as exc:error=str(exc)
+            error=comm.bcast(error,root=0)
+            if error:raise RuntimeError('input metadata description failed: '+error)
         gs.close()
+        if description is not None and comm.rank==0:
+            import json
+            print(json.dumps(description.as_dict(),ensure_ascii=False,indent=2))
         first=model.new_state('first');second=model.new_state('second')
         try:
             for step in range(1,17):

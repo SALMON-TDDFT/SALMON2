@@ -46,6 +46,101 @@ class GSNativeTests(unittest.TestCase):
                                            pseudopotentials=[self.potential],max_steps=20)
         self.addCleanup(a.close);return a
 
+    def test_retained_archive_loader_converts_once_and_keeps_unknown_provenance(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from salmonpy.native_gs import NativeGSSession,NativeGSState
+        comm=SimpleNamespace(size=1,rank=0,allgather=lambda v:[v],bcast=lambda v,root:v)
+        backend=SimpleNamespace(sha256='b'*64,_io_profile={'source_sha256':None,'compiler_sha256':None,'record_flags':()})
+        session=NativeGSSession(backend,SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=comm)),None)
+        state=NativeGSState(session,1,Path(self.tmp.name)/'state','film-a',None)
+        session.load=Mock(return_value=state)
+        destination=Path(self.tmp.name)/'retained-import'
+        with self.assertWarnsRegex(RuntimeWarning,'compiler'):
+            loaded=session.load_archive(self.archive,destination,converter=self.converter,
+                executable=self.model.executable,pseudopotentials=[self.potential],material_id='film-a')
+        self.assertIs(loaded,state)
+        session.load.assert_called_once_with(destination.resolve(),'rt.inp',material_id='film-a')
+        self.assertIsNone(loaded.calculation)
+        self.assertTrue(loaded.archive_origin['explicit_gamma_complex_table'])
+        self.assertIn("file_kw='kpoints.dat'",(destination/'rt.inp').read_text())
+        self.assertEqual((destination/'kpoints.dat').read_text(),'1\n1 0 0 0 1\n')
+        self.assertEqual(loaded.archive_origin['archive_manifest_sha256'],
+                         hashlib.sha256((self.archive.directory/'manifest.json').read_bytes()).hexdigest())
+        with self.assertRaises(TypeError):loaded.archive_origin['material_id']='other'
+        with self.assertRaises(FileExistsError):
+            session.load_archive(self.archive,destination,converter=self.converter,
+                executable=self.model.executable,pseudopotentials=[self.potential])
+        self.assertEqual(session.load.call_count,1)
+        backend._io_profile['record_flags']=('-frecord-marker=8',)
+        with self.assertRaisesRegex(InputError,'record format'):
+            session.load_archive(self.archive,Path(self.tmp.name)/'bad-profile',converter=self.converter,
+                executable=self.model.executable,pseudopotentials=[self.potential])
+        self.assertEqual(session.load.call_count,1)
+        self.assertFalse((Path(self.tmp.name)/'bad-profile').exists())
+        from salmonpy.gs_archive import save_ground_state
+        provenance=dict(schema='salmonpy.retained-gs-export/1',material_id='archive-film',
+            state_identity='synthetic fixture only',target_sha256='a'*64,converged=False,iterations=0,
+            density_source='reconstructed_from_native_orbitals',local_channels=[dict(atomic_number=2,local_channel=0)])
+        inherited=save_ground_state(Path(self.tmp.name)/'with-origin',provenance=provenance,**self.values)
+        second=NativeGSState(session,2,Path(self.tmp.name)/'second','archive-film',None)
+        session.load.return_value=second;backend._io_profile['record_flags']=()
+        with self.assertWarns(RuntimeWarning):
+            other=session.load_archive(inherited,Path(self.tmp.name)/'inherited-import',converter=self.converter,
+                executable=self.model.executable,pseudopotentials=[self.potential])
+        self.assertEqual(other.material_id,'archive-film')
+        self.assertEqual(other.archive_origin['archive_material_id'],'archive-film')
+        self.assertFalse(other.archive_origin['archive_converged'])
+        self.assertIsNone(other.archive_origin['scf_converged'])
+        self.assertEqual(state.archive_origin['material_id'],'film-a')
+
+    def test_imported_archive_reexport_labels_carried_values_and_reads_native_occupations(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock,PropertyMock
+        from salmonpy.native_gs import NativeGSSession,NativeGSState,NativeGSInfo,NativeGSArray
+        comm=SimpleNamespace(size=1,rank=0,allgather=lambda v:[v],bcast=lambda v,root:v)
+        backend=SimpleNamespace(sha256='b'*64,decomposition=(1,1,1,1,1),
+            _io_profile={'source_sha256':None,'compiler_sha256':None,'record_flags':()})
+        session=NativeGSSession(backend,SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=comm)),None)
+        state=NativeGSState(session,1,Path(self.tmp.name)/'state','film-a',None)
+        state._identity='synthetic imported state';session.load=Mock(return_value=state)
+        from salmonpy.gs_archive import save_ground_state
+        provenance=dict(schema='salmonpy.retained-gs-export/1',material_id='original-id',
+            state_identity='synthetic metadata only',target_sha256='a'*64,converged=False,iterations=0,
+            density_source='reconstructed_from_native_orbitals',local_channels=[dict(atomic_number=2,local_channel=0)])
+        self.archive=save_ground_state(Path(self.tmp.name)/'source-with-claim',provenance=provenance,**self.values)
+        with self.assertWarns(RuntimeWarning):
+            session.load_archive(self.archive,Path(self.tmp.name)/'import',converter=self.converter,
+                executable=self.model.executable,pseudopotentials=[self.potential],material_id='film-a')
+        waves=self.values['wavefunctions']
+        raw=waves.transpose(4,3,2,1,0)[:,:,:,None,:,:,None]
+        # Native occupations deliberately differ from the retained source values.
+        occ=np.array([1.5,.5]).reshape(2,1,1)
+        values={'density':NativeGSArray(np.zeros((8,8,8)),(1,1,1),'density','bohr^-3'),
+                'orbitals':NativeGSArray(raw,(1,1,1,1,1,1,1),'orbitals','native'),
+                'occupations':NativeGSArray(occ,(1,1,1),'occupations','1')}
+        state.array=Mock(side_effect=lambda name:values[name])
+        import shutil
+        shutil.rmtree(self.archive.directory)  # retained small metadata must suffice
+        info=NativeGSInfo(987.,0.,0.,0,None,1,2)
+        with patch.object(NativeGSState,'info',new_callable=PropertyMock,return_value=info):
+            with self.assertWarnsRegex(RuntimeWarning,'unknown'):
+                archive=state.export_archive(Path(self.tmp.name)/'reexport')
+        np.testing.assert_array_equal(archive.wavefunctions(0),waves[0])
+        np.testing.assert_array_equal(archive.array('occupations'),[[1.5,.5]])
+        np.testing.assert_array_equal(archive.array('eigenvalues'),self.values['eigenvalues'])
+        self.assertEqual(archive.metadata['energy_hartree'],-1.)
+        provenance=archive.metadata['provenance']
+        self.assertEqual(provenance['schema'],'salmonpy.retained-gs-reexport/1')
+        self.assertEqual(provenance['energy_source'],'source_archive')
+        self.assertEqual(provenance['eigenvalue_source'],'source_archive')
+        self.assertEqual(provenance['sampling_source'],'source_archive')
+        self.assertIsNone(provenance['converged'])
+        self.assertFalse(provenance['inherited_convergence'])
+        self.assertIsNone(state.calculation)
+        self.assertNotIn('eigenvalues',[call.args[0] for call in state.array.call_args_list])
+        self.assertEqual(state.archive_origin['material_id'],'film-a')
+
     def test_bridge_entry_and_owned_initial_replay(self):
         self.assertIsNotNone(importlib.util.find_spec('salmonpy.gs_native'))
         initial=self.initial()

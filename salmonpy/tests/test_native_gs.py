@@ -57,7 +57,7 @@ class NativeGSTests(unittest.TestCase):
                 with self.assertRaises(AttributeError):setattr(backend,name,value)
 
 
-    def test_imported_force_is_explicitly_unavailable(self):
+    def test_imported_force_and_native_complex_array_contract(self):
         from salmonpy.native_gs import NativeGSState
         from salmonpy.errors import InputError
         from types import SimpleNamespace
@@ -66,6 +66,135 @@ class NativeGSTests(unittest.TestCase):
         state=NativeGSState(session,1,None,'imported',None)
         with self.assertRaisesRegex(InputError,'forces were not computed'):state.array('forces')
         session.lib.sp_gs_array_info.assert_not_called()
+        import ctypes as c
+        import numpy as np
+        from salmonpy.errors import NumericalError
+        expected=np.empty(2,dtype=np.complex128)
+        expected.real=[1.,-0.];expected.imag=[-0.,0.]
+        def layout(token,quantity,ndim,shape,lower):
+            ndim._obj.value=7
+            np.ctypeslib.as_array((c.c_int64*7).from_address(shape))[:]=[2,1,1,1,1,1,1]
+            np.ctypeslib.as_array((c.c_int64*7).from_address(lower))[:]=1
+            return 0
+        def read(token,quantity,re,im,length):
+            np.ctypeslib.as_array((c.c_double*length).from_address(re))[:]=expected.real
+            np.ctypeslib.as_array((c.c_double*length).from_address(im))[:]=expected.imag
+            return 0
+        session.lib=SimpleNamespace(sp_gs_array_info=layout,sp_gs_read=read)
+        session._check=lambda status:None
+        result=state.array('orbitals').values
+        self.assertEqual(result.tobytes(),expected.tobytes())
+        self.assertFalse(result.flags.writeable)
+        for value in (np.inf,np.nan,-np.inf):
+            expected.imag[0]=value
+            with np.errstate(all='raise'),self.assertRaises(NumericalError):state.array('orbitals')
+
+    @unittest.skipUnless(importlib.util.find_spec('f90nml'),'optional f90nml not installed')
+    def test_declared_gs_metadata_normalization_and_independence(self):
+        import numpy as np
+        from salmonpy.gs_input import describe_gs_input
+        from salmonpy.ase import BOHR_ANGSTROM
+        text="""&units
+ unit_system='A_eV_fs'
+/
+&system
+ yn_periodic='y', spin='unpolarized', nelec=4, nstate=3, natom=1,
+ al=4.23341768536,4.23341768536,4.23341768536
+/
+&rgrid
+ num_rgrid=8,10,12
+/
+&kgrid
+ file_kw='tables/k!.dat'
+/
+&pseudo
+ izatom(2)=14, lloc_ps(2)=2, file_pseudo(2)='pot/Si_rps.dat'
+/
+&functional
+ xc='libxc_pbe'
+/
+&atomic_coor
+ 'Si' 2.11670884268 0 0 2
+/
+"""
+        assets={'tables/k!.dat':b'2\n1 -.25 0 0 .5\n2 .25 0 0 .5\n','pot/Si_rps.dat':b'synthetic'}
+        metadata=describe_gs_input(text,assets=assets,material_id='film-a')
+        data=metadata.as_dict();settings=data['settings']
+        np.testing.assert_allclose(settings['cell_bohr'],np.eye(3)*8,rtol=0,atol=1e-12)
+        np.testing.assert_allclose(settings['fractional_positions'],[[.5,0,0]],rtol=0,atol=1e-15)
+        self.assertEqual(settings['atomic_numbers'],[14])
+        self.assertEqual(settings['grid_counts'],[8,10,12])
+        self.assertEqual(settings['pseudopotentials'][0]['species_index'],2)
+        self.assertEqual(settings['pseudopotentials'][0]['local_channel'],2)
+        self.assertEqual(settings['k_sampling']['input_weights'],[.5,.5])
+        self.assertIsNone(data['evidence']['scf_converged'])
+        self.assertEqual(data['evidence']['checkpoint_provenance'],'unknown')
+        assets.clear();data['settings']['cell_bohr'][0][0]=999
+        self.assertAlmostEqual(metadata.settings['cell_bohr'][0][0],8)
+        with self.assertRaises(TypeError):metadata.settings['electrons']=8
+        skew=describe_gs_input("&units\n unit_system='au'\n/\n&system\n natom=1,nelec=2,nstate=2,al_vec1=8,0,0,al_vec2=1,9,0,al_vec3=0,2,10,file_atom_coor='coords/a.dat'\n/\n&pseudo\n izatom=2,lloc_ps=0,file_pseudo='p.dat'\n/\n",assets={'coords/a.dat':b"'He' 2.5 6 7.5 1\n",'p.dat':b'synthetic'})
+        np.testing.assert_array_equal(skew.settings['cell_bohr'],[[8,0,0],[1,9,0],[0,2,10]])
+        np.testing.assert_allclose(skew.settings['fractional_positions'],[[.25,.5,.75]],rtol=0,atol=1e-15)
+        self.assertEqual(metadata.source_id,describe_gs_input(text,assets={
+            'tables/k!.dat':b'2\n1 -.25 0 0 .5\n2 .25 0 0 .5\n','pot/Si_rps.dat':b'synthetic'},material_id='other-id').source_id)
+
+    @unittest.skipUnless(importlib.util.find_spec('f90nml'),'optional f90nml not installed')
+    def test_gs_metadata_unknowns_and_optional_dependency_do_not_claim_defaults(self):
+        from salmonpy.gs_input import describe_gs_input
+        from salmonpy.native_gs import NativeGSState
+        text="&system\n nelec=4,nstate=2,al=8,8,8\n/\n&functional\n xc='pz'\n/\n"
+        metadata=describe_gs_input(text,assets={},material_id='unknown')
+        self.assertIsNone(metadata.settings['cell_bohr'])
+        self.assertIsNone(metadata.settings['fractional_positions'])
+        self.assertIsNone(metadata.settings['k_sampling'])
+        self.assertTrue(metadata.notes)
+        self.assertFalse(describe_gs_input(text,assets={},origin='computed',converged=False).as_dict()['evidence']['scf_converged'])
+        state=NativeGSState(None,1,None,'unknown',None)
+        state._input_text=text
+        first=state.input_metadata()
+        state.closed=True
+        self.assertEqual(first.as_dict(),state.input_metadata().as_dict())
+        with patch.dict('sys.modules',{'f90nml':None}):
+            with self.assertRaisesRegex(ImportError,'metadata'):describe_gs_input(text,assets={})
+
+    def test_existing_gs_import_preserves_external_k_table_and_rejects_missing_asset(self):
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from salmonpy.native_gs import NativeGSSession
+        from salmonpy.errors import InputError
+        comm=SimpleNamespace(size=1,rank=0,allgather=lambda v:[v],bcast=lambda v,root:v)
+        native=SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=comm))
+        def imported(filename,pointer):
+            pointer._obj.value=123
+            return 0
+        fn=Mock(side_effect=imported)
+        lib=SimpleNamespace(sp_gs_import=fn)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'source';source.mkdir();work=root/'work';work.mkdir()
+            (source/'data_for_restart').mkdir()
+            for name in ('info.bin','occupation.bin','wfn.bin'):
+                (source/'data_for_restart'/name).write_bytes(b'synthetic placeholder, never passed to Fortran')
+            (source/'pseudo_rps.dat').write_bytes(b'synthetic potential')
+            (source/'tables').mkdir();table=source/'tables/k!.dat'
+            table.write_text('2\n1 -.25 0 0 .5\n2 .25 0 0 .5\n')
+            (source/'rt.inp').write_text("&system\n nelec=4\n/\n&pseudo\n file_pseudo(1)='pseudo_rps.dat'\n/\n&kgrid\n file_kw='tables/k!.dat'\n/\n")
+            session=NativeGSSession(SimpleNamespace(work_root=work,decomposition=(1,1,1,1,1),sha256='a'*64),native,lib)
+            state=session.load(source,material_id='silicon')
+            self.assertEqual((state.directory/'tables/k!.dat').read_bytes(),table.read_bytes())
+            self.assertIn(('tables/k!.dat',table.read_bytes()),state._assets)
+            self.assertEqual(state.material_id,'silicon')
+            self.assertEqual(fn.call_count,1)
+            if importlib.util.find_spec('f90nml'):
+                description=state.input_metadata()
+                self.assertEqual(description.settings['k_sampling']['mode'],'file')
+                self.assertEqual(description.as_dict()['evidence']['origin'],'imported')
+            table.unlink()
+            if importlib.util.find_spec('f90nml'):
+                self.assertEqual(description.as_dict(),state.input_metadata().as_dict())
+            with self.assertRaisesRegex(InputError,'k!.dat'):session.load(source)
+            self.assertEqual(fn.call_count,1)
+            self.assertEqual(len(list(work.glob('gs-import-*'))),1)
 
     def test_retained_gamma_archive_roundtrip_and_source_independence(self):
         import tempfile

@@ -7,7 +7,7 @@ from mpi4py import MPI
 from salmonpy.native_gs import NativeGSBackend
 from salmonpy.embedded_tddft import NativeTDDFTBackend,NativeTDDFTMaterialProvider
 def main():
-    p=argparse.ArgumentParser();p.add_argument('build');p.add_argument('fixture');p.add_argument('output');p.add_argument('--size',type=int,default=1);p.add_argument('--split',default='orbital');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('build');p.add_argument('fixture');p.add_argument('output');p.add_argument('--size',type=int,default=1);p.add_argument('--split',default='orbital');p.add_argument('--external-k',action='store_true');p.add_argument('--describe-input',action='store_true');a=p.parse_args()
     w=MPI.COMM_WORLD;assert w.size==2*a.size
     g=w.rank//a.size;comm=w.Split(g,w.rank);root=Path(a.output)/str(g)
     if comm.rank==0:root.mkdir(parents=True,exist_ok=False)
@@ -17,8 +17,56 @@ def main():
     trace=[]
     try:
      if g==0:
+      fixture=Path(a.fixture)
+      if a.external_k:
+       import re,shutil
+       from salmonpy.bands import _input_groups,_scalar
+       staged=root/'external-k-input';error=None
+       if comm.rank==0:
+        try:
+         groups=_input_groups((fixture/'rt.inp').read_text())
+         kbody=groups['kgrid']
+         match=re.search(r'num_kgrid\s*=\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)',kbody,re.I)
+         if match is None or _scalar(kbody,'file_kw','none')!='none' or _scalar(kbody,'yn_gamma_centered','n')!='n':
+          raise ValueError('external-k comparison requires an unshifted regular full source mesh')
+         if re.search(r'\bdk_shift\b',kbody,re.I):
+          raise ValueError('external-k comparison uses source meshes without explicit dk_shift')
+         mx,my,mz=map(int,match.groups())
+         points=[[(ix+.5)/mx-.5,(iy+.5)/my-.5,(iz+.5)/mz-.5]
+                 for iz in range(mz) for iy in range(my) for ix in range(mx)]
+         shutil.copytree(fixture,staged)
+         (staged/'tables').mkdir(exist_ok=True)
+         lines=[str(len(points))]+[str(i+1)+' '+' '.join(format(float(v),'.17e') for v in (*point,1/len(points)))
+                                   for i,point in enumerate(points)]
+         (staged/'tables/kpoints.dat').write_text('\n'.join(lines)+'\n')
+         groups['kgrid']="\n file_kw='tables/kpoints.dat'\n"
+         text=''.join('&'+key+body+'/\n' for key,body in groups.items())
+         (staged/'rt.inp').write_text(text)
+         (staged/'rt-missing.inp').write_text(text.replace('tables/kpoints.dat','tables/missing.dat'))
+        except Exception as exc:error=str(exc)
+       error=comm.bcast(error,root=0)
+       if error:raise ValueError(error)
+       fixture=staged
       with NativeGSBackend(a.build,root,decomposition=dec).open(ctx) as session:
-       gs=session.load(a.fixture,material_id='silicon')
+       gs=session.load(fixture,material_id='silicon')
+       if a.external_k:
+        assert (gs.directory/'tables/kpoints.dat').read_bytes()==(fixture/'tables/kpoints.dat').read_bytes()
+        assert any(name=='tables/kpoints.dat' for name,_ in gs._assets)
+       if a.describe_input:
+        metadata_error=None
+        try:
+         description=gs.input_metadata()
+         record=description.as_dict()
+         assert record['material_id']=='silicon'
+         assert record['evidence']['origin']=='imported' and record['evidence']['scf_converged'] is None
+         assert record['evidence']['checkpoint_provenance']=='unknown'
+         assert description.settings['cell_bohr'] is not None
+         assert description.settings['fractional_positions'] is not None
+         if a.external_k:assert description.settings['k_sampling']['mode']=='file'
+        except Exception as exc:metadata_error=str(exc) or type(exc).__name__
+        errors=comm.allgather(metadata_error)
+        if any(errors):raise RuntimeError('input description failed: '+str(errors))
+        assert comm.allgather(description.source_id)==[description.source_id]*comm.size
        assert gs.info.converged is None
        from salmonpy.errors import InputError
        try:gs.array('forces')
@@ -30,8 +78,17 @@ def main():
         trace.append(state.step(A(i)))
         np.testing.assert_array_equal(sibling.step(-A(i)),sibling.current)
        state.checkpoint(root/f'state-{comm.rank}.bin')
+       if a.external_k:
+        # Admission failure must precede native initialization and preserve RT/GS.
+        before=session.resources();current=state.current.copy();caught=False
+        try:session.load(fixture,'rt-missing.inp',material_id='missing-table')
+        except InputError:caught=True
+        assert all(comm.allgather(caught))
+        assert session.resources()==before
+        np.testing.assert_array_equal(state.current,current)
        # An existing GS load while RT is active must preserve its inputs/caches.
-       loaded=session.load(a.fixture,material_id='second');loaded.close();gs.close()
+       loaded=session.load(fixture,material_id='second');loaded.close();gs.close()
+       if a.describe_input:assert gs.input_metadata().as_dict()==description.as_dict()
        for i in range(9,17):trace.append(state.step(A(i)))
        fresh=model.new_state('restore-after-GS-close')
        fresh.checkpoint(root/f'state-{comm.rank}.bin',restore=True)
@@ -49,7 +106,7 @@ def main():
       finally:state.close()
      values=w.allgather(np.asarray(trace));np.testing.assert_array_equal(values[0],values[a.size])
      if w.rank==0:
-      result={'status':'pass','size':a.size,'split':a.split,'file_route_exact':True,'independent_states_exact':True,'resume_exact':True,'SCF_calls':0,'replayed_steps':0}
+      result={'status':'pass','size':a.size,'split':a.split,'file_route_exact':True,'independent_states_exact':True,'resume_exact':True,'SCF_calls':0,'replayed_steps':0,'input_metadata':a.describe_input,'external_k_table':a.external_k,'missing_asset_rejected_before_native':a.external_k}
       (Path(a.output)/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(result,flush=True)
     except BaseException:
      import traceback;traceback.print_exc();w.Abort(1)

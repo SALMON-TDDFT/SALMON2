@@ -146,7 +146,7 @@ if archive is not None:  # サブグループのrootのみ。他ランクはNone
 
 現段階の対象は、DFT設定を保持する周期・非スピン分極・固定イオン・通常k点メッシュ・
 MPIサブグループの状態です。Γ点と複数k点に対応します。既存ファイルから読み込んだGSは不変DFT設定を
-持たないため未対応で、native GSハンドルの復元も残作業です。
+持たないため未対応です。GS/2経由の読み込み状態は後述の情報を保持して再保存できます。完全なnative SCF状態の復元は残作業です。
 これは保存機能の範囲で、通常のGS/TDDFT計算の制限は増やしません。
 非立方格子・非対称ハロー・実数／複素数相当の合成native配列で確認しました。
 実GSでの書き出しと、その後のTDDFT結果の一致は未測定です。
@@ -194,3 +194,170 @@ MPI通信自体の故障やプロセス消失からの復帰は対象外です�
 元配列の保持と再試行を確認しました。SALMONの実GS保存やSCF/RT物理の検証ではありません。
 `mpiexec -n4 python tools/test_retained_gs_archive_mpi.py NEW_OUTPUT` で実行できます。
 インストール後も `salmonpy/_runtime_source/tools` に同梱し、native GSやランタイムを読みません。
+
+### 既存GS読み込み時の参照入力ファイル
+
+`session.load` は、擬ポテンシャル・原子配置ファイル・`file_kw` のk点表を、
+相対サブディレクトリごとコピーして保持します。各MPIランクで内容を検証し、
+メモリ上のGS→TDDFTモデルにも引き継ぎます。引用符内のファイル名の `!` は保持し、
+実際のコメントだけを除去します。必要な参照ファイルが欠けた場合はnative初期化前に
+拒否し、既存GS・TDDFT状態は変更しません。必須ファイルを読めない場合は初期化できず、
+数値の未収束を警告だけにする方針とは区別します。
+
+既存GSの共通比較ランナーに `--external-k` を追加しました。
+
+```sh
+mpiexec -n 4 python tools/test_memory_gs_mpi.py BUILD EXISTING_GS NEW_WORK --size 2 --split orbital --external-k
+```
+
+既存GSと入力の作業コピーを作り、通常メッシュを同じ外部k点表に置き換え、元の
+ファイル経路と比較します。SCFは実行せず、参照GSも新規作成しません。元の入力は
+変更しません。作業出力から収集するのは診断の要約だけとしてください。
+この任意ランナーは明示シフト・Γ中心指定のない通常メッシュを対象としますが、
+`session.load` の通常機能に新しい制限を加えるものではありません。
+PZの2点、Libxc-PBE／TB-mBJの8点について、内部MPI2、独立状態と兄弟状態、
+再計算なしの直接再開、RT進行中の参照ファイル欠落の拒否を検証しました。
+インストール後も `salmonpy/_runtime_source/tools` に同梱します。
+読み込んだGSの `calculation` は引き続きNoneです。正規化した物質モデルの紐付け・
+旧形式読み込みGSの物質情報の完全な紐付け・完全なGS/SCF状態の復元・元GSの物理的な由来は別の残作業です。
+ファイルの整合性や時系列の一致は、物理的なSCF収束を証明しません。
+
+## 保持した宣言入力のメタデータ
+
+任意の `metadata` extra（f90nml）を管理ノード等で事前に導入してください。
+ネット接続できない計算ノードで暗黙に取得しません。必須依存はNumPyだけのままで、
+通常のimport・run・loadではf90nmlを読み込みません。
+
+```python
+# 既存セッション内。input_metadata自体はMPI集団操作ではありません。
+metadata = gs.input_metadata()
+# closeは従来どおり全ランクで呼びます。
+gs.close()
+record = metadata.as_dict()  # nativeハンドルを持たないJSON互換のコピー
+cell = metadata.settings["cell_bohr"]
+```
+
+`GSInputMetadata` は不変で、`as_dict` は編集可能な独立コピーを返します。
+利用者の物質ID、保持した入力・参照ファイルのSHA256、source_idを残します。
+source_idは宣言された入力バイトの識別子で、物理的な同一物質・バイナリの由来・
+チェックポイント互換性を証明しません。書式やファイル名でも変化し得ます。
+native側のidentityや利用者の物質IDは変更しません。
+`gs.input_metadata()` はGSを閉じた後も、保持したテキスト・参照データだけから
+呼べます。元ファイルの読み直し、native呼び出し、MPI通信、再計算は行いません。
+
+明示されたau/A_eV_fsのセルをbohrへ、対応するインライン／外部ファイルの
+Cartesian／相対原子座標を分率座標へ整理します。原子種の順序、指定された格子数・幅、
+通常kメッシュ条件または外部k点表の座標・入力重み、XC条件、種の添字ごとの
+擬ポテンシャルのハッシュ・局所チャネルを返します。nativeで規格化された重みや
+省略時の既定値は推測しません。単位不明・曖昧・未対応の形状はNoneとnotesで表します。
+これは宣言入力の記述で、実効nativeモデルの問い合わせではありません。
+
+読み込みGSの収束・物理的由来は不明のままです。runで作ったGSでは、既に取得した
+収束フラグを記録します。説明の読み出しでSCFを回したり、GSを再認証したり、
+未計算の力を公開したり、読み込みGSのcalculationを設定したりはしません。
+native復元や読み込みGSのポータブル保存を許可するものでもありません。
+通常の計算・読み込みに新たな制限は加えません。任意の説明処理で依存不足・
+入力解釈エラーが起きてもGS状態は変えず、呼び出し側で計算とは別に扱えます。
+
+自作ホストでも `salmonpy.gs_input.describe_gs_input(text,
+assets=相対名からbytesへの対応, material_id="film")` を使えます。
+ランタイムやファイルアクセスは不要です。
+`python -m salmonpy.examples.memory_gs BUILD EXISTING_GS NEW_WORK --describe-input`
+は、GSを閉じた後にrootの記述を表示します。rootの説明処理が失敗した場合は、次の
+集団操作へ進む前に全ランクで合意します。共通比較ランナーも `--describe-input` に
+対応します。実際に説明を呼ぶランクにはf90nmlが必要で、importやヘルプではMPIを
+初期化しません。
+
+## ポータブル配列から保持GSを初期化する
+
+`session.load_archive` でGS/2を既存nativeローダーへ接続できます。
+事前に検証済みのGammaRestartConverterまたはSerialRestartConverterと、その対応する
+直列SalmonExecutableを用意します。暗黙のコンパイル・取得・SCFは行いません。
+全MPIランクが同じ条件で呼び、rootだけがアーカイブを読み変換します。その後の新規
+変換先ディレクトリは、サブグループ全ランクから参照できる場所に置きます。
+
+```python
+with backend.open(context) as session:
+    gs = session.load_archive(
+        "portable-gs", "new-converted-bundle",
+        converter=converter, executable=paired_serial_engine,
+        pseudopotentials=potentials, material_id="silicon")
+    origin = gs.archive_origin  # 不変のハッシュ・由来情報。close後も保持
+    model = gs.tddft_model(dt=0.003, max_steps=100)
+    gs.close()
+    state = model.new_state("response")
+    j = state.step([0.0001, 0, 0])  # transverse A/c → 電荷電流
+    state.close()
+    model.close()
+```
+
+material_idを省略すると、保持GSからの保存来歴に物質IDがあれば継承し、なければ
+"material"とします。明示したIDを優先し、元のIDや過去の宣言収束状態はarchive_originで
+今回の読み込み収束状態(None)と区別して保持します。アーカイブのmanifest、変換器、
+対応直列実行ファイル、共有ランタイムのハッシュを残します。input_metadataも利用でき、
+calculationはNone、力は未計算のままです。元の保存データ・以前の状態は上書きしません。
+
+新しいnative所有者へ軌道・占有数を初期化する機能です。保存済みの密度・固有値・
+エネルギーをnative再開レコードとして復元するものではなく、密度・ポテンシャルを
+初期化時に再構成します。混合履歴・ソルバーの内部資源・途中のGS反復は復元しません。
+変換エラーはnative呼び出し前に全ランクで合意し、新規の不完全な変換先を除去します。
+変換済みの完全なディレクトリは、その後native受付が失敗した場合も利用者用に保持します。
+既存保存先は上書きしません。native STOP・MPI通信故障・プロセス消失の扱いは従来どおりです。
+
+変換器の対応条件は引き継ぎます。周期・非スピン分極・固定イオン・偶数電子の閉殻、
+各方向8格子以上、対応する共有ランタイムでのPZ／Libxc-PZ／PBEが対象です。
+Gamma版は厳密Γ点、SerialRestartConverterの複数k点は正の軸に沿った直交セルが対象です。
+変換はrootで直列に行い、その後のnative初期化には対応するk点／軌道／空間MPI分割を使えます。
+任意のRT/SCFチェックポイントの再分割ではありません。対応する直列実行ファイルは、
+ここでは形式を結び付ける識別子で、実際のソルバーとして起動しません。
+
+記録されたFortranレコードマーカー・整数幅の不一致は変換前に拒否します。
+コンパイラー・ソースの照合情報が不明、またはその他のフラグが異なる場合は警告だけで、
+明示的に選んだnativeローダーへ進みます。古い記録にないコンパイラーのハッシュを
+推測で補いません。未検証のコンパイラー・環境での一般的なnative I/O安全性は保証しません。
+レコード変換の環境条件はランク間で一致させ、変換済みの記録・内容を読み込み前に検査します。
+
+`salmonpy.examples.portable_gs.current_from_archive(session, ...,
+A_steps=..., dt=...)` はdt,2dt,...でのA/cからjを返し、この計算の所有者を解放します。
+繰り返す場合は同じセッションを保持し、毎回新しい変換先を指定します。変換済みデータは
+利用者が管理します。ネット接続できない計算ノードでは、管理ノードで変換器を準備し、
+検証済みの配置記録と実行ファイルを事前に移してください。
+
+Γ点の配列読み込みも等価な明示Γ点表を使い、native DFTで複素軌道を確保します。
+既定の実数軌道分岐へ入らず、ゼロでない虚部を保持します。生成k点表のハッシュを
+変換記録へ含め、この経路をarchive_originにも記録します。複素Γ点の合成データで、
+軌道・空間MPI分割とも軌道の完全一致、独立／ファイル経路の電流、直接再開が通りました。
+
+## GS/2から読み込んだGSを再保存する
+
+`load_archive` が返す生存中のGS所有者は、同じ集団API `export_archive` で再保存できます。
+旧形式の `load` だけで読み込んだ状態は完全な物質モデルが不明なため、部分的な入力説明を
+使って推測で保存可能にすることはありません。
+
+```python
+with backend.open(context) as session:
+    gs = session.load_archive("source-gs", "new-native-bundle",
+        converter=converter, executable=paired_serial_engine,
+        pseudopotentials=potentials, material_id="silicon")
+    saved = gs.export_archive("new-gs-array-archive")  # rootのみarchive、他はNone
+    # GSと既存のRTモデルは変化しません。
+    gs.close()
+```
+
+読み込み時に保持するのは小さなメタデータ・固有値・k点・構造の配列と不変の擬ポテンシャルです。
+元の波動関数全体や生きたアーカイブオブジェクトはキャッシュしません。GS所有者が生存していれば、
+元アーカイブを削除した後も再保存できます。軌道・占有数はnativeから読み、ハローを除外します。
+密度は元のk点重みを使って再構成します。構造・格子・XC・擬ポテンシャル参照、k点座標・入力重み、
+参照固有値・エネルギーは元アーカイブから引き継ぎ、新たに計算した値とは扱いません。
+
+来歴の新しい種類 `salmonpy.retained-gs-reexport/1` に、energy_source／eigenvalue_source／
+sampling_sourceがsource_archiveであること、元manifestのSHA、引き継いだ収束の宣言を記録します。
+今回のconvergedはNoneのままです。参照値からSCF収束やnative内部状態の復元を主張しません。
+この来歴形式を読むには対応版が必要で、既存GS/2やDFT計算由来の来歴形式は変更しません。
+calculationはNone、力は未計算のままです。複素配列は実部・虚部を演算せずコピーし、ゼロの符号も
+保持します。NaN／Infinityは全ランクで拒否します。
+
+非一様な重み・不規則k点も、通常メッシュと推測せずそのまま保存します。既存DFT由来の保存の
+演算順は維持します。サンプルの `current_from_archive(..., reexport_to="new-array-archive")` で、
+RT状態を作る前の保存も選択できます。再読込は新しいモデルの初期化で、既存RTチェックポイントを
+別モデル・別MPI分割へ移す機能ではありません。完全なSCF混合履歴・内部資源・反復途中の再開は別の残作業です。

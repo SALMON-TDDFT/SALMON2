@@ -131,15 +131,22 @@ def _metadata(m):
 
 def _export_provenance(p):
     retained=type(p) is dict and p.get('schema')=='salmonpy.retained-gs-export/1'
-    if retained:
+    reexport=type(p) is dict and p.get('schema')=='salmonpy.retained-gs-reexport/1'
+    if retained or reexport:
         keys={'schema','material_id','state_identity','target_sha256','converged',
               'iterations','density_source','local_channels'}
+        if reexport:
+            keys|={'source_archive_manifest_sha256','inherited_convergence','eigenvalue_source','energy_source','sampling_source'}
+            if (not _sha(p.get('source_archive_manifest_sha256')) or p.get('converged') is not None
+                    or (p.get('inherited_convergence') is not None and type(p.get('inherited_convergence')) is not bool)
+                    or any(p.get(name)!='source_archive' for name in ('eigenvalue_source','energy_source','sampling_source'))):
+                raise InputError('invalid retained GS reexport provenance')
         if set(p)!=keys:raise InputError('invalid retained GS export provenance')
         from .config import _identifier
         _identifier(p['material_id'],'material_id')
         if type(p['state_identity']) is not str or not p['state_identity'] or not _sha(p['target_sha256']):
             raise InputError('invalid retained GS identity/runtime')
-        if type(p['converged']) is not bool or type(p['iterations']) is not int or p['iterations']<0:
+        if (not reexport and type(p['converged']) is not bool) or type(p['iterations']) is not int or p['iterations']<0:
             raise InputError('invalid retained GS convergence record')
         if p['density_source']!='reconstructed_from_native_orbitals':
             raise InputError('unsupported retained GS density semantics')
@@ -158,7 +165,7 @@ def _export_provenance(p):
                 or not 1<=c['atomic_number']<=118 or c['atomic_number'] in seen or type(c['local_channel']) is not int
                 or not 0<=c['local_channel']<=4):raise InputError('invalid local channels')
         seen.add(c['atomic_number'])
-    if retained:return
+    if retained or reexport:return
     env=p['record_environment']
     if type(env) is not dict or set(env)!={'GFORTRAN_CONVERT_UNIT'} or type(env['GFORTRAN_CONVERT_UNIT']) is not str:raise InputError('invalid GS record environment')
     if env['GFORTRAN_CONVERT_UNIT'].lower() not in ('','native','swap','big_endian','little_endian'):raise InputError('unsupported GS record environment')

@@ -156,3 +156,15 @@ initial = archive.tddft_initial_state(converter=converter, executable=engine,
 `NativeGSState.export_archive` で通常k点メッシュ・DFT設定を保持するGS（全ランク呼び出し、rootが保存）を保存できます。
 対象範囲・来歴・検証の限界は [NATIVE_GS.md](NATIVE_GS.md) を参照してください。
 完全なSCFチェックポイントやnative GSハンドルの復元ではありません。
+
+## native保持GSへの初期化
+
+`NativeGSSession.load_archive` はrootでGS/2を一度変換し、新しいnative所有者へ
+SCFなしで読み込みます。対応する変換器・ランタイム・擬ポテンシャルを明示します。
+[NATIVE_GS.md](NATIVE_GS.md) と examples/portable_gs.py を参照してください。
+配列の初期化であり、保存したエネルギー・固有値・混合履歴・途中のSCF状態の復元ではありません。
+
+GS/2経由の保持GSは `salmonpy.retained-gs-reexport/1` の来歴で再保存できます。
+nativeの軌道・占有数と再構成密度を、元データから引き継ぐエネルギー・固有値・
+物質・k点情報と区別します。今回の収束は不明のままです。保持GSガイドを参照してください。
+従来の来歴は引き続き読め、新しい来歴には対応版のリーダーが必要です。

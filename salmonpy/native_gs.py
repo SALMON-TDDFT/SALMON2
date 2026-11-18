@@ -58,6 +58,8 @@ class NativeGSBackend:
     def __init__(self,build_record,work_root,*,decomposition=(1,1,1,1,1)):
         record=json.loads(Path(build_record).read_text())
         if record.get('schema')!='salmonpy.embedded-tddft/1':raise InputError('verified standard embedded build record required')
+        from ._gs_archive_load import record_profile
+        self._io_profile=record_profile(record)
         self._library=Path(record['library']).resolve();self._sha256=record['sha256']
         if hashlib.sha256(self.library.read_bytes()).hexdigest()!=self.sha256:raise InputError('native library checksum mismatch')
         self._work_root=Path(work_root).expanduser().resolve()
@@ -153,12 +155,14 @@ class NativeGSSession:
         code=self._call(work,self.lib.sp_gs_create,b'gs.inp',c.byref(token))
         self._check(code)
         state=NativeGSState(self,token.value,work,material_id,calculation)
+        state._input_text=text;state._input_origin='computed'
         state._electrons=calculation.electrons
         state._assets=tuple((calculation._pseudo_name(i),pp.data) for i,pp in enumerate(calculation.pseudopotentials))
         self._states[token.value]=state
         try:info=state.info
         except BaseException:
             state.close();raise
+        state._metadata_converged=info.converged
         state._identity='salmonpy.retained-gs/1/'+hashlib.sha256(json.dumps(
             [descriptor,self.backend.sha256,self.backend.decomposition,vars(info)],sort_keys=True).encode()).hexdigest()
         if not info.converged:
@@ -182,7 +186,8 @@ class NativeGSSession:
             _identifier(material_id,'material_id')
             provider=NativeTDDFTMaterialProvider(directory,input_file)
             initial=provider.prepare(None)
-            groups=_input_groups((initial.directory/initial.input_file).read_text())
+            source_input=(initial.directory/initial.input_file).read_text()
+            groups=_input_groups(source_input)
             electrons=int(_scalar(groups['system'],'nelec'))
             if electrons<2:raise InputError('positive occupied electronic state required')
             allowed={'calculation','control','units','system','pseudo','functional','rgrid','kgrid',
@@ -198,8 +203,9 @@ class NativeGSSession:
             groups['parallel']=f'\n nproc_k={k},nproc_ob={o},nproc_rgrid={x},{y},{z}\n'
             assets=[]
             for body in groups.values():
-                clean=re.sub(r"![^\n]*",'',body)
-                for match in re.finditer(r"\b(file_pseudo|file_atom_coor|file_atom_red_coor|file_kgrid)\s*(?:\([^)]*\))?\s*=\s*(['\"])(.*?)\2",clean,re.I):
+                clean=re.sub(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|![^\n]*",
+                             lambda m:'' if m[0].startswith('!') else m[0],body)
+                for match in re.finditer(r"\b(file_pseudo|file_atom_coor|file_atom_red_coor|file_kw|file_kgrid)\s*(?:\([^)]*\))?\s*=\s*(['\"])(.*?)\2",clean,re.I):
                     name=match[3]
                     if name=='none':continue
                     path=Path(name)
@@ -236,11 +242,24 @@ class NativeGSSession:
         token=c.c_int64()
         self._check(self._call(work,fn,b'gs.inp',c.byref(token)))
         state=NativeGSState(self,token.value,work,material_id,None)
+        state._input_text=source_input;state._input_origin='imported'
         state._electrons=electrons;state._assets=tuple(assets)
         state._identity='salmonpy.imported-gs/1/'+hashlib.sha256(json.dumps(
             [descriptor,self.backend.sha256,self.backend.decomposition],sort_keys=True).encode()).hexdigest()
         self._states[token.value]=state
         return state
+
+    def load_archive(self,archive,directory,*,converter,executable,pseudopotentials,
+                     material_id=None,timeout=300.):
+        """Collectively convert GS/2 once on root, then import without SCF.
+
+        Explicit directory retains the converted bundle. This initializes arrays,
+        not a complete SCF/native-state checkpoint. Conversion failures precede
+        native import; the existing native loader recovery limits still apply.
+        """
+        from ._gs_archive_load import load_archive
+        return load_archive(self,archive,directory,converter=converter,executable=executable,
+                            pseudopotentials=pseudopotentials,material_id=material_id,timeout=timeout)
 
     def resources(self):
         self._live();counts=np.zeros(3,dtype=np.int32)
@@ -275,12 +294,28 @@ class NativeGSState:
         self.session=session;self._token=token;self.directory=work
         self._material_id=material_id;self._calculation=calculation;self._identity=None;self.closed=False
         self._electrons=None;self._assets=()
+        self._input_text=None;self._input_origin='unknown';self._metadata_converged=None
+        self._archive_origin=None
+        self._archive_export_context=None;self._archive_export_potentials=()
     @property
     def identity(self):return self._identity
     @property
     def material_id(self):return self._material_id
     @property
     def calculation(self):return self._calculation
+    @property
+    def archive_origin(self):return self._archive_origin
+
+    def input_metadata(self):
+        """Return detached declared-input metadata, even after native state close.
+
+        Optional f90nml is imported only here; no native/MPI operation is made.
+        """
+        from .gs_input import describe_gs_input
+        if self._input_text is None:raise InputError('no captured GS input text')
+        return describe_gs_input(self._input_text,assets=self._assets,material_id=self.material_id,
+                                 origin=self._input_origin,converged=self._metadata_converged)
+
     def _live(self):
         self.session._live()
         _agree(self.session.comm,'GS state is closed' if self.closed else None)
@@ -320,7 +355,10 @@ class NativeGSState:
         real=np.empty(size,dtype=np.float64);imag=np.empty(size,dtype=np.float64) if code==5 else None
         self.session._check(self.session.lib.sp_gs_read(self._token,code,real.ctypes.data,
                             None if imag is None else imag.ctypes.data,size))
-        values=real if imag is None else real+1j*imag
+        if imag is None:values=real
+        else:
+            values=np.empty(size,dtype=np.complex128)
+            values.real=real;values.imag=imag
         if any(self.session.comm.allgather(not bool(np.isfinite(values).all()))):
             raise NumericalError('nonfinite retained GS array: '+quantity)
         frozen=np.frombuffer(values.tobytes(),dtype=values.dtype).reshape(dims,order='F')

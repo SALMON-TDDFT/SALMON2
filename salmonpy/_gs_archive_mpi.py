@@ -2,6 +2,7 @@
 import hashlib
 import math
 from pathlib import Path
+from types import SimpleNamespace
 import warnings
 import numpy as np
 from .errors import InputError,NumericalError
@@ -15,8 +16,31 @@ def _root_error(comm,error):
     if error is not None:raise error
 
 
+def _nk(model):
+    return model.n_kpoints if hasattr(model,'n_kpoints') else math.prod(model.kmesh)
+
+
+def _model(gs):
+    from .dft import DFT
+    if isinstance(gs.calculation,DFT):return gs.calculation
+    source=getattr(gs,'_archive_export_context',None)
+    if source is None:
+        raise InputError('export requires an immutable DFT model or a captured GS/2 import context')
+    metadata=source['metadata'];arrays=source['arrays']
+    return SimpleNamespace(archive_context=source,n_kpoints=metadata['n_kpoints'],
+        states=metadata['n_bands'],grid=tuple(reversed(metadata['grid_zyx'])),
+        numbers=arrays['atomic_numbers'],cell=arrays['cell_bohr'],
+        fractional_positions=arrays['fractional_positions'],electrons=metadata['electrons'],
+        xc=metadata['xc'],pseudopotentials=gs._archive_export_potentials)
+
+
+def _description(model):
+    source=getattr(model,'archive_context',None)
+    return 'GS/2:'+source['manifest_sha256'] if source is not None else model.input_text()
+
+
 def _tile(model,density,orbitals,occupations,eigenvalues):
-    nk=math.prod(model.kmesh)
+    nk=_nk(model)
     expected=(model.states,nk,1)
     for array in (occupations,eigenvalues):
         if array.values.shape!=expected or array.lower_indices!=(1,1,1):
@@ -83,19 +107,23 @@ def _assemble(comm,local,tiles,full_shape):
     return waves
 
 
-def _write(gs,destination,block,waves,occ,eigen,info):
+def _write(gs,destination,block,waves,occ,eigen,info,model):
     from .gs_archive import save_ground_state
-    model=gs.calculation
-    nk=math.prod(model.kmesh)
+    source=getattr(model,'archive_context',None)
+    nk=_nk(model)
     rho=np.zeros(tuple(reversed(model.grid)))
     try:
         with np.errstate(over='raise',invalid='raise'):
             for k in range(nk):
                 for band in range(model.states):
-                    rho+=(occ[k,band]/nk)*(waves[k,band].real**2+waves[k,band].imag**2)
+                    factor=occ[k,band]/nk if source is None else source['arrays']['weights'][k]*occ[k,band]
+                    rho+=factor*(waves[k,band].real**2+waves[k,band].imag**2)
     except FloatingPointError as exc:
         raise NumericalError('nonfinite reconstructed retained GS density') from exc
-    if not info.converged:
+    if source is not None:
+        warnings.warn('SCF convergence unknown for imported GS; exporting source-labelled arrays',
+                      RuntimeWarning,stacklevel=3)
+    elif not info.converged:
         warnings.warn('SCF not converged; exporting the retained last iterate without '
                       'certifying physical convergence',RuntimeWarning,stacklevel=3)
     provenance=dict(schema='salmonpy.retained-gs-export/1',material_id=gs.material_id,
@@ -104,38 +132,49 @@ def _write(gs,destination,block,waves,occ,eigen,info):
         density_source='reconstructed_from_native_orbitals',
         local_channels=[dict(atomic_number=p.atomic_number,local_channel=p.local_channel)
                         for p in model.pseudopotentials])
-    references=[dict(atomic_number=p.atomic_number,filename=model._pseudo_name(i),
-                     sha256=p.sha256,source='retained DFT model')
-                for i,p in enumerate(model.pseudopotentials)]
-    # Same ordinary full-mesh order as native lattice.f90:init_kvector.
-    mx,my,mz=model.kmesh
-    points=[[(ix+.5)/mx-.5,(iy+.5)/my-.5,(iz+.5)/mz-.5]
-            for iz in range(mz) for iy in range(my) for ix in range(mx)]
+    if source is None:
+        references=[dict(atomic_number=p.atomic_number,filename=model._pseudo_name(i),
+                         sha256=p.sha256,source='retained DFT model')
+                    for i,p in enumerate(model.pseudopotentials)]
+        # Same ordinary full-mesh order as native lattice.f90:init_kvector.
+        mx,my,mz=model.kmesh
+        points=[[(ix+.5)/mx-.5,(iy+.5)/my-.5,(iz+.5)/mz-.5]
+                for iz in range(mz) for iy in range(my) for ix in range(mx)]
+        weights=np.full(nk,1./nk);energy=info.energy_hartree
+    else:
+        inherited=source['metadata'].get('provenance',{})
+        provenance.update(schema='salmonpy.retained-gs-reexport/1',converged=None,
+            source_archive_manifest_sha256=source['manifest_sha256'],
+            inherited_convergence=inherited.get('inherited_convergence',inherited.get('converged')),
+            eigenvalue_source='source_archive',energy_source='source_archive',sampling_source='source_archive')
+        references=source['metadata']['pseudopotentials']
+        # save_ground_state accepts a detached JSON list, not frozen mappings.
+        from .config import _thaw
+        references=_thaw(references)
+        points=source['arrays']['kpoints'];weights=source['arrays']['weights']
+        energy=source['metadata']['energy_hartree']
     return save_ground_state(destination,wavefunctions=waves,density=rho,
-        eigenvalues=eigen,occupations=occ,kpoints=points,weights=np.full(nk,1./nk),
+        eigenvalues=eigen,occupations=occ,kpoints=points,weights=weights,
         cell_bohr=model.cell,fractional_positions=model.fractional_positions,
-        atomic_numbers=list(model.numbers),electrons=model.electrons,energy_hartree=info.energy_hartree,
+        atomic_numbers=list(model.numbers),electrons=model.electrons,energy_hartree=energy,
         xc=model.xc,pseudopotentials=references,orbital_block=block,provenance=provenance)
 
 
 def export(gs,directory,orbital_block):
-    from .dft import DFT
     from .gs_archive import _integer
     gs._live()
     comm=gs.session.comm
     root=getattr(comm,'rank',0)==0
     error=None
     try:
-        model=gs.calculation
-        if not isinstance(model,DFT):
-            raise InputError('export requires the immutable DFT model of a retained computed GS')
+        model=_model(gs)
         if math.prod(gs.session.backend.decomposition)!=comm.size:
             raise InputError('GS decomposition does not match subgroup size')
         block=_integer(orbital_block,'orbital_block')
         destination=Path(directory).expanduser().absolute()
         descriptor=(gs._token,gs.identity,gs.material_id,str(destination),block,
                     gs.session.backend.sha256,gs.session.backend.decomposition,
-                    model.input_text(),tuple(p.sha256 for p in model.pseudopotentials))
+                    _description(model),tuple(p.sha256 for p in model.pseudopotentials))
     except Exception as exc:error=str(exc)
     _agree(comm,error)
     _agree(comm,'export selections differ across ranks' if any(v!=descriptor for v in comm.allgather(descriptor)) else None)
@@ -150,18 +189,24 @@ def export(gs,directory,orbital_block):
     _agree(comm,'retained GS metadata differs across ranks/model' if (
         info.atoms!=len(model.numbers) or info.bands!=model.states or
         any(v!=vars(info) for v in metadata)) else None)
-    arrays=[gs.array(name) for name in ('density','orbitals','occupations','eigenvalues')]
+    arrays=[gs.array(name) for name in ('density','orbitals','occupations')]
+    source=getattr(model,'archive_context',None)
+    if source is None:arrays.append(gs.array('eigenvalues'))
+    else:
+        from .native_gs import NativeGSArray
+        carried=np.asarray(source['arrays']['eigenvalues'],dtype=np.float64).T[:,:,None]
+        arrays.append(NativeGSArray(carried,(1,1,1),'eigenvalues','hartree (source archive)'))
     error=None
     try:local,occ,eigen,signature=_tile(model,*arrays)
     except Exception as exc:error=str(exc)
     _agree(comm,error)
     tiles=comm.allgather(signature)
-    shape=(math.prod(model.kmesh),model.states,*reversed(model.grid))
+    shape=(_nk(model),model.states,*reversed(model.grid))
     _validate_tiles(tiles,shape)
     waves=_assemble(comm,local,tiles,shape)
     archive=None;error=None
     if root:
-        try:archive=_write(gs,destination,block,waves,occ,eigen,info)
+        try:archive=_write(gs,destination,block,waves,occ,eigen,info,model)
         except Exception as exc:error=exc
     _root_error(comm,error)
     return archive

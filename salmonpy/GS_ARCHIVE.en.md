@@ -91,3 +91,17 @@ Multi-k states support the existing `state.save_checkpoint('new-history')` and `
 `NativeGSState.export_archive` adds a collective regular-mesh DFT-owned export entry (root writes/returns the archive).
 See [NATIVE_GS.en.md](NATIVE_GS.en.md) for scope, provenance and measured limits.
 It is not a complete SCF checkpoint or native GS-handle restoration.
+
+## Native retained-GS initialization
+
+`NativeGSSession.load_archive` converts GS/2 once on subgroup root and imports a
+new native owner with no SCF. Explicit converter/runtime/potential selection is
+required. See [NATIVE_GS.en.md](NATIVE_GS.en.md) and examples/portable_gs.py.
+This restores array initialization, not archived energy/eigenvalues, mixing
+history or an in-progress native SCF checkpoint.
+
+GS/2-imported retained owners can re-export using
+`salmonpy.retained-gs-reexport/1` provenance. Native orbitals/occupations and
+reconstructed density are separated from carried source energy/eigenvalues/model/
+sampling information. Current convergence remains unknown. See the retained-GS
+guide; existing provenance stays readable, and new provenance needs a matching reader.
