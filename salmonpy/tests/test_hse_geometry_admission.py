@@ -34,6 +34,13 @@ class HSEGeometryAdmissionTests(unittest.TestCase):
             g=groups();g['system']="yn_periodic='y',natom=1,nelem=1,"+body;g['rgrid']=grid
             self.check(g)
 
+    def test_general_cells_follow_native_column_lengths(self):
+        for vectors in ['al_vec1=0,8,0,al_vec2=-8,0,0,al_vec3=0,0,8',
+                        'al_vec1=0,8,0,al_vec2=8,0,0,al_vec3=0,0,8',
+                        'al_vec1=8,0,0,al_vec2=1,8,0,al_vec3=0,0,8']:
+            g=groups();g['system']+=','+vectors
+            np.testing.assert_array_equal(self.check(g),[8,8,8])
+
     def test_cell_failures(self):
         for body in ['al=0,8,8','al=-8,8,8','al=nan,8,8','al=,8,8,8','al=8,8,8,,','al=3*1d200',
                      'al_vec1=8,1,0,al_vec2=16,2,0,al_vec3=0,0,8']:
@@ -65,13 +72,13 @@ class HSEGeometryAdmissionTests(unittest.TestCase):
         translated=np.array([np.column_stack((np.eye(3),[1/3,0,0]))])
         with self.assertRaisesRegex(InputError,'grid'):self.check(groups(),translated)
 
-    def test_case_sensitive_file_and_unsupported_units_or_orientation(self):
+    def test_case_sensitive_file_units_and_left_handed_cell(self):
         g=groups();del g['atomic_red_coor'];g['system']+=",file_atom_coor='Atoms.dat'"
         self.check(g,files={'Atoms.dat':"'Si' 0 0 0 1\n"})
         g['units']="unit_system='A_eV_fs'"
         with self.assertRaisesRegex(InputError,'unit_system'):self.check(g,files={'Atoms.dat':"'Si' 0 0 0 1\n"})
         g=groups();g['system']="yn_periodic='y',natom=1,nelem=1,al_vec1=0,8,0,al_vec2=8,0,0,al_vec3=0,0,8"
-        with self.assertRaisesRegex(InputError,'axis-aligned'):self.check(g)
+        np.testing.assert_array_equal(self.check(g),[8,8,8])
 
     def test_grid_accumulated_roundoff_is_checked(self):
         g=groups();g['rgrid']='num_rgrid=1000000,8,8'
@@ -113,3 +120,28 @@ class HSEGeometryAdmissionTests(unittest.TestCase):
         ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3)
         ops[1,:,:3]=np.diag([-1,-1,1]);ops[1,0,3]=1e20
         with self.assertRaisesRegex(InputError,'grid'):self.check(groups(),ops)
+
+class GeneralCellCapabilityTests(unittest.TestCase):
+    def test_old_core_is_only_refused_for_general_symmetry(self):
+        from salmonpy.fast_hse_mpi import _require_cell_protocol
+        from types import SimpleNamespace
+        g=groups();g['system']+=',al_vec1=0,8,0,al_vec2=-8,0,0,al_vec3=0,0,8'
+        _require_cell_protocol(SimpleNamespace(),g,False)
+        _require_cell_protocol(SimpleNamespace(),groups(),True)
+        with self.assertRaisesRegex(InputError,'general.cell'):
+            _require_cell_protocol(SimpleNamespace(),g,True)
+        class Query:
+            def __call__(self):return 1
+        _require_cell_protocol(SimpleNamespace(sp_fast_hse_general_cell_protocol=Query()),g,True)
+
+    def test_arbitrary_field_core_capability_uses_cartesian_group(self):
+        from salmonpy.fast_hse_mpi import _require_cell_protocol
+        from types import SimpleNamespace
+        class Query:
+            def __call__(self):return 1
+        ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3);ops[1,:,:3]=np.diag([1,-1,-1])
+        with self.assertRaisesRegex(InputError,'arbitrary-field'):
+            _require_cell_protocol(SimpleNamespace(),groups(),True,ops)
+        _require_cell_protocol(SimpleNamespace(sp_fast_hse_symmetry_field_protocol=Query()),groups(),True,ops)
+        g=groups();g['system']+=',al_vec1=0,0,8,al_vec2=8,0,0,al_vec3=0,8,0'
+        _require_cell_protocol(SimpleNamespace(sp_fast_hse_general_cell_protocol=Query()),g,True,ops)

@@ -124,6 +124,27 @@ def _configure(lib):
         getattr(lib, 'sp_fast_hse_'+name).restype = c.c_int
 
 
+def _require_cell_protocol(lib,groups,symmetry,operations=None):
+    if not symmetry:return
+    from ._hse_geometry import _numeric
+    vectors=np.column_stack([_numeric(groups.get('system',''),'al_vec'+str(i),3) for i in range(1,4)])
+    general=bool(np.any(vectors-np.diag(np.diag(vectors))))
+    def require(name,message):
+        query=getattr(lib,name,None)
+        if query is None:raise InputError(message+'; rebuild explicitly with current sources')
+        query.argtypes=[];query.restype=c.c_int
+        if query()!=1:raise InputError('unsupported '+message+' protocol')
+    if general:
+        require('sp_fast_hse_general_cell_protocol','general-cell symmetry requires a corrected fast-PR core')
+    if operations is not None:
+        for operation in operations:
+            rotation=operation[:,:3]
+            if general:rotation=vectors@rotation@np.linalg.inv(vectors)
+            if np.max(abs(rotation[:,2]-[0.,0.,1.]))>1e-10:
+                require('sp_fast_hse_symmetry_field_protocol','arbitrary-field symmetry requires a corrected fast-PR core')
+                break
+
+
 def _initializer(lib, allow_symmetry, group_size=1):
     if not allow_symmetry:
         return lib.sp_fast_hse_init
@@ -256,6 +277,7 @@ class NativeFastHSEBackend:
                 raise InputError('fast HSE work directory is not shared identically')
             lib = c.CDLL(str(self.library))
             _configure(lib)
+            _require_cell_protocol(lib,groups,symmetry,operations)
             initializer = _initializer(lib,self.allow_symmetry,comm.size)
         except Exception as exc:
             error = str(exc)

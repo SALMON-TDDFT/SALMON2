@@ -206,3 +206,5 @@ install(FILES "${ROOT}/tests/native/test_hse_low_gradient.f90" DESTINATION salmo
 install(FILES "${ROOT}/salmonpy/_hse_geometry.py" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/salmonpy/_hse_assets.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/tools/test_fast_hse_general_cell_mpi.py" DESTINATION salmonpy/_runtime_source/tools)

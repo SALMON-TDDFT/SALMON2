@@ -738,3 +738,23 @@ SCF warning-first validation: actual Si one-iteration SCF, reopen/force access a
 
 General cells and learned/PT-CN symmetry remain subsequent native work, unchanged
 by these structural checks. Resource budget advice does not enforce a rank/memory cap.
+
+## 2026-11-18 — General-cell and actual-field fast-PR initialization
+
+- [x] Root cause: scalar orbit gauges/k maps/wrap phases assumed aligned axes;
+  rotated reduced-k ACE failed Hermiticity while full-k/reference action worked.
+- [x] Complete replacement uses full cell/Cartesian maps only for non-diagonal
+  cells; positive diagonal arithmetic stays unchanged. Original sources retained.
+- [x] General-cell geometry uses native column norms and actual cell metric.
+- [x] Per-owner A/B symmetry comparison no longer falsely rejects2.9e-18 roundoff.
+- [x] Host-attached zero-impulse initialization has no fixed-z assumption; actual
+  A[3] checked per-step, with capabilities identifying corrected native cores.
+- [x] Rotated,left-handed,xy-sheared,z-permuted full/reduced MPI1/2 comparisons;
+  independent material groups and direct7→32 resume. x/y/circular-xy also covered.
+- [x] Original diagonal trajectory bytes retained. Nonbinary diagonal cells
+  match old optimized kernels with the admission-only fix.
+- [ ] Symmetry learned/PT-CN, arbitrary space groups, broader process ownership,
+  larger partitions/environments and portable archives remain next tasks.
+
+Historical axis-aligned-only and fixed-z restrictions above describe older
+binaries; use the current guide and corrected explicitly built runtime.

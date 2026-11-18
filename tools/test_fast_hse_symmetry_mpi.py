@@ -28,7 +28,8 @@ def main():
     parser.add_argument('--checkpoint', type=Path, required=True)
     parser.add_argument('--steps', type=int, default=32)
     parser.add_argument('--group-size', type=int, choices=(1,2), default=1)
-    parser.add_argument('--admission-fault', choices=('truncated','nonfinite','nonclosed','cell','cell-metric','cell-orientation','atoms','grid','grid-translation','k-shift','k-count','pseudo','gs-info','gs-occupation','gs-wfn'))
+    parser.add_argument('--admission-fault', choices=('truncated','nonfinite','nonclosed','cell','cell-metric','cell-singular','atoms','grid','grid-translation','k-shift','k-count','pseudo','gs-info','gs-occupation','gs-wfn'))
+    parser.add_argument('--polarization',choices=('x','y','z','circular-xy'),default='z')
     parser.add_argument('--split', type=int, default=7)
     args = parser.parse_args()
     if not 3 < args.split < args.steps:
@@ -60,7 +61,7 @@ def main():
             print('Public symmetry rejection before lifetime PASS', args.mode, flush=True)
         return
     if args.admission_fault:
-        geometry_fault = args.admission_fault in ('cell','cell-metric','cell-orientation','atoms','grid','grid-translation')
+        geometry_fault = args.admission_fault in ('cell','cell-metric','cell-singular','atoms','grid','grid-translation')
         path = bundle/('rt.inp' if geometry_fault and args.admission_fault != 'grid-translation' else 'sym.dat')
         asset_fault = args.admission_fault in ('k-shift','k-count','pseudo','gs-info','gs-occupation','gs-wfn')
         if asset_fault:
@@ -81,8 +82,8 @@ def main():
                 damaged = original.replace('al=8,8,8','al=0,8,8')
             elif args.admission_fault == 'cell-metric':
                 damaged = original.replace('al=8,8,8','al=8,8,8,al_vec1=8,0,0,al_vec2=0,8,0,al_vec3=1,0,8')
-            elif args.admission_fault == 'cell-orientation':
-                damaged = original.replace('al=8,8,8','al=8,8,8,al_vec1=0,8,0,al_vec2=-8,0,0,al_vec3=0,0,8')
+            elif args.admission_fault == 'cell-singular':
+                damaged = original.replace('al=8,8,8','al=8,8,8,al_vec1=8,1,0,al_vec2=16,2,0,al_vec3=0,0,8')
             elif args.admission_fault == 'grid':
                 damaged = original.replace('num_rgrid=8,8,8','num_rgrid=0,8,8')
             elif args.admission_fault == 'atoms':
@@ -117,7 +118,12 @@ def main():
         target.mkdir(parents=True, exist_ok=False)
     shard = target / 'checkpoint.bin'
     trace = target / 'trace.npz'
-    endpoint = lambda step: np.array([0., 0., .0001*np.sin(.3*step)])
+    def endpoint(step):
+        if args.polarization=='circular-xy':
+            return .0001*np.array([np.cos(.3*step)-1,np.sin(.3*step),0.])
+        A=np.zeros(3);A['xyz'.index(args.polarization)]=.0001*np.sin(.3*step)
+        return A
+    invalid_axis={'x':1,'y':0,'z':0,'circular-xy':2}[args.polarization]
     try:
         first = 0
         if args.mode == 'resume':
@@ -135,7 +141,8 @@ def main():
                 state.checkpoint(before, False)
                 old = (state.steps, state.A.tobytes(), state.current.tobytes(), state.energy)
                 try:
-                    state.step([1e-250, 0, 0])
+                    invalid=np.zeros(3);invalid[invalid_axis]=1e-250
+                    state.step(invalid)
                 except InputError as error:
                     assert 'little group' in str(error)
                 else:

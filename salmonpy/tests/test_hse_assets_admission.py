@@ -96,10 +96,18 @@ class HSEAssetsAdmissionTests(unittest.TestCase):
         self.assertEqual(_string_array("file_pseudo=2*'Same_rps.dat'",'file_pseudo',2),['Same_rps.dat']*2)
         with self.assertRaises(InputError):_string_array("file_pseudo=,'bad_rps.dat'",'file_pseudo',1)
 
-    def test_native_z_group_guard(self):
+    def test_k_mesh_does_not_impose_polarization(self):
         from salmonpy._hse_assets import _mesh
         ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3);ops[1,2,2]=-1
-        with self.assertRaisesRegex(InputError,'z-field'):_mesh({'kgrid':'num_kgrid=2,2,2'},ops)
+        _mesh({'kgrid':'num_kgrid=2,2,2'},ops)
+
+    def test_general_cell_k_mesh_is_independent_of_polarization(self):
+        from salmonpy._hse_assets import _mesh
+        g={'kgrid':'num_kgrid=2,2,2','system':'al_vec1=0,0,8,al_vec2=8,0,0,al_vec3=0,8,0'}
+        ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3);ops[1,:,:3]=np.diag([1,-1,-1])
+        _mesh(g,ops)  # Fractional C2x is Cartesian C2z.
+        ops[1,:,:3]=np.diag([-1,-1,1])
+        _mesh(g,ops)  # Actual field compatibility is checked at each step.
 
     def test_extra_stored_states_and_real_wavefunction(self):
         for real in [0,1]:

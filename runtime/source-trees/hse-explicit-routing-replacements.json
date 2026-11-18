@@ -3,7 +3,7 @@
   "files": {
     "src/xc/exx_native.f90": {
       "before_sha256": "2d9375f186815bb62c34405237b77fa70ac80b58a53ef704ea137014c96c68ae",
-      "after_sha256": "003d7ee900282be8d901072930c5c3a6477dc5b463e831119cdcc4f69da56001",
+      "after_sha256": "125d028475642087d9996c7d0391c4ade861cfd8f6fdd2e2f0106eaa38162bf1",
       "source": "overrides/hse-explicit-routing/src/xc/exx_native.f90"
     },
     "src/xc/exx_rt_state.f90": {
@@ -190,6 +190,16 @@
       "before_sha256": "2188c1dbdfe20218af5a48a9a2dc5998f412e91e3cff25dc1329371b44df5af4",
       "after_sha256": "bb153effbaa5de297f757e57ed68bfb7aaafd6af4cc2617347baedb91474dd68",
       "source": "overrides/hse-explicit-routing/src/xc/hybrid_semilocal.f90"
+    },
+    "src/xc/exx_k_orbits.f90": {
+      "before_sha256": "0283f26b450d92166869aebc96e3057ac2530ce21d58bb42aec394ae270a7e86",
+      "after_sha256": "4fc2bb6b826d9229712b1046541426354a2efb6f5821f16580f5b86e1ba5affd",
+      "source": "overrides/hse-explicit-routing/src/xc/exx_k_orbits.f90"
+    },
+    "src/symmetry/symmetry.f90": {
+      "before_sha256": "85b4098863c13947eddbd2c95ded856ccb67cdebec942980efdd74fe4a359962",
+      "after_sha256": "fb5945d1c36b73a3af624a3dedb120cc97c99b5aa46d4ecb61547682c4db862c",
+      "source": "overrides/hse-explicit-routing/src/symmetry/symmetry.f90"
     }
   }
 }

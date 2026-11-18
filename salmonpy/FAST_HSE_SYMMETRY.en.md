@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.8`
+[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.9`
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -93,7 +93,7 @@ reduced internal-k MPI and ordinary symmetric mixed failure/resume remain open.
 An internal Fortran `rt_open(..., allow_symmetry=.true.)` opt-in now connects the
 exchange core to the complete TDDFT checkpoint path. It is bounded to scalar
 periodic CPU/full-q, one/two internal k ranks, factor-off Taylor/ACE and a retained
-group preserving z. Full-action is test-only. One initialization per process is
+group preserving the actual A/c at each step. Full-action is test-only. One initialization per process is
 allowed; initialize a fresh process for each independent TDDFT lifetime.
 
 Density/current symmetry tables are still process-common and immutable. Their
@@ -243,8 +243,9 @@ solver group. No native lifetime has been acquired: repair the original input,
 construct a new material provider and retry. Editing an already prepared
 provider's inputs is still rejected by existing hash checks.
 The geometry admission below checks cells, atomic/species mapping and grids.
-K-stars, pseudopotential contents, restart binaries and other native STOP paths
-remain separate work; do not advertise general initialization recovery.
+Generated k-stars, PP references/plain KY and supported legacy GS structural
+checks are also available. Physical GS identity, all non-KY contents and general
+native STOP recovery remain outside this scope.
 
 Add `--admission-fault truncated`, `nonfinite` or `nonclosed` to the preceding
 save command to corrupt only the last rank of each group and verify rejection,
@@ -260,7 +261,7 @@ checks effective geometry before native loading/lifetime/work-copy creation.
 No ASE/f90nml dependency is added. Every solver rank must enter the collective
 call. Repair rejected source input, construct a new provider and retry.
 
-- Cells follow native priorities: al, diagonal al_vec1..3, num_rgrid*dl, and detect off-axis vectors. Finite positive lengths/volume and a consistent inverse are required. The current native profile admits axis-aligned orthogonal cells; off-axis/permuted cells reject before initialization.
+- Cells follow native priorities: al, diagonal al_vec1..3, num_rgrid*dl, and detect off-axis vectors. Finite positive lengths/volume and a consistent inverse are required. The corrected native core also admits non-axis-aligned, permuted and left-handed nonsingular cells.
 - Grid counts/spacing and native integer bounds are checked. Resolution follows native int((length+1e-10)/spacing), including its spacing-to-cell tolerance; no ceiling, repair or input rewriting.
 - One explicit inline or bundle-local Cartesian/reduced atom source is required. Counts, finite coordinates and species IDs1..nelem are checked. The existing fast-PR adapter remains au-only.
 - With symmetry, check Cartesian cell isometries, integer grid maps (corner residual/index bounds, no full-grid allocation) and unique species-preserving atom permutations.
@@ -270,13 +271,55 @@ and positive index/section assignments. Null or unsupported forms reject rather
 than being guessed. Atom records use canonical label/x/y/z/species fields. File
 name case is preserved; references escaping the bundle reject. Inputs stay intact.
 
-Use `--admission-fault cell|cell-metric|cell-orientation|atoms|grid|grid-translation` in the explicit
+Use `--admission-fault cell|cell-metric|cell-singular|atoms|grid|grid-translation` in the explicit
 probe to corrupt one rank of each group and check collective rejection without
 lifetime acquisition, repair and normal start. Current/energy traces and direct
-resume remain unchanged. These checks do not authenticate GS identity, k-stars,
-pseudopotential content, restart binaries, all native initialization paths or
-physical convergence.
+resume remain unchanged. Supported k/PP/legacy-GS structural checks do not
+authenticate physical GS identity, every PP format, all native initialization
+paths or physical convergence.
 
-Equivalent axis-permuted right/left-handed synthetic fixtures hit ACE initialization
-STOP in the existing runtime. Reject these unsupported forms rather than silently
-rotating/reordering a basis. General-cell native initialization remains open.
+Old binaries hit ACE initialization STOP on axis-permuted fixtures. The corrected
+complete source fixes this; rebuild explicitly rather than modifying a fixed binary.
+Primitive axes and orbital records are not reordered.
+
+## General cells and x/y/circular polarization
+
+The external field is a Cartesian three-vector A/c. Attached-host, zero-impulse
+`tddft_response` initializes at A=0 and checks the actual vector at every step.
+Ordinary batch initialization keeps its previous checks. No fixed z polarization,
+field projection, tiny-component removal or automatic symmetry change is imposed.
+
+| Field | Example retained Cartesian symmetry |
+|---|---|
+| x polarization | C2x |
+| y polarization | C2y |
+| z polarization | C2z |
+| Circular xy | mirror-z preserving the entire xy plane |
+
+The group must also preserve the actual cell and atomic species/positions. A field
+incompatible with that reduced model is refused before updating, preserving the
+accepted state. Use a matching full-k initial state when no suitable group exists;
+arbitrary GS data are not automatically converted and groups are not changed mid-run.
+
+General cells use native column-vector lengths for grid resolution and the full
+cell matrix for phases, k maps and Cartesian rotations. General-cell symmetry
+requires `sp_fast_hse_general_cell_protocol()==1`; retained groups not preserving
+z additionally require `sp_fast_hse_symmetry_field_protocol()==1`. Missing protocols
+reject before native lifetime acquisition. Old full-k and ordinary z-preserving
+diagonal-cell paths do not require unnecessary new protocols.
+
+Rotated orthogonal, left-handed, xy-sheared and z-permuted cells are compared using
+full8/reduced4 k points, internal MPI1/2, two independent material groups and own
+direct7→32 resume. The same checks cover x/y/circular-xy fields. Synthetic orbital
+regressions do not certify real-material convergence.
+
+```sh
+python tools/test_fast_hse_general_cell_mpi.py \
+  NEW_BUILD FULL_K_BUNDLE REDUCED_K_BUNDLE NEW_OUTPUT --old-build OLD_BUILD
+# Optional --roundoff-reference-build ADMISSION_REFERENCE compares nonbinary
+# diagonal lengths against old kernels with only their admission rejection fixed.
+```
+
+Resume still requires the same binary/model/MPI partition; checkpoint encoding
+and arrays are unchanged. Learned/PT-CN symmetry, arbitrary space groups and
+broader real-space partitions remain separate work.

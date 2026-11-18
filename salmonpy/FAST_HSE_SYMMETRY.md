@@ -1,6 +1,6 @@
 # 高速PR版HSEと対称性
 
-[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.8`
+[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.9`
 
 HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成・orbit再利用・ACEと対称性を
 中心に進めます。通常版HSEを代替エンジンにはしません。標準SALMONの対称性縮約とは演算が
@@ -77,7 +77,7 @@ ownerの作り直しを含め、復元直後の作用・エネルギーと、そ
 
 内部Fortranの `rt_open(..., allow_symmetry=.true.)` で、交換コアとTDDFT全体のcheckpointを
 接続します。周期・非スピン分極・CPU・full-q・内部kランク1／2・factor-offのTaylor／ACEと、
-zを保つ対称群に限定します。full-actionは比較検証用のみです。初期化は1プロセス1回で、
+各時刻の実A/cを保つ対称群を使います。x/y/zや円偏光を固定z条件で制限しません。full-actionは比較検証用のみです。初期化は1プロセス1回で、
 独立したTDDFTの実行には新しいプロセスを用意します。
 
 密度／電流の対称化情報はまだプロセス共通・不変です。フラグ・操作行列・格子・逆行列を所有入力と
@@ -223,7 +223,7 @@ native読込み・寿命取得・作業コピーの前に有効セル・格子�
 ASE/f90nmlの追加依存はありません。各ランクが同じcollective入口へ参加する必要があります。
 検査で拒否されたら元入力を直し、新しいproviderを用意して再試行します。
 
-- セル：`al`、対角`al_vec1..3`、`num_rgrid*dl`、ベクトル指定の優先順位をSALMONと合わせ、有限・正の長さ／体積、逆行列を検査。現native接続は軸整列直交セルに限定し、非直交・軸入替は事前拒否します。
+- セル：`al`、対角`al_vec1..3`、`num_rgrid*dl`、ベクトル指定の優先順位をSALMONと合わせ、有限・正の長さ／体積、逆行列を検査。非対角成分があれば `al_vec1..3` を使い、新しいnativeコアでは軸入替・左手系・傾いたセルも扱います。
 - 格子：正の整数点数／幅とnative整数範囲を検査。実際の点数はSALMONと同じ `int((length+1e-10)/spacing)`、幅指定のセル整合許容差も同じ。ceilや入力の補正はしません。
 - 原子：inlineまたはbundle内の明示ファイルのCartesian／縮約座標を1つだけ指定。原子数、有限座標、1..nelemの種別IDを検査。既存の高速PR接続と同じく入力単位はauのみです。
 - 対称性あり：セルのCartesian等長性、全格子の整数写像（角で誤差と整数範囲を評価し、格子全体の配列は作らない）、同一種別の原子の一対一対応を検査します。
@@ -232,10 +232,34 @@ ASE/f90nmlの追加依存はありません。各ランクが同じcollective入
 null項やその他の未対応書式は推測せず拒否します。座標は標準の「label x y z species」の5項形式。
 ファイル名の大文字小文字を保持し、外部へ抜ける参照は拒否します。入力は書き換えません。
 
-検証ツールの `--admission-fault cell|cell-metric|cell-orientation|atoms|grid|grid-translation` で、各MPI群の1ランクを
+検証ツールの `--admission-fault cell|cell-metric|cell-singular|atoms|grid|grid-translation` で、各MPI群の1ランクを
 壊し、全員の拒否・寿命未取得・修正後開始を確認できます。正常な電流・エネルギーと直接再開も維持します。
-これは入力の構造検査です。GSとの同一性、k-star、擬ポテンシャル内容、再開バイナリ、未対応の
-native初期化を検証したことにはなりません。物理収束も別途確認してください。
+これは入力の構造検査です。k-star、PP参照・plain KY、対応GSレコードの構造検査も加えています。物理的なGS同一性、他PP形式の全内容、任意のnative初期化復帰を保証しません。物理収束は別途確認してください。
 
-軸を入れ替えた右手系／左手系の合成入力で現ランタイムのACE初期化停止を確認したため、
-これらを黙って変換せず対応外として拒否します。一般セルのnative初期化は残作業です。
+旧版では軸入替セルがACE初期化で停止しましたが、後述の一般セル対応コアで修正しています。古いバイナリは変更せず、対応ソースから明示的に再ビルドします。
+
+## 一般セルとx/y・円偏光
+
+外場はCartesianの3成分A/cです。ホスト接続・ゼロインパルスの `tddft_response` はA=0で初期化し、各ステップの実Aを保持対称性と照合します。通常バッチの初期偏光検査は変更しません。z方向への固定、微小成分の切捨て、入力波形の投影は行いません。
+
+| 外場 | 保持できる対称性の例 |
+|---|---|
+| x偏光 | Cartesian C2x |
+| y偏光 | Cartesian C2y |
+| z偏光 | Cartesian C2z |
+| xy円偏光 | xy面を保つmirror-z |
+
+実際の結晶・セル・原子配置にも適合する群を選びます。適合しない群で縮約したまま進めると異なる計算になるため、その場合は更新前に拒否して元の状態を保ちます。適合群がなければ、対応する全k点初期状態を使ってください。任意の既存GSを自動変換したり、途中で群を変更したりしません。
+
+一般セルではnativeと同じく格子ベクトルの列の長さから格子幅・点数を決め、セル行列で位相・k点・Cartesian対称操作を計算します。対称性付き一般セルには `sp_fast_hse_general_cell_protocol()==1`、zを保たない保持群には `sp_fast_hse_symmetry_field_protocol()==1` が必要です。対応していない旧コアは寿命消費前に拒否します。全k点や従来のz保存・対角セルに不要な新protocolを要求しません。
+
+回転した直交セル、左手系、xyの傾斜セル、z軸を入れ替えたセルで、全8k点と縮約4k点・内部MPI1/2・独立2物質群・直接7→32再開を確認します。x/y/xy円偏光も同じ比較を行います。合成軌道の数値回帰であり、実材料の収束保証ではありません。
+
+```sh
+python tools/test_fast_hse_general_cell_mpi.py \
+  NEW_BUILD FULL_K_BUNDLE REDUCED_K_BUNDLE NEW_OUTPUT --old-build OLD_BUILD
+# 端数セル長の旧カーネル比較には、旧版の誤拒否だけ直した比較専用
+# --roundoff-reference-build ADMISSION_REFERENCE を任意で追加します。
+```
+
+再開では同一バイナリ・同一モデル・同一MPI分割を使います。checkpoint形式と保存配列は変更していません。学習／PT-CNの対称性、一般の空間群、実空間分割の拡張は別の残作業です。

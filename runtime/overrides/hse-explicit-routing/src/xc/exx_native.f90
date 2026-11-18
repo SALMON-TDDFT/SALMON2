@@ -321,7 +321,10 @@ contains
         do i=1,3
           if(.not.ieee_is_finite(owner%native_symmetry%translation(i,k)))return
         enddo
-        if(any(system%kpoint_input%symmat_a(:,1:3,k)/=owner%native_symmetry%rotation(:,:,k)))return
+        ! The immutable fractional A and reciprocal B tables are computed by
+        ! different matrix products. Match the same tolerance used at map init;
+        ! exact A==B rejects valid sheared cells at roundoff (observed 2.9e-18).
+        if(maxval(abs(system%kpoint_input%symmat_a(:,1:3,k)-owner%native_symmetry%rotation(:,:,k)))>1d-10)return
         if(any(system%kpoint_input%symmat_b(:,1:3,k)/=owner%native_symmetry%rotation(:,:,k)))return
         if(any(system%kpoint_input%symmat_a(:,4,k)/=owner%native_symmetry%translation(:,k)))return
         cartesian=matmul(system%primitive_a, &

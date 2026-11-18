@@ -155,8 +155,6 @@ def _mesh(groups,operations):
         origin=(.5+shift)/mesh-.5
         for operation in operations:
             r=operation[:,:3]
-            if np.max(abs(r[:,2]-[0.,0.,1.]))>1e-10:
-                _fail('retained k symmetry must preserve the native z-field initialization group')
             matrix=r*mesh[:,None]/mesh[None,:]
             offset=mesh*(r@origin-origin)
             if not np.isfinite(matrix).all() or not np.isfinite(offset).all():_fail('nonfinite k-star mapping')

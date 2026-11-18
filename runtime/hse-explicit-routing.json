@@ -41,7 +41,9 @@
     "src/rt/step_recovery.f90",
     "src/rt/CMakeLists.txt",
     "src/xc/exx_symmetry.f90",
-    "src/xc/hybrid_semilocal.f90"
+    "src/xc/hybrid_semilocal.f90",
+    "src/xc/exx_k_orbits.f90",
+    "src/symmetry/symmetry.f90"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -71,6 +73,6 @@
   ],
   "scope": "explicit full-support fast HSE native ownership; serial and experimental k-only host-MPI CPU contexts, common immutable per-group configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "8c188c165d6f0a00f28e1bebbc50e6b0593e1ed30aa1dbfd80e1dd60c6e2070c",
+  "replacements_sha256": "c13826f3d91aa7975299b22f15ee6db085093c51b634a766ad6f06ac9c2b2095",
   "patch_sha256_role": "historical migration identity; no patch is applied"
 }

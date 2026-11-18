@@ -166,12 +166,10 @@ def preflight(root,groups,operations=None):
             else:_fail('cell lengths are not defined')
         cell=np.diag(lengths)
     else:
-        # Full native TDDFT initialization is not the independent exchange-core
-        # cell test. Axis-permuted fixtures hit ACE init STOP in the current
-        # runtime; decline before lifetime rather than normalizing the basis.
-        _fail('native fast-PR initialization currently requires an axis-aligned orthogonal cell')
+        cell=vectors.copy()
+        lengths=np.linalg.norm(cell,axis=0)
     if not np.isfinite(cell).all() or not np.isfinite(lengths).all() or np.any(lengths<=0):
-        _fail('cell lengths must be finite and positive')
+        _fail('cell vector lengths must be finite and positive')
     magnitude=float(np.max(abs(cell)))
     determinant=float(np.linalg.det(cell/magnitude))
     if not np.isfinite(determinant) or determinant==0 or (operations is not None and abs(determinant)<=1e-14):
