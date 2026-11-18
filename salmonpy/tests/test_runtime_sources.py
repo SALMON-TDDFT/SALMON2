@@ -34,6 +34,15 @@ class RuntimeSources(unittest.TestCase):
   files={'x.f90':{'before_sha256':sha(self.tree/'x.f90'),'after_sha256':sha(replacement),'source':'replacement'},'added.f90':{'before_sha256':None,'after_sha256':sha(replacement),'source':'replacement'}}
   manifest=self.root/'replace.json';manifest.write_text(json.dumps({'schema':'salmonpy.source-replacements/1','files':files}))
   spec={'replacements':'replace.json','replacements_sha256':sha(manifest)}
+  resolved=store.effective_files(self.root,self.spec,overlays=(spec,))
+  self.assertEqual(set(resolved),{'x.f90','added.f90'})
+  self.assertEqual(resolved['x.f90']['sha256'],sha(replacement))
+  self.assertEqual(resolved['x.f90']['source'],'replacement')
+  self.assertEqual((self.tree/'x.f90').read_text(),'old\n')
+  original=store.effective_files(self.root,self.spec)
+  self.assertEqual(original['x.f90']['source'],'tree/x.f90')
+  with self.assertRaises(ValueError):store.effective_files(self.root,self.spec,overlays=(spec,spec))
+  self.assertFalse((self.root/'out').exists())
   (self.tree/'added.f90').write_text('keep')
   with self.assertRaises(ValueError):store.replace_files(self.root,spec,self.tree)
   self.assertEqual((self.tree/'x.f90').read_text(),'old\n')

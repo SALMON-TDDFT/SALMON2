@@ -109,7 +109,7 @@ def main():
             from contextlib import nullcontext
             context=nullcontext()
             if failure=='writer':context=patch('salmonpy.gs_archive._write',side_effect=fail)
-            if failure=='allocation':context=patch('salmonpy._gs_archive_mpi.np.empty',side_effect=MemoryError('injected root allocation failure'))
+            if failure=='allocation':context=patch('salmonpy._gs_archive.np.empty',side_effect=MemoryError('injected root allocation failure'))
             chosen_info=NativeGSInfo(-2.,1e-12,1e-9,10,True,2,5) if failure=='metadata' and comm.rank==3 else info
             caught=None
             try:

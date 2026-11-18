@@ -2,8 +2,8 @@
   "schema": "salmonpy.source-replacements/1",
   "files": {
     "src/common/structures.f90": {
-      "before_sha256": "30cdddff0c18cb3d5aac76aa7c65e3746ed21e33cf9581e6d39482c0bd311477",
-      "after_sha256": "47b091bfd38ec34e391837a71934d93ee140da4a11ab01dec5f894a06dee0f0c",
+      "before_sha256": "190d255a465851d559e57d385432fbebd1d7057c56ef35595c296f71a6980930",
+      "after_sha256": "73110c333a7881a23f396a19364421ed946549ed29da3731376b67ac3f8f52bf",
       "source": "overrides/rt-step-config/src/common/structures.f90"
     },
     "src/rt/initialization_rt.f90": {

@@ -30,7 +30,7 @@ class GSExportTests(unittest.TestCase):
         def run(args,**kw):
             if args==[str(self.exporter)]:args=[sys.executable,str(self.exporter)]
             return original(args,**kw)
-        wrapper=patch('salmonpy._gs_export.subprocess.run',side_effect=run);wrapper.start();self.addCleanup(wrapper.stop)
+        wrapper=patch('salmonpy._gs_archive.subprocess.run',side_effect=run);wrapper.start();self.addCleanup(wrapper.stop)
         self.source=root/'source-gs';native=self.source/'native';restart=native/'data_for_restart';restart.mkdir(parents=True)
         self.dft=DFT([2],np.eye(3)*4,[[0,0,0]],[self.potential],electrons=2,states=2,grid=(8,8,8),kmesh=(1,1,1))
         (native/'gs.inp').write_text(self.dft.input_text())

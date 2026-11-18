@@ -58,7 +58,7 @@ class NativeGSBackend:
     def __init__(self,build_record,work_root,*,decomposition=(1,1,1,1,1)):
         record=json.loads(Path(build_record).read_text())
         if record.get('schema')!='salmonpy.embedded-tddft/1':raise InputError('verified standard embedded build record required')
-        from ._gs_archive_load import record_profile
+        from ._gs_archive import record_profile
         self._io_profile=record_profile(record)
         self._library=Path(record['library']).resolve();self._sha256=record['sha256']
         if hashlib.sha256(self.library.read_bytes()).hexdigest()!=self.sha256:raise InputError('native library checksum mismatch')
@@ -257,7 +257,7 @@ class NativeGSSession:
         not a complete SCF/native-state checkpoint. Conversion failures precede
         native import; the existing native loader recovery limits still apply.
         """
-        from ._gs_archive_load import load_archive
+        from ._gs_archive import load_archive
         return load_archive(self,archive,directory,converter=converter,executable=executable,
                             pseudopotentials=pseudopotentials,material_id=material_id,timeout=timeout)
 
@@ -336,18 +336,23 @@ class NativeGSState:
         from ._gs_tddft import open_model
         return open_model(self,dt,max_steps)
     def export_archive(self,directory,*,orbital_block=16):
-        """Collectively export regular-mesh GS/2 arrays; root returns the archive.
+        """Collectively export supported GS/2 arrays; root returns the archive.
 
         Workers return None. This is not a complete SCF/native-handle checkpoint.
         """
-        from ._gs_archive_mpi import export
-        return export(self,directory,orbital_block)
+        from ._gs_archive import export_retained
+        return export_retained(self,directory,orbital_block)
 
     def array(self,quantity):
         self._live();error=None
-        if quantity not in _QUANTITIES:error='unknown GS array quantity'
-        if quantity=='forces' and self._calculation is None:error='forces were not computed by existing-GS import'
+        if not isinstance(quantity,str) or quantity not in _QUANTITIES:
+            error='unknown GS array quantity; supported quantity string required'
+        elif quantity=='forces' and self._calculation is None:
+            error='forces were not computed by existing-GS import'
         _agree(self.session.comm,error)
+        quantities=self.session.comm.allgather(quantity)
+        _agree(self.session.comm,'GS array quantities differ across ranks'
+               if any(value!=quantity for value in quantities) else None)
         code,unit=_QUANTITIES[quantity];ndim=c.c_int()
         shape=np.ones(7,dtype=np.int64);lower=np.ones(7,dtype=np.int64)
         self.session._check(self.session.lib.sp_gs_array_info(self._token,code,c.byref(ndim),shape.ctypes.data,lower.ctypes.data))

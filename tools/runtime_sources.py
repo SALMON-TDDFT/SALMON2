@@ -88,3 +88,64 @@ def copy_files(source,dest,files):
         target.parent.mkdir(parents=True,exist_ok=True)
         shutil.copy2(origin,target)
         if digest(target)!=expected:raise ValueError('source changed while copying: '+name)
+
+
+def effective_files(root,spec,*,overlays=()):
+    """Resolve verified complete-file preparations without copying or mutations.
+
+    This describes source bytes, not semantic feature compatibility. Each overlay
+    is checked against the preceding inventory, including additions and order.
+    """
+    root=Path(root).resolve()
+    files=manifest(root,spec,'source_tree_manifest','source_tree_sha256','salmonpy.source-tree/1')
+    tree=path_in(root,spec['source_tree']);check_tree(tree,files)
+    resolved={name:{'sha256':expected,'source':path_in(tree,name).relative_to(root).as_posix()}
+              for name,expected in files.items()}
+    for overlay in overlays:
+        replacements=manifest(root,overlay,'replacements','replacements_sha256','salmonpy.source-replacements/1')
+        for name,entry in replacements.items():
+            path_in(root,name)  # Validate destination names even though no files are written.
+            current=resolved.get(name)
+            if entry['before_sha256'] is None:
+                if current is not None:raise ValueError('new source already exists: '+name)
+            elif current is None or current['sha256']!=entry['before_sha256']:
+                raise ValueError('replacement base differs: '+name)
+            origin=path_in(root,entry['source'])
+            if digest(origin)!=entry['after_sha256']:raise ValueError('replacement hash changed: '+name)
+            resolved[name]={'sha256':entry['after_sha256'],'source':origin.relative_to(root).as_posix()}
+    return resolved
+
+
+def inventory(root):
+    """Current standard and fast-PR effective source matrix, with provenance."""
+    root=Path(root).resolve()
+    standard=json.loads((root/'source.json').read_text())
+    hse=json.loads((root/'hse-rt-state.json').read_text())
+    routing=json.loads((root/'hse-explicit-routing.json').read_text())
+    if routing['parent_patch_sha256']!=hse['patch_sha256'] or routing['base_commit']!=hse['upstream_commit']:
+        raise ValueError('fast HSE routing parent differs')
+    profiles={'standard':effective_files(root,standard),
+              'fast_hse_reference':effective_files(root,hse),
+              'fast_hse':effective_files(root,hse,overlays=(hse,routing))}
+    a=profiles['standard'];b=profiles['fast_hse'];common=set(a)&set(b)
+    same=sorted(name for name in common if a[name]['sha256']==b[name]['sha256'])
+    different=sorted(common-set(same))
+    critical=('src/gs/embedded_gs.f90','src/gs/gs_model.f90','src/gs/gs_seed.f90',
+              'src/gs/gs_storage.f90','src/io/model_inputs.f90','src/rt/embedded_tddft.f90',
+              'src/maxwell/embedded_eh.f90','src/common/force.f90','src/xc/salmon_xc.f90',
+              'src/io/checkpoint_restart.f90','src/gs/scf_iteration_dft.f90',
+              'src/parallel/communication.f90','src/xc/exx_native.f90','src/xc/exx_symmetry.f90')
+    return {'schema':'salmonpy.source-inventory/1','scope':'source byte provenance, not execution/physics certification',
+            'counts':{name:len(files) for name,files in profiles.items()},
+            'comparison':{'byte_identical':same,'different':different,
+                          'standard_only':sorted(set(a)-set(b)),'fast_hse_only':sorted(set(b)-set(a))},
+            'critical_paths':{name:{profile:files.get(name) for profile,files in profiles.items()} for name in critical},
+            'profiles':profiles}
+
+
+if __name__=='__main__':
+    import argparse
+    parser=argparse.ArgumentParser(description='Inspect verified effective solver source inventories without copying/building.')
+    parser.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1]/'runtime')
+    args=parser.parse_args()
+    print(json.dumps(inventory(args.root),indent=2))

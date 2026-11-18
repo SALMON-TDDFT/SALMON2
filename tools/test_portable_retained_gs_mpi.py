@@ -140,6 +140,19 @@ def main():
                     warnings.simplefilter('ignore',RuntimeWarning)
                     other=session.load_archive(archive,root/'retry',converter=converter,executable=engine,
                                                pseudopotentials=[pp],material_id='retry')
+                # Rank-local invalid requests and mismatched supported quantities
+                # must reject together, without touching GS/active RT owners.
+                before=session.resources();current=first.current.copy()
+                original=other.array('orbitals').values.tobytes()
+                for quantity in (['density'] if comm.rank==0 else 'density',
+                                 'density' if comm.rank==0 else 'occupations'):
+                    caught=False
+                    try:other.array(quantity)
+                    except InputError:caught=True
+                    assert all(comm.allgather(caught))
+                    assert session.resources()==before
+                    np.testing.assert_array_equal(first.current,current)
+                    assert other.array('orbitals').values.tobytes()==original
                 # Re-export while RT owners are active; fail publication once,
                 # preserve all owners and retry the same output path.
                 from unittest.mock import patch
@@ -193,7 +206,7 @@ def main():
         traces=world.allgather(np.asarray(trace))
         np.testing.assert_array_equal(traces[0],traces[2])
         if world.rank==0:
-            result=dict(status='pass',active_RT_reexport_failure_safe=True,active_RT_reexport_retry_exact=True,reexport_exact=True,reimport_current_exact=True,reexport_preserved_owner=True,
+            result=dict(status='pass',array_admission_collective=True,array_retry_exact=True,active_RT_reexport_failure_safe=True,active_RT_reexport_retry_exact=True,reexport_exact=True,reimport_current_exact=True,reexport_preserved_owner=True,
                 nonuniform=a.nonuniform,gamma=a.gamma,xc=a.xc,current_sha256=hashlib.sha256(np.asarray(trace).tobytes()).hexdigest(),split=a.split,synthetic_native_orbitals_exact=True,
                 portable_to_memory_current_exact=True,independent_exact=True,resume_exact=True,
                 conversion_failure_preserved_state=True,retry_exact=True,SCF_calls=0,replayed_steps=0,

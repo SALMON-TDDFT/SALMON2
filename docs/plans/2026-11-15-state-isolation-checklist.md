@@ -36,13 +36,30 @@ existing-GS/native checks below. No new push or Actions this slice.
   Selected49→43 unit methods retain the identical581 traced runtime lines;
   line tracing is not branch coverage or a physics certificate.
 - [x] Relevant JP/EN/AI guides, examples, test removal mapping and canonical
-  diagnostic records updated. Mixed-HSE source/wheel regressions are620; retained portable export source
-  regression is622 (one skip), with no new wheel run for that Python-only slice.
+  diagnostic records updated. Current source/installed-wheel regression is628
+  (one skip each); latest standard SCF-progress slice preserves this method count.
+  Historical620/622 counts below describe their dated validation slices.
+
+### Next priority — source consolidation and SALMON convergence (2026-11-19)
+
+User direction: fast-PR HSE is the maintained solver basis. Audit effective
+source/feature differences and migrate standard-only interfaces before removing
+duplicate maintenance trees. Reduce archive-helper fragmentation and curate three
+beginner examples while preserving public API. Design only so far; no deletion.
+
+User convergence recipe: PP radius/3 → about0.1 angstrom with few fixed k points,
+then a few-fs impulse dt scan from about0.2au downward. Stop a NaN/Inf trial
+immediately; report nonbreaking and value-converged dt separately. k convergence
+is a later independent check; SCF/resource warnings do not halt the campaign.
+See 2026-11-19-source-consolidation-and-convergence-design.md for acceptance and
+unresolved radius/tolerance choices. Full SCF continuation is deferred behind
+this priority; previously verified pending changes are retained.
 
 ### Remaining work (do not double-count historical notes)
 
-1. [ ] Commit/review and push the currently verified changes when requested;
-   retain CI quota-saving policy. HEAD is d67ce847; preceding work pushed; referenced-k-file import fix uncommitted.
+1. [x] Verified external-k import, declared input metadata, portable retained-GS
+   load and source-labelled re-export committed/pushed as f6005fb9 [skip ci].
+   Subsequent work remains uncommitted until requested; no routine CI dispatch.
 2. [x] Connect the different-input fast-PR HSE registry to ordinary material-ID/
    ResponseSession/rank-plan assembly. Grouped4/separate6 and protected aggregate
    save8/resume24 are exact. Specialized SOC/+U/DC remain separate; molecular work paused.
@@ -1364,3 +1381,71 @@ See docs/gs-reexport-validation-2026-11-19.md for final wheel/evidence.
   sample repeats with reexport_to and legacy current hash unchanged. Computed
   archive b66b97fd file parity, source removal, signed-zero and nonfinite checks pass.
   Evidence: calc2026/salmonpy-gs-reexport-20261119; no real GS arrays/SCF/CI.
+
+
+## 2026-11-19 — collective retained-GS array admission
+
+- [x] Invalid quantity types and differing supported quantities agree across the
+  subgroup before native access; fixed requests can retry without owner changes.
+- [x] Existing unit contract extended (no new test method); real synthetic MPI4
+  PZ orbital2 and Libxc-PBE spatial2 preserve GS bytes/resources and active RT,
+  match independent currents and direct resume without replay or new SCF.
+- [x] Paired guide/AI JSON synchronized; historical completed slices remain below
+  their dates and must not be counted as new outstanding work.
+- [ ] Full SCF iteration continuation remains: retained mixing storage exists,
+  but current model.run refuses active storage and always enters initialization.
+  Restart must rebuild resources and restore explicit iteration/mixing controls.
+  See 2026-11-19-scf-checkpoint-followup.md; this fix does not implement it.
+
+- Final check:628 unit methods (one skip), existing SHA-verified wheel LD/SBE
+  kernels reused without rebuild. Synthetic MPI4 orbital-PZ/spatial-Libxc-PBE
+  admission/retry/current/direct-resume controls pass; orbital current hash equals
+  f6005fb9's measured baseline. Docs/AI sync/diff checks pass. Evidence:
+  calc2026/salmonpy-gs-array-admission-20261119 (logs/hashes only, no GS arrays).
+  No Actions or new SCF. Local storage verified; cloud synchronization unverified.
+
+
+## 2026-11-19 — owner-scoped SCF convergence progress (standard)
+
+- [x] Move previous density/potential arrays, normalization, no-mixing counter and
+  convergence flag into s_mixing; capture final iterations/residual/rion_update.
+  Existing fresh-entry reset, arithmetic and native convergence policy retained.
+- [x] Complete dependent-object rebuild and source/object prohibition audits;
+  synthetic ownership/copy/reset/bounds and extracted five-criterion convergence
+  bit parity in MPI1/2 x OMP1/2; iteration body unchanged beyond ownership/capture.
+- [ ] Continue active SCF without reinitialization; serialize complete numerical
+  context and rebuild resources in independent restore candidates. This slice
+  does not implement a complete SCF checkpoint or public resume entry.
+
+- Final progress slice: source628/installed628 (one skip each); installed native
+  MPI4 import/current/direct-resume and installed ownership/extracted convergence
+  runner pass. PZ orbital2/Libxc-PBE spatial2 current hashes equal prior runtime.
+  Runtime/standalone probe object audits and offline sdist→wheel/source inventories
+  pass. Current optional RT-step profile synchronized to the new base/type layout.
+  Evidence: calc2026/salmonpy-scf-progress-20261119, no GS arrays/new SCF/CI.
+  New shared-runtime SHA6950875d; GNU/macOS only, not Fujitsu/platform validation.
+
+
+## 2026-11-19 — consolidation first batch
+
+- [x] Effective-source inventory validates ordered complete-file replacements and
+  preserves per-file origins/hashes without mutation. Standard670/fast-HSE725
+  fully match actual prepared trees:573 same,77 different,20/75 unique paths.
+- [x] Consolidate three GS archive implementation modules into _gs_archive.py,
+  retaining public imports and separate GS→TDDFT lifecycle. Private module count
+  reduced by2; function ASTs unchanged except private naming/self-import.
+- [x] Beginner examples: LD→synthetic SBE→Si execution check; JP/EN/AI synchronized.
+- [ ] One maintained fast-PR-capable solver tree, compatible no-HSE/HSE profiles:
+  migrate standard-only owners/bridges and reconcile77 effective differences.
+  Current trees/references/fixed binaries preserved; no blanket copy/delete.
+- [ ] SALMON-specific grid/dt convergence workflow and synthetic campaign tests;
+  PP radius definition/explicit tolerance contract per approved design.
+
+- Final first-batch verification: source628/installed628 test methods (one skip
+  each), source and installed real-MPI14 archive cases pass. Native PZ orbital2
+  current hash/direct resume unchanged; public LD/SBE examples pass, Si CLI help
+  checked without a new SCF run. Function AST parity and source/installed/prepared
+  inventory equality pass. Offline sdist→wheel, native checksum and JP/EN/AI sync
+  verified. Current Python module count68/private17 (was70/19).
+  Evidence: calc2026/salmonpy-consolidation-first-batch-20261119, no GS collection
+  or Actions. Native single-source migration/convergence execution still pending.

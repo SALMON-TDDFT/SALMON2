@@ -29,6 +29,8 @@ to the installation environment. Wheels do not require a Fortran compiler;
 importing never compiles anything. Diagnostics load the bundled libraries but do
 not calculate, install software or start the external SALMON executable.
 
+Start with [LD → SBE → Si current](examples/README.en.md#start-with-these-three). The Si starter checks execution, not converged optical properties.
+
 ## Choose a task
 
 | Task | Python entry | Requirements |

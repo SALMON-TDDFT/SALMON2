@@ -66,6 +66,16 @@ class NativeGSTests(unittest.TestCase):
         state=NativeGSState(session,1,None,'imported',None)
         with self.assertRaisesRegex(InputError,'forces were not computed'):state.array('forces')
         session.lib.sp_gs_array_info.assert_not_called()
+        # All ranks must select the same supported quantity before C/MPI calls.
+        for invalid in ([], {}, None, 1):
+            with self.subTest(quantity=invalid),self.assertRaises(InputError):state.array(invalid)
+        session.lib.sp_gs_array_info.assert_not_called()
+        def gathered(value):
+            return [value,'occupations'] if value=='density' else [value,value]
+        session.comm=SimpleNamespace(allgather=gathered)
+        with self.assertRaisesRegex(InputError,'quantities differ'):state.array('density')
+        session.lib.sp_gs_array_info.assert_not_called()
+        session.comm=SimpleNamespace(allgather=lambda value:[value])
         import ctypes as c
         import numpy as np
         from salmonpy.errors import NumericalError

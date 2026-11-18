@@ -500,7 +500,17 @@ module structures
     type(s_orbital) :: pre_gk,pk,hpk
   end type s_cg
 
+  ! Numerical SCF progress only; no native handles or communicator ownership.
+  ! Owned by the mixing state, so retained GS owners keep separate histories.
+  type s_scf_iteration_progress
+    type(s_scalar) :: rho_old,Vlocal_old
+    real(8) :: electron_normalization=0d0,residual=1d9
+    integer :: iterations=0,no_mix_converged_count=0
+    logical :: converged=.false.,rion_update=.false.
+  end type s_scf_iteration_progress
+
   type s_mixing
+    type(s_scf_iteration_progress) :: scf_progress
     logical :: flag_mix_zero
     integer :: num_rho_stock
     type(s_scalar),allocatable :: rho_in(:), rho_out(:), rho_s_in(:,:), rho_s_out(:,:)

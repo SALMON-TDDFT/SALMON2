@@ -383,3 +383,24 @@ sample current_from_archive(..., reexport_to="new-array-archive") optionally sav
 before creating RT states. Repeated save/load initializes new models, not a transfer
 of an existing RT checkpoint to another model/topology. Full SCF mixing/cache/
 iteration continuation remains separate.
+
+### Collective array requests
+
+Call `gs.array(quantity)` on every rank in the GS subgroup, selecting the same
+supported quantity string. Invalid types, unknown quantities, unavailable imported
+forces and differing rank selections raise `InputError` collectively before native
+array access. A corrected request can be retried; retained GS and active TDDFT
+owners are unchanged. This cannot recover a missing rank or mismatched API call
+order. Numerical values and supported quantities are unchanged.
+
+### SCF continuation groundwork
+
+New standard-runtime builds retain the SCF convergence work arrays (previous
+density and local potential), electron normalization, no-mixing counter and final
+iteration/residual/convergence/ion-update values inside each owner's mixing state.
+The existing entry still resets this progress for each fresh SCF call and keeps
+the original arithmetic and convergence policy. Existing GS files, GS/2 import
+and RT checkpoint formats are unchanged. This is internal groundwork: no public
+SCF resume API or complete SCF checkpoint is available yet. The two previous-field
+arrays now remain live with the GS owner until reset/close. HSE source profiles
+are unchanged by this standard-only slice.

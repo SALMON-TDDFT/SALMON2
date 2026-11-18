@@ -1,6 +1,6 @@
 # Pythonサンプル集
 
-[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-15.1`
+[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-19.1`
 対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、
 [Si入門：wheelから電流まで](../SI_INTRO.md)は、固定の擬ポテンシャル・入力・期待値を同梱し、配布済みランタイムを明示して使う手順です。
 
@@ -13,6 +13,14 @@ APIの使い方を示す例です。メモリ上限や物理量の収束を保�
 
 LDと内蔵SBEはwheel同梱のネイティブライブラリを使います。波形の作成・解析はソルバー不要です。
 `FieldSamples.write_salmon` の出力をSALMONで使う場合は `ae_shape1='input'`、`unit_system='au'` を指定します。
+
+## まずこの3本
+
+1. **LD単独応答**：`python -m salmonpy.examples.ld_response`。wheelだけで材料応答を試します。
+2. **SBE単独応答**：`python -m salmonpy.examples.sbe_response new-sbe-output`。合成模型でA→jと独立状態を試します。実材料の物性例ではありません。
+3. **Siの電流**：[Si入門](../SI_INTRO.md)。対応する配布済みランタイムを準備して、wheelから電流までを確認します。短い動作確認であり、物理量の収束保証ではありません。
+
+初めて使う場合はこの順で十分です。以下の一覧は目的別の追加例、MPI・nativeの例は応用向けです。出力先にはコードツリー外の新しい場所を使ってください。
 
 | 目的 | サンプル | 追加で必要なもの |
 |---|---|---|

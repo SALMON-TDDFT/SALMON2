@@ -85,15 +85,16 @@ type(s_mixing) :: mixing
 type(s_band_dft) :: band
 type(s_dcdft),optional :: dc
 
-logical :: rion_update, flag_conv
-integer :: i,j, icnt_conv_nomix
+logical :: rion_update
+integer :: i,j
 logical :: is_checkpoint_iter, is_shutdown_time
-type(s_scalar) :: rho_old,Vlocal_old
-real(8) :: rNe
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
 
+! Preserve the legacy fresh-entry policy. A future continuation entry will
+! explicitly retain this context instead of silently resetting it.
+mixing%scf_progress=s_scf_iteration_progress()
 call init_convergence_check
 
 if(calc_mode=='DFT_BAND') then
@@ -102,7 +103,7 @@ if(calc_mode=='DFT_BAND') then
 endif
 
 if(nscf_init_mix_zero.gt.1)then
-   icnt_conv_nomix = 0
+   mixing%scf_progress%no_mix_converged_count = 0
    DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
 
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
@@ -131,26 +132,26 @@ if(nscf_init_mix_zero.gt.1)then
       endif
       !(convergence: energy gap is over specified energy)
       if(ene_gap .ge. conv_gap_mix_zero) then
-         icnt_conv_nomix = icnt_conv_nomix + 1
-         if(icnt_conv_nomix==5) then
+         mixing%scf_progress%no_mix_converged_count = mixing%scf_progress%no_mix_converged_count + 1
+         if(mixing%scf_progress%no_mix_converged_count==5) then
             if(comm_is_root(nproc_id_global)) write(*,*) "  converged no-mixing iteration"
             exit
          endif
       else
-         icnt_conv_nomix = 0
+         mixing%scf_progress%no_mix_converged_count = 0
       endif
 
    end do DFT_NoMix_Iteration
 endif
 
-flag_conv = .false.
+mixing%scf_progress%converged = .false.
 sum1=1d9
 
 !DFT_Iteration : do iter=1,nscf
 DFT_Iteration : do iter=Miter+1,nscf
 
    if( sum1 < threshold ) then
-      flag_conv = .true.
+      mixing%scf_progress%converged = .true.
       if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
       endif
@@ -362,8 +363,8 @@ DFT_Iteration : do iter=Miter+1,nscf
      do iz=mg%is(3),mg%ie(3)
      do iy=mg%is(2),mg%ie(2)
      do ix=mg%is(1),mg%ie(1)
-        rho_old%f(ix,iy,iz)    = rho%f(ix,iy,iz)
-        Vlocal_old%f(ix,iy,iz) = V_local(1)%f(ix,iy,iz)
+        mixing%scf_progress%rho_old%f(ix,iy,iz)    = rho%f(ix,iy,iz)
+        mixing%scf_progress%Vlocal_old%f(ix,iy,iz) = V_local(1)%f(ix,iy,iz)
      end do
      end do
      end do
@@ -373,7 +374,7 @@ DFT_Iteration : do iter=Miter+1,nscf
      do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
      do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
      do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-        rho_old%f(ix,iy,iz)    = dc%rho_tot%f(ix,iy,iz)
+        mixing%scf_progress%rho_old%f(ix,iy,iz)    = dc%rho_tot%f(ix,iy,iz)
      end do
      end do
      end do
@@ -403,7 +404,7 @@ DFT_Iteration : do iter=Miter+1,nscf
 end do DFT_Iteration
 
 if(calc_mode/='DFT_BAND')then
-if(.not.flag_conv) then
+if(.not.mixing%scf_progress%converged) then
    if( ilevel_print.ge.1 .and. comm_is_root(nproc_id_global)) then
       write(*,'(a,e15.8)') "  #GS does not converged :",sum1
    endif
@@ -415,12 +416,17 @@ if (theory=='dft' .and. yn_opt=='n' .and. yn_md=='n' .and. yn_dc=='n') then
    if (comm_is_root(nproc_id_global)) then
       open(newunit=gs_status_unit,file='gs_status.dat',status='replace')
       write(gs_status_unit,'(a)') 'SALMONPY_GS_V1'
-      write(gs_status_unit,*) merge(1,0,flag_conv),Miter
+      write(gs_status_unit,*) merge(1,0,mixing%scf_progress%converged),Miter
       write(gs_status_unit,'(3es26.17e3)') sum1,threshold,energy%E_tot
       write(gs_status_unit,'(a)') trim(convergence)
       close(gs_status_unit)
    end if
 end if
+
+! Retain the exact final values; do not reinterpret native convergence policy.
+mixing%scf_progress%iterations=Miter
+mixing%scf_progress%residual=sum1
+mixing%scf_progress%rion_update=rion_update
 
 contains
 
@@ -428,33 +434,33 @@ contains
     implicit none
     
     if(system%nspin==1) then
-      rNe = dble(nelec)
+      mixing%scf_progress%electron_normalization = dble(nelec)
     else if(system%nspin==2)then
       if(sum(nelec_spin(:))>0)then
-        rNe = dble(sum(nelec_spin(:)))
+        mixing%scf_progress%electron_normalization = dble(sum(nelec_spin(:)))
       else
-        rNe = dble(nelec)
+        mixing%scf_progress%electron_normalization = dble(nelec)
       end if
     end if
     
-    call allocate_scalar(mg,rho_old)
-    call allocate_scalar(mg,Vlocal_old)
+    call allocate_scalar(mg,mixing%scf_progress%rho_old)
+    call allocate_scalar(mg,mixing%scf_progress%Vlocal_old)
 
     !$OMP parallel do private(iz,iy,ix)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-       rho_old%f(ix,iy,iz)   = rho%f(ix,iy,iz)
-       Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
+       mixing%scf_progress%rho_old%f(ix,iy,iz)   = rho%f(ix,iy,iz)
+       mixing%scf_progress%Vlocal_old%f(ix,iy,iz)= V_local(1)%f(ix,iy,iz)
     end do
     end do
     end do
     
     if(yn_dc=='y') then
-      rNe = dc%elec_num_tot
-      deallocate(rho_old%f)
-      call allocate_scalar(dc%mg_tot,rho_old)
-      rho_old%f = dc%rho_tot%f
+      mixing%scf_progress%electron_normalization = dc%elec_num_tot
+      deallocate(mixing%scf_progress%rho_old%f)
+      call allocate_scalar(dc%mg_tot,mixing%scf_progress%rho_old)
+      mixing%scf_progress%rho_old%f = dc%rho_tot%f
     end if
     
   end subroutine init_convergence_check
@@ -475,19 +481,19 @@ contains
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-      sum0 = sum0 + abs(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+      sum0 = sum0 + abs(rho%f(ix,iy,iz)-mixing%scf_progress%rho_old%f(ix,iy,iz))
       end do
       end do
       end do
       call comm_summation(sum0,sum1,info%icomm_r)
-      sum1 = sum1*system%Hvol/rNe
+      sum1 = sum1*system%Hvol/mixing%scf_progress%electron_normalization
     case('norm_rho','norm_rho_dng')
       sum0=0.d0
       !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-      sum0 = sum0 + (rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
+      sum0 = sum0 + (rho%f(ix,iy,iz)-mixing%scf_progress%rho_old%f(ix,iy,iz))**2
       end do
       end do
       end do
@@ -501,7 +507,7 @@ contains
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-      sum0 = sum0 + (V_local(1)%f(ix,iy,iz)-Vlocal_old%f(ix,iy,iz))**2
+      sum0 = sum0 + (V_local(1)%f(ix,iy,iz)-mixing%scf_progress%Vlocal_old%f(ix,iy,iz))**2
       end do
       end do
       end do

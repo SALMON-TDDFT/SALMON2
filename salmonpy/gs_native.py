@@ -167,7 +167,7 @@ class GammaRestartConverter:
 
     def export_archive(self,result,directory,*,orbital_block=16,timeout=300.):
         """Export verified native GS/1 in this converter scope; reconstruct density."""
-        from ._gs_export import export_gamma
+        from ._gs_archive import export_gamma
         return export_gamma(self,result,directory,orbital_block=orbital_block,timeout=timeout)
 
     def tddft_initial_state(self,archive,*,executable,pseudopotentials,max_steps=1000,threads=1,timeout=300.):

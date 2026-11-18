@@ -1,6 +1,6 @@
 # Python samples
 
-[日本語](README.md) · Topic: `examples` · Paired revision: `2026-11-15.1`
+[日本語](README.md) · Topic: `examples` · Paired revision: `2026-11-19.1`
 
 [Si starter: wheel to current](../SI_INTRO.en.md) includes a fixed pseudopotential, input and reference, and explicitly selects a prebuilt runtime.
 
@@ -9,6 +9,14 @@ below ship in the wheel. The code is shared by both language editions.
 
 LD and built-in SBE use the native library bundled in the wheel. Pulse creation and analysis need no solver.
 For SALMON input exported by `FieldSamples.write_salmon`, use `ae_shape1='input'` and `unit_system='au'`.
+
+## Start with these three
+
+1. **LD response**: `python -m salmonpy.examples.ld_response`. Try material response using only the wheel.
+2. **SBE response**: `python -m salmonpy.examples.sbe_response new-sbe-output`. Learn A-to-j and independent states using a synthetic model, not real-material optical data.
+3. **Si current**: follow the [Si starter](../SI_INTRO.en.md) with a matching prebuilt runtime. This short wheel-to-current check does not certify physical convergence.
+
+These three are enough for a first visit. The table below indexes further tasks; MPI/native examples are advanced. Use new output locations outside the source checkout.
 
 | Module under `salmonpy.examples` | Purpose / additional input |
 |---|---|
