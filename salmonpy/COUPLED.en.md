@@ -483,9 +483,10 @@ consume another's candidate. Different selected dt/capacity and three-component
 waveforms can be interleaved. Reopened output streams acquire available units;
 closing a rolled-back context cannot close a unit reused by another context.
 
-The public Python/C backend still has one native lifetime per process. This
-internal ownership step does **not** introduce a stable multi-context C handle
-or permit different shared inputs, arbitrary communicators or thread entry.
+The legacy Python create_state route retains one native lifetime/process.
+The separate current C handle and Python open_model routes build on this internal
+ownership; see SHARED_HSE.en.md. Different shared inputs, arbitrary communicators
+and threaded entry remain separate work.
 Shared symmetry/initialization/I/O/timer state and the synchronous serializer
 allocation bound remain to be extracted. Do not copy whole contexts or owning
 FFT/MPI/Libxc handles. Text-output rollback still restores saved file bytes on
@@ -500,4 +501,4 @@ OpenMP1/2. The fixtures test state isolation, not material convergence.
 
 Reconnection failures retain the transaction metadata, so retry or close cannot act on another context’s reused unit.
 
-Generation-checked same-model C contexts have a separate [native handle entry](NATIVE_HANDLES.en.md). The Python backend keeps its one-lifetime contract.
+Generation-checked same-model C contexts have a separate [native handle entry](NATIVE_HANDLES.en.md). The legacy Python path keeps its one-lifetime contract; [shared Python models](SHARED_HSE.en.md) use the separate handle route.

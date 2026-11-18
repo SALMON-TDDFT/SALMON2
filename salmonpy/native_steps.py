@@ -15,14 +15,16 @@ __all__=['native_step_targets']
 
 
 class _AppendJournal:
-    def __init__(self,root,files):
+    def __init__(self,root,files,selection=None):
         self.root=root
         self.files=files
+        self.selection=selection
 
     @staticmethod
-    def _inventory(root):
+    def _inventory(root,selection=None):
         records={}
-        for path in root.glob('*.data'):
+        paths=root.glob('*.data') if selection is None else (root/name for name in selection)
+        for path in paths:
             value=path.lstat()
             if not stat.S_ISREG(value.st_mode) or value.st_nlink!=1:
                 raise InputError('native step output must be a private regular file: '+path.name)
@@ -30,12 +32,15 @@ class _AppendJournal:
         return records
 
     @classmethod
-    def capture(cls,root):
+    def capture(cls,root,*,files=None):
         root=Path(root).resolve()
-        return cls(root,cls._inventory(root))
+        selection=None if files is None else tuple(files)
+        if selection is not None and any(Path(name).name!=name for name in selection):
+            raise InputError("output journal requires local basenames")
+        return cls(root,cls._inventory(root,selection),selection)
 
     def restore(self):
-        current=self._inventory(self.root)
+        current=self._inventory(self.root,self.selection)
         if set(current)!=set(self.files):
             raise RuntimeFailure('native step stream inventory changed; no automatic deletion/recreation')
         for name,(device,inode,size) in self.files.items():
@@ -132,7 +137,11 @@ class _NativeBackup:
         saved=_snapshot_attrs(self.owner,self.attrs)
         # Root failure returns to the common capture vote. release(None) still
         # retires the collective native backup on all subgroup ranks.
-        journal=_AppendJournal.capture(self.root) if self.comm.rank==0 else None
+        journal=None
+        if self.comm.rank==0:
+            selected=getattr(self.owner,'output_files',None)
+            journal=(_AppendJournal.capture(self.root) if selected is None else
+                     _AppendJournal.capture(self.root,files=selected))
         return saved,journal
 
     def rollback(self,token):

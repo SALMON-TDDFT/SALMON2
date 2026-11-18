@@ -5,7 +5,8 @@
 明示的にビルドしたhost-MPI高速PRランタイムは `sp_fast_hse_handle_protocol()==1` と
 `native_adapters/fast_hse_handles.h` のC／C++入口を提供します。同じMPI群・作業ディレクトリで、
 **一つの不変な物質モデル**から独立した複数の電子状態を作る範囲です。
-Pythonの `NativeFastHSEBackend` は引き続き1プロセス1native寿命です。
+Pythonの旧 `create_state` は1プロセス1native寿命のままです。
+[open_model](SHARED_HSE.md) はモデルを共有し、状態別leaseで接続を保持します。
 通常の混在サンプルのランク配置や、同一プロセス内の状態数を自動変更する機能ではありません。
 
 ホストがMPIを初期化し、`sp_attach(MPI_Comm_c2f(comm))` で接続します。
@@ -16,6 +17,7 @@ Pythonの `NativeFastHSEBackend` は引き続き1プロセス1native寿命です
 | 操作 | 意味 |
 |---|---|
 | `handle_init(path,dt,capacity,symmetry,&h,j)` | プロセスで一度だけ物質を初期化し、最初の状態を返す。旧singleton初期化との併用はしない。 |
+| `model_new(dt,capacity,&h,j)` | model protocol1に対応する初期化済みモデルから、全状態終了後も再生成する。隠れたテンプレートは持たない。 |
 | `handle_new(model,dt,capacity,&h,j)` | 生存するモデルの元GSから独立状態を作る。呼び出し元の励起・時間発展履歴はコピーしない。 |
 | `handle_step(h,Aold,Anew,j,&energy)` | 選択した状態で従来の高速PR端点更新を実行する。 |
 | `handle_info(h,&step,A,j)`、`handle_history(h,values)` | 受理済み端点と、ランク内の8要素の履歴診断値を返す。 |

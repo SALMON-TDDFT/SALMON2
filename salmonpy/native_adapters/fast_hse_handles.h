@@ -29,6 +29,10 @@ int sp_detach(void);
 int sp_fast_hse_handle_protocol(void); /* version 1 */
 int sp_fast_hse_handle_init(const char *path, double dt, int capacity,
                           int allow_symmetry, int64_t *handle, double j[3]);
+/* Model allocator remains usable after all states close, before detach.
+ * Requires a successful handle_init and model protocol1. */
+int sp_fast_hse_model_protocol(void);
+int sp_fast_hse_model_new(double dt, int capacity, int64_t *handle, double j[3]);
 int sp_fast_hse_handle_new(int64_t model, double dt, int capacity,
                          int64_t *handle, double j[3]);
 int sp_fast_hse_handle_step(int64_t handle, const double a_old[3],

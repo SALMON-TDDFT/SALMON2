@@ -834,3 +834,26 @@ journaling remains responsible for file-byte rollback. See
 See `docs/fast-hse-native-handles-validation-2026-11-18.md` and the JP/EN
 `NATIVE_HANDLES` guide. This is bounded handle identity/dispatch, not completed
 arbitrary native reentrancy. Child MPI communicators currently retire at detach.
+
+## 2026-11-18 — Python shared full-k HSE model
+
+- [x] Push preceding ownership/C-handle commits to independent SALMONpy branch.
+- [x] backend.open_model + NativeFastHSEModel.new_state: one verified GS work
+  copy/attachment, independent state dt/capacity/A/current/clock/output labels.
+- [x] State-bound ctypes shims preserve underlying native signatures; leases
+  retain the real parent context until closed model + last closed state.
+- [x] Native model protocol1 allocates after zero live states; no hidden numeric
+  template. Unattempted empty model releases its unused Python reservation.
+- [x] Owner-scoped output journals and public native_step_targets preserve
+  sibling outputs during rollback; same-owner transaction exclusion retained.
+- [x] Learned Taylor/PT-CN, MPI1/2 and OMP1/2: independent/mixed/preceding
+  singleton trajectories identical. Save8→A32/B34 resumes without replay;
+  corrupted fresh restore can be retired without changing original states.
+- [x] Shared model close stops creation while a survivor continues; last close
+  detaches. Idle-model fresh recreation is tested twice in isolated controls.
+- [ ] Automatic multi-point ResponseSession/rank-plan integration for this
+  explicit factory, heterogeneous/symmetry shared inputs and per-context MPI
+  communicator retirement remain separate; ordinary default MPI plans unchanged.
+
+See SHARED_HSE JP/EN and examples/shared_fast_hse.py. Numerical source kernels
+and checkpoint format unchanged; model allocator reuses the existing constructor.

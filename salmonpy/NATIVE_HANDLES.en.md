@@ -6,8 +6,8 @@ An explicitly built host-MPI fast-PR runtime exports
 `sp_fast_hse_handle_protocol()==1` and the declarations in
 `native_adapters/fast_hse_handles.h`. This is a bounded C/C++ entry for multiple
 independent electronic states of **one immutable model** in one attached MPI
-group and working directory. Python `NativeFastHSEBackend` retains its existing
-one-native-lifetime limit. The new entry does not change the ordinary mixed
+group and working directory. Python legacy `create_state` retains its one-native-lifetime limit;
+[open_model](SHARED_HSE.en.md) now shares the model through state leases. The new entry does not change the ordinary mixed
 sample's rank layout or automatically use multiple contexts in one process.
 
 The host initializes MPI, calls `sp_attach(MPI_Comm_c2f(comm))`, and keeps that
@@ -18,6 +18,7 @@ initialize/finalize MPI, change the working directory or compile a runtime.
 | Operation | Meaning |
 |---|---|
 | `handle_init(path,dt,capacity,symmetry,&h,j)` | First and only process-model initialization; returns its first state. Use this or the legacy singleton initializer, exclusively. |
+| `model_new(dt,capacity,&h,j)` | With model protocol1, create after zero live states in the retained initialized model; no hidden template. |
 | `handle_new(model,dt,capacity,&h,j)` | Fresh independent state from the original GS of a **live** model token; does not copy its current excitation or propagation. |
 | `handle_step(h,Aold,Anew,j,&energy)` | Existing fast-PR endpoint update on the selected state. |
 | `handle_info(h,&step,A,j)`, `handle_history(h,values)` | Accepted endpoint and eight rank-local history diagnostics. |

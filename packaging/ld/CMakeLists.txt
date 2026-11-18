@@ -218,3 +218,8 @@ install(FILES "${ROOT}/tools/test_fast_hse_handles_mpi.py" DESTINATION salmonpy/
 install(FILES "${ROOT}/salmonpy/examples/native_fast_hse_handles.c" DESTINATION salmonpy/examples)
 
 install(FILES "${ROOT}/salmonpy/NATIVE_HANDLES.md" "${ROOT}/salmonpy/NATIVE_HANDLES.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/_shared_hse.py" DESTINATION salmonpy)
+install(FILES "${ROOT}/tools/test_shared_hse_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/SHARED_HSE.md" "${ROOT}/salmonpy/SHARED_HSE.en.md" DESTINATION salmonpy)

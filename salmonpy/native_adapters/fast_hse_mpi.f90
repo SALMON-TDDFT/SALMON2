@@ -422,21 +422,49 @@ integer(c_int) function sp_fast_hse_handle_init(path,timestep,capacity,symmetry,
  endif
  sp_fast_hse_handle_init=status
 end function
+integer(c_int) function sp_fast_hse_model_protocol() bind(C)
+ sp_fast_hse_model_protocol=1
+end function
 integer(c_int) function sp_fast_hse_handle_new(model,timestep,capacity,token,J) bind(C)
  integer(c_int64_t),value::model
  real(c_double),value::timestep
  integer(c_int),value::capacity
  integer(c_int64_t),intent(out)::token
  real(c_double),intent(out)::J(3)
- type(tddft_context),pointer::fresh
- type(s_rt_run_config)::config
- integer::status,parent,index,reference_capacity
- real(8)::reference_dt
- integer(c_int64_t)::candidate
- token=0;J=0d0;nullify(fresh)
+ integer::parent,status
+ token=0;J=0d0
  call handle_lookup(model,parent,status)
  sp_fast_hse_handle_new=status
  if(status/=0)return
+ sp_fast_hse_handle_new=create_model_state(timestep,capacity,token,J)
+end function
+integer(c_int) function sp_fast_hse_model_new(timestep,capacity,token,J) bind(C)
+ real(c_double),value::timestep
+ integer(c_int),value::capacity
+ integer(c_int64_t),intent(out)::token
+ real(c_double),intent(out)::J(3)
+ integer::group,rank,n,status
+ token=0;J=0d0;sp_fast_hse_model_new=12
+ if(.not.attached_main_thread())return
+ call comm_get_globalinfo(group,rank,n)
+ status=0
+ if(.not.handle_mode.or.group/=handle_group)status=12
+ call agree(status)
+ if(status/=0)return
+ sp_fast_hse_model_new=create_model_state(timestep,capacity,token,J)
+end function
+integer(c_int) function create_model_state(timestep,capacity,token,J)
+ real(c_double),intent(in)::timestep
+ integer(c_int),intent(in)::capacity
+ integer(c_int64_t),intent(out)::token
+ real(c_double),intent(out)::J(3)
+ type(tddft_context),pointer::fresh
+ type(s_rt_run_config)::config
+ integer::status,index,reference_capacity
+ real(8)::reference_dt
+ integer(c_int64_t)::candidate
+ token=0;J=0d0;nullify(fresh)
+ status=0
  if(capacity<1.or.capacity>=huge(0))status=1
  if(.not.ieee_is_finite(timestep).or.timestep<=0d0)status=1
  reference_dt=timestep;reference_capacity=capacity
@@ -445,11 +473,11 @@ integer(c_int) function sp_fast_hse_handle_new(model,timestep,capacity,token,J) 
  if(reference_dt/=timestep.or.reference_capacity/=capacity)status=11
  call agree(status)
  if(status/=0)then
-  sp_fast_hse_handle_new=status;return
+  create_model_state=status;return
  endif
  call handle_reserve(index,candidate,status)
  if(status/=0)then
-  sp_fast_hse_handle_new=status;return
+  create_model_state=status;return
  endif
  write(handles(index)%label,'(a,i0,a,i0)')'native_hse_h',index,'_g',handles(index)%generation
  call rt_input_config(config);config%delta_t=timestep;config%max_steps=capacity
@@ -464,7 +492,7 @@ integer(c_int) function sp_fast_hse_handle_new(model,timestep,capacity,token,J) 
  else if(associated(fresh))then
   call rt_close(fresh)
  endif
- sp_fast_hse_handle_new=status
+ create_model_state=status
 end function
 integer(c_int) function sp_fast_hse_handle_step(token,Aold,Anew,J,energy) bind(C)
  integer(c_int64_t),value::token

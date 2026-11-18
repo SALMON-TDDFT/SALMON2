@@ -1,7 +1,8 @@
 """Experimental fast-PR HSE on an explicitly supplied k-only MPI subgroup.
 
 Build explicitly against the host MPI. One native lifetime on the main thread
-per process. Input and shared work directories are caller-owned. No MPI import,
+per process on the legacy route; open_model provides shared full-k state leases.
+Input and shared work directories are caller-owned. No MPI import,
 initialization, finalization, compilation or download occurs on module import.
 """
 import ctypes as c
@@ -24,7 +25,7 @@ from .fast_hse import _Initial, _input_text, _positive, _vector
 from .material_response import _response_timing
 from .tddft import _copy_bundle, _digest
 
-__all__ = ['NativeFastHSEBackend']
+__all__ = ['NativeFastHSEBackend', 'NativeFastHSEModel']
 _used = False
 
 
@@ -204,7 +205,8 @@ class NativeFastHSEBackend:
 
     The explicit build receipt binds a host-MPI native library. No conventional
     HSE engine or fallback is supported. Material points require separate groups;
-    each group has one shared work copy and one point. Errors can invalidate the
+    the legacy route has one point per group; open_model shares one verified copy
+    among independent full-k states. Errors can invalidate the
     whole MPI job; native process-terminating failures are not recoverable.
     allow_symmetry is explicit, identity-bound and restricted to one/two internal
     ranks; Taylor strict/learned and PT-CN need the matching history capability.
@@ -238,7 +240,14 @@ class NativeFastHSEBackend:
             identity.append('symmetry-v1')
         self.identity = 'salmonpy.fast-hse-mpi/1/' + hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
+    def open_model(self, initial, dt, context):
+        """Collectively share one immutable full-k GS and MPI lease among states."""
+        return self._create(initial, None, dt, context, shared=True)
+
     def create_state(self, initial, point_id, dt, context):
+        return self._create(initial, point_id, dt, context, shared=False)
+
+    def _create(self, initial, point_id, dt, context, *, shared):
         global _used
         comm = context.solver_comm
         error = None
@@ -247,7 +256,7 @@ class NativeFastHSEBackend:
                 raise InputError('one native lifetime per process; use a fresh MPI job')
             if threading.current_thread() is not threading.main_thread():
                 raise InputError('native fast HSE requires the main thread')
-            if len(context.point_ids) != 1 or context.point_ids[0] != point_id:
+            if not shared and (len(context.point_ids) != 1 or context.point_ids[0] != point_id):
                 raise InputError('one fast HSE point per solver group required')
             if comm.size not in self.supported_group_sizes:
                 raise InputError('validated fast HSE k-only group requires one or two ranks')
@@ -268,6 +277,8 @@ class NativeFastHSEBackend:
             symmetry = 'y' in symmetry_setting
             if symmetry and not self.allow_symmetry:
                 raise InputError('symmetry input requires explicit allow_symmetry=True')
+            if shared and symmetry:
+                raise InputError('shared native HSE model requires non-symmetric full-k input')
             operations = None
             if symmetry:
                 factor = _symmetry_factor(groups,propagator)
@@ -279,7 +290,7 @@ class NativeFastHSEBackend:
             groups['tgrid'] = groups.get('tgrid','') + '\n dt='+format(dt,'.17g')+', nt='+str(initial.max_steps)+'\n'
             groups['parallel'] = groups.get('parallel','') + '\n nproc_k='+str(comm.size)+', nproc_ob=1, nproc_rgrid=1,1,1\n'
             text = '\n'.join('&'+k+v+'/' for k,v in groups.items())+'\n'
-            descriptor = (self.sha256,initial.manifest,point_id,dt,initial.max_steps,text,self.allow_symmetry)
+            descriptor = (self.sha256,initial.manifest,point_id,dt,initial.max_steps,text,self.allow_symmetry,shared)
         except Exception as exc:
             error = str(exc)
         _agree(comm,error)
@@ -308,13 +319,20 @@ class NativeFastHSEBackend:
             _configure(lib)
             _require_cell_protocol(lib,groups,symmetry,operations)
             if symmetry:_require_history_protocol(lib,factor,propagator)
-            initializer = _initializer(lib,self.allow_symmetry,comm.size)
+            if shared:
+                from ._shared_hse import _configure_handles
+                _configure_handles(lib)
+            else:
+                initializer = _initializer(lib,self.allow_symmetry,comm.size)
         except Exception as exc:
             error = str(exc)
         _agree(comm,error)
-        owner = SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
+        owner = (context if shared and hasattr(context,'closed') and hasattr(context,'_dependents')
+                 else SimpleNamespace(solver_comm=comm,closed=False,_dependents=0))
         native = NativeParallelContext(owner,self.library,self.sha256)
         _used = embedded._used = True
+        if shared:
+            return NativeFastHSEModel(native,lib,work,dt,initial.max_steps,propagator,self.identity,initial.manifest)
         state = _State(native,lib,work,dt,initial.max_steps,propagator)
         state.symmetry_enabled = symmetry
         try:
@@ -455,3 +473,6 @@ class _State:
             raise RuntimeFailure('fast HSE native close failed: '+str(codes))
         self._native.close()
         self.closed = True
+
+
+from ._shared_hse import NativeFastHSEModel

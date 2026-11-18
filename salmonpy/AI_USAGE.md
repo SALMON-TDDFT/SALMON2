@@ -619,7 +619,7 @@ HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベース
 
 高速PR版HSEの外側MPI／FDTD接続は `fast_hse.FastHSEMaterialProvider` と `FastHSEResponseBackend` を使う。専用serialワーカーを明示ビルドし、各HSE点は1ランク群にする。HSE内部MPIではない。場1／2ランク＋SBE1＋HSE1と場内LDを結合し、共有保存先へ直接保存／復元する。`mpi_mixed_native --fast-hse-build ... --layers mixed_hse_layers.json` の手順はCOUPLED日英ガイド。初期電流は実測値を返し、差し引かない。ゼロ場サンプルでは1e-12 au以下を要求。入力の高速伝播器と学習条件を守り、通常HSE・Gammaの未対応学習モードへフォールバックしない。全ランクの保存検査後にHSE LOADを行い、counter/current/Aを照合する。
 
-内部k点MPIの高速PR版HSEは `fast_hse_mpi.NativeFastHSEBackend` を明示ビルドしたホストMPIライブラリへ接続する。物質群1／2ランク、軌道／実空間分割なし、1群1点、メインスレッド・1プロセス1寿命。場1＋SBE1＋HSE2と場内LDの4ランク例は `--fast-hse-mpi-build ... --hse-ranks 2`。同じ分割・バイナリ・共有保存先でランク別直接保存／復元し、過去ステップの再計算をしない。静的初期化と独立serial参照比較は別途行う。全shardの検査後に反映するが、後段I/O失敗や群間での原子的巻戻しは保証しない。失敗後はジョブを中止する。入力、制約、計測範囲はCOUPLED日英ガイドに従う。
+内部k点MPIの高速PR版HSEは `fast_hse_mpi.NativeFastHSEBackend` を明示ビルドしたホストMPIライブラリへ接続する。従来のcreate_stateは物質群1／2ランク、軌道／実空間分割なし、1群1点、メインスレッド・1プロセス1寿命。明示的なopen_modelの全k点共有状態はSHARED_HSE.mdに従う。場1＋SBE1＋HSE2と場内LDの4ランク例は `--fast-hse-mpi-build ... --hse-ranks 2`。同じ分割・バイナリ・共有保存先でランク別直接保存／復元し、過去ステップの再計算をしない。静的初期化と独立serial参照比較は別途行う。全shardの検査後に反映するが、後段I/O失敗や群間での原子的巻戻しは保証しない。失敗後はジョブを中止する。入力、制約、計測範囲はCOUPLED日英ガイドに従う。
 
 層構成では任意の `backend.supported_group_sizes` を検査する。高速HSEは(1,2)。対応ランク数の宣言は空でない正の整数の重複なしtuple。未宣言の自作バックエンドへ未確認の能力を推定しない。数値・再開の能力検査は別途必要。
 
@@ -723,7 +723,7 @@ FAST_HSE_SYMMETRY日英ガイドとfast_hse_symmetryタスクを参照。通常�
 
 NativeFastHSEBackend(...,allow_symmetry=True) と新しい対応nativeライブラリを明示する。
 既定Falseは対称性を拒否。対称性opt-inは内部k1／2・CPU・周期・非スピン分極・full-q・factor-off
-Taylor、1プロセス1寿命・共有対称化設定不変。学習／PT-CN対称性は選ばない。内部2ランクにはsp_fast_hse_symmetry_kmpi_protocol()==1を確認する。
+Taylor strict/learned・PT-CN off/learnedには対応するhistory capabilityを確認する。旧経路は1プロセス1寿命・共有対称化設定不変。open_modelの複数状態は現状では対称性なし・全k点のみ。内部2ランクにはsp_fast_hse_symmetry_kmpi_protocol()==1を確認する。
 新C入口sp_fast_hse_init_symmetryとsp_fast_hse_symmetry_protocol()==1が必要。旧バイナリから
 対応を推定しない。有限で一致したstatus34だけが状態維持のInputErrorで、Aの修正後に再試行可。
 外場の自動投影・微小成分の切捨て・通常HSEへのfallbackは禁止。FDTD全体にはstep_protectedを使う。
@@ -753,3 +753,7 @@ k-star・擬ポテンシャル内容・再開バイナリとの互換性や全�
 高速PR版HSEの外場A/cはCartesianの3成分で、z限定ではありません。x/yや円偏光には実際の全時刻のAとセル・原子配置を保つ対称群を選ぶか、対応する全k点初期状態を使います。一般セルとz非保存群には新コアのcapabilityが必要です。波形の投影・微小成分の切捨て・群の自動変更はしません。詳細はFAST_HSE_SYMMETRY.md／FAST_HSE_SYMMETRY.en.mdを参照してください。
 
 対称性付き高速PRのTaylor strict／learnedとPT-CNには `sp_fast_hse_symmetry_history_protocol()==1` を持つ明示ビルドを使います。学習PT-CNは既存方式どおり exact interval=1・predictor_corrector=n。設定を自動変更しません。履歴・ready・予測状態を保存し、受理済み時刻を再生せずに再開します。異なるモデルを同一プロセスで自由に混在できるとは説明しません。
+
+## Python共有HSEモデル
+
+NativeFastHSEBackend.open_model(initial,dt,context)で入力を一度だけ検証・コピーし、NativeFastHSEModel.new_state(point_id,dt=...,capacity=...)で元GSから独立した状態を作る。最初のnew_stateがnative初期化を行う。状態ごとのstep/checkpoint/closeと出力ラベルを使い、直接復元は対応する新規状態へ行う。model.closeは生成を止めるだけで、生存状態は最後に閉じるまで接続を保持する。finallyで全状態を明示closeする。空のままのモデルや全状態終了後も、開いているモデルから再生成でき、隠れた完全電子状態を保持しない。model protocol1の新しいランタイムが必要。既存のMPI点配置や異種物質の同一プロセス対応を自動変更しない。SHARED_HSE日英ガイドとexamples/shared_fast_hse.pyに従う。
