@@ -6,40 +6,65 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 The dated sections below retain the scope at their completion time. Older statements such as "occupation remains shared" or "multiple field ranks remain open" are superseded by the later evidence, not separate unfinished tasks.
 
-### Actionable status — latest geometry-admission audit
+### Actionable status — Python shared-model audit
 
-This list is the current work queue. Historical unchecked items below retain
-completion-time scope and must not be counted again as new tasks.
+This is the current queue. Historical unchecked items below record their earlier
+scope and must not be counted again as newly unfinished work.
 
-- [x] Low-gradient Libxc HSE stabilization and original phase0 comparison.
-- [x] Reduced-k internal MPI1/2, full-k parity, same-partition direct restart.
-- [x] sym.dat and bounded cell/atom/grid pre-native admission; collective rejection/repair.
-- [x] Normal mixed regression, source/installed569 tests (one skip each), wheel verification and paired manuals/AI JSON.
-- [ ] Delivery: latest geometry-admission code/docs are verified but uncommitted. Previous delivery is6479a538.
-- [ ] Next: k-star/representative weights, pseudopotential assets and GS/restart identity/layout admission before native lifetime.
-- [ ] General-cell native initialization: axis-permuted fixtures hit ACE init STOP; current profile rejects off-axis cells and remains au-only.
-- [ ] Learned/PT-CN with symmetry; factor-off Taylor/ACE validation does not cover these histories.
-- [ ] Broader GS/TDDFT different-input ownership, native handles, remaining MPI/I/O/timer/specialized resources and general failure recovery.
-- [ ] Larger partitions/point-count scaling, calibrated resource models, additional native platforms/runtime distribution and interoperable archives/repartitioning.
+- [x] Delivery through85a73b92 is committed and pushed to the independent
+  SALMONpy branch. Ownership9f07fb54 and C handles8fe6cd15 are included.
+- [x] Low-gradient Libxc HSE correction, full/reduced-k parity and internal MPI1/2.
+- [x] Cell/atom/grid/k-star/representative weights, PP references/KY records and
+  legacy GS structural admission. This is not complete physical GS authentication.
+- [x] General-cell native initialization and actual Cartesian x/y/z/circular A.
+- [x] Symmetry Taylor strict/learned and PT-CN off/learned with direct history resume.
+- [x] Per-context step/restore buffers and generation-checked same-model C handles.
+- [x] Explicit Python full-k shared model: independent dt/capacity/state/output,
+  one work copy/attachment, idle recreation and direct save/resume. Independent
+  and preceding singleton trajectories match in six MPI/OpenMP cases.
+- [x] Latest source/installed suites:602 tests each, one skip each; sdist→wheel,
+  hashes, installed MPI/example, paired guides and AI catalog verified locally.
 
-Converged physical benchmarks are separate from implementation verification and
-remain material/user-owned. Molecular work stays paused; memory budgets warn only;
-conventional HSE and routine Actions are not pending requirements.
+Remaining work, grouped rather than duplicating historical bullets:
+
+1. [x] Connect the explicit shared-model factory to normal ResponseSession /
+   rank-plan assembly: multiple local macropoints, LD/SBE/TDDFT/HSE mixtures,
+   FDTD coupling and aggregate protected save/resume. Opt-in grouping is implemented; default ordinary plans remain unchanged.
+   Taylor/PT-CN, PBE mixture, distributed field and protected failed-restore retry pass.
+2. [ ] Multiple reduced-k/symmetry HSE contexts in one model/process. Existing
+   symmetry propagation, learned histories, MPI and restart are already covered
+   on the established separate-group route; Python sharing currently uses full k.
+3. [ ] Broader GS/TDDFT different-input ownership; per-context MPI subgroup
+   retirement, common initialization/I/O/timers and specialized SOC/+U/DC resources.
+   Same-model HSE token identity is complete within its documented boundary.
+4. [ ] Extend defined recovery beyond the verified numerical/staged-restore
+   subset: initialization, allocation/I/O and unsupported native error paths.
+   Process/MPI failures do not acquire a general retry guarantee from these tests.
+5. [ ] Canonical/interoperable archives and version migration, physical GS
+   identity, non-KY content coverage, arbitrary-backend identity and changed-MPI
+   topology restore. Existing same-topology direct restart and GS/2 are complete
+   in measured scopes. Canonicalize inactive legacy checkpoint workspace too.
+6. [ ] More points/larger electronic grids and communication scaling, calibrated
+   resource advice, additional native platforms and matching runtime distribution.
+
+Band-iteration non-convergence policy remains a separate smaller audit item.
+Interpolation/subcycling is optional later scheduling work, not a prerequisite
+for fixed-dt mixed calculations. Converged physical benchmarks remain material /
+user-owned. Molecular work is paused; budget excess warns; conventional HSE and
+routine Actions are not pending requirements.
+
+Evidence: [normal shared mixed-session validation](../validation/2026-11-18-shared-hse-mixed-session.md).
 
 ### Fast-PR HSE priority
 
-Project lead directs HSE development through the fast-PR profile with symmetry as
-central. Owned actual-A checks, exchange-map/cache persistence and explicit internal
-TDDFT direct/staged resume plus explicit public C/Python opt-in/retry and protected
-mixed connection are verified in the bounded one/two-k-rank profile. The Libxc HSE near-zero-gradient cancellation is now resolved in the complete
-wrapper source by stable evaluation of the same WPBEh formula. The unchanged
-phase0 full/reduced case, ordinary regressions and80-digit energy differences
-pass; old failure evidence is retained. Reduced-k internal-MPI2 partition/failure/direct restart tests now pass. Next are
-broader initialization hardening and converged physical benchmarks. sym.dat and effective cell/atom/grid
-admission now run before native lifetime; k-star/pseudopotential/restart and other STOP paths remain. Default/old init and serial
-workers still reject symmetry. No physical-convergence certificate is implied.
-The standard k-point port is deferred; its distinct arithmetic is not the target
-for modifying fast-PR symmetry. Conventional HSE remains unsupported.
+Fast PR remains the only HSE engine, with symmetry central. Reduced-k symmetry,
+actual-A admission, general cells and learned Taylor/PT-CN persistence are verified
+on the established internal-MPI1/2 routes. Explicit C/Python same-model sharing is
+now available for full-k states. The factory is integrated into normal mixed point/rank assembly. Next extend
+shared symmetry and remaining resource ownership.
+Do not confuse completed separate-group symmetry support with still-open
+same-process multi-context symmetry. Standard-solver symmetry arithmetic remains
+a distinct port; no physical-convergence or cross-platform certificate is implied.
 
 ### Completed within measured scope
 

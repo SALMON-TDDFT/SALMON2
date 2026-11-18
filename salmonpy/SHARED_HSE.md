@@ -1,6 +1,6 @@
 # Pythonから共有する高速PR版HSEモデル
 
-[English](SHARED_HSE.en.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.1`
+[English](SHARED_HSE.en.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.2`
 
 `NativeFastHSEBackend.open_model(initial, dt, context)` が `NativeFastHSEModel` を返します。
 不変の全k点入力を一度だけ検証・コピーし、ホストのMPIコミュニケータに一度接続します。
@@ -77,3 +77,44 @@ mpiexec -n 2 python shared_fast_hse.py BUILD_JSON GS NEW_OUTPUT
 
 2種類の偏光を進め、新規状態への直接復元を確認する例です。実材料の物理的収束を保証する例ではありません。
 下位C ABIと残る共有資源については[nativeハンドル](NATIVE_HANDLES.md)を参照してください。
+
+## 通常の混在MPIセッション
+
+`NativeFastHSEBackend(build_json, work_root, shared_model=True)` で明示的に有効化し、
+`assemble_native_layers` に `points_per_group={material_id: 2}` を渡します。
+`ranks_per_point` は各群のMPIランク数です。全マクロ点の状態とIDを維持し、同じ物質の点を
+登場順にまとめます。離れた層の点も同じ群にできます。省略時は従来の一群一点です。
+予算超過は警告で、点数や分割を自動変更しません。既知の単一状態TDDFTは群を共有できませんが、
+自作バックエンドは独自の生成器を提供できます。共有native HSEは現在、対称性なし・全k点が対象です。
+
+`ResponseSession` は任意の `backend.open_group(initial, dt, context)` をローカルbindingごとに
+一度呼びます。戻り値の生成器は `new_state(point_id)` と `close()` を持ち、`None` なら従来の
+`create_state` を使います。群の全ランクで同じ順序で呼びます。生成器の寿命はセッションが管理し、
+状態を閉じてから生成器を閉じます。一つの終了処理が失敗しても他の状態の終了を試みます。
+バックエンドの再利用だけでは生存セッションを暗黙に共有しません。自作コードに継承は不要です。
+
+通常サンプルは `--hse-points-per-group 2` を受け付けます。
+
+```sh
+mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native \
+  STANDARD_BUILD RUNTIME HSE_GS NEW_OUTPUT \
+  --layers mixed_shared_hse_layers.json \
+  --fast-hse-build SERIAL_HSE_BUILD --fast-hse-mpi-build MPI_HSE_BUILD \
+  --hse-ranks 2 --hse-points-per-group 2 --steps 256 --dt .003 --protect-steps
+```
+
+JSONは `importlib.resources.files('salmonpy.examples')` から取得し、その中の
+`mixed_shared_hse_layers.json` のパスを渡します。LD・SBE・HSE二点を含み、共有時4ランク、
+別群では6ランクです。`mixed_shared_tddft_hse_layers.json` は内部2ランクのPBEも含み、
+共有時6、別群8ランクです。場を2ランクにする場合は合計を一つ増やし、`--field-grid 1 2 1` を指定します。
+ランタイムは明示的にビルドし、検査済みGSを用意します。配置JSONだけではGS生成・取得をしません。
+
+`--direct-save-at 127` で保存し、新規ジョブに
+`--direct-resume SAVED_OUTPUT/direct-checkpoint` を指定して同じ配置・dt・stepsで再開できます。
+一ランクに複数バイナリ状態がある場合は `salmonpy.native-direct/4` とランク・点ごとのファイルを使います。
+一点の場合の従来名・形式を維持し、版1〜3も読めます。同じバイナリ・入力・MPI分割が必要です。
+保護付き復元は独立候補を準備し、後の点で失敗しても場・LD・SBE・全電子状態を維持し、
+過去ステップの再計算なしで再試行できます。プロセスクラッシュの復旧や汎用交換形式の保証ではありません。
+
+Taylor／PT-CNで、共有群と別群、独立した直列応答、連続実行と直接再開の電流・場・エネルギーを
+比較しました。測定範囲は検証記録を参照してください。物理的収束の保証ではありません。

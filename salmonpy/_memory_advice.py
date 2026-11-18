@@ -52,6 +52,9 @@ def initial_advice(world,context,calculation,bundle,field_grid,model,budget,reco
                 raise OSError('wavefunction input sizes unavailable')
             storage=8*sum(p.stat().st_size for p in files)
             basis+='; electronic heuristic: 8*whole input wavefunction bytes per rank'
+        if context.group.role!='field':
+            storage*=len(context.group.point_ids)
+            basis+='; local states='+str(len(context.group.point_ids))
         live=None if rss is None else rss+storage
         estimate=MemoryEstimate(live,4*storage,RESERVE,basis,
             unknown)
@@ -78,19 +81,21 @@ def restore_advice(world,coupled,root,data):
     if records is None:
         records=[]
         coupled.memory_reports=records
+    from .examples._direct_checkpoint import _state_filename
+    r=coupled.response
     rss,basis=process_memory()
     unknown=[]
     try:
         payload=0;snapshots=0
         if coupled.field is not None:
             payload+=(root/f'field-{world.rank}.bin').stat().st_size
-        for state in coupled.response.states.values():
+        for point,state in r.states.items():
             if hasattr(state,'_process'):
                 unknown.append('child worker memory excluded')
             if hasattr(state,'native'):
-                payload+=(root/f'electronic-{world.rank}.bin').stat().st_size
+                payload+=(root/_state_filename(r,point,world.rank)).stat().st_size
             elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
-                payload+=(root/f'worker-{world.rank}.bin').stat().st_size
+                payload+=(root/_state_filename(r,point,world.rank)).stat().st_size
             else:
                 raw=state._raw
                 if hasattr(raw,'_initial'):

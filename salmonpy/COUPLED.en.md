@@ -502,3 +502,6 @@ OpenMP1/2. The fixtures test state isolation, not material convergence.
 Reconnection failures retain the transaction metadata, so retry or close cannot act on another context’s reused unit.
 
 Generation-checked same-model C contexts have a separate [native handle entry](NATIVE_HANDLES.en.md). The legacy Python path keeps its one-lifetime contract; [shared Python models](SHARED_HSE.en.md) use the separate handle route.
+
+
+[Shared HSE multipoint placement and protected direct resume](SHARED_HSE.en.md#normal-mixed-mpi-sessions).

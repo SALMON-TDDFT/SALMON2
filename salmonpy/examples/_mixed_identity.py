@@ -97,7 +97,9 @@ def checkpoint_identity(coupled):
 
 
 def check_identity(current,saved,schema):
-    if schema in ('salmonpy.native-direct/3','salmonpy.native-replay/2'):
+    if schema=='salmonpy.native-direct/4' and current is None and saved is None:
+        return
+    if schema in ('salmonpy.native-direct/3','salmonpy.native-direct/4','salmonpy.native-replay/2'):
         if current is None or saved is None or digest_record(current)!=digest_record(saved):
             raise InputError('checkpoint identity mismatch: run/point/material/initial/ownership must match')
     elif current is not None or saved is not None:

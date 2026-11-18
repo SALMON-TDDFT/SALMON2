@@ -131,6 +131,7 @@ class ResponseSession:
         self._adapters = {}
         self._point_metadata = None
         self._field_contracts = None
+        self._group_factories={}
         self.states={};self.bindings=dict(bindings);self._A=np.zeros((len(context.plan.point_ids),3))
         error=None;descriptors=None
         try:
@@ -204,7 +205,13 @@ class ResponseSession:
             errors=context.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
             try:
-                state=b.backend.create_state(cache[b.key],point,dt,callback_context)
+                if b.key not in self._group_factories:
+                    opener=getattr(b.backend,'open_group',None)
+                    factory=None if opener is None else opener(cache[b.key],dt,callback_context)
+                    self._group_factories[b.key]=factory
+                factory=self._group_factories[b.key]
+                state=(b.backend.create_state(cache[b.key],point,dt,callback_context)
+                       if factory is None else factory.new_state(point))
                 _admit_response_state(state, self.states)
             except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             errors=context.solver_comm.allgather(error)
@@ -481,6 +488,10 @@ class ResponseSession:
         for point in self.context.group.point_ids:
             if point in self.states:
                 try: self.states[point].close()
+                except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+        for factory in self._group_factories.values():
+            if factory is not None:
+                try: factory.close()
                 except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self.closed=True
         if self._registered:

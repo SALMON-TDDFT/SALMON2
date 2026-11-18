@@ -94,3 +94,38 @@ class LayerAssemblyTests(unittest.TestCase):
                 backend.supported_group_sizes=invalid
                 with self.assertRaisesRegex(ValueError,'supported_group_sizes'):
                     self.assemble()
+
+    def test_explicit_grouping_keeps_every_point_and_id(self):
+        d=layout();d['layers'][0]['thickness']=4.
+        grouped=self.assemble(d,points_per_group={'sbe':2})
+        self.assertEqual(grouped.record()['required_ranks'],4)
+        groups=[g for g in grouped.parallel_plan.groups if g.role=='material']
+        self.assertEqual(groups[0].point_ids,(1,2))
+        self.assertEqual(groups[0].ranks,(2,))
+        plain=self.assemble(d,rank_budget=5)
+        self.assertEqual(dict(grouped.points),dict(plain.points))
+        self.assertEqual([p['point_id'] for p in grouped.record()['points']],
+                         [p['point_id'] for p in plain.record()['points']])
+
+    def test_groups_can_span_separated_layers_without_reordering_ids(self):
+        d=layout()
+        d['layers'].insert(2,{'id':'second-s','material_id':'sbe','thickness':2.,'transverse_cells':[1,1]})
+        a=self.assemble(d,points_per_group={'sbe':2})
+        groups=[g for g in a.parallel_plan.groups if g.role=='material']
+        self.assertEqual(groups[0].point_ids,(1,3))
+        self.assertEqual(a.parallel_plan.point_ids,(1,2,3))
+        self.assertEqual(a.record()['required_ranks'],4)
+
+    def test_custom_native_subclass_can_supply_its_own_group_factory(self):
+        from salmonpy.fast_hse_mpi import NativeFastHSEBackend
+        class CustomBackend(NativeFastHSEBackend):
+            def open_group(self,initial,dt,context):raise AssertionError('planner must not execute')
+        custom=object.__new__(CustomBackend)
+        custom.identity='custom';custom.shared_model=False
+        materials=self.materials()
+        old=materials['sbe'];materials['sbe']=MaterialBinding('sbe',old.provider,custom)
+        d=layout();d['layers'][0]['thickness']=4.
+        from unittest.mock import patch
+        with patch.object(self,'materials',return_value=materials):
+            assembly=self.assemble(d,points_per_group={'sbe':2})
+        self.assertEqual(assembly.parallel_plan.groups[1].point_ids,(1,2))

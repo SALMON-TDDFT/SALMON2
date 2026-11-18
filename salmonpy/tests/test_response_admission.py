@@ -39,3 +39,24 @@ class ResponseAdmissionTests(unittest.TestCase):
         self.assertEqual(wrapped.backend.supported_group_sizes,(1,))
         backend.supported_group_sizes=(2,)
         self.assertEqual(wrapped.backend.supported_group_sizes,(2,))
+
+    def test_optional_group_factory_is_session_owned_and_custom(self):
+        from unittest.mock import patch
+        events=[]
+        context=self.context()
+        group=SolverGroup('material',(1,2),point_ids=(10,20))
+        context.plan=ParallelPlan((context.plan.groups[0],group));context.group=group
+        context._dependents=0
+        factory=SimpleNamespace(new_state=lambda p:SimpleNamespace(close=lambda:events.append(('close',p))),
+                                close=lambda:events.append(('factory',None)))
+        provider=SimpleNamespace(identity='initial',prepare=Mock(return_value='prepared'))
+        backend=SimpleNamespace(identity='custom',execution='collective',reduction='leader',
+                                open_group=Mock(return_value=factory),create_state=Mock(side_effect=AssertionError('legacy route')))
+        binding=MaterialBinding('material',provider,backend)
+        with patch.object(ResponseSession,'_initial_current_records',return_value={}):
+            session=ResponseSession(context,{10:binding,20:binding},dt=.01)
+        provider.prepare.assert_called_once();backend.open_group.assert_called_once()
+        self.assertIsNot(session.states[10],session.states[20])
+        session.close();session.close()
+        self.assertEqual(events,[('close',10),('close',20),('factory',None)])
+        self.assertEqual(context._dependents,0)

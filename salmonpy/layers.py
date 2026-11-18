@@ -44,7 +44,7 @@ class NativeLayerAssembly:
 
 
 def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
-                           field_grid, ranks_per_point, rank_budget):
+                           field_grid, ranks_per_point, rank_budget, points_per_group=None):
     """Build FDTD, point bindings and MPI plan from explicit ordered layers.
 
     ``materials`` maps user IDs to LD models (including configured LD models)
@@ -67,6 +67,11 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
     if not isinstance(materials, Mapping) or not isinstance(ranks_per_point, Mapping):
         raise InputTypeError('material and ranks_per_point mappings required')
     budget = _int(rank_budget, 'rank_budget')
+    if points_per_group is not None and not isinstance(points_per_group,Mapping):
+        raise InputTypeError('points_per_group mapping required')
+    grouping={} if points_per_group is None else dict(points_per_group)
+    for mid,count in grouping.items():_int(count,'points_per_group['+str(mid)+']')
+    totals={}
     origin = data['origin_cell']
     if not isinstance(origin,list) or len(origin)!=3: raise InputError('three origin_cell indices required')
     for i,v in enumerate(origin):
@@ -118,13 +123,23 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
                 from .embedded_tddft import NativeTDDFTBackend
                 if isinstance(model.backend,NativeTDDFTBackend) and math.prod(model.backend.decomposition)!=rank_count:
                     raise InputError('TDDFT inner decomposition differs from ranks_per_point')
+                width=grouping.get(mid,1)
+                if width>1:
+                    from .fast_hse_mpi import NativeFastHSEBackend
+                    if type(model.backend) is NativeTDDFTBackend:
+                        raise InputError('native TDDFT requires one point per group')
+                    if type(model.backend) is NativeFastHSEBackend and not model.backend.shared_model:
+                        raise InputError('multiple HSE points require shared_model=True')
                 electronic[mid]=model
-                needed+=cells*math.prod(widths)*rank_count
+                totals[mid]=totals.get(mid,0)+cells*math.prod(widths)
             else: raise InputTypeError('material must be LD or an explicit MaterialBinding: '+mid)
         records.append({**item,'kind':kind,'cells':cells,'actual_thickness':cells*grid.spacing[axis],
                         'cell_start':lo,'cell_stop':hi,'ranks_per_point':rank_count})
         boxes.append((lo,hi,mid,kind,name,rank_count))
     if set(ranks_per_point)!=set(electronic): raise InputError('rank settings required only for selected electronic materials; LD is field-local')
+    if not set(grouping)<=set(electronic):
+        raise InputError('points_per_group applies only to selected electronic materials')
+    needed=nf+sum(((count+grouping.get(mid,1)-1)//grouping.get(mid,1))*ranks_per_point[mid] for mid,count in totals.items())
     if needed>budget:
         warnings.warn(f'required ranks {needed} exceed rank budget {budget}; continuing planning without subsampling; launch with {needed} ranks', RuntimeWarning, stacklevel=2)
     if not electronic: raise InputError('mixed assembly requires electronic points; use FDTD for LD-only calculations')
@@ -138,6 +153,7 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
             shapes.append(Shape('box',tuple((h-l)*d for l,h,d in zip(lo,hi,grid.spacing)),
                                 tuple(float((coords[i][l]+coords[i][h-1])/2) for i,(l,h) in enumerate(zip(lo,hi))),ld_ids[mid]))
     points={};bindings={};point_records=[];groups=[SolverGroup('field',tuple(range(nf)),role='field')];rank=nf
+    grouped=[];pending={}
     for lo,hi,mid,kind,name,ranks in boxes:
         if kind!='electronic': continue
         for cell in product(*(range(l,h) for l,h in zip(lo,hi))):
@@ -147,12 +163,17 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
             if any(k=='ld' and all(l-1<=v<h+1 for v,l,h in zip(cell,lows,highs)) for lows,highs,m,k,n,r in boxes):
                 raise InputError('electronic point requires an LD-free constitutive neighborhood: '+name)
             point=len(points)+1;points[point]=cell;bindings[point]=electronic[mid]
-            groups.append(SolverGroup('point-'+str(point),tuple(range(rank,rank+ranks)),point_ids=(point,)))
+            current=pending.get(mid)
+            if current is None or len(current['points'])>=grouping.get(mid,1):
+                current={'name':'point-'+str(point),'ranks':tuple(range(rank,rank+ranks)),'points':[]}
+                pending[mid]=current;grouped.append(current);rank+=ranks
+            current['points'].append(point)
+            owned_ranks=list(current['ranks'])
             relative=[v-l for v,l in zip(cell,lo)]
             point_records.append({'transport_id':point,'point_id':name+'/'+','.join(map(str,relative)),
-                                  'layer_id':name,'material_id':mid,'cell':list(cell),'ranks':list(range(rank,rank+ranks)),
+                                  'layer_id':name,'material_id':mid,'cell':list(cell),'ranks':owned_ranks,
                                   'provider_identity':electronic[mid].provider.identity,'backend_identity':electronic[mid].backend.identity})
-            rank+=ranks
+    groups.extend(SolverGroup(item['name'],item['ranks'],point_ids=tuple(item['points'])) for item in grouped)
     plan=ParallelPlan(tuple(groups));plan.validate(needed)
     geometry=Geometry(grid,tuple(shapes))
     observations=tuple(tuple(float(coords[i][v]) for i,v in enumerate(cell)) for cell in points.values())
@@ -168,5 +189,6 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
             'field_grid':list(parallel.grid),'length_unit':'bohr','memory_bytes':None,
             'materials':material_records,'grid':asdict(grid),'dt':calculation.dt,'steps':calculation.steps,'source':asdict(source),
             'note':'one independent electronic state per grid cell; LD stays in field group; no implicit gaps'}
+    if points_per_group is not None:report['points_per_group']=grouping
     return NativeLayerAssembly(calculation,plan,MappingProxyType(points),MappingProxyType(bindings),
                                tuple(parallel.grid),_freeze(report))

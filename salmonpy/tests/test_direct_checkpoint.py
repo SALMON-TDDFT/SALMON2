@@ -106,14 +106,11 @@ class DirectCheckpointTests(unittest.TestCase):
             self.assertFalse(coupled.response.failed)
 
     def test_multiple_worker_files_cannot_collide(self):
-        c=self.coupled()
-        state=lambda:SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1',checkpoint=lambda *a,**k:None)
-        c.response.states={1:state(),2:state()}
-        with tempfile.TemporaryDirectory() as d:
-            p=Path(d)/'checkpoint'
-            with self.assertRaisesRegex(ValueError,'one worker checkpoint'):
-                checkpoint(self.world(),c,p,{})
-            self.assertFalse(p.exists())
+        from salmonpy.examples._direct_checkpoint import _state_filename
+        state=lambda:SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1')
+        r=SimpleNamespace(states={1:state(),2:state()})
+        self.assertEqual({_state_filename(r,p,0) for p in r.states},
+                         {'worker-0-point-1.bin','worker-0-point-2.bin'})
 
     def test_restart_layout_includes_inner_decomposition_and_capability(self):
         from salmonpy.examples._direct_checkpoint import _compatibility
@@ -157,13 +154,10 @@ class DirectCheckpointTests(unittest.TestCase):
         return SimpleNamespace(rank=0,size=2,allgather=gather)
 
     def test_multiple_native_files_cannot_collide(self):
-        coupled=self.coupled()
-        coupled.response.states={1:SimpleNamespace(native=object()),2:SimpleNamespace(native=object())}
-        with tempfile.TemporaryDirectory() as d:
-            target=Path(d)/'checkpoint'
-            with self.assertRaisesRegex(ValueError,'one native electronic checkpoint'):
-                checkpoint(self.world(),coupled,target,{})
-            self.assertFalse(target.exists())
+        from salmonpy.examples._direct_checkpoint import _state_filename
+        r=SimpleNamespace(states={1:SimpleNamespace(native=object()),2:SimpleNamespace(native=object())})
+        self.assertEqual({_state_filename(r,p,0) for p in r.states},
+                         {'electronic-0-point-1.bin','electronic-0-point-2.bin'})
 
     def test_public_capability_object_on_custom_backend(self):
         from salmonpy.checkpointing import CheckpointCapability
@@ -191,3 +185,21 @@ class DirectCheckpointTests(unittest.TestCase):
                     checkpoint(world,coupled,Path(root)/'new',{},protected=True)
                 admission.assert_not_called()
         self.assertFalse(coupled.response.failed)
+
+    def test_multi_binary_names_are_distinct_and_legacy_names_remain(self):
+        from salmonpy.examples._direct_checkpoint import _state_filename
+        worker=lambda:SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1')
+        a,b=worker(),worker()
+        r=SimpleNamespace(states={10:a,20:b})
+        self.assertEqual(_state_filename(r,10,3),'worker-3-point-10.bin')
+        self.assertNotEqual(_state_filename(r,10,3),_state_filename(r,20,3))
+        self.assertEqual(_state_filename(SimpleNamespace(states={10:a}),10,3),'worker-3.bin')
+
+    def test_version_four_identity_cannot_be_silently_downgraded(self):
+        from salmonpy.examples._mixed_identity import check_identity
+        from salmonpy.errors import InputError
+        identity={'run':'example','points':[10,20]}
+        check_identity(identity,identity,'salmonpy.native-direct/4')
+        check_identity(None,None,'salmonpy.native-direct/4')
+        with self.assertRaises(InputError):check_identity(identity,None,'salmonpy.native-direct/4')
+        with self.assertRaises(InputError):check_identity(None,identity,'salmonpy.native-direct/4')

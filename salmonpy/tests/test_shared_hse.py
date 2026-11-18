@@ -76,3 +76,13 @@ class SharedHSETests(unittest.TestCase):
             model.close()
             self.assertTrue(fast_hse_mpi._used)
             self.assertTrue(fast_hse_mpi.embedded._used)
+
+    def test_session_factory_attempts_all_returned_state_cleanup(self):
+        from salmonpy._shared_hse import _SessionGroup
+        from salmonpy.errors import RuntimeFailure
+        events=[]
+        def fail():events.append('first');raise RuntimeError('close failed')
+        group=_SessionGroup(SimpleNamespace(close=lambda:events.append('model')))
+        group.states=[SimpleNamespace(close=fail),SimpleNamespace(close=lambda:events.append('unadmitted'))]
+        with self.assertRaisesRegex(RuntimeFailure,'close failed'):group.close()
+        self.assertEqual(events,['first','unadmitted','model'])

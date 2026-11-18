@@ -21,6 +21,24 @@ def digest(path):
     return h.hexdigest()
 
 
+def _state_filename(response,point,rank):
+    """Keep one-state legacy names; namespace binary siblings by point ID."""
+    state=response.states[point]
+    electronic=hasattr(state,'native')
+    prefix='electronic' if electronic else 'worker'
+    peers=sum(hasattr(other,'native') if electronic else
+              getattr(other,'checkpoint_protocol',None)=='salmonpy.direct-state/1'
+              for other in response.states.values())
+    suffix='-point-'+str(point) if peers>1 else ''
+    return f'{prefix}-{rank}{suffix}.bin'
+
+
+def _multiple_binary(response):
+    return (sum(hasattr(s,'native') for s in response.states.values())>1 or
+            sum(getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1'
+                for s in response.states.values())>1)
+
+
 def _verify_files(root, files, rank, ranks):
     """Hash each payload on one rank; caller agrees errors before any load."""
     if not isinstance(files, dict) or not files:
@@ -102,11 +120,11 @@ def _compatibility(world, coupled, *, restore, saved=None, available_files=None,
         for point,state in r.states.items():
             if hasattr(state,'native'):
                 states[point]=component(state,symbol='sp_tddft_checkpoint',native_format='salmonpy.tddft-native/2',ranks=ranks)
-                required.append(f'electronic-{world.rank}.bin')
+                required.append(_state_filename(r,point,world.rank))
             else:
                 states[point]=component(state,ranks=ranks)
                 if getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
-                    required.append(f'worker-{world.rank}.bin')
+                    required.append(_state_filename(r,point,world.rank))
     except Exception as exc:
         error=str(exc)
     return check_checkpoint_compatibility(world,groups,group=group,field=field,states=states,
@@ -197,11 +215,11 @@ def _restore_protected(world,coupled,root,data,compatibility,verification,histor
             if type(adapter) is not _StepAdapter:
                 raise ValueError('protected native sample requires endpoint response adapters')
             if hasattr(state,'native'):
-                candidate=NativeRestoreCandidate(state,'sp_tddft_checkpoint',root/f'electronic-{world.rank}.bin')
+                candidate=NativeRestoreCandidate(state,'sp_tddft_checkpoint',root/_state_filename(r,point,world.rank))
                 updates.extend(((state,'steps',step),(state,'A',A)))
                 native.append(candidate)
             elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
-                candidate=NativeRestoreCandidate(state,'sp_fast_hse_checkpoint',root/f'worker-{world.rank}.bin')
+                candidate=NativeRestoreCandidate(state,'sp_fast_hse_checkpoint',root/_state_filename(r,point,world.rank))
                 updates.extend(((state,'steps',step),(state,'A',A),
                     (state,'current',np.array(data['states'][str(point)]['current'],dtype=float)),(state,'energy',None)))
                 native.append(candidate)
@@ -270,10 +288,6 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         identity_digest=None if current_identity is None else digest_record(current_identity)
         if type(restore) is not bool or type(protected) is not bool:
             raise ValueError("restore and protected must be booleans")
-        if sum(getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1' for s in r.states.values())>1:
-            raise ValueError('one worker checkpoint per rank required')
-        if sum(hasattr(s,'native') for s in r.states.values())>1:
-            raise ValueError('one native electronic checkpoint per rank required')
         for state in r.states.values():
             if hasattr(state, 'native'):
                 getattr(state.lib, 'sp_tddft_checkpoint')
@@ -285,7 +299,7 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         if restore:
             manifest = json.loads((root/'complete.json').read_text())
             manifest_id = hashlib.sha256(json.dumps(manifest,sort_keys=True,allow_nan=False).encode()).hexdigest()
-            if manifest['schema'] not in ('salmonpy.native-direct/1','salmonpy.native-direct/2','salmonpy.native-direct/3') or manifest['signature'] != signature or manifest['ranks'] != world.size:
+            if manifest['schema'] not in ('salmonpy.native-direct/1','salmonpy.native-direct/2','salmonpy.native-direct/3','salmonpy.native-direct/4') or manifest['signature'] != signature or manifest['ranks'] != world.size:
                 raise ValueError('checkpoint input/library/topology mismatch')
             check_identity(current_identity,manifest.get('identity'),manifest['schema'])
             if type(manifest['step']) is not int or not 0 < manifest['step'] < signature['steps']:
@@ -329,6 +343,7 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         raise ValueError('checkpoint manifests differ across ranks')
     if any(item[3]!=identity_digest for item in agreement):
         raise ValueError('checkpoint identity differs across ranks')
+    multiple_binary=any(world.allgather(_multiple_binary(r)))
     compatibility=_compatibility(world,coupled,restore=restore,
         saved=manifest.get('compatibility') if restore else None,
         available_files=manifest['files'] if restore else None,protected=protected and restore)
@@ -386,12 +401,12 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
     def state_io(point,state):
         key = str(point)
         if hasattr(state, 'native'):
-            native_call(state, 'sp_tddft_checkpoint', f'electronic-{world.rank}.bin')
+            native_call(state, 'sp_tddft_checkpoint', _state_filename(r,point,world.rank))
             if restore:
                 state.steps = data['step']; state.A = np.asarray(data['states'][key]['A'])
             else: data['states'][key] = {'A': state.A.tolist()}
         elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
-            state.checkpoint(root/f'worker-{world.rank}.bin', restore=restore)
+            state.checkpoint(root/_state_filename(r,point,world.rank), restore=restore)
             if restore:
                 if state.steps != data['step']: raise ValueError('worker checkpoint clock differs')
                 state.A = np.asarray(data['states'][key]['A'])
@@ -446,7 +461,8 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
                 {k: v.tolist() if isinstance(v,np.ndarray) else v for k,v in h.items()}
                 for h in frames], allow_nan=False)+'\n')
             files = {p.name: digest(p) for p in sorted(root.iterdir())}
-            completion={'schema':'salmonpy.native-direct/3' if current_identity is not None else 'salmonpy.native-direct/2',
+            completion={'schema':('salmonpy.native-direct/4' if multiple_binary else
+                                  'salmonpy.native-direct/3' if current_identity is not None else 'salmonpy.native-direct/2'),
                 'compatibility':compatibility,'ranks':world.size,'signature':signature,'step':coupled.step_index,'files':files}
             if current_identity is not None:completion['identity']=current_identity
             (root/'complete.tmp').write_text(json.dumps(completion, indent=2)+'\n')

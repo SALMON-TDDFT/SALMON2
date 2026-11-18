@@ -216,9 +216,12 @@ class NativeFastHSEBackend:
     execution = 'collective'
     reduction = 'leader'
 
-    def __init__(self, build_record, work_root, *, allow_symmetry=False):
+    def __init__(self, build_record, work_root, *, allow_symmetry=False, shared_model=False):
         if type(allow_symmetry) is not bool:
             raise InputTypeError('allow_symmetry must be boolean')
+        if type(shared_model) is not bool:
+            raise InputTypeError('shared_model must be boolean')
+        self.shared_model = shared_model
         self.allow_symmetry = allow_symmetry
         self.supported_group_sizes = (1,2)
         record = json.loads(Path(build_record).expanduser().resolve().read_text())
@@ -238,13 +241,24 @@ class NativeFastHSEBackend:
         identity = [self.sha256,self.origin_sha256]
         if allow_symmetry:
             identity.append('symmetry-v1')
+        if shared_model:
+            identity.append('shared-model-v1')
         self.identity = 'salmonpy.fast-hse-mpi/1/' + hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+
+    def open_group(self, initial, dt, context):
+        """Optional ResponseSession-owned factory; default route stays unchanged."""
+        if not self.shared_model:
+            return None
+        from ._shared_hse import _SessionGroup
+        return _SessionGroup(self.open_model(initial,dt,context))
 
     def open_model(self, initial, dt, context):
         """Collectively share one immutable full-k GS and MPI lease among states."""
         return self._create(initial, None, dt, context, shared=True)
 
     def create_state(self, initial, point_id, dt, context):
+        if self.shared_model:
+            raise InputError('shared_model uses ResponseSession/open_group or explicit open_model')
         return self._create(initial, point_id, dt, context, shared=False)
 
     def _create(self, initial, point_id, dt, context, *, shared):

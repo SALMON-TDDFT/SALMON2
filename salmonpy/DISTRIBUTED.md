@@ -101,3 +101,6 @@ MPI応答サービスでの明示的なID継承・出力は[MPI_IDENTITY.md](MPI
 PointRun自体の直列専用という制約やrestart未対応は維持します。
 
 `ResponseSession`は任意の`backend.supported_group_sizes`（空でない、正の整数の重複なしtuple）を物質準備前に検査します。宣言は全群で照合し、順序だけが異なるtupleは同じ集合として扱います。未宣言は従来のexecution／reduction検査を維持し、対応を自動認証しません。Aパケットラッパーも元の宣言を引き継ぎます。
+
+
+[共有HSEの複数点配置と保護付き直接再開](SHARED_HSE.md#通常の混在mpiセッション).

@@ -52,6 +52,7 @@ def main():
     parser.add_argument('--hse-bundle', type=Path, help='optional separate fast-PR HSE GS bundle; default is BUNDLE')
     parser.add_argument('--hse-symmetry', action='store_true', help='explicit fast-PR symmetry opt-in; native HSE group1/2 with matching mode capability')
     parser.add_argument('--hse-reference-bundle', type=Path, help='explicit equivalent full-k HSE bundle for serial comparison')
+    parser.add_argument('--hse-points-per-group',type=int,default=1,help='explicit shared full-k HSE points per native group')
     parser.add_argument('--hse-ranks', type=int, choices=(1, 2), default=1)
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
@@ -94,6 +95,10 @@ def main():
         parser.error('--hse-symmetry requires native HSE and --hse-reference-bundle')
     if args.hse_reference_bundle is not None and not args.hse_symmetry:
         parser.error('--hse-reference-bundle requires --hse-symmetry')
+    if args.hse_points_per_group<1 or (args.hse_points_per_group>1 and args.fast_hse_mpi_build is None):
+        parser.error('positive hse-points-per-group; grouping requires fast-hse-mpi-build')
+    if args.hse_points_per_group>1 and args.hse_symmetry:
+        parser.error('shared HSE groups currently require full-k non-symmetric input')
     if args.hse_ranks != 1 and args.fast_hse_mpi_build is None:
         parser.error('hse-ranks > 1 requires --fast-hse-mpi-build')
     if args.memory_budget_gib is not None and (not np.isfinite(args.memory_budget_gib) or args.memory_budget_gib <= 0):
@@ -139,7 +144,7 @@ def main():
             available['hse-point'] = MaterialBinding('hse-point',
                 FastHSEMaterialProvider(args.hse_bundle or args.bundle, 'rt.inp', max_steps=args.steps),
                 (FastHSEResponseBackend(args.fast_hse_build, output) if args.fast_hse_mpi_build is None
-                 else NativeFastHSEBackend(args.fast_hse_mpi_build, output, allow_symmetry=args.hse_symmetry)))
+                 else NativeFastHSEBackend(args.fast_hse_mpi_build, output, allow_symmetry=args.hse_symmetry, shared_model=args.hse_points_per_group>1)))
         assembly = None
         if layout is None:
             bindings = {10: available['sbe-point'], 20: available['si-tddft']}
@@ -151,7 +156,8 @@ def main():
             rank_settings = {key: count for key, count in {'sbe-point': 1, 'si-tddft': args.tddft_ranks, 'hse-point': args.hse_ranks}.items() if key in selected}
             assembly = assemble_native_layers(layout, available,
                 grid=grid, dt=dt, steps=args.steps, source=calculation.source, field_grid=tuple(args.field_grid),
-                ranks_per_point=rank_settings, rank_budget=args.rank_budget if args.rank_budget is not None else world.size)
+                ranks_per_point=rank_settings, rank_budget=args.rank_budget if args.rank_budget is not None else world.size,
+                points_per_group={'hse-point':args.hse_points_per_group} if args.hse_points_per_group>1 else None)
             if assembly.record()['required_ranks'] != world.size:
                 raise ValueError(f"launch exactly {assembly.record()['required_ranks']} ranks for this layout")
             calculation = assembly.calculation; geometry = calculation.geometry
@@ -180,6 +186,7 @@ def main():
         if 'hse-point' in selected:
             signature['fast_hse_backend'] = available['hse-point'].backend.identity
             signature['hse_ranks'] = args.hse_ranks
+            if args.hse_points_per_group>1:signature['hse_points_per_group']=args.hse_points_per_group
             if args.hse_symmetry:
                 signature['hse_symmetry'] = True
                 signature['hse_reference_assets'] = {str(p.relative_to(args.hse_reference_bundle)): digest_file(p)

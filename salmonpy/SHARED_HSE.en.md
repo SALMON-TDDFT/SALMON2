@@ -1,6 +1,6 @@
 # Python shared fast-PR HSE model
 
-[日本語](SHARED_HSE.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.1`
+[日本語](SHARED_HSE.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.2`
 
 `NativeFastHSEBackend.open_model(initial, dt, context)` returns a
 `NativeFastHSEModel`. It verifies/copies one immutable full-k input bundle and
@@ -86,3 +86,51 @@ mpiexec -n 2 python shared_fast_hse.py BUILD_JSON GS NEW_OUTPUT
 The sample advances two polarizations and verifies fresh direct resume. It checks
 composition/restart, not material convergence. See [native handles](NATIVE_HANDLES.en.md)
 for the underlying C ABI and remaining source ownership boundaries.
+
+## Normal mixed MPI sessions
+
+Opt in with `NativeFastHSEBackend(build_json, work_root, shared_model=True)`.
+Pass `points_per_group={material_id: 2}` to `assemble_native_layers`; the
+`ranks_per_point` value is the MPI width of each group. Every macropoint retains
+its own state and ID. Points of the same material are grouped in encounter order,
+including across separate layers. Omit the option to retain one point/group.
+This is an explicit layout choice; budget warnings never change it automatically.
+Known singleton TDDFT cannot share a group; custom backends may provide their own
+factory. Shared native HSE currently requires non-symmetric full-k inputs.
+
+`ResponseSession` optionally calls `backend.open_group(initial, dt, context)`
+once per local binding. A returned factory supplies `new_state(point_id)` and
+`close()`; `None` uses the existing `create_state` path. All subgroup ranks call
+the same sequence. The session owns the factory, closes states before it, and
+attempts cleanup of all created states even if one cleanup fails. Reusing a backend
+object does not implicitly cache live sessions. User backends need no inheritance.
+
+The installed normal sample supports `--hse-points-per-group 2`:
+
+```sh
+mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native \
+  STANDARD_BUILD RUNTIME HSE_GS NEW_OUTPUT \
+  --layers mixed_shared_hse_layers.json \
+  --fast-hse-build SERIAL_HSE_BUILD --fast-hse-mpi-build MPI_HSE_BUILD \
+  --hse-ranks 2 --hse-points-per-group 2 --steps 256 --dt .003 --protect-steps
+```
+
+Obtain the JSON with `importlib.resources.files('salmonpy.examples')`; use the
+path to `mixed_shared_hse_layers.json`. It contains LD, SBE and two HSE points:
+4 ranks with sharing, 6 without. `mixed_shared_tddft_hse_layers.json` adds PBE
+(two internal ranks): 6 shared ranks or 8 separate ranks. Two field ranks need
+one extra rank and `--field-grid 1 2 1`. Build explicitly and supply verified GS
+bundles; the layouts do not download or manufacture a ground state.
+
+Add `--direct-save-at 127`, then start a fresh job with
+`--direct-resume SAVED_OUTPUT/direct-checkpoint` and the same layout/dt/steps.
+Multi-binary groups use `salmonpy.native-direct/4` and per-rank, per-point files;
+one-state filenames and schemas remain unchanged and versions1–3 remain readable.
+Resume requires the same binary, inputs and MPI topology. Protected restore stages
+independent candidates: a later-point failure preserves field, LD, SBE and all
+electronic originals and allows retry without replay. This is not process-crash
+recovery or an interchangeable cross-backend archive format.
+
+Local Taylor and PT-CN tests compared shared versus separate MPI groups, independent
+serial responses, and continuous versus direct resumed currents/fields/energies.
+See the repository validation record for scope; this is not material convergence.
