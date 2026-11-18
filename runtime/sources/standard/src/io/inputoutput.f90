@@ -20,6 +20,7 @@
 module inputoutput
   use phys_constants
   use salmon_global
+  use salmonpy_model_inputs, only: s_model_inputs
   implicit none
 !Physical constant
   real(8),parameter :: au_time_fs = 0.02418884326505d0
@@ -27,41 +28,48 @@ module inputoutput
   real(8),parameter :: au_length_aa = 0.52917721067d0
 
 
-  integer :: fh_variables_log
-  integer :: fh_namelist
-!  integer, parameter :: fh_atomic_spiecies = 902
-  integer :: fh_atomic_coor
-  integer :: fh_reentrance
-  integer :: fh_atomic_red_coor
-  logical :: if_nml_coor, if_nml_red_coor
-
-  integer :: inml_calculation
-  integer :: inml_control
-  integer :: inml_units
-  integer :: inml_parallel
-  integer :: inml_system
-  integer :: inml_pseudo
-  integer :: inml_functional
-  integer :: inml_rgrid
-  integer :: inml_kgrid
-  integer :: inml_tgrid
-  integer :: inml_propagation
-  integer :: inml_scf
-  integer :: inml_emfield
-  integer :: inml_singlescale
-  integer :: inml_multiscale
-  integer :: inml_maxwell
-  integer :: inml_analysis
-  integer :: inml_poisson
-  integer :: inml_ewald
-  integer :: inml_opt
-  integer :: inml_md
-  integer :: inml_jellium
-  integer :: inml_code
-  integer :: inml_band
-  integer :: inml_sbe
-  integer :: inml_dc
-  integer :: inml_unfolding
+  ! Model-owned parser scratch/diagnostics. Legacy no-argument callers retain
+  ! their named temporary files, required by the later MD velocity reader.
+  type, public :: s_input_parser
+    logical :: isolated=.true.
+    character(4096) :: log_path='variables.log'
+    type(s_model_inputs) :: defaults,values
+    integer :: fh_variables_log=0
+    integer :: fh_namelist=0
+    integer :: fh_atomic_coor=0
+    integer :: fh_reentrance=0
+    integer :: fh_atomic_red_coor=0
+    logical :: if_nml_coor=.false.
+    logical :: if_nml_red_coor=.false.
+    integer :: inml_calculation=0
+    integer :: inml_control=0
+    integer :: inml_units=0
+    integer :: inml_parallel=0
+    integer :: inml_system=0
+    integer :: inml_pseudo=0
+    integer :: inml_functional=0
+    integer :: inml_rgrid=0
+    integer :: inml_kgrid=0
+    integer :: inml_tgrid=0
+    integer :: inml_propagation=0
+    integer :: inml_scf=0
+    integer :: inml_emfield=0
+    integer :: inml_singlescale=0
+    integer :: inml_multiscale=0
+    integer :: inml_maxwell=0
+    integer :: inml_analysis=0
+    integer :: inml_poisson=0
+    integer :: inml_ewald=0
+    integer :: inml_opt=0
+    integer :: inml_md=0
+    integer :: inml_jellium=0
+    integer :: inml_code=0
+    integer :: inml_band=0
+    integer :: inml_sbe=0
+    integer :: inml_dc=0
+    integer :: inml_unfolding=0
+  end type
+  type(s_input_parser),target,save,private :: legacy_parser
 
 !Input/Output units
   integer :: iflag_unit_time
@@ -109,54 +117,112 @@ module inputoutput
   type(unit_t) :: t_unit_conductivity
 
 contains
-  subroutine read_input(input_path)
+  subroutine read_input(input_path,workspace)
     use tddft_worker, only: worker_configure
     implicit none
-
     character(*),optional,intent(in) :: input_path
+    type(s_input_parser),optional,target,intent(inout) :: workspace
+    type(s_input_parser),pointer :: parser
 
-    call read_stdin(input_path)
-    call read_input_common ! Should be renamed properly later
+    if(present(workspace))then
+      parser=>workspace
+      parser%isolated=.true.
+    else
+      parser=>legacy_parser
+      parser%isolated=.false.
+    endif
+    call read_stdin(input_path,parser)
+    call read_input_common(parser)
     call worker_configure()
-    call read_atomic_coordinates
-    call dump_input_common ! Should be renamed properly later
+    call read_atomic_coordinates(parser)
+    call dump_input_common(parser)
     call check_bad_input
-
+    if(parser%isolated)then
+      call parser%values%capture()
+      call close_parser_workspace(parser)
+    endif
   end subroutine read_input
 
 
-  subroutine read_stdin(input_path)
+  subroutine read_stdin(input_path,parser)
     use tddft_worker, only: worker_requested
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use filesystem, only: get_filehandle
     implicit none
     character(*),optional,intent(in) :: input_path
+    type(s_input_parser),intent(inout) :: parser
     integer :: input_fh
     integer :: cur
-    integer :: ret = 0
+    integer :: ret
     character(256) :: buff, text
+
+    parser%if_nml_coor=.false.
+    parser%if_nml_red_coor=.false.
+    parser%inml_calculation=0
+    parser%inml_control=0
+    parser%inml_units=0
+    parser%inml_parallel=0
+    parser%inml_system=0
+    parser%inml_pseudo=0
+    parser%inml_functional=0
+    parser%inml_rgrid=0
+    parser%inml_kgrid=0
+    parser%inml_tgrid=0
+    parser%inml_propagation=0
+    parser%inml_scf=0
+    parser%inml_emfield=0
+    parser%inml_singlescale=0
+    parser%inml_multiscale=0
+    parser%inml_maxwell=0
+    parser%inml_analysis=0
+    parser%inml_poisson=0
+    parser%inml_ewald=0
+    parser%inml_opt=0
+    parser%inml_md=0
+    parser%inml_jellium=0
+    parser%inml_code=0
+    parser%inml_band=0
+    parser%inml_sbe=0
+    parser%inml_dc=0
+    parser%inml_unfolding=0
 
     if (comm_is_root(nproc_id_global)) then
 
-      fh_namelist = get_filehandle()
-      open(fh_namelist, file='.namelist.tmp', status='replace')
+      if(parser%isolated)then
+        open(newunit=parser%fh_namelist,status='scratch',form='formatted',action='readwrite')
+      else
+        parser%fh_namelist = get_filehandle()
+        open(parser%fh_namelist, file='.namelist.tmp', status='replace')
+      endif
      !open(fh_atomic_spiecies, file='.atomic_spiecies.tmp', status='replace')
 
-      if_nml_coor =.false.
-      fh_atomic_coor = get_filehandle()
-      open(fh_atomic_coor, file='.atomic_coor.tmp', status='replace')
+      parser%if_nml_coor =.false.
+      if(parser%isolated)then
+        open(newunit=parser%fh_atomic_coor,status='scratch',form='formatted',action='readwrite')
+      else
+        parser%fh_atomic_coor = get_filehandle()
+        open(parser%fh_atomic_coor, file='.atomic_coor.tmp', status='replace')
+      endif
 
-      if_nml_red_coor = .false.
-      fh_atomic_red_coor = get_filehandle()
-      open(fh_atomic_red_coor, file='.atomic_red_coor.tmp', status='replace')
+      parser%if_nml_red_coor = .false.
+      if(parser%isolated)then
+        open(newunit=parser%fh_atomic_red_coor,status='scratch',form='formatted',action='readwrite')
+      else
+        parser%fh_atomic_red_coor = get_filehandle()
+        open(parser%fh_atomic_red_coor, file='.atomic_red_coor.tmp', status='replace')
+      endif
 
-      fh_reentrance = get_filehandle()
-      open(fh_reentrance, file='.reenetrance.tmp', status='replace')
+      if(parser%isolated)then
+        open(newunit=parser%fh_reentrance,status='scratch',form='formatted',action='readwrite')
+      else
+        parser%fh_reentrance = get_filehandle()
+        open(parser%fh_reentrance, file='.reenetrance.tmp', status='replace')
+      endif
 
       input_fh=5
       if(present(input_path)) open(newunit=input_fh,file=input_path,status="old",action="read")
-      cur = fh_namelist
+      cur = parser%fh_namelist
       do while (.true.)
         read(input_fh, '(a)', iostat=ret) buff
         if (ret < 0) then
@@ -173,23 +239,23 @@ contains
          !end if
           ! Beginning of 'atomic_positions' part
           if (text == '&atomic_coor') then
-            cur = fh_atomic_coor
-            if_nml_coor =.true.
+            cur = parser%fh_atomic_coor
+            parser%if_nml_coor =.true.
             cycle
           end if
           if (text == '&atomic_red_coor') then
-            cur = fh_atomic_red_coor
-            if_nml_red_coor = .true.
+            cur = parser%fh_atomic_red_coor
+            parser%if_nml_red_coor = .true.
             cycle
           end if
           ! Beginning of 'atomic_species' part
           if (text == '&reentrance') then
-            cur = fh_reentrance
+            cur = parser%fh_reentrance
             cycle
           end if
           ! End of 'atomic_(spiecies|positions)' part
-          if ((text == '/') .and. (cur /= fh_namelist)) then
-            cur = fh_namelist
+          if ((text == '/') .and. (cur /= parser%fh_namelist)) then
+            cur = parser%fh_namelist
             cycle
           end if
 
@@ -198,11 +264,13 @@ contains
       end do
 
       if(present(input_path)) close(input_fh)
-      close(fh_namelist)
-      close(fh_atomic_coor)
-      close(fh_atomic_red_coor)
+      if(.not.parser%isolated)then
+        close(parser%fh_namelist)
+        close(parser%fh_atomic_coor)
+        close(parser%fh_atomic_red_coor)
+      endif
      !close(fh_atomic_spiecies)
-      close(fh_reentrance)
+      if(.not.parser%isolated)close(parser%fh_reentrance)
     end if
 
    !call comm_sync_all()
@@ -210,12 +278,13 @@ contains
     return
   end subroutine read_stdin
 
-  subroutine read_input_common
+  subroutine read_input_common(parser)
     use parallelization
     use communication
     use filesystem, only: get_filehandle
     use misc_routines, only: string_lowercase
     implicit none
+    type(s_input_parser),intent(inout) :: parser
     integer :: ii
     real(8) :: norm
 
@@ -645,10 +714,14 @@ contains
 !! =======================
 
     if (comm_is_root(nproc_id_global)) then
-      open(fh_namelist, file='.namelist.tmp', status='old')
-      read(fh_namelist, nml=units, iostat=inml_units)
-      rewind(fh_namelist)
-      close(fh_namelist)
+      if(parser%isolated)then
+        rewind(parser%fh_namelist)
+      else
+        open(parser%fh_namelist, file='.namelist.tmp', status='old')
+      endif
+      read(parser%fh_namelist, nml=units, iostat=parser%inml_units)
+      rewind(parser%fh_namelist)
+      if(.not.parser%isolated)close(parser%fh_namelist)
     end if
 
     call comm_bcast(unit_system,nproc_group_global)
@@ -675,505 +748,95 @@ contains
 
     call initialize_inputoutput_units
 
-!! == default for &calculation
-    theory              = 'tddft'
-    yn_md               = 'n'
-    yn_opt              = 'n'
-    yn_dc               = 'n'
-    yn_conventional_from_dcdft = 'n'
-!! == default for &control
-    sysname               = 'default'
-    base_directory        = './'
-    yn_restart            = 'n'
-    directory_read_data   = 'restart/'
-    yn_self_checkpoint    = 'n'
-    checkpoint_interval   = -1
-    yn_reset_step_restart = 'n'
-    read_gs_restart_data  = 'all'
-    write_gs_restart_data = 'all'
-    time_shutdown         = -1d0
-    method_wf_distributor = 'single'
-    nblock_wf_distribute = 16
-    !remove later
-    write_gs_wfn_k   = 'n'
-    write_rt_wfn_k   = 'n'
-!! == default for &parallel
-    nproc_k              = 0
-    nproc_ob             = 0
-    nproc_rgrid          = 0
-    yn_ffte              = 'n'
-    yn_fftw              = 'n'
-    yn_scalapack         = 'n'
-    yn_gramschmidt_blas  = 'y'
-    yn_eigenexa          = 'n'
-    yn_diagonalization_red_mem = 'n'
-    yn_nccl_reduction    = 'n'
-    process_allocation   = 'grid_sequential'
-!! == default for &system
-    yn_periodic        = 'n'
-    spin               = 'unpolarized'
-    al                 = 0d0
-    al_vec1            = 0d0
-    al_vec2            = 0d0
-    al_vec3            = 0d0
-    nstate             = 0
-    nelec              = 0
-    nelec_spin (:)     = 0
-    temperature        = -1d0
-    temperature_k      = -1d0
-    nelem              = 0
-    natom              = 0
-    file_atom_coor     = 'none'
-    file_atom_red_coor = 'none'
-    yn_spinorbit       = 'n'
-    yn_symmetry        = 'n'
-    absorbing_boundary = 'none'
-    imagnary_potential_w0 = 0d0
-    imagnary_potential_dr = 0d0
-
-!! == default for &pseudo
-    file_pseudo = 'none'
-    lmax_ps     = -1
-    lloc_ps     = -1
-    izatom      = -1
-    yn_psmask   = 'n'
-    yn_pseudo_atomic_orbital = 'n'
-    alpha_mask  = 0.8d0
-    gamma_mask  = 1.8d0
-    eta_mask    = 15d0
-!! == default for &functional
-    xc    = 'none'
-    ! xcname = 'PZ'
-    xname = 'none'
-    cname = 'none'
-    hse_omega = .11d0 / ulength_from_au ! inverse input length
-    alibx = 'none'
-    alibc = 'none'
-    alibxc= 'none'
-    cval  = -1d0
-!! == default for &rgrid
-    dl        = 0d0
-    num_rgrid = 0
-!! == default for &kgrid
-    num_kgrid = 1
-    file_kw   = 'none'
-    dk_shift = 0d0
-    yn_gamma_centered = 'n'
-!! == default for &tgrid
-    nt = 0
-    dt = 0
-    gram_schmidt_interval = -1
-!! == default for &propagation
-    n_hamil     = 4
-    propagator  = '' ! resolved after functional and propagation input
-    yn_fix_func = 'n'
-    yn_predictor_corrector = '' ! functional-dependent default
-!! == default for &scf
-    method_init_wf = 'gauss'
-    iseed_number_change  =  0
-    method_min    = 'cg'
-    ncg           = 4
-    ncg_init      = 4
-    method_mixing = 'broyden'
-    mixrate       = 0.5d0
-    nmemory_mb    = 8
-    alpha_mb      = 0.75d0
-    nmemory_p     = 4
-    beta_p        = 0.75d0
-    yn_auto_mixing = 'n'
-    update_mixing_ratio = 3.d0
-    nscf          = 300
-    yn_subspace_diagonalization = 'y'
-    convergence   = 'rho_dne'
-    threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
-    nscf_init_redistribution = 10
-    nscf_init_no_diagonal= 10
-    nscf_init_mix_zero   = -1
-    conv_gap_mix_zero    = 99999d0*uenergy_from_au
-    method_init_density  = 'wf'
-    magdir_atom          = 0d0
-    yn_preconditioning   = 'n'
-    alpha_pre            = 0.6d0
-
-!! == default for &emfield
-    trans_longi    = 'tr'
-    ae_shape1      = 'none'
-    file_input1    = ''
-    e_impulse      = 1d-2*uenergy_from_au/ulength_from_au*utime_from_au ! a.u.
-    E_amplitude1   = 0d0
-    I_wcm2_1       = -1d0
-    tw1            = 0d0
-    omega1         = 0d0
-    epdir_re1      = (/1d0,0d0,0d0/)
-    epdir_im1      = 0d0
-    phi_cep1       = 0d0
-    ae_shape2      = 'none'
-    E_amplitude2   = 0d0
-    I_wcm2_2       = -1d0
-    tw2            = 0d0
-    omega2         = 0d0
-    epdir_re2      = (/1d0,0d0,0d0/)
-    epdir_im2      = 0d0
-    phi_cep2       = 0d0
-    t1_t2          = 0d0
-    t1_start       = 0d0
-    num_dipole_source  = 0
-    vec_dipole_source  = 0d0
-    cood_dipole_source = 0d0
-    rad_dipole_source  = 2d0 ! a.u.
-    
-!! == default for &singlescale
-    method_singlescale = '3d'
-    cutoff_G2_emfield  = -1d0
-    yn_symmetrized_stencil = 'n'
-    yn_put_wall_z_boundary = 'n'
-    wall_height        = 100.0d0 /au_energy_ev * uenergy_from_au !eV
-    wall_width         =   5.0d0 /au_length_aa * ulength_from_au !A
-
-!! == default for &multiscale
-    fdtddim    = '1d'
-    twod_shape = 'periodic'
-    nx_m       = 1
-    ny_m       = 1
-    nz_m       = 1
-    hx_m       = 0d0
-    hy_m       = 0d0
-    hz_m       = 0d0
-    nksplit    = 0
-    nxysplit   = 0
-    nxvacl_m     = 0
-    nxvacr_m     = 0
-    nxvac_m(1:2) = 0
-    nyvac_m(1:2) = 0
-    nzvac_m(1:2) = 0
-    nx_origin_m = 1
-    ny_origin_m = 1
-    nz_origin_m = 1
-    out_ms_region_ix_m(1) = -999999
-    out_ms_region_ix_m(2) = +999999
-    out_ms_region_iy_m(1) = -999999
-    out_ms_region_iy_m(2) = +999999
-    out_ms_region_iz_m(1) = -999999
-    out_ms_region_iz_m(2) = +999999
-    file_macropoint = ''
-    set_ini_coor_vel= 'n'
-    nmacro_write_group= -1
-    nmacro_chunk = 20
-    rmat_ms(1, 1:3) = (/ 1.0d0, 0.0d0, 0.0d0 /)
-    rmat_ms(2, 1:3) = (/ 0.0d0, 1.0d0, 0.0d0 /)
-    rmat_ms(3, 1:3) = (/ 0.0d0, 0.0d0, 1.0d0 /)
-
-!! == default for &maxwell
-    al_em(:)                    = 0d0
-    dl_em(:)                    = 0d0
-    num_rgrid_em(:)             = 0
-    at_em                       = 0d0
-    dt_em                       = 0d0
-    nt_em                       = 0
-    boundary_em(:,:)            = 'default'
-    shape_file                  = 'none'
-    media_num                   = 0
-    media_type(:)               = 'vacuum'
-    epsilon_em(:)               = 1d0
-    mu_em(:)                    = 1d0
-    sigma_em(:)                 = 0d0
-    pole_num_ld(:)              = 1
-    omega_p_ld(:)               = 0d0
-    f_ld(:,:)                   = 0d0
-    gamma_ld(:,:)               = 0d0
-    omega_ld(:,:)               = 0d0
-    wave_input                  = 'none'
-    ek_dir1(:)                  = 0d0
-    source_loc1(:)              = 0d0
-    gbeam_sigma_plane1(:)       =-1d0
-    gbeam_sigma_line1(:)        =-1d0
-    ek_dir2(:)                  = 0d0
-    source_loc2(:)              = 0d0
-    gbeam_sigma_plane2(:)       =-1d0
-    gbeam_sigma_line2(:)        =-1d0
-    obs_num_em                  = 0
-    obs_samp_em                 = 0
-    obs_loc_em(:,:)             = 0d0
-    obs_plane_ene_em(:,:)       = -1d0
-    yn_obs_plane_em(:)          = 'n'
-    yn_obs_plane_integral_em(:) = 'n'
-    yn_wf_em                    = 'y'
-    film_thickness              = 0d0
-    media_id_pml(:,:)           = 0
-    media_id_source1            = 0
-    media_id_source2            = 0
-    bloch_k_em(:)               = 0d0
-    bloch_real_imag_em(:)       = 'real'
-    ase_num_em                  = 0
-    ase_ene_min_em              = -1.0d0
-    ase_ene_max_em              = -1.0d0
-    ase_wav_min_em              = -1.0d0
-    ase_wav_max_em              = -1.0d0
-    ase_smedia_id_em            = 0
-    ase_box_cent_em(:)          = 0.0d0
-    ase_box_size_em(:)          = -1.0d0
-    art_num_em                  = 0
-    art_ene_min_em              = -1.0d0
-    art_ene_max_em              = -1.0d0
-    art_wav_min_em              = -1.0d0
-    art_wav_max_em              = -1.0d0
-    art_smedia_id_em            = 0
-    art_plane_bot_em(:)         = 0.0d0
-    art_plane_top_em(:)         = 0.0d0
-    yn_make_shape               = 'n'
-    yn_output_shape             = 'n'
-    yn_copy_x                   = 'n'
-    yn_copy_y                   = 'n'
-    yn_copy_z                   = 'n'
-    rot_type                    = 'radian'
-    n_s                         = 0
-    typ_s(:)                    = 'none'
-    id_s(:)                     = 0
-    inf_s(:,:)                  = 0d0
-    ori_s(:,:)                  = 0d0
-    rot_s(:,:)                  = 0d0
-    
-!! == default for &analysis
-    projection_option   = 'no'
-    out_projection_step = 100
-    threshold_projection = 1d-6
-    nenergy             = 1000
-    de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
-    out_rt_energy_step  = 10
-    yn_out_psi          = 'n'
-    yn_out_dos          = 'n'
-    yn_out_dos_set_fe_origin = 'n'
-    out_dos_start       = -1.d10 / au_energy_ev * uenergy_from_au
-    out_dos_end         = +1.d10 / au_energy_ev * uenergy_from_au
-    out_dos_nenergy     = 601
-    out_dos_width       = 0.1d0 / au_energy_ev * uenergy_from_au
-    out_dos_function    = 'gaussian'
-    yn_out_pdos         = 'n'
-    yn_out_dns          = 'n'
-    yn_out_dns_rt       = 'n'
-    yn_out_dns_ac_je    = 'n'
-    yn_out_micro_je     = 'n'
-    out_dns_rt_step     = 50
-    out_dns_ac_je_step  = 50
-    out_micro_je_step   = 50
-    out_old_dns         = 'n'
-    yn_out_dns_trans    = 'n'
-    out_dns_trans_energy= 1.55d0 / au_energy_ev * uenergy_from_au  ! eV
-
-    yn_out_elf          = 'n'
-    yn_out_elf_rt       = 'n'
-    out_elf_rt_step     = 50
-    yn_out_estatic_rt   = 'n'
-    out_estatic_rt_step = 50
-    yn_out_rvf_rt       = 'n'
-    out_rvf_rt_step     = 10
-    yn_out_tm           = 'n'
-    yn_out_tm_bin       = 'n'
-    yn_out_gs_sgm_eps   = 'n'
-    out_gs_sgm_eps_mu_nu(1) = 3
-    out_gs_sgm_eps_mu_nu(2) = 3
-    out_gs_sgm_eps_width    = 0.015d0/ au_energy_ev * uenergy_from_au
-    out_ms_step         = 100
-    format_voxel_data   = 'cube'
-    nsplit_voxel_data   = 1
-    yn_lr_w0_correction = 'n'
-    yn_out_intraband_current = 'n'
-    yn_out_current_decomposed = 'n'
-    out_current_decomposed_step = 100
-    out_rt_spin_step = 100
-    yn_out_mag_decomposed_rt = 'n'
-    yn_out_mag_micro_rt = 'n'
-    yn_out_spin_current_decomposed = 'n'
-    yn_out_spin_current_micro = 'n'
-    yn_out_rt_energy_components = 'n'
-
-    yn_out_perflog      = 'y'
-    format_perflog      = 'stdout'
-
-!! == default for &poisson
-    layout_multipole  = 3
-    num_multipole_xyz = 0
-    lmax_multipole    = 4
-    threshold_cg      = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
-    method_poisson    = 'cg'
-!! == default for &ewald
-    newald = 4
-    aewald = 0.5d0
-    cutoff_r = -1d0
-    cutoff_r_buff =  2.0d0
-    cutoff_g = -1d0
-!! == default for &opt
-    nopt                = 100
-    max_step_len_adjust =  -1d0 ![au] (no adjust if negative number)
-    convrg_opt_fmax     =  1d-3
-    method_opt          =  'bfgs'
-    step_steep          =  0.5d0
-    step_fire           =  4.134d0/utime_to_au  !=0.1[fs]
-!! == default for &md
-    ensemble              = 'nve'
-    thermostat            = 'nose-hoover'
-    step_velocity_scaling = -1
-    step_update_ps        = 10
-    temperature0_ion_k    = 298.15d0
-    yn_set_ini_velocity   = 'n'
-    file_ini_velocity     = 'none'
-    thermostat_tau        =  41.34d0/utime_to_au  !=1[fs]: test value
-    yn_stop_system_momt   = 'n'
-!! == default for &jellium
-    yn_jm                = 'n'
-    yn_charge_neutral_jm = 'y'
-    yn_output_dns_jm     = 'yf'
-    shape_file_jm        = 'none'
-    num_jm               = 0
-    rs_bohr_jm(:)        = 0d0
-    sphere_nion_jm(:)    = 0
-    sphere_loc_jm(:,:)   = 0d0
-!! == default for code
-    yn_want_stencil_hand_vectorization = 'y'
-    yn_want_communication_overlapping  = 'n'
-    stencil_openmp_mode = 'auto'
-    current_openmp_mode = 'auto'
-    force_openmp_mode   = 'auto'
-!! == default for &band
-    file_band_kpoints = 'none'
-    lattice =''
-    nref_band = 0
-    tol_esp_diff = 1.0d-5
-    num_of_segments = 0
-    ndiv_segment(:) = 0
-    kpt(:,:) = 0.0d0
-    kpt_label(:) = ''
-!! == default for &sbe
-    yn_vnl_correction = 'n'
-    num_sbe = 1
-    sysname_sbe(:) = 'default'
-    nk_sbe(:) = -1
-    nstate_sbe(:) = -1
-    nelec_sbe(:) = -1
-    al_sbe(:,:) = 0.d0
-    al_vec1_sbe(:,:) = 0.d0
-    al_vec2_sbe(:,:) = 0.d0
-    al_vec3_sbe(:,:) = 0.d0
-    norder_correction = 0
-    gauge_sbe = 'velocity_gauge'
-    t_2 = -1.d0
-    am_s = 4
-!! == default for &dc
-    num_fragment = 0
-    num_rgrid_buffer = 0
-    nproc_rgrid_tot = 1
-    file_atom_coor_frag = 'none'
-    yn_out_dc_fragment_coor = 'n'
-    xi_dc = -1d0
-    yn_dc_lcfo = 'y'
-    yn_dc_lcfo_diag = 'y'
-#ifdef USE_EIGENEXA
-    lcfo_eigensolver = 'eigenexa'
-#else
-    lcfo_eigensolver = 'lapack'
-#endif
-    lcfo_diag_chefsi_filter_degree = 60
-    lcfo_diag_chefsi_filter_chunk_size = 0
-    lcfo_diag_chefsi_max_cycle = 200
-    lcfo_diag_chefsi_residual_tolerance = 1d-7
-    nstate_frag = 0
-    energy_cut = 0d0
-    lambda_cut = 1d-3
-!! == default for &unfolding
-    dm_unfold_option = 'no'
-    num_lkgrid = 1
-    num_skgrid = 1
-    no_pr = 0
-    out_dm_unfold_step = 100
-    yn_out_mom_distr_gs = 'n'
-    yn_out_mom_distr_rt = 'n'
-    out_mom_distr_rt_step = 100
-    nq_mom = 0
-    dq_mom = 0.0d0
+    call initialize_parser_defaults(parser)
 
     if (comm_is_root(nproc_id_global)) then
-      fh_namelist = get_filehandle()
-      open(fh_namelist, file='.namelist.tmp', status='old')
+      if(.not.parser%isolated)parser%fh_namelist = get_filehandle()
+      if(parser%isolated)then
+        rewind(parser%fh_namelist)
+      else
+        open(parser%fh_namelist, file='.namelist.tmp', status='old')
+      endif
 
-      read(fh_namelist, nml=calculation, iostat=inml_calculation)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=calculation, iostat=parser%inml_calculation)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=control, iostat=inml_control)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=control, iostat=parser%inml_control)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=parallel, iostat=inml_parallel)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=parallel, iostat=parser%inml_parallel)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=system, iostat=inml_system)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=system, iostat=parser%inml_system)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=pseudo, iostat=inml_pseudo)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=pseudo, iostat=parser%inml_pseudo)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=functional, iostat=inml_functional)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=functional, iostat=parser%inml_functional)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=rgrid, iostat=inml_rgrid)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=rgrid, iostat=parser%inml_rgrid)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=kgrid, iostat=inml_kgrid)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=kgrid, iostat=parser%inml_kgrid)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=tgrid, iostat=inml_tgrid)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=tgrid, iostat=parser%inml_tgrid)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=propagation, iostat=inml_propagation)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=propagation, iostat=parser%inml_propagation)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=scf, iostat=inml_scf)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=scf, iostat=parser%inml_scf)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=emfield, iostat=inml_emfield)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=emfield, iostat=parser%inml_emfield)
+      rewind(parser%fh_namelist)
       
-      read(fh_namelist, nml=singlescale, iostat=inml_singlescale)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=singlescale, iostat=parser%inml_singlescale)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=multiscale, iostat=inml_multiscale)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=multiscale, iostat=parser%inml_multiscale)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=maxwell, iostat=inml_maxwell)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=maxwell, iostat=parser%inml_maxwell)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=analysis, iostat=inml_analysis)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=analysis, iostat=parser%inml_analysis)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=poisson, iostat=inml_poisson)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=poisson, iostat=parser%inml_poisson)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=ewald, iostat=inml_ewald)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=ewald, iostat=parser%inml_ewald)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=opt, iostat=inml_opt)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=opt, iostat=parser%inml_opt)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=md, iostat=inml_md)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=md, iostat=parser%inml_md)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=jellium, iostat=inml_jellium)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=jellium, iostat=parser%inml_jellium)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=code, iostat=inml_code)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=code, iostat=parser%inml_code)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=band, iostat=inml_band)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=band, iostat=parser%inml_band)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=sbe, iostat=inml_sbe)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=sbe, iostat=parser%inml_sbe)
+      rewind(parser%fh_namelist)
       
-      read(fh_namelist, nml=dc, iostat=inml_dc)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=dc, iostat=parser%inml_dc)
+      rewind(parser%fh_namelist)
 
-      read(fh_namelist, nml=unfolding, iostat=inml_unfolding)
-      rewind(fh_namelist)
+      read(parser%fh_namelist, nml=unfolding, iostat=parser%inml_unfolding)
+      rewind(parser%fh_namelist)
 
-      close(fh_namelist)
+      if(.not.parser%isolated)close(parser%fh_namelist)
     end if
 
 
@@ -1762,18 +1425,503 @@ contains
     call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
     call comm_bcast(nq_mom, nproc_group_global)
     call comm_bcast(dq_mom, nproc_group_global)
+
+    if(parser%isolated)then
+      call comm_bcast(parser%if_nml_coor,nproc_group_global)
+      call comm_bcast(parser%if_nml_red_coor,nproc_group_global)
+      call comm_bcast(parser%inml_calculation,nproc_group_global)
+      call comm_bcast(parser%inml_control,nproc_group_global)
+      call comm_bcast(parser%inml_units,nproc_group_global)
+      call comm_bcast(parser%inml_parallel,nproc_group_global)
+      call comm_bcast(parser%inml_system,nproc_group_global)
+      call comm_bcast(parser%inml_pseudo,nproc_group_global)
+      call comm_bcast(parser%inml_functional,nproc_group_global)
+      call comm_bcast(parser%inml_rgrid,nproc_group_global)
+      call comm_bcast(parser%inml_kgrid,nproc_group_global)
+      call comm_bcast(parser%inml_tgrid,nproc_group_global)
+      call comm_bcast(parser%inml_propagation,nproc_group_global)
+      call comm_bcast(parser%inml_scf,nproc_group_global)
+      call comm_bcast(parser%inml_emfield,nproc_group_global)
+      call comm_bcast(parser%inml_singlescale,nproc_group_global)
+      call comm_bcast(parser%inml_multiscale,nproc_group_global)
+      call comm_bcast(parser%inml_maxwell,nproc_group_global)
+      call comm_bcast(parser%inml_analysis,nproc_group_global)
+      call comm_bcast(parser%inml_poisson,nproc_group_global)
+      call comm_bcast(parser%inml_ewald,nproc_group_global)
+      call comm_bcast(parser%inml_opt,nproc_group_global)
+      call comm_bcast(parser%inml_md,nproc_group_global)
+      call comm_bcast(parser%inml_jellium,nproc_group_global)
+      call comm_bcast(parser%inml_code,nproc_group_global)
+      call comm_bcast(parser%inml_band,nproc_group_global)
+      call comm_bcast(parser%inml_sbe,nproc_group_global)
+      call comm_bcast(parser%inml_dc,nproc_group_global)
+      call comm_bcast(parser%inml_unfolding,nproc_group_global)
+    endif
   end subroutine read_input_common
 
-  subroutine read_atomic_coordinates
+  subroutine initialize_parser_defaults(parser)
+    implicit none
+    type(s_input_parser),intent(inout) :: parser
+    integer :: ii
+    if(parser%isolated)then
+      ! Parser views never borrow a preceding model's atom allocations.
+      if(allocated(Rion))deallocate(Rion)
+      if(allocated(Rion_red))deallocate(Rion_red)
+      if(allocated(kion))deallocate(kion)
+      if(allocated(flag_opt_atom))deallocate(flag_opt_atom)
+      if(allocated(atom_name))deallocate(atom_name)
+      iflag_atom_coor=ntype_atom_coor_none
+      iperiodic=0
+    endif
+!! == default for &calculation
+    theory              = 'tddft'
+    yn_md               = 'n'
+    yn_opt              = 'n'
+    yn_dc               = 'n'
+    yn_conventional_from_dcdft = 'n'
+!! == default for &control
+    sysname               = 'default'
+    base_directory        = './'
+    yn_restart            = 'n'
+    directory_read_data   = 'restart/'
+    yn_self_checkpoint    = 'n'
+    checkpoint_interval   = -1
+    yn_reset_step_restart = 'n'
+    read_gs_restart_data  = 'all'
+    write_gs_restart_data = 'all'
+    time_shutdown         = -1d0
+    method_wf_distributor = 'single'
+    nblock_wf_distribute = 16
+    !remove later
+    write_gs_wfn_k   = 'n'
+    write_rt_wfn_k   = 'n'
+!! == default for &parallel
+    nproc_k              = 0
+    nproc_ob             = 0
+    nproc_rgrid          = 0
+    yn_ffte              = 'n'
+    yn_fftw              = 'n'
+    yn_scalapack         = 'n'
+    yn_gramschmidt_blas  = 'y'
+    yn_eigenexa          = 'n'
+    yn_diagonalization_red_mem = 'n'
+    yn_nccl_reduction    = 'n'
+    process_allocation   = 'grid_sequential'
+!! == default for &system
+    yn_periodic        = 'n'
+    spin               = 'unpolarized'
+    al                 = 0d0
+    al_vec1            = 0d0
+    al_vec2            = 0d0
+    al_vec3            = 0d0
+    nstate             = 0
+    nelec              = 0
+    nelec_spin (:)     = 0
+    temperature        = -1d0
+    temperature_k      = -1d0
+    nelem              = 0
+    natom              = 0
+    file_atom_coor     = 'none'
+    file_atom_red_coor = 'none'
+    yn_spinorbit       = 'n'
+    yn_symmetry        = 'n'
+    absorbing_boundary = 'none'
+    imagnary_potential_w0 = 0d0
+    imagnary_potential_dr = 0d0
+
+!! == default for &pseudo
+    file_pseudo = 'none'
+    lmax_ps     = -1
+    lloc_ps     = -1
+    izatom      = -1
+    yn_psmask   = 'n'
+    yn_pseudo_atomic_orbital = 'n'
+    alpha_mask  = 0.8d0
+    gamma_mask  = 1.8d0
+    eta_mask    = 15d0
+!! == default for &functional
+    xc    = 'none'
+    ! xcname = 'PZ'
+    xname = 'none'
+    cname = 'none'
+    hse_omega = .11d0 / ulength_from_au ! inverse input length
+    alibx = 'none'
+    alibc = 'none'
+    alibxc= 'none'
+    cval  = -1d0
+!! == default for &rgrid
+    dl        = 0d0
+    num_rgrid = 0
+!! == default for &kgrid
+    num_kgrid = 1
+    file_kw   = 'none'
+    dk_shift = 0d0
+    yn_gamma_centered = 'n'
+!! == default for &tgrid
+    nt = 0
+    dt = 0
+    gram_schmidt_interval = -1
+!! == default for &propagation
+    n_hamil     = 4
+    propagator  = '' ! resolved after functional and propagation input
+    yn_fix_func = 'n'
+    yn_predictor_corrector = '' ! functional-dependent default
+!! == default for &scf
+    method_init_wf = 'gauss'
+    iseed_number_change  =  0
+    method_min    = 'cg'
+    ncg           = 4
+    ncg_init      = 4
+    method_mixing = 'broyden'
+    mixrate       = 0.5d0
+    nmemory_mb    = 8
+    alpha_mb      = 0.75d0
+    nmemory_p     = 4
+    beta_p        = 0.75d0
+    yn_auto_mixing = 'n'
+    update_mixing_ratio = 3.d0
+    nscf          = 300
+    yn_subspace_diagonalization = 'y'
+    convergence   = 'rho_dne'
+    threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
+    nscf_init_redistribution = 10
+    nscf_init_no_diagonal= 10
+    nscf_init_mix_zero   = -1
+    conv_gap_mix_zero    = 99999d0*uenergy_from_au
+    method_init_density  = 'wf'
+    magdir_atom          = 0d0
+    yn_preconditioning   = 'n'
+    alpha_pre            = 0.6d0
+
+!! == default for &emfield
+    trans_longi    = 'tr'
+    ae_shape1      = 'none'
+    file_input1    = ''
+    e_impulse      = 1d-2*uenergy_from_au/ulength_from_au*utime_from_au ! a.u.
+    E_amplitude1   = 0d0
+    I_wcm2_1       = -1d0
+    tw1            = 0d0
+    omega1         = 0d0
+    epdir_re1      = (/1d0,0d0,0d0/)
+    epdir_im1      = 0d0
+    phi_cep1       = 0d0
+    ae_shape2      = 'none'
+    E_amplitude2   = 0d0
+    I_wcm2_2       = -1d0
+    tw2            = 0d0
+    omega2         = 0d0
+    epdir_re2      = (/1d0,0d0,0d0/)
+    epdir_im2      = 0d0
+    phi_cep2       = 0d0
+    t1_t2          = 0d0
+    t1_start       = 0d0
+    num_dipole_source  = 0
+    vec_dipole_source  = 0d0
+    cood_dipole_source = 0d0
+    rad_dipole_source  = 2d0 ! a.u.
+
+!! == default for &singlescale
+    method_singlescale = '3d'
+    cutoff_G2_emfield  = -1d0
+    yn_symmetrized_stencil = 'n'
+    yn_put_wall_z_boundary = 'n'
+    wall_height        = 100.0d0 /au_energy_ev * uenergy_from_au !eV
+    wall_width         =   5.0d0 /au_length_aa * ulength_from_au !A
+
+!! == default for &multiscale
+    fdtddim    = '1d'
+    twod_shape = 'periodic'
+    nx_m       = 1
+    ny_m       = 1
+    nz_m       = 1
+    hx_m       = 0d0
+    hy_m       = 0d0
+    hz_m       = 0d0
+    nksplit    = 0
+    nxysplit   = 0
+    nxvacl_m     = 0
+    nxvacr_m     = 0
+    nxvac_m(1:2) = 0
+    nyvac_m(1:2) = 0
+    nzvac_m(1:2) = 0
+    nx_origin_m = 1
+    ny_origin_m = 1
+    nz_origin_m = 1
+    out_ms_region_ix_m(1) = -999999
+    out_ms_region_ix_m(2) = +999999
+    out_ms_region_iy_m(1) = -999999
+    out_ms_region_iy_m(2) = +999999
+    out_ms_region_iz_m(1) = -999999
+    out_ms_region_iz_m(2) = +999999
+    file_macropoint = ''
+    set_ini_coor_vel= 'n'
+    nmacro_write_group= -1
+    nmacro_chunk = 20
+    rmat_ms(1, 1:3) = (/ 1.0d0, 0.0d0, 0.0d0 /)
+    rmat_ms(2, 1:3) = (/ 0.0d0, 1.0d0, 0.0d0 /)
+    rmat_ms(3, 1:3) = (/ 0.0d0, 0.0d0, 1.0d0 /)
+
+!! == default for &maxwell
+    al_em(:)                    = 0d0
+    dl_em(:)                    = 0d0
+    num_rgrid_em(:)             = 0
+    at_em                       = 0d0
+    dt_em                       = 0d0
+    nt_em                       = 0
+    boundary_em(:,:)            = 'default'
+    shape_file                  = 'none'
+    media_num                   = 0
+    media_type(:)               = 'vacuum'
+    epsilon_em(:)               = 1d0
+    mu_em(:)                    = 1d0
+    sigma_em(:)                 = 0d0
+    pole_num_ld(:)              = 1
+    omega_p_ld(:)               = 0d0
+    f_ld(:,:)                   = 0d0
+    gamma_ld(:,:)               = 0d0
+    omega_ld(:,:)               = 0d0
+    wave_input                  = 'none'
+    ek_dir1(:)                  = 0d0
+    source_loc1(:)              = 0d0
+    gbeam_sigma_plane1(:)       =-1d0
+    gbeam_sigma_line1(:)        =-1d0
+    ek_dir2(:)                  = 0d0
+    source_loc2(:)              = 0d0
+    gbeam_sigma_plane2(:)       =-1d0
+    gbeam_sigma_line2(:)        =-1d0
+    obs_num_em                  = 0
+    obs_samp_em                 = 0
+    obs_loc_em(:,:)             = 0d0
+    obs_plane_ene_em(:,:)       = -1d0
+    yn_obs_plane_em(:)          = 'n'
+    yn_obs_plane_integral_em(:) = 'n'
+    yn_wf_em                    = 'y'
+    film_thickness              = 0d0
+    media_id_pml(:,:)           = 0
+    media_id_source1            = 0
+    media_id_source2            = 0
+    bloch_k_em(:)               = 0d0
+    bloch_real_imag_em(:)       = 'real'
+    ase_num_em                  = 0
+    ase_ene_min_em              = -1.0d0
+    ase_ene_max_em              = -1.0d0
+    ase_wav_min_em              = -1.0d0
+    ase_wav_max_em              = -1.0d0
+    ase_smedia_id_em            = 0
+    ase_box_cent_em(:)          = 0.0d0
+    ase_box_size_em(:)          = -1.0d0
+    art_num_em                  = 0
+    art_ene_min_em              = -1.0d0
+    art_ene_max_em              = -1.0d0
+    art_wav_min_em              = -1.0d0
+    art_wav_max_em              = -1.0d0
+    art_smedia_id_em            = 0
+    art_plane_bot_em(:)         = 0.0d0
+    art_plane_top_em(:)         = 0.0d0
+    yn_make_shape               = 'n'
+    yn_output_shape             = 'n'
+    yn_copy_x                   = 'n'
+    yn_copy_y                   = 'n'
+    yn_copy_z                   = 'n'
+    rot_type                    = 'radian'
+    n_s                         = 0
+    typ_s(:)                    = 'none'
+    id_s(:)                     = 0
+    inf_s(:,:)                  = 0d0
+    ori_s(:,:)                  = 0d0
+    rot_s(:,:)                  = 0d0
+
+!! == default for &analysis
+    projection_option   = 'no'
+    out_projection_step = 100
+    threshold_projection = 1d-6
+    nenergy             = 1000
+    de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
+    out_rt_energy_step  = 10
+    yn_out_psi          = 'n'
+    yn_out_dos          = 'n'
+    yn_out_dos_set_fe_origin = 'n'
+    out_dos_start       = -1.d10 / au_energy_ev * uenergy_from_au
+    out_dos_end         = +1.d10 / au_energy_ev * uenergy_from_au
+    out_dos_nenergy     = 601
+    out_dos_width       = 0.1d0 / au_energy_ev * uenergy_from_au
+    out_dos_function    = 'gaussian'
+    yn_out_pdos         = 'n'
+    yn_out_dns          = 'n'
+    yn_out_dns_rt       = 'n'
+    yn_out_dns_ac_je    = 'n'
+    yn_out_micro_je     = 'n'
+    out_dns_rt_step     = 50
+    out_dns_ac_je_step  = 50
+    out_micro_je_step   = 50
+    out_old_dns         = 'n'
+    yn_out_dns_trans    = 'n'
+    out_dns_trans_energy= 1.55d0 / au_energy_ev * uenergy_from_au  ! eV
+
+    yn_out_elf          = 'n'
+    yn_out_elf_rt       = 'n'
+    out_elf_rt_step     = 50
+    yn_out_estatic_rt   = 'n'
+    out_estatic_rt_step = 50
+    yn_out_rvf_rt       = 'n'
+    out_rvf_rt_step     = 10
+    yn_out_tm           = 'n'
+    yn_out_tm_bin       = 'n'
+    yn_out_gs_sgm_eps   = 'n'
+    out_gs_sgm_eps_mu_nu(1) = 3
+    out_gs_sgm_eps_mu_nu(2) = 3
+    out_gs_sgm_eps_width    = 0.015d0/ au_energy_ev * uenergy_from_au
+    out_ms_step         = 100
+    format_voxel_data   = 'cube'
+    nsplit_voxel_data   = 1
+    yn_lr_w0_correction = 'n'
+    yn_out_intraband_current = 'n'
+    yn_out_current_decomposed = 'n'
+    out_current_decomposed_step = 100
+    out_rt_spin_step = 100
+    yn_out_mag_decomposed_rt = 'n'
+    yn_out_mag_micro_rt = 'n'
+    yn_out_spin_current_decomposed = 'n'
+    yn_out_spin_current_micro = 'n'
+    yn_out_rt_energy_components = 'n'
+
+    yn_out_perflog      = 'y'
+    format_perflog      = 'stdout'
+
+!! == default for &poisson
+    layout_multipole  = 3
+    num_multipole_xyz = 0
+    lmax_multipole    = 4
+    threshold_cg      = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
+    method_poisson    = 'cg'
+!! == default for &ewald
+    newald = 4
+    aewald = 0.5d0
+    cutoff_r = -1d0
+    cutoff_r_buff =  2.0d0
+    cutoff_g = -1d0
+!! == default for &opt
+    nopt                = 100
+    max_step_len_adjust =  -1d0 ![au] (no adjust if negative number)
+    convrg_opt_fmax     =  1d-3
+    method_opt          =  'bfgs'
+    step_steep          =  0.5d0
+    step_fire           =  4.134d0/utime_to_au  !=0.1[fs]
+!! == default for &md
+    ensemble              = 'nve'
+    thermostat            = 'nose-hoover'
+    step_velocity_scaling = -1
+    step_update_ps        = 10
+    temperature0_ion_k    = 298.15d0
+    yn_set_ini_velocity   = 'n'
+    file_ini_velocity     = 'none'
+    thermostat_tau        =  41.34d0/utime_to_au  !=1[fs]: test value
+    yn_stop_system_momt   = 'n'
+!! == default for &jellium
+    yn_jm                = 'n'
+    yn_charge_neutral_jm = 'y'
+    yn_output_dns_jm     = 'yf'
+    shape_file_jm        = 'none'
+    num_jm               = 0
+    rs_bohr_jm(:)        = 0d0
+    sphere_nion_jm(:)    = 0
+    sphere_loc_jm(:,:)   = 0d0
+!! == default for code
+    yn_want_stencil_hand_vectorization = 'y'
+    yn_want_communication_overlapping  = 'n'
+    stencil_openmp_mode = 'auto'
+    current_openmp_mode = 'auto'
+    force_openmp_mode   = 'auto'
+!! == default for &band
+    file_band_kpoints = 'none'
+    lattice =''
+    nref_band = 0
+    tol_esp_diff = 1.0d-5
+    num_of_segments = 0
+    ndiv_segment(:) = 0
+    kpt(:,:) = 0.0d0
+    kpt_label(:) = ''
+!! == default for &sbe
+    yn_vnl_correction = 'n'
+    num_sbe = 1
+    sysname_sbe(:) = 'default'
+    nk_sbe(:) = -1
+    nstate_sbe(:) = -1
+    nelec_sbe(:) = -1
+    al_sbe(:,:) = 0.d0
+    al_vec1_sbe(:,:) = 0.d0
+    al_vec2_sbe(:,:) = 0.d0
+    al_vec3_sbe(:,:) = 0.d0
+    norder_correction = 0
+    gauge_sbe = 'velocity_gauge'
+    t_2 = -1.d0
+    am_s = 4
+!! == default for &dc
+    num_fragment = 0
+    num_rgrid_buffer = 0
+    nproc_rgrid_tot = 1
+    file_atom_coor_frag = 'none'
+    yn_out_dc_fragment_coor = 'n'
+    xi_dc = -1d0
+    yn_dc_lcfo = 'y'
+    yn_dc_lcfo_diag = 'y'
+#ifdef USE_EIGENEXA
+    lcfo_eigensolver = 'eigenexa'
+#else
+    lcfo_eigensolver = 'lapack'
+#endif
+    lcfo_diag_chefsi_filter_degree = 60
+    lcfo_diag_chefsi_filter_chunk_size = 0
+    lcfo_diag_chefsi_max_cycle = 200
+    lcfo_diag_chefsi_residual_tolerance = 1d-7
+    nstate_frag = 0
+    energy_cut = 0d0
+    lambda_cut = 1d-3
+!! == default for &unfolding
+    dm_unfold_option = 'no'
+    num_lkgrid = 1
+    num_skgrid = 1
+    no_pr = 0
+    out_dm_unfold_step = 100
+    yn_out_mom_distr_gs = 'n'
+    yn_out_mom_distr_rt = 'n'
+    out_mom_distr_rt_step = 100
+    nq_mom = 0
+    dq_mom = 0.0d0
+
+    if(parser%isolated)call parser%defaults%capture()
+  end subroutine initialize_parser_defaults
+
+  subroutine close_parser_workspace(parser)
+    implicit none
+    type(s_input_parser),intent(inout) :: parser
+    integer :: units(4),i
+    logical :: opened
+    if(.not.parser%isolated)return
+    units=[parser%fh_namelist,parser%fh_atomic_coor,parser%fh_atomic_red_coor,parser%fh_reentrance]
+    do i=1,size(units)
+      if(units(i)==0)cycle
+      inquire(unit=units(i),opened=opened)
+      if(opened)close(units(i))
+    enddo
+    parser%fh_namelist=0;parser%fh_atomic_coor=0
+    parser%fh_atomic_red_coor=0;parser%fh_reentrance=0
+    parser%fh_variables_log=0
+  end subroutine close_parser_workspace
+
+  subroutine read_atomic_coordinates(parser)
     use parallelization
     use communication
     use filesystem, only: get_filehandle
     use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
     use checkpoint_restart_sub, only: generate_restart_directory_name
     character(256) :: filename_tmp,char_atom, gdir,wdir
-    integer :: icount,i
+    type(s_input_parser),intent(inout) :: parser
+    integer :: icount,i,coordinate_unit
+    logical :: scratch_coordinates
     logical :: if_error, if_cartesian, iself
 
+    scratch_coordinates=.false.
     if (comm_is_root(nproc_id_global)) then
 
       if_error     = .false.
@@ -1794,17 +1942,23 @@ contains
         iflag_atom_coor = ntype_atom_coor_reduced
       end if
 
-      if(if_nml_coor)then
+      if(parser%if_nml_coor)then
         icount = icount + 1
         if_cartesian = .true.
         filename_tmp = '.atomic_coor.tmp'
+        if(parser%isolated)then
+          coordinate_unit=parser%fh_atomic_coor;scratch_coordinates=.true.
+        endif
         iflag_atom_coor = ntype_atom_coor_cartesian
       end if
 
-      if(if_nml_red_coor)then
+      if(parser%if_nml_red_coor)then
         icount = icount + 1
         if_cartesian = .false.
         filename_tmp = '.atomic_red_coor.tmp'
+        if(parser%isolated)then
+          coordinate_unit=parser%fh_atomic_red_coor;scratch_coordinates=.true.
+        endif
         iflag_atom_coor = ntype_atom_coor_reduced
       end if
 
@@ -1844,8 +1998,8 @@ contains
          write(*,"(A)") 'Remove the following input(s); atomic coordinates are read from the restart data:'
          if(file_atom_coor /= 'none') write(*,"(A)") '  file_atom_coor'
          if(file_atom_red_coor /= 'none') write(*,"(A)") '  file_atom_red_coor'
-         if(if_nml_coor) write(*,"(A)") '  &atomic_coor'
-         if(if_nml_red_coor) write(*,"(A)") '  &atomic_red_coor'
+         if(parser%if_nml_coor) write(*,"(A)") '  &atomic_coor'
+         if(parser%if_nml_red_coor) write(*,"(A)") '  &atomic_red_coor'
        end if
        call end_parallel
        stop
@@ -1878,15 +2032,19 @@ contains
     if (0 < natom .and. yn_jm == 'n') then
 
       if (comm_is_root(nproc_id_global))then
-        fh_atomic_coor = get_filehandle()
-        open(fh_atomic_coor, file=filename_tmp, status='old')
+        if(scratch_coordinates)then
+          rewind(coordinate_unit)
+        else
+          coordinate_unit = get_filehandle()
+          open(coordinate_unit, file=filename_tmp, status='old')
+        endif
         select case(iflag_atom_coor)
         case(ntype_atom_coor_cartesian)
            do i=1,natom
               if(yn_opt == 'y')then
-                 read(fh_atomic_coor, *) char_atom, Rion(:,i), kion(i), flag_opt_atom(i)
+                 read(coordinate_unit, *) char_atom, Rion(:,i), kion(i), flag_opt_atom(i)
               else
-                 read(fh_atomic_coor, *) char_atom, Rion(:,i), kion(i)
+                 read(coordinate_unit, *) char_atom, Rion(:,i), kion(i)
               end if
               atom_name(i) = char_atom
            end do
@@ -1895,15 +2053,15 @@ contains
         case(ntype_atom_coor_reduced)
            do i=1,natom
               if(yn_opt == 'y')then
-                 read(fh_atomic_coor, *) char_atom, Rion_red(:,i), kion(i), flag_opt_atom(i)
+                 read(coordinate_unit, *) char_atom, Rion_red(:,i), kion(i), flag_opt_atom(i)
               else
-                 read(fh_atomic_coor, *) char_atom, Rion_red(:,i), kion(i)
+                 read(coordinate_unit, *) char_atom, Rion_red(:,i), kion(i)
               end if
               atom_name(i) = char_atom
            end do
 
         end select
-        close(fh_atomic_coor)
+        if(.not.scratch_coordinates)close(coordinate_unit)
 
       end if
 
@@ -2145,637 +2303,639 @@ contains
 
   end subroutine initialize_inputoutput_units
 
-  subroutine dump_input_common
+  subroutine dump_input_common(parser)
     use parallelization
     use communication
     use filesystem, only: get_filehandle
     use filesystem, only: atomic_create_directory
     implicit none
+    type(s_input_parser),intent(inout) :: parser
     integer :: i,j,ierr_nml
     ierr_nml = 0
 
     if (comm_is_root(nproc_id_global)) then
 
-      fh_variables_log = get_filehandle()
-      open(fh_variables_log,file='variables.log')
+      parser%fh_variables_log = get_filehandle()
+      open(parser%fh_variables_log,file=trim(parser%log_path))
 
-      if(inml_calculation >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'calculation', inml_calculation
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'theory', theory
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_md', yn_md
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_opt', yn_opt
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dc', yn_dc
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_conventional_from_dcdft', yn_conventional_from_dcdft
+      if(parser%inml_calculation >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'calculation', parser%inml_calculation
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'theory', theory
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_md', yn_md
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_opt', yn_opt
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_dc', yn_dc
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_conventional_from_dcdft', yn_conventional_from_dcdft
 
-      if(inml_control >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'control', inml_control
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'sysname', trim(sysname)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'base_directory', trim(base_directory)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_restart', yn_restart
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'checkpoint_interval', checkpoint_interval
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_reset_step_restart', yn_reset_step_restart
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_restart_data', trim(read_gs_restart_data)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_restart_data', trim(write_gs_restart_data)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_wf_distributor', method_wf_distributor
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
-
-
-      if(inml_units >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'units', inml_units
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'unit_system', unit_system
-
-      if(inml_parallel >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'parallel', inml_parallel
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_k', nproc_k
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_ob', nproc_ob
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(1)', nproc_rgrid(1)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fftw', yn_fftw
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gramschmidt_blas', yn_gramschmidt_blas
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_diagonalization_red_mem', yn_diagonalization_red_mem
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_nccl_reduction', yn_nccl_reduction
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
-
-      if(inml_system >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'system', inml_system
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_periodic', yn_periodic
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'spin', spin
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(1)', al(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(2)', al(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(3)', al(3)
-      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec1(1:3)', al_vec1(1:3)
-      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec2(1:3)', al_vec2(1:3)
-      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec3(1:3)', al_vec3(1:3)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nstate', nstate
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nelec', nelec
-      write(fh_variables_log, '("#",4X,A,"=",I4,2x,I4)') 'nelec_spin(1:2)', nelec_spin
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature', temperature
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature_k', temperature_k
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nelem', nelem
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'natom', natom
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_coor', trim(file_atom_coor)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
-
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'absorbing_boundary', trim(absorbing_boundary)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_w0', imagnary_potential_w0
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_dr', imagnary_potential_dr
+      if(parser%inml_control >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'control', parser%inml_control
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'sysname', trim(sysname)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'base_directory', trim(base_directory)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_restart', yn_restart
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'checkpoint_interval', checkpoint_interval
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_reset_step_restart', yn_reset_step_restart
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_restart_data', trim(read_gs_restart_data)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_restart_data', trim(write_gs_restart_data)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_wf_distributor', method_wf_distributor
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
 
 
+      if(parser%inml_units >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'units', parser%inml_units
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'unit_system', unit_system
 
-      if(inml_pseudo >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', inml_pseudo
+      if(parser%inml_parallel >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'parallel', parser%inml_parallel
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_k', nproc_k
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_ob', nproc_ob
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(1)', nproc_rgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_fftw', yn_fftw
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_gramschmidt_blas', yn_gramschmidt_blas
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_diagonalization_red_mem', yn_diagonalization_red_mem
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_nccl_reduction', yn_nccl_reduction
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
+
+      if(parser%inml_system >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'system', parser%inml_system
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_periodic', yn_periodic
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'spin', spin
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(1)', al(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(2)', al(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(3)', al(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec1(1:3)', al_vec1(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec2(1:3)', al_vec2(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec3(1:3)', al_vec3(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nstate', nstate
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nelec', nelec
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4,2x,I4)') 'nelec_spin(1:2)', nelec_spin
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature', temperature
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature_k', temperature_k
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nelem', nelem
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'natom', natom
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_coor', trim(file_atom_coor)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
+
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'absorbing_boundary', trim(absorbing_boundary)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_w0', imagnary_potential_w0
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_dr', imagnary_potential_dr
+
+
+
+      if(parser%inml_pseudo >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', parser%inml_pseudo
 
       do i = 1,nelem
-        write(fh_variables_log, '("#",4X,A,I2,A,"=",A)') 'file_pseudo(',i,')', trim(file_pseudo(i))
-        write(fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'lmax_ps(',i,')', lmax_ps(i)
-        write(fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'lloc_ps(',i,')', lloc_ps(i)
-        write(fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'izatom(',i,')', izatom(i)
+        write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",A)') 'file_pseudo(',i,')', trim(file_pseudo(i))
+        write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'lmax_ps(',i,')', lmax_ps(i)
+        write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'lloc_ps(',i,')', lloc_ps(i)
+        write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'izatom(',i,')', izatom(i)
       end do
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_psmask', yn_psmask
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_pseudo_atomic_orbital', yn_pseudo_atomic_orbital
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mask', alpha_mask
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gamma_mask', gamma_mask
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_mask', eta_mask
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_psmask', yn_psmask
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_pseudo_atomic_orbital', yn_pseudo_atomic_orbital
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mask', alpha_mask
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gamma_mask', gamma_mask
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_mask', eta_mask
 
-      if(inml_functional >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'functional', inml_functional
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'xc', trim(xc)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
-      write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
+      if(parser%inml_functional >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'functional', parser%inml_functional
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'xc', trim(xc)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
+      write(parser%fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
 #ifdef USE_LIBXC
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'alibc', trim(alibc)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'alibc', trim(alibc)
 #endif
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cval', cval
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cval', cval
 
-      if(inml_rgrid >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'rgrid', inml_rgrid
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(1)', dl(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(2)', dl(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(3)', dl(3)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_rgrid(1)', num_rgrid(1)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_rgrid(2)', num_rgrid(2)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_rgrid(3)', num_rgrid(3)
+      if(parser%inml_rgrid >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'rgrid', parser%inml_rgrid
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(1)', dl(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(2)', dl(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(3)', dl(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_rgrid(1)', num_rgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_rgrid(2)', num_rgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_rgrid(3)', num_rgrid(3)
 
-      if(inml_kgrid >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'kgrid', inml_kgrid
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(1)', num_kgrid(1)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(2)', num_kgrid(2)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(3)', num_kgrid(3)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_kw', trim(file_kw)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(1)', dk_shift(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(2)', dk_shift(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(3)', dk_shift(3)
-      write(fh_variables_log, '("#",4x,A,"=",A)') 'yn_gamma_centered', yn_gamma_centered
+      if(parser%inml_kgrid >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'kgrid', parser%inml_kgrid
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(1)', num_kgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(2)', num_kgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(3)', num_kgrid(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_kw', trim(file_kw)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(1)', dk_shift(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(2)', dk_shift(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(3)', dk_shift(3)
+      write(parser%fh_variables_log, '("#",4x,A,"=",A)') 'yn_gamma_centered', yn_gamma_centered
 
-      if(inml_tgrid >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'tgrid', inml_tgrid
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nt', nt
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt', dt
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'gram_schmidt_interval', gram_schmidt_interval
+      if(parser%inml_tgrid >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'tgrid', parser%inml_tgrid
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'nt', nt
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt', dt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'gram_schmidt_interval', gram_schmidt_interval
 
-      if(inml_propagation >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'propagation', inml_propagation
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'n_hamil', n_hamil
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
+      if(parser%inml_propagation >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'propagation', parser%inml_propagation
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'n_hamil', n_hamil
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
 
-      if(inml_scf >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_init_wf', method_init_wf
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'iseed_number_change', iseed_number_change
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_min', method_min
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_init', ncg_init
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_mixing', method_mixing
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'mixrate', mixrate
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_mb', nmemory_mb
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mb', alpha_mb
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_p', nmemory_p
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'beta_p', beta_p
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_redistribution', nscf_init_redistribution
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_no_diagonal', nscf_init_no_diagonal
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_init_density', method_init_density
+      if(parser%inml_scf >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', parser%inml_scf
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_init_wf', method_init_wf
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'iseed_number_change', iseed_number_change
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_min', method_min
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_init', ncg_init
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_mixing', method_mixing
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'mixrate', mixrate
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_mb', nmemory_mb
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mb', alpha_mb
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_p', nmemory_p
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'beta_p', beta_p
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_redistribution', nscf_init_redistribution
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_no_diagonal', nscf_init_no_diagonal
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_init_density', method_init_density
       if(method_init_density == 'pp_magdir') then
-        write(fh_variables_log, '("#",4X,A,"=",99ES12.5)') 'magdir_atom', magdir_atom(1:min(natom,99))
+        write(parser%fh_variables_log, '("#",4X,A,"=",99ES12.5)') 'magdir_atom', magdir_atom(1:min(natom,99))
       end if
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_preconditioning', yn_preconditioning
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_pre', alpha_pre
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_preconditioning', yn_preconditioning
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_pre', alpha_pre
 
-      if(inml_emfield >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', inml_emfield
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'trans_longi', trans_longi
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape1', ae_shape1
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_input1', trim(file_input1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'e_impulse', e_impulse
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude1', E_amplitude1
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_1', I_wcm2_1
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tw1', tw1
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega1', omega1
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(1)', epdir_re1(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(2)', epdir_re1(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(3)', epdir_re1(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(1)', epdir_im1(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(2)', epdir_im1(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(3)', epdir_im1(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep1', phi_cep1
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape2', ae_shape2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude2', E_amplitude2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_2', I_wcm2_2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tw2', tw2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega2', omega2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(1)', epdir_re2(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(2)', epdir_re2(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(3)', epdir_re2(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(1)', epdir_im2(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(2)', epdir_im2(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(3)', epdir_im2(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep2', phi_cep2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_t2', t1_t2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_start', t1_start
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_dipole_source', num_dipole_source
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,1)', vec_dipole_source(1,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,1)', vec_dipole_source(2,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(3,1)', vec_dipole_source(3,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,2)', vec_dipole_source(1,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,2)', vec_dipole_source(2,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(3,2)', vec_dipole_source(3,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(1,1)', cood_dipole_source(1,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,1)', cood_dipole_source(2,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,1)', cood_dipole_source(3,1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(1,2)', cood_dipole_source(1,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,2)', cood_dipole_source(2,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,2)', cood_dipole_source(3,2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rad_dipole_source', rad_dipole_source
+      if(parser%inml_emfield >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', parser%inml_emfield
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'trans_longi', trans_longi
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape1', ae_shape1
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_input1', trim(file_input1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'e_impulse', e_impulse
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude1', E_amplitude1
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_1', I_wcm2_1
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tw1', tw1
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega1', omega1
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(1)', epdir_re1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(2)', epdir_re1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(3)', epdir_re1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(1)', epdir_im1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(2)', epdir_im1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(3)', epdir_im1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep1', phi_cep1
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape2', ae_shape2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude2', E_amplitude2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_2', I_wcm2_2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tw2', tw2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega2', omega2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(1)', epdir_re2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(2)', epdir_re2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(3)', epdir_re2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(1)', epdir_im2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(2)', epdir_im2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(3)', epdir_im2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep2', phi_cep2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_t2', t1_t2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_start', t1_start
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_dipole_source', num_dipole_source
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,1)', vec_dipole_source(1,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,1)', vec_dipole_source(2,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(3,1)', vec_dipole_source(3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,2)', vec_dipole_source(1,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,2)', vec_dipole_source(2,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(3,2)', vec_dipole_source(3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(1,1)', cood_dipole_source(1,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,1)', cood_dipole_source(2,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,1)', cood_dipole_source(3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(1,2)', cood_dipole_source(1,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,2)', cood_dipole_source(2,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,2)', cood_dipole_source(3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rad_dipole_source', rad_dipole_source
       
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'singlescale', inml_singlescale
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_singlescale', method_singlescale
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_G2_emfield', cutoff_G2_emfield
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetrized_stencil', yn_symmetrized_stencil
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_put_wall_z_boundary', yn_put_wall_z_boundary
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_height', wall_height
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_width', wall_width
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'singlescale', parser%inml_singlescale
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_singlescale', method_singlescale
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_G2_emfield', cutoff_G2_emfield
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetrized_stencil', yn_symmetrized_stencil
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_put_wall_z_boundary', yn_put_wall_z_boundary
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_height', wall_height
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_width', wall_width
 
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'twod_shape', twod_shape
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nx_m', nx_m
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'ny_m', ny_m
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nz_m', nz_m
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hx_m', hx_m
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hy_m', hy_m
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hz_m', hz_m
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nksplit', nksplit
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nxysplit', nxysplit
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacl_m', nxvacl_m
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacr_m', nxvacr_m
-      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'nxvac_m', nxvac_m(1:2)
-      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'nyvac_m', nyvac_m(1:2)
-      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'nzvac_m', nzvac_m(1:2)
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nx_origin_m', nx_origin_m
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m
-      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_ix_m', out_ms_region_ix_m(1:2)
-      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iy_m', out_ms_region_iy_m(1:2)
-      write(fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iz_m', out_ms_region_iz_m(1:2)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
-      write(fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
-      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,1)', rmat_ms(1:3,1)
-      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,2)', rmat_ms(1:3,2)
-      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,3)', rmat_ms(1:3,3)
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', parser%inml_multiscale
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'twod_shape', twod_shape
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nx_m', nx_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'ny_m', ny_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nz_m', nz_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hx_m', hx_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hy_m', hy_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hz_m', hz_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nksplit', nksplit
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nxysplit', nxysplit
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacl_m', nxvacl_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacr_m', nxvacr_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'nxvac_m', nxvac_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'nyvac_m', nyvac_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'nzvac_m', nzvac_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nx_origin_m', nx_origin_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_ix_m', out_ms_region_ix_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iy_m', out_ms_region_iy_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iz_m', out_ms_region_iz_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,1)', rmat_ms(1:3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,2)', rmat_ms(1:3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,3)', rmat_ms(1:3,3)
 
-      if(inml_maxwell >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'maxwell', inml_maxwell
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(1)', al_em(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(2)', al_em(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(3)', al_em(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(1)', dl_em(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(2)', dl_em(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(3)', dl_em(3)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(1)', num_rgrid_em(1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(2)', num_rgrid_em(2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(3)', num_rgrid_em(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'at_em', at_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt_em', dt_em
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'nt_em', nt_em
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,1)', boundary_em(1,1)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,2)', boundary_em(1,2)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(2,1)', boundary_em(2,1)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(2,2)', boundary_em(2,2)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,1)', boundary_em(3,1)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,2)', boundary_em(3,2)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'shape_file', trim(shape_file)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_num', media_num
+      if(parser%inml_maxwell >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'maxwell', parser%inml_maxwell
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(1)', al_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(2)', al_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(3)', al_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(1)', dl_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(2)', dl_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(3)', dl_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(1)', num_rgrid_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(2)', num_rgrid_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(3)', num_rgrid_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'at_em', at_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt_em', dt_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'nt_em', nt_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,1)', boundary_em(1,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,2)', boundary_em(1,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(2,1)', boundary_em(2,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(2,2)', boundary_em(2,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,1)', boundary_em(3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,2)', boundary_em(3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'shape_file', trim(shape_file)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_num', media_num
       do i = 0,media_num
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')      'media_type(',i,')', media_type(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'epsilon_em(',i,')', epsilon_em(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'mu_em(',i,')', mu_em(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'sigma_em(',i,')', sigma_em(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')     'pole_num_ld(',i,')', pole_num_ld(i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'omega_p_ld(',i,')', omega_p_ld(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)')      'media_type(',i,')', media_type(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'epsilon_em(',i,')', epsilon_em(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'mu_em(',i,')', mu_em(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'sigma_em(',i,')', sigma_em(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)')     'pole_num_ld(',i,')', pole_num_ld(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'omega_p_ld(',i,')', omega_p_ld(i)
         do j = 1,pole_num_ld(i)
-          write(fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'f_ld(',i,',',j,')', f_ld(i,j)
-          write(fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'gamma_ld(',i,',',j,')', gamma_ld(i,j)
-          write(fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'omega_ld(',i,',',j,')', omega_ld(i,j)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'f_ld(',i,',',j,')', f_ld(i,j)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'gamma_ld(',i,',',j,')', gamma_ld(i,j)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'omega_ld(',i,',',j,')', omega_ld(i,j)
         end do
       end do
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'wave_input', wave_input
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(1)', ek_dir1(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(2)', ek_dir1(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(3)', ek_dir1(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(1)', source_loc1(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(2)', source_loc1(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(3)', source_loc1(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(1)', gbeam_sigma_plane1(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(2)', gbeam_sigma_plane1(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(3)', gbeam_sigma_plane1(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(1)', gbeam_sigma_line1(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(2)', gbeam_sigma_line1(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(3)', gbeam_sigma_line1(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(1)', ek_dir2(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(2)', ek_dir2(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(3)', ek_dir2(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(1)', source_loc2(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(2)', source_loc2(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(3)', source_loc2(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(1)', gbeam_sigma_plane2(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(2)', gbeam_sigma_plane2(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(3)', gbeam_sigma_plane2(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(1)', gbeam_sigma_line2(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(2)', gbeam_sigma_line2(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(3)', gbeam_sigma_line2(3)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_num_em', obs_num_em
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'obs_samp_em', obs_samp_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'wave_input', wave_input
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(1)', ek_dir1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(2)', ek_dir1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(3)', ek_dir1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(1)', source_loc1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(2)', source_loc1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(3)', source_loc1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(1)', gbeam_sigma_plane1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(2)', gbeam_sigma_plane1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(3)', gbeam_sigma_plane1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(1)', gbeam_sigma_line1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(2)', gbeam_sigma_line1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(3)', gbeam_sigma_line1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(1)', ek_dir2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(2)', ek_dir2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(3)', ek_dir2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(1)', source_loc2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(2)', source_loc2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(3)', source_loc2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(1)', gbeam_sigma_plane2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(2)', gbeam_sigma_plane2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(3)', gbeam_sigma_plane2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(1)', gbeam_sigma_line2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(2)', gbeam_sigma_line2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(3)', gbeam_sigma_line2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'obs_num_em', obs_num_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'obs_samp_em', obs_samp_em
       if(obs_num_em==0) then
-        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,1),obs_loc_em(1,2),obs_loc_em(1,3)
-        write(fh_variables_log, '("#",4X,A,"=",ES14.5)')  'obs_plane_ene_em', obs_plane_ene_em(1,1)
-        write(fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_em', yn_obs_plane_em(1)
-        write(fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_integral_em', yn_obs_plane_integral_em(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,1),obs_loc_em(1,2),obs_loc_em(1,3)
+        write(parser%fh_variables_log, '("#",4X,A,"=",ES14.5)')  'obs_plane_ene_em', obs_plane_ene_em(1,1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_em', yn_obs_plane_em(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_integral_em', yn_obs_plane_integral_em(1)
       else
         do i = 1,obs_num_em
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') &
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') &
                                   'obs_loc_em(',i,',:)', obs_loc_em(i,:)
           do j = 1,size(obs_plane_ene_em,2)
             if( (j==1) .or. (obs_plane_ene_em(i,j)>=0.0d0) ) then
-              write(fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES14.5)') &
+              write(parser%fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES14.5)') &
                                   'obs_plane_ene_em(',i,',',j,')', obs_plane_ene_em(i,j)
             end if
           end do
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
                                   'yn_obs_plane_em(',i,')', yn_obs_plane_em(i)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
                                   'yn_obs_plane_integral_em(',i,')', yn_obs_plane_integral_em(i)
         end do
       end if
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_wf_em', yn_wf_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'film_thickness', film_thickness
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,1)', media_id_pml(1,1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,2)', media_id_pml(1,2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(2,1)', media_id_pml(2,1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(2,2)', media_id_pml(2,2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,1)', media_id_pml(3,1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,2)', media_id_pml(3,2)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source1', media_id_source1
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source2', media_id_source2
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(1)', bloch_k_em(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(2)', bloch_k_em(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(3)', bloch_k_em(3)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(1)', bloch_real_imag_em(1)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(2)', bloch_real_imag_em(2)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(3)', bloch_real_imag_em(3)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'ase_num_em', ase_num_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_min_em', ase_ene_min_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_max_em', ase_ene_max_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_min_em', ase_wav_min_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_max_em', ase_wav_max_em
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'ase_smedia_id_em', ase_smedia_id_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(1)', ase_box_cent_em(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(2)', ase_box_cent_em(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(3)', ase_box_cent_em(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(1)', ase_box_size_em(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(2)', ase_box_size_em(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(3)', ase_box_size_em(3)
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'art_num_em', art_num_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_min_em', art_ene_min_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_max_em', art_ene_max_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_min_em', art_wav_min_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_max_em', art_wav_max_em
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'art_smedia_id_em', art_smedia_id_em
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(1)', art_plane_bot_em(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(2)', art_plane_bot_em(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(3)', art_plane_bot_em(3)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(1)', art_plane_top_em(1)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(2)', art_plane_top_em(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(3)', art_plane_top_em(3)
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_make_shape', yn_make_shape
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_output_shape', yn_output_shape
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_x', yn_copy_x
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_y', yn_copy_y
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_z', yn_copy_z
-      write(fh_variables_log, '("#",4X,A,"=",A)')      'rot_type', rot_type
-      write(fh_variables_log, '("#",4X,A,"=",I6)')     'n_s', n_s
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_wf_em', yn_wf_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'film_thickness', film_thickness
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,1)', media_id_pml(1,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,2)', media_id_pml(1,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(2,1)', media_id_pml(2,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(2,2)', media_id_pml(2,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,1)', media_id_pml(3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,2)', media_id_pml(3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source1', media_id_source1
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source2', media_id_source2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(1)', bloch_k_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(2)', bloch_k_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(3)', bloch_k_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(1)', bloch_real_imag_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(2)', bloch_real_imag_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(3)', bloch_real_imag_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'ase_num_em', ase_num_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_min_em', ase_ene_min_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_max_em', ase_ene_max_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_min_em', ase_wav_min_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_max_em', ase_wav_max_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'ase_smedia_id_em', ase_smedia_id_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(1)', ase_box_cent_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(2)', ase_box_cent_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(3)', ase_box_cent_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(1)', ase_box_size_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(2)', ase_box_size_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(3)', ase_box_size_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'art_num_em', art_num_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_min_em', art_ene_min_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_max_em', art_ene_max_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_min_em', art_wav_min_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_max_em', art_wav_max_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'art_smedia_id_em', art_smedia_id_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(1)', art_plane_bot_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(2)', art_plane_bot_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(3)', art_plane_bot_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(1)', art_plane_top_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(2)', art_plane_top_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(3)', art_plane_top_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_make_shape', yn_make_shape
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_output_shape', yn_output_shape
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_x', yn_copy_x
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_y', yn_copy_y
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_z', yn_copy_z
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'rot_type', rot_type
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'n_s', n_s
       if(n_s==0) then
-        write(fh_variables_log, '("#",4X,A,"=",A)')       'typ_s', typ_s(1)
-        write(fh_variables_log, '("#",4X,A,"=",I6)')      'id_s', id_s(1)
-        write(fh_variables_log, '("#",4X,A,"=",10ES14.5)')'inf_s', inf_s(1,:)
-        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'ori_s', ori_s(1,:)
-        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'rot_s', rot_s(1,:)
+        write(parser%fh_variables_log, '("#",4X,A,"=",A)')       'typ_s', typ_s(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",I6)')      'id_s', id_s(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",10ES14.5)')'inf_s', inf_s(1,:)
+        write(parser%fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'ori_s', ori_s(1,:)
+        write(parser%fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'rot_s', rot_s(1,:)
       else
         do i = 1,n_s
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'typ_s(',i,')', typ_s(i)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'id_s(',i,')', id_s(i)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",10ES14.5)')'inf_s(',i,',:)', inf_s(i,:)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'ori_s(',i,',:)', ori_s(i,:)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'rot_s(',i,',:)', rot_s(i,:)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'typ_s(',i,')', typ_s(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'id_s(',i,')', id_s(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",10ES14.5)')'inf_s(',i,',:)', inf_s(i,:)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'ori_s(',i,',:)', ori_s(i,:)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'rot_s(',i,',:)', rot_s(i,:)
         end do
       end if
       
-      if(inml_analysis >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', inml_analysis
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_projection', threshold_projection
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_energy_step', out_rt_energy_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_psi', yn_out_psi
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos', yn_out_dos
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos_set_fe_origin', yn_out_dos_set_fe_origin
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_start', out_dos_start
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_end', out_dos_end
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dos_nenergy', out_dos_nenergy
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_width', out_dos_width
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_dos_function', out_dos_function
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_pdos', yn_out_pdos
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns', yn_out_dns
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_rt', yn_out_dns_rt
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_ac_je', yn_out_dns_ac_je
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_micro_je', yn_out_micro_je
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_rt_step', out_dns_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_ac_je_step', out_dns_ac_je_step
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_micro_je_step', out_micro_je_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'out_old_dns', out_old_dns
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_trans', yn_out_dns_trans
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dns_trans_energy', out_dns_trans_energy
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_elf', yn_out_elf
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_elf_rt', yn_out_elf_rt
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_elf_rt_step', out_elf_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_estatic_rt', yn_out_estatic_rt
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_estatic_rt_step', out_estatic_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm_bin', yn_out_tm_bin
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(2)', out_gs_sgm_eps_mu_nu(2)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_gs_sgm_eps_width', out_gs_sgm_eps_width
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_lr_w0_correction', yn_lr_w0_correction
-      write(fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_intraband_current', yn_out_intraband_current
-      write(fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_current_decomposed', yn_out_current_decomposed
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_current_decomposed_step', out_current_decomposed_step
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_spin_step', out_rt_spin_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_decomposed_rt',yn_out_mag_decomposed_rt
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_micro_rt',yn_out_mag_micro_rt
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_decomposed', yn_out_spin_current_decomposed
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_micro',yn_out_spin_current_micro
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rt_energy_components',yn_out_rt_energy_components
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
+      if(parser%inml_analysis >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', parser%inml_analysis
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_projection', threshold_projection
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_energy_step', out_rt_energy_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_psi', yn_out_psi
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos', yn_out_dos
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos_set_fe_origin', yn_out_dos_set_fe_origin
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_start', out_dos_start
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_end', out_dos_end
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_dos_nenergy', out_dos_nenergy
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_width', out_dos_width
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'out_dos_function', out_dos_function
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_pdos', yn_out_pdos
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns', yn_out_dns
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_rt', yn_out_dns_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_ac_je', yn_out_dns_ac_je
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_micro_je', yn_out_micro_je
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_rt_step', out_dns_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_ac_je_step', out_dns_ac_je_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_micro_je_step', out_micro_je_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'out_old_dns', out_old_dns
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_trans', yn_out_dns_trans
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dns_trans_energy', out_dns_trans_energy
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_elf', yn_out_elf
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_elf_rt', yn_out_elf_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_elf_rt_step', out_elf_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_estatic_rt', yn_out_estatic_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_estatic_rt_step', out_estatic_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm_bin', yn_out_tm_bin
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(2)', out_gs_sgm_eps_mu_nu(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_gs_sgm_eps_width', out_gs_sgm_eps_width
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_lr_w0_correction', yn_lr_w0_correction
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_intraband_current', yn_out_intraband_current
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_current_decomposed', yn_out_current_decomposed
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_current_decomposed_step', out_current_decomposed_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_spin_step', out_rt_spin_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_decomposed_rt',yn_out_mag_decomposed_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_micro_rt',yn_out_mag_micro_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_decomposed', yn_out_spin_current_decomposed
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_micro',yn_out_spin_current_micro
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rt_energy_components',yn_out_rt_energy_components
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
 
-      if(inml_poisson >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'poisson', inml_poisson
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'layout_multipole', layout_multipole
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(1)', num_multipole_xyz(1)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(2)', num_multipole_xyz(2)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_multipole', lmax_multipole
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_cg', threshold_cg
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_poisson', method_poisson
+      if(parser%inml_poisson >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'poisson', parser%inml_poisson
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'layout_multipole', layout_multipole
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(1)', num_multipole_xyz(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(2)', num_multipole_xyz(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_multipole', lmax_multipole
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_cg', threshold_cg
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_poisson', method_poisson
 
-      if(inml_ewald >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ewald', inml_ewald
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'newald', newald
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'aewald', aewald
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_r', cutoff_r
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_r_buff', cutoff_r_buff
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_g', cutoff_g
+      if(parser%inml_ewald >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ewald', parser%inml_ewald
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'newald', newald
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'aewald', aewald
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_r', cutoff_r
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_r_buff', cutoff_r_buff
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_g', cutoff_g
 
-      if(inml_opt >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'opt', inml_opt
-      write(fh_variables_log, '("#",4X,A,"=",I3)') 'nopt', nopt
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'max_step_len_adjust', max_step_len_adjust
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_fmax',convrg_opt_fmax
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'method_opt', method_opt
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_steep', step_steep
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_fire', step_fire
+      if(parser%inml_opt >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'opt', parser%inml_opt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nopt', nopt
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'max_step_len_adjust', max_step_len_adjust
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_fmax',convrg_opt_fmax
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_opt', method_opt
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_steep', step_steep
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_fire', step_fire
 
-      if(inml_md >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'md', inml_md
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'ensemble', ensemble
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'thermostat', thermostat
-      write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_velocity_scaling', step_velocity_scaling
-      write(fh_variables_log, '("#",4X,A,"=",I8)') 'step_update_ps', step_update_ps
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature0_ion_k', temperature0_ion_k
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_set_ini_velocity', yn_set_ini_velocity
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'file_ini_velocity', trim(file_ini_velocity)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'thermostat_tau', thermostat_tau
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_stop_system_momt', yn_stop_system_momt
+      if(parser%inml_md >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'md', parser%inml_md
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'ensemble', ensemble
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'thermostat', thermostat
+      write(parser%fh_variables_log, '("#",4X,A,"=",I8)') 'step_velocity_scaling', step_velocity_scaling
+      write(parser%fh_variables_log, '("#",4X,A,"=",I8)') 'step_update_ps', step_update_ps
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature0_ion_k', temperature0_ion_k
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_set_ini_velocity', yn_set_ini_velocity
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_ini_velocity', trim(file_ini_velocity)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'thermostat_tau', thermostat_tau
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_stop_system_momt', yn_stop_system_momt
 
-      if(inml_jellium >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'jellium', inml_jellium
-      write(fh_variables_log, '("#",4X,A,"=",A)')  'yn_jm', yn_jm
-      write(fh_variables_log, '("#",4X,A,"=",A)')  'yn_charge_neutral_jm', yn_charge_neutral_jm
-      write(fh_variables_log, '("#",4X,A,"=",A)')  'yn_output_dns_jm', yn_output_dns_jm
-      write(fh_variables_log, '("#",4X,A,"=",A)')  'shape_file', trim(shape_file_jm)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_jm', num_jm
+      if(parser%inml_jellium >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'jellium', parser%inml_jellium
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_jm', yn_jm
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_charge_neutral_jm', yn_charge_neutral_jm
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_output_dns_jm', yn_output_dns_jm
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'shape_file', trim(shape_file_jm)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'num_jm', num_jm
       if(num_jm==0) then
-        write(fh_variables_log, '("#",4X,A,"=",ES12.5)')  'rs_bohr_jm', rs_bohr_jm(1)
-        write(fh_variables_log, '("#",4X,A,"=",I6)')      'sphere_nion_jm', sphere_nion_jm(1)
-        write(fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'sphere_loc_jm', &
+        write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)')  'rs_bohr_jm', rs_bohr_jm(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",I6)')      'sphere_nion_jm', sphere_nion_jm(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'sphere_loc_jm', &
                                                           sphere_loc_jm(1,1),sphere_loc_jm(1,2),sphere_loc_jm(1,3)
       else
         do i = 1,num_jm
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)')  'rs_bohr_jm(',i,')', rs_bohr_jm(i)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'sphere_nion_jm(',i,')', sphere_nion_jm(i)
-          write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'sphere_loc_jm(',i,',:)', sphere_loc_jm(i,:)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)')  'rs_bohr_jm(',i,')', rs_bohr_jm(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'sphere_nion_jm(',i,')', sphere_nion_jm(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'sphere_loc_jm(',i,',:)', sphere_loc_jm(i,:)
         end do
       end if
 
       select case(iflag_atom_coor)
       case(ntype_atom_coor_cartesian)
-        write(fh_variables_log, '("#namelist: ",A)') 'atomic_coor'
+        write(parser%fh_variables_log, '("#namelist: ",A)') 'atomic_coor'
         do i = 1,natom
-          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion(',i,')', Rion(1:3,i)
+          write(parser%fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion(',i,')', Rion(1:3,i)
         end do
       case(ntype_atom_coor_reduced)
-        write(fh_variables_log, '("#namelist: ",A)') 'atomic_red_coor'
+        write(parser%fh_variables_log, '("#namelist: ",A)') 'atomic_red_coor'
         do i = 1,natom
-          write(fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion_red(',i,')', Rion_red(1:3,i)
+          write(parser%fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion_red(',i,')', Rion_red(1:3,i)
         end do
       case default
       end select
 
-      if(inml_code >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'code', inml_code
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_hand_vectorization', yn_want_stencil_hand_vectorization
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_communication_overlapping', yn_want_communication_overlapping
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'stencil_openmp_mode', stencil_openmp_mode
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'current_openmp_mode', current_openmp_mode
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'force_openmp_mode',   force_openmp_mode
+      if(parser%inml_code >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'code', parser%inml_code
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_hand_vectorization', yn_want_stencil_hand_vectorization
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_communication_overlapping', yn_want_communication_overlapping
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'stencil_openmp_mode', stencil_openmp_mode
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'current_openmp_mode', current_openmp_mode
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'force_openmp_mode',   force_openmp_mode
 
-      if(inml_band >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'band', inml_band
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'lattice', lattice
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'nref_band', nref_band
-      write(fh_variables_log, '("#",4X,A,"=",ES14.5)') 'tol_esp_diff', tol_esp_diff
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_of_segments', num_of_segments
-      write(fh_variables_log, '("#",4X,A,I2,A,"=",10I4)') 'ndiv_segment(',num_of_segments,')', ndiv_segment(1:num_of_segments)
+      if(parser%inml_band >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'band', parser%inml_band
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'lattice', lattice
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'nref_band', nref_band
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES14.5)') 'tol_esp_diff', tol_esp_diff
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'num_of_segments', num_of_segments
+      write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",10I4)') 'ndiv_segment(',num_of_segments,')', &
+        & ndiv_segment(1:num_of_segments)
       do i = 1, num_of_segments+1
-        write(fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
+        write(parser%fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
       end do 
-      write(fh_variables_log, '("#",4X,A,I2,A,"=",10(A,1X))') 'kpt_label(',num_of_segments,')', kpt_label(1:num_of_segments)
+      write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",10(A,1X))') 'kpt_label(',num_of_segments,')', kpt_label(1:num_of_segments)
       
-      if(inml_sbe >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', inml_sbe
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'num_sbe', num_sbe
+      if(parser%inml_sbe >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', parser%inml_sbe
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'num_sbe', num_sbe
       do i = 1,num_sbe
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",A)') 'sysname_sbe(',i,')', sysname_sbe(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)') 'sysname_sbe(',i,')', sysname_sbe(i)
       end do
       do i = 1,num_sbe
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nk_sbe(',i,')', nk_sbe(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nk_sbe(',i,')', nk_sbe(i)
       end do
       do i = 1,num_sbe
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nstate_sbe(',i,')', nstate_sbe(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nstate_sbe(',i,')', nstate_sbe(i)
       end do
       do i = 1,num_sbe
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nelec_sbe(',i,')', nelec_sbe(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nelec_sbe(',i,')', nelec_sbe(i)
       end do
       do i = 1,num_sbe
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(1',i,')', al_sbe(1,i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(2',i,')', al_sbe(2,i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(3',i,')', al_sbe(3,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(1',i,')', al_sbe(1,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(2',i,')', al_sbe(2,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(3',i,')', al_sbe(3,i)
       end do
       do i = 1,num_sbe
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec1_sbe(1:3',i,')', al_vec1_sbe(1:3,i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec2_sbe(1:3',i,')', al_vec2_sbe(1:3,i)
-        write(fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec1_sbe(1:3',i,')', al_vec1_sbe(1:3,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec2_sbe(1:3',i,')', al_vec2_sbe(1:3,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
       end do
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'gauge_sbe', gauge_sbe
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'gauge_sbe', gauge_sbe
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
       
-      if(inml_dc >0)ierr_nml = ierr_nml +1
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', inml_dc
-      write(fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
-      write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
-      write(fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
-      write(fh_variables_log, '("#",4X,A,"=",A)') "file_atom_coor_frag", file_atom_coor_frag
-      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_out_dc_fragment_coor", yn_out_dc_fragment_coor
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
-      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
-      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
-      write(fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
-      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+      if(parser%inml_dc >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', parser%inml_dc
+      write(parser%fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "file_atom_coor_frag", file_atom_coor_frag
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "yn_out_dc_fragment_coor", yn_out_dc_fragment_coor
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') &
       & "lcfo_diag_chefsi_filter_degree",lcfo_diag_chefsi_filter_degree
-      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') &
       & "lcfo_diag_chefsi_filter_chunk_size", &
       & lcfo_diag_chefsi_filter_chunk_size
-      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') &
       & "lcfo_diag_chefsi_max_cycle",lcfo_diag_chefsi_max_cycle
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') &
       & "lcfo_diag_chefsi_residual_tolerance", &
       & lcfo_diag_chefsi_residual_tolerance
-      write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
 
-      write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'unfolding', inml_unfolding
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'dm_unfold_option', dm_unfold_option
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(1)', num_lkgrid(1)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(2)', num_lkgrid(2)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(3)', num_lkgrid(3)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(1)', num_skgrid(1)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(2)', num_skgrid(2)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_pr', no_pr
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_gs', yn_out_mom_distr_gs
-      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_rt', yn_out_mom_distr_rt
-      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_mom_distr_rt_step', out_mom_distr_rt_step
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'nq_mom', nq_mom
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dq_mom', dq_mom
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'unfolding', parser%inml_unfolding
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'dm_unfold_option', dm_unfold_option
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(1)', num_lkgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(2)', num_lkgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(3)', num_lkgrid(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(1)', num_skgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(2)', num_skgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'no_pr', no_pr
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_gs', yn_out_mom_distr_gs
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_rt', yn_out_mom_distr_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_mom_distr_rt_step', out_mom_distr_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nq_mom', nq_mom
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dq_mom', dq_mom
       
-      close(fh_variables_log)
+      close(parser%fh_variables_log)
     end if
 
     call comm_bcast(ierr_nml,nproc_group_global)

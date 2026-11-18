@@ -25,7 +25,7 @@ use hamiltonian, only: update_kvector_nonlocalpt
 use math_constants, only: pi
 use salmon_global
 use structures
-use salmonpy_model_inputs, only: s_model_inputs
+use inputoutput, only: s_input_parser
 use salmonpy_step_output
 use parallelization, only: adjust_elapse_time, nproc_group_global
 use communication, only: comm_is_root, comm_sync_all, comm_bcast, &
@@ -57,7 +57,7 @@ end type
 ! A model owns immutable initialization values, distinct from RT numerical owners.
 ! The model registry remains singleton until heterogeneous activation is implemented.
 type :: rt_model
-  type(s_model_inputs) :: inputs
+  type(s_input_parser) :: parser
   real(8) :: initial_A(3)=0d0
 end type
 type :: rt_context
@@ -534,12 +534,11 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   embedded_decomposition=decomposition
   call set_math_constants
   call setup_parallel
-  call read_input(trim(filename))
+  allocate(model)
+  call read_input(trim(filename),model%parser)
   calc_mode='RT'
   call read_sw_symmetry(yn_symmetry)
   call timer_initialize
-  allocate(model)
-  call model%inputs%capture()
   model%initial_A=worker_initial_A
   call open_initial_state(model,J,status,'')
   sp_tddft_init=status
@@ -559,7 +558,7 @@ subroutine open_initial_state(owner,J,status,name)
   call handle_agree(status)
   if(status/=0)return
   ! Explicit compatibility view for legacy initialization, not a numerical snapshot.
-  call owner%inputs%activate(status)
+  call owner%parser%values%activate(status)
   call handle_agree(status)
   if(status/=0)return
   call initialize_inputoutput_units

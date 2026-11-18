@@ -179,8 +179,8 @@ select an `rt_context`, while `model_new` uses the single already-read model;
 there is no native model-ID registry or second independent input constructor.
 The remaining work is:
 
-1. Own immutable model input/defaults and initialization data separately from
-   process globals (`read_input`, parallel setup, global XC/profile controls).
+1. Model input/default records and parser workspaces are now owned (see below).
+   Complete model registration/activation and remaining process-global derived controls.
 2. Construct and select more than one model without changing a live sibling;
    step/restore must use the selected model's dt/capacity/XC and geometry controls.
 3. Complete ownership of common caches, I/O/timers and non-child MPI resources,
@@ -211,9 +211,9 @@ Sibling states do not own/deallocate that model; an idle open model can still
 create states from the original inputs. Numerical wavefunctions, live MPI/Libxc
 owners and RT checkpoint payloads are not copied into this input record.
 
-This completes the owned-input record and explicit initialization boundary. The
-parser itself, singleton model registration, kernel activation/common derived
-resources and heterogeneous model handles remain subsequent work. In particular,
+This completes the owned-input record and explicit initialization boundary. Parser workspaces and per-read defaults are also owned as described below.
+Singleton model registration, kernel activation/common derived resources and
+heterogeneous model handles remain subsequent work. In particular,
 this **does not enable different-input models in the same process** or change the
 public ABI, supported profile, numerical order or restart format.
 
@@ -226,3 +226,40 @@ The latter retains scalar IEEE inquiries on every checked element. New runtimes
 require source/object prohibition audits; unchanged validated binaries use recorded
 SHA256. No new GS fixtures are required. Cross-compiler validation is recorded
 separately; a local GNU build is not a Fujitsu compilation certificate.
+
+## Model-owned parser workspace and defaults (2026-11-18)
+
+`inputoutput.read_input(path, parser)` accepts an `s_input_parser` owned by each
+standard native model. It owns namelist status, coordinate-block flags, scratch
+connections, a fresh `defaults` record and final `values`. The original default
+assignment order/formulas and physical conversion order are retained. Defaults are
+created after that input's unit selection; preceding atom arrays and coordinate
+mode are excluded before capture. Effective worker dt/capacity/decomposition are
+captured in final values after worker setup and coordinate reading.
+
+The owned route uses unnamed Fortran scratch connections, keeping each split
+input alive until consumed, then closing/resetting all handles. It does not
+replace preexisting `.namelist.tmp`/coordinate/reentrance files. Parser read status
+and coordinate flags agree across MPI ranks; unit numbers remain root-local.
+`parser.log_path` chooses a diagnostic log (default `variables.log`); callers
+reading several inputs in one directory can set distinct log paths. Input/file
+references retain the existing working-directory semantics. No download or
+compilation is triggered by reading input.
+
+Legacy `read_input()`/`read_input(path)` callers retain a deliberate legacy
+workspace and named temporary files: the MD velocity reader still consumes those
+coordinate files later. This preserves batch/MD behavior. The new record covers
+selected standard scalar-TDDFT model fields; it is not a complete FDTD/SBE/DC
+configuration owner. Parsing and numerical initialization still use a synchronous
+legacy value/unit view, so this is sequential input isolation, not concurrent
+thread entry or heterogeneous live propagation in one process. Existing error
+policy is unchanged; general parser I/O/MPI failure recovery is not added.
+
+Developer test `tools/test_parser_ownership.py BUILD_JSON NEW_OUTPUT --fc mpifort
+--mpiexec mpiexec --ranks 2` uses the actual Fortran parser, with matching compiler
+module files from the build directory in the receipt. It checks A→B→A, reused
+workspace, different units/atom counts/Cartesian-external-reduced-absent sources,
+omitted XC/k/pulse/mixing defaults, two interleaved scratch sources and closed
+connections. Diagnostic logs match fresh-process legacy parsing exactly; existing
+named temporary-file sentinels remain unchanged. Repeat at MPI1/2. No GS data is
+needed. Native old/new XC/MPI/direct/mixed comparisons verify numerical parity.
