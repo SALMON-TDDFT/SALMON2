@@ -28,7 +28,7 @@ def main():
     parser.add_argument('--checkpoint', type=Path, required=True)
     parser.add_argument('--steps', type=int, default=32)
     parser.add_argument('--group-size', type=int, choices=(1,2), default=1)
-    parser.add_argument('--admission-fault', choices=('truncated','nonfinite','nonclosed'))
+    parser.add_argument('--admission-fault', choices=('truncated','nonfinite','nonclosed','cell','cell-metric','cell-orientation','atoms','grid','grid-translation'))
     parser.add_argument('--split', type=int, default=7)
     args = parser.parse_args()
     if not 3 < args.split < args.steps:
@@ -60,21 +60,38 @@ def main():
             print('Public symmetry rejection before lifetime PASS', args.mode, flush=True)
         return
     if args.admission_fault:
-        path = bundle/'sym.dat'
+        geometry_fault = args.admission_fault in ('cell','cell-metric','cell-orientation','atoms','grid','grid-translation')
+        path = bundle/('rt.inp' if geometry_fault and args.admission_fault != 'grid-translation' else 'sym.dat')
         original = path.read_text()
         if comm.rank == comm.size-1:
-            if args.admission_fault == 'truncated':
+            if args.admission_fault == 'cell':
+                damaged = original.replace('al=8,8,8','al=0,8,8')
+            elif args.admission_fault == 'cell-metric':
+                damaged = original.replace('al=8,8,8','al=8,8,8,al_vec1=8,0,0,al_vec2=0,8,0,al_vec3=1,0,8')
+            elif args.admission_fault == 'cell-orientation':
+                damaged = original.replace('al=8,8,8','al=8,8,8,al_vec1=0,8,0,al_vec2=-8,0,0,al_vec3=0,0,8')
+            elif args.admission_fault == 'grid':
+                damaged = original.replace('num_rgrid=8,8,8','num_rgrid=0,8,8')
+            elif args.admission_fault == 'atoms':
+                damaged = original.replace("'Si' 0 0 0 1","'Si' .1 0 0 1")
+            elif args.admission_fault == 'grid-translation':
+                rows = np.loadtxt(path);rows[3,3] = 1/3
+                import io
+                buf=io.StringIO();np.savetxt(buf,rows,fmt='%.17g');damaged=buf.getvalue()
+            elif args.admission_fault == 'truncated':
                 damaged = original+'1 0 0 0\n'
             elif args.admission_fault == 'nonfinite':
                 damaged = original.replace('1.0','NaN',1)
             else:
                 damaged = '1 0 0 0\n0 1 0 0\n0 0 1 0\n0 -1 0 0\n1 0 0 0\n0 0 1 0\n'
+            if damaged == original:
+                raise ValueError('admission-fault requires the canonical synthetic fixture')
             path.write_text(damaged)
         try:
             invalid_provider = FastHSEMaterialProvider(bundle,max_steps=args.steps)
             rejected = backend.create_state(invalid_provider.prepare(context), point, .001, context)
         except InputError as error:
-            assert 'sym.dat' in str(error)
+            assert ('HSE geometry' if geometry_fault else 'sym.dat') in str(error)
             assert not fast_hse_mpi._used and not embedded_tddft._used
         else:
             rejected.close()

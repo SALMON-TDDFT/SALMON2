@@ -6,6 +6,26 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 The dated sections below retain the scope at their completion time. Older statements such as "occupation remains shared" or "multiple field ranks remain open" are superseded by the later evidence, not separate unfinished tasks.
 
+### Actionable status — latest geometry-admission audit
+
+This list is the current work queue. Historical unchecked items below retain
+completion-time scope and must not be counted again as new tasks.
+
+- [x] Low-gradient Libxc HSE stabilization and original phase0 comparison.
+- [x] Reduced-k internal MPI1/2, full-k parity, same-partition direct restart.
+- [x] sym.dat and bounded cell/atom/grid pre-native admission; collective rejection/repair.
+- [x] Normal mixed regression, source/installed569 tests (one skip each), wheel verification and paired manuals/AI JSON.
+- [ ] Delivery: latest geometry-admission code/docs are verified but uncommitted. Previous delivery is6479a538.
+- [ ] Next: k-star/representative weights, pseudopotential assets and GS/restart identity/layout admission before native lifetime.
+- [ ] General-cell native initialization: axis-permuted fixtures hit ACE init STOP; current profile rejects off-axis cells and remains au-only.
+- [ ] Learned/PT-CN with symmetry; factor-off Taylor/ACE validation does not cover these histories.
+- [ ] Broader GS/TDDFT different-input ownership, native handles, remaining MPI/I/O/timer/specialized resources and general failure recovery.
+- [ ] Larger partitions/point-count scaling, calibrated resource models, additional native platforms/runtime distribution and interoperable archives/repartitioning.
+
+Converged physical benchmarks are separate from implementation verification and
+remain material/user-owned. Molecular work stays paused; memory budgets warn only;
+conventional HSE and routine Actions are not pending requirements.
+
 ### Fast-PR HSE priority
 
 Project lead directs HSE development through the fast-PR profile with symmetry as
@@ -15,8 +35,8 @@ mixed connection are verified in the bounded one/two-k-rank profile. The Libxc H
 wrapper source by stable evaluation of the same WPBEh formula. The unchanged
 phase0 full/reduced case, ordinary regressions and80-digit energy differences
 pass; old failure evidence is retained. Reduced-k internal-MPI2 partition/failure/direct restart tests now pass. Next are
-broader initialization hardening and converged physical benchmarks. sym.dat format/retained-group
-admission now runs before native lifetime; atom/cell/grid/restart STOP paths remain. Default/old init and serial
+broader initialization hardening and converged physical benchmarks. sym.dat and effective cell/atom/grid
+admission now run before native lifetime; k-star/pseudopotential/restart and other STOP paths remain. Default/old init and serial
 workers still reject symmetry. No physical-convergence certificate is implied.
 The standard k-point port is deferred; its distinct arithmetic is not the target
 for modifying fast-PR symmetry. Conventional HSE remains unsupported.
@@ -671,3 +691,15 @@ Raw Libxc diagnostic sensitivity remains expected; no library binary is patched.
 
 Physical convergence remains material/user-owned; molecular work stays paused.
 Larger MPI partitions and checkpoint repartitioning are not implied by MPI2 results.
+
+
+## 2026-11-18 — Cell/atom/grid initialization admission
+
+- [x] Effective cell and grid follow native priorities/units/rounding and integer bounds; finite volume/inverse; current native profile remains axis-aligned/au-only.
+- [x] Explicit Cartesian/reduced inline/file atoms, counts/species/finite values; case-preserving bundle-local paths, no new dependency.
+- [x] Symmetry cell metric, bounded affine full-grid checks and unique same-species atomic permutations.
+- [x] MPI2 groups reject one bad rank before lifetime/work copy, repair/retry, unchanged normal current/energy and own direct resume.
+- [ ] General-cell native initialization (axis-permuted fixtures hit ACE init STOP); k-star, pseudopotential-content/restart-identity and general native recovery remain open.
+
+This supersedes the cell/atom/grid subset of older unchecked initialization notes.
+GS/TDDFT ownership, learned/PT-CN symmetry, environment/scaling and portable archive work remain separate.

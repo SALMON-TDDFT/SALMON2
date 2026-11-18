@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.7`
+[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.8`
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -242,12 +242,41 @@ A malformed file on one rank produces collective `InputError` for the entire
 solver group. No native lifetime has been acquired: repair the original input,
 construct a new material provider and retry. Editing an already prepared
 provider's inputs is still rejected by existing hash checks.
-Passing this preflight does NOT validate cell isometries, atomic/species mapping,
-grids, k-stars or restart binaries. Their native initialization/STOP paths remain
-separate work; do not advertise general initialization recovery.
+The geometry admission below checks cells, atomic/species mapping and grids.
+K-stars, pseudopotential contents, restart binaries and other native STOP paths
+remain separate work; do not advertise general initialization recovery.
 
 Add `--admission-fault truncated`, `nonfinite` or `nonclosed` to the preceding
 save command to corrupt only the last rank of each group and verify rejection,
 repair and subsequent start. Normal input/numerical formulas remain unchanged.
 
 Axis flags must contain one to three lowercase `y`/`n` characters; unsupported forms are rejected rather than silently normalized.
+
+
+## Cell, atom and grid admission
+
+For periodic fast-PR input with or without symmetry, `NativeFastHSEBackend.create_state`
+checks effective geometry before native loading/lifetime/work-copy creation.
+No ASE/f90nml dependency is added. Every solver rank must enter the collective
+call. Repair rejected source input, construct a new provider and retry.
+
+- Cells follow native priorities: al, diagonal al_vec1..3, num_rgrid*dl, and detect off-axis vectors. Finite positive lengths/volume and a consistent inverse are required. The current native profile admits axis-aligned orthogonal cells; off-axis/permuted cells reject before initialization.
+- Grid counts/spacing and native integer bounds are checked. Resolution follows native int((length+1e-10)/spacing), including its spacing-to-cell tolerance; no ceiling, repair or input rewriting.
+- One explicit inline or bundle-local Cartesian/reduced atom source is required. Counts, finite coordinates and species IDs1..nelem are checked. The existing fast-PR adapter remains au-only.
+- With symmetry, check Cartesian cell isometries, integer grid maps (corner residual/index bounds, no full-grid allocation) and unique species-preserving atom permutations.
+
+The focused numeric reader supports real/integer literals, D exponents, repeats
+and positive index/section assignments. Null or unsupported forms reject rather
+than being guessed. Atom records use canonical label/x/y/z/species fields. File
+name case is preserved; references escaping the bundle reject. Inputs stay intact.
+
+Use `--admission-fault cell|cell-metric|cell-orientation|atoms|grid|grid-translation` in the explicit
+probe to corrupt one rank of each group and check collective rejection without
+lifetime acquisition, repair and normal start. Current/energy traces and direct
+resume remain unchanged. These checks do not authenticate GS identity, k-stars,
+pseudopotential content, restart binaries, all native initialization paths or
+physical convergence.
+
+Equivalent axis-permuted right/left-handed synthetic fixtures hit ACE initialization
+STOP in the existing runtime. Reject these unsupported forms rather than silently
+rotating/reordering a basis. General-cell native initialization remains open.

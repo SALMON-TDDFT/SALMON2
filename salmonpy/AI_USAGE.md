@@ -743,5 +743,9 @@ probe_hse_low_gradient.pyは生のLibxc診断で、wrapper修正後も感度True
 
 高速HSEのsym.datは、native寿命前に形式・有限値・保持された群の構造を事前検査する。
 InputErrorなら元入力を直しproviderを作り直して再試行可。既存providerの入力を黙って変更しない。
-この検査はセル・原子・格子・k-star・再開バイナリの安全性や全初期化異常復帰を保証しない。
+続くNumPy-onlyの幾何検査で、有効セル・原子配置／種別・格子と対称性整合を検査する。
+k-star・擬ポテンシャル内容・再開バイナリとの互換性や全初期化異常復帰は保証しない。
 詳しくはFAST_HSE_SYMMETRY日英ガイド。
+
+幾何検査はSALMONと同じセル優先順位・格子解決・単位を使う。検査中にceil・セル正規化・原子移動などの入力補正をしない。
+形式不正の拒否と物理収束を区別する。collective create_stateへ全solverランクで参加する。

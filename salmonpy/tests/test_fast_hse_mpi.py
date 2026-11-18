@@ -152,6 +152,15 @@ class NativeFastHSETests(unittest.TestCase):
                 backend.create_state(provider.prepare(ctx),1,.01,ctx)
         self.assertEqual(set(self.root.iterdir()),before)
 
+        # The generic scalar reader lowercases values; flags must instead
+        # retain their spelling so unsupported native forms reject unchanged.
+        inp=bundle/'rt.inp';inp.write_text(inp.read_text().replace("'yyn'","'YYN'"))
+        provider=FastHSEMaterialProvider(bundle,max_steps=3)
+        with patch('salmonpy.fast_hse_mpi.c.CDLL',side_effect=AssertionError('no native load')):
+            with self.assertRaisesRegex(InputError,'yn_symmetry'):
+                backend.create_state(provider.prepare(ctx),1,.01,ctx)
+        self.assertEqual(set(self.root.iterdir()),before)
+
     def test_constructor_is_lazy_and_hash_bound(self):
         with patch('salmonpy.fast_hse_mpi.c.CDLL',side_effect=AssertionError('must not load')):
             backend=self.backend()

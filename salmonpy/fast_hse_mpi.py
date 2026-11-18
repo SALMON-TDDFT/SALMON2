@@ -109,6 +109,8 @@ def _symmetry_preflight(path, setting):
                 np.max(abs(delta-np.rint(delta)),axis=1) < tolerance)
             if np.count_nonzero(matched) != 1:
                 fail('retained operations do not form a closed group')
+    ops.setflags(write=False)
+    return ops
 
 
 def _configure(lib):
@@ -207,18 +209,21 @@ class NativeFastHSEBackend:
             if _digest(self.library) != self.sha256:
                 raise InputError('fast HSE MPI library changed')
             groups, propagator = _input_text((initial.directory/initial.input_file).read_text())
-            symmetry_setting = _scalar(groups.get('system',''), 'yn_symmetry', default='n')
+            from ._hse_geometry import preflight, _string
+            symmetry_setting = _string(groups.get('system',''), 'yn_symmetry', 'n')
             if re.fullmatch(r'[yn]{1,3}',symmetry_setting) is None:
                 raise InputError('yn_symmetry requires one to three lowercase y/n characters')
             symmetry = 'y' in symmetry_setting
             if symmetry and not self.allow_symmetry:
                 raise InputError('symmetry input requires explicit allow_symmetry=True')
+            operations = None
             if symmetry:
                 factor = _scalar(groups.get('functional',''), 'exx_factor_mode', default='off')
                 if factor != 'off' or propagator not in ('hse_taylor4','hse_taylor4_full'):
                     raise InputError('symmetry requires factor-off fast-PR Taylor (full-action is test-only)')
-                _symmetry_preflight(initial.directory/'sym.dat',
+                operations = _symmetry_preflight(initial.directory/'sym.dat',
                     symmetry_setting)
+            preflight(initial.directory,groups,operations)
             groups['tgrid'] = groups.get('tgrid','') + '\n dt='+format(dt,'.17g')+', nt='+str(initial.max_steps)+'\n'
             groups['parallel'] = groups.get('parallel','') + '\n nproc_k='+str(comm.size)+', nproc_ob=1, nproc_rgrid=1,1,1\n'
             text = '\n'.join('&'+k+v+'/' for k,v in groups.items())+'\n'

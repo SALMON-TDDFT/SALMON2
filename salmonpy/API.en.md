@@ -161,3 +161,5 @@ stable near-zero-gradient XC evaluation and regression checks. Connectivity/rest
 physical-convergence certificates.
 
 Reduced-k symmetry now supports two internal k ranks and same-partition direct resume with the separate native k-MPI capability. Checkpoint repartitioning remains unsupported; see the symmetry guide.
+
+NativeFastHSEBackend collectively admits periodic cell/grid/atom inputs before native lifetime. Repair source inputs and construct a new provider after InputError. Restart compatibility and general native initialization safety remain separate; see the symmetry guide.
