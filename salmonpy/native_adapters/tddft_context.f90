@@ -27,6 +27,16 @@ module salmonpy_tddft_context
  end type
  type(fixed_settings),save::process_settings
  logical,save::settings_pinned=.false.
+type :: checkpoint_payload
+  type(s_orbital) :: spsi_in,spsi_out,tpsi
+  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
+  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
+  type(s_rt) :: rt
+  type(s_poisson) :: poisson
+  type(s_dft_energy) :: energy
+  real(8) :: fields(3,5)
+  integer :: Mit,accepted
+end type
  type tddft_context
  private
 type(s_rgrid) :: lg
@@ -58,28 +68,16 @@ type(s_unfold) :: unfold
  type(s_rt_run_config)::run_settings
  logical::checkpoint_failed=.false.
  type(fixed_settings)::settings
+ ! Protected numerical buffers and staged restore candidates belong to this
+ ! context. Never copy owning FFT, MPI, XC-library or output handles here.
+ type(checkpoint_payload),allocatable::step_saved,pending
+ type(numeric_payload),allocatable::step_exchange,pending_hse
+ type(s_xc_operator_payload),allocatable::step_xc
+ type(step_output_state)::step_outputs
+ real(8)::step_cval=0d0
+ logical::step_restored=.false.
  integer::Mit=0,accepted=0
  end type
-type :: checkpoint_payload
-  type(s_orbital) :: spsi_in,spsi_out,tpsi
-  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
-  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
-  type(s_rt) :: rt
-  type(s_poisson) :: poisson
-  type(s_dft_energy) :: energy
-  real(8) :: fields(3,5)
-  integer :: Mit,accepted
-end type
-type(tddft_context),pointer,save::step_owner=>null()
-type(checkpoint_payload),allocatable,save::step_saved
-type(numeric_payload),allocatable,save::step_exchange
-type(s_xc_operator_payload),allocatable,save::step_xc
-real(8),save::step_cval
-logical,save::step_restored=.false.
-type(step_output_state),save::step_outputs
-type(tddft_context),pointer,save::pending_owner=>null()
-type(checkpoint_payload),allocatable,save::pending
-type(numeric_payload),allocatable,save::pending_hse
 integer(8),save::checkpoint_array_limit=0_8
 contains
  subroutine rt_step_transaction(ctx,mode,status)
@@ -95,53 +93,58 @@ contains
  call comm_get_max(status,nproc_group_global)
  if(status/=0)return
  if(mode==0)then
-   if(associated(step_owner).or.associated(pending_owner))status=14
+   if(allocated(ctx%step_saved).or.allocated(ctx%pending))status=14
    if(yn_out_dns_rt/='n'.or.yn_out_dns_ac_je/='n'.or.yn_out_micro_je/='n')status=15
     if(yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n'.or.yn_out_current_decomposed/='n')status=15
     if(projection_option/='no'.or.dm_unfold_option/='no'.or.yn_out_rvf_rt/='n')status=15
  else if(mode/=2)then
-   if(.not.associated(step_owner,ctx))status=14
-   if(mode==1.and.step_restored)status=14
+   if(.not.allocated(ctx%step_saved))status=14
+   if(mode==1.and.ctx%step_restored)status=14
  endif
  call comm_get_max(status,nproc_group_global)
  if(status/=0)return
  select case(mode)
  case(0)
-   allocate(step_saved,step_exchange,step_xc)
-   call hse_checkpoint_capture(ctx%hse,step_exchange,status)
+   allocate(ctx%step_saved,ctx%step_exchange,ctx%step_xc)
+   call hse_checkpoint_capture(ctx%hse,ctx%step_exchange,status)
    call comm_get_max(status,nproc_group_global)
    if(status==0)then
-     call checkpoint_copy(ctx,step_saved,.false.)
-     step_xc=ctx%system%xc_payload;step_cval=ctx%xc_func%cval
-     if(nproc_id_global==0)call step_output_capture(step_outputs,ctx%ofl,status)
+     call checkpoint_copy(ctx,ctx%step_saved,.false.)
+     ctx%step_xc=ctx%system%xc_payload;ctx%step_cval=ctx%xc_func%cval
+     if(nproc_id_global==0)call step_output_capture(ctx%step_outputs,ctx%ofl,status)
      call comm_get_max(status,nproc_group_global)
    endif
    if(status/=0)then
-     deallocate(step_saved,step_exchange,step_xc)
+     deallocate(ctx%step_saved,ctx%step_exchange,ctx%step_xc)
    else
-     step_owner=>ctx;step_restored=.false.
+     ctx%step_restored=.false.
    endif
  case(1)
-   call hse_checkpoint_install(ctx%hse,step_exchange)
-   call checkpoint_copy(ctx,step_saved,.true.)
-   ctx%system%xc_payload=step_xc;ctx%xc_func%cval=step_cval
+   call hse_checkpoint_install(ctx%hse,ctx%step_exchange)
+   call checkpoint_copy(ctx,ctx%step_saved,.true.)
+   ctx%system%xc_payload=ctx%step_xc;ctx%xc_func%cval=ctx%step_cval
    block
    use hamiltonian,only:update_kvector_nonlocalpt
    call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
    end block
-   step_restored=.true.
-   if(nproc_id_global==0)call step_output_close(step_outputs,status)
+   ctx%step_restored=.true.
+   if(nproc_id_global==0)call step_output_close(ctx%step_outputs,status)
  case(2)
-   if(associated(step_owner,ctx))then
+   if(allocated(ctx%step_saved))then
      if(nproc_id_global==0)then
-       call step_output_reopen(step_outputs,status)
-       if(status==0)call step_output_flush(step_outputs,status)
+       call step_output_reopen(ctx%step_outputs,status,ctx%ofl)
+       if(status==0)call step_output_flush(ctx%step_outputs,status)
      endif
-     deallocate(step_saved,step_exchange,step_xc);nullify(step_owner)
-     step_restored=.false.
+     call comm_get_max(status,nproc_group_global)
+     ! Retain ownership metadata if reconnect/flush failed. Old closed units
+     ! may belong to another context; retry or close must still skip them.
+     if(status==0)then
+       deallocate(ctx%step_saved,ctx%step_exchange,ctx%step_xc)
+       ctx%step_restored=.false.
+     endif
    endif
  case(3)
-   if(nproc_id_global==0)call step_output_reopen(step_outputs,status)
+   if(nproc_id_global==0)call step_output_reopen(ctx%step_outputs,status,ctx%ofl)
  end select
  call comm_get_max(status,nproc_group_global)
  end subroutine
@@ -307,7 +310,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  if(.not.associated(ctx))return
  guard_status=0
  if(.not.settings_match(ctx%settings).or..not.context_symmetry_matches(ctx))guard_status=2
- if(associated(pending_owner,ctx))guard_status=2
+ if(allocated(ctx%pending))guard_status=2
  if(ctx%checkpoint_failed)guard_status=2
  if(ctx%accepted>=ctx%rt%max_steps)guard_status=2
  do i=1,3
@@ -405,11 +408,17 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  use sendrecv_grid,only:dealloc_cache
  type(tddft_context),pointer,intent(inout)::ctx
  if(.not.associated(ctx))return
- if(associated(step_owner,ctx))then
-   deallocate(step_saved,step_exchange,step_xc);nullify(step_owner)
- endif
+ ! A rolled-back transaction may have closed these units already; another
+ ! context can now own their old numbers. Only close our still-connected streams.
  if(nproc_id_global==0)then
-  close(ctx%ofl%fh_rt);close(ctx%ofl%fh_rt_energy)
+  if(allocated(ctx%step_saved))then
+   block
+   integer::output_status
+   call step_output_close(ctx%step_outputs,output_status)
+   end block
+  else
+   close(ctx%ofl%fh_rt);close(ctx%ofl%fh_rt_energy)
+  endif
  endif
  call dealloc_cache(ctx%srg)
  call dealloc_cache(ctx%srg_scalar)
@@ -492,36 +501,35 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  logical::hse_loaded
  status=1;hse_loaded=.false.
  ios=0
- if(associated(step_owner).and.(restore.or.present(stage)))ios=14
+ if(.not.associated(ctx))ios=1
  call checkpoint_collective_status(ios)
  if(ios/=0)return
- if(.not.present(stage).and.associated(pending_owner))return
+ if(allocated(ctx%step_saved).and.(restore.or.present(stage)))ios=14
+ call checkpoint_collective_status(ios)
+ if(ios/=0)return
+ if(.not.present(stage).and.allocated(ctx%pending))return
  if(present(stage))then
-  if(associated(pending_owner))then
-   if(.not.associated(pending_owner,ctx))return
-  endif
   if(stage==4)then
-   if(allocated(pending))deallocate(pending)
-   if(allocated(pending_hse))deallocate(pending_hse)
-   nullify(pending_owner)
+   if(allocated(ctx%pending))deallocate(ctx%pending)
+   if(allocated(ctx%pending_hse))deallocate(ctx%pending_hse)
    status=0;return
   endif
   if(stage==3)then
-   if(.not.allocated(pending).or..not.allocated(pending_hse))return
+   if(.not.allocated(ctx%pending).or..not.allocated(ctx%pending_hse))return
    ! Recheck the immutable process contract at commit, not just while staging.
    ios=0
    if(.not.settings_match(ctx%settings).or..not.context_symmetry_matches(ctx))ios=1
    call checkpoint_collective_status(ios)
    if(ios/=0)return
-   call hse_checkpoint_install(ctx%hse,pending_hse)
-   call checkpoint_copy(ctx,pending,.true.)
+   call hse_checkpoint_install(ctx%hse,ctx%pending_hse)
+   call checkpoint_copy(ctx,ctx%pending,.true.)
    call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
    ctx%spsi_in%update_zwf_overlap=.true.
    ctx%spsi_out%update_zwf_overlap=.true.
    ctx%tpsi%update_zwf_overlap=.true.
-   deallocate(pending,pending_hse);nullify(pending_owner);status=0;return
+   deallocate(ctx%pending,ctx%pending_hse);status=0;return
   endif
-  if(stage/=2.or.allocated(pending).or.allocated(pending_hse))return
+  if(stage/=2.or.allocated(ctx%pending).or.allocated(ctx%pending_hse))return
  endif
  ios=0
  if(.not.associated(ctx))ios=1
@@ -603,7 +611,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
    call checkpoint_collective_status(ios)
    if(ios==0)then
     inquire(unit=u,pos=hse_position)
-    call hse_checkpoint_read(u,ctx%hse,ios,staged=pending_hse)
+    call hse_checkpoint_read(u,ctx%hse,ios,staged=ctx%pending_hse)
    endif
   else
    call hse_checkpoint_write(u,ctx%hse,ios)
@@ -633,15 +641,14 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  if(closing/=0)ios=closing
  call checkpoint_collective_status(ios)
  if(ios/=0)then
-  if(allocated(pending_hse))deallocate(pending_hse)
+  if(allocated(ctx%pending_hse))deallocate(ctx%pending_hse)
   return
  endif
  if(restore.and.present(stage))then
-  call move_alloc(copy,pending)
-  pending_owner=>ctx
+  call move_alloc(copy,ctx%pending)
  else if(restore)then
-  call hse_checkpoint_install(ctx%hse,pending_hse)
-  deallocate(pending_hse)
+  call hse_checkpoint_install(ctx%hse,ctx%pending_hse)
+  deallocate(ctx%pending_hse)
   call checkpoint_copy(ctx,copy,.true.)
   call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
   ctx%spsi_in%update_zwf_overlap=.true.

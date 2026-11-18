@@ -34,3 +34,13 @@ active k weights, avoiding a shape mismatch with padded reduced-k storage.
 Histories and native capability/diagnostic adapters are SALMONpy modifications
 under the existing Apache-2.0 distribution; original fast-PR snapshots and source
 provenance remain unchanged.
+
+# RT transaction and output ownership
+
+The fast-PR context adapter owns protected-step buffers and pending numeric
+restore candidates per context. The common standard/adapter output helper now
+selects an available unit on reconnect and updates the owning output descriptor,
+preventing a closed unit reused by another context from being reconnected or
+closed by its former owner. Standard embedded call sites pass that descriptor.
+These are SALMONpy ownership changes; numerical kernels and original upstream
+snapshots are retained. Current source inventories identify the complete files.

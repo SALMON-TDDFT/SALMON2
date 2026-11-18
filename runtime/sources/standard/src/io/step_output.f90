@@ -65,18 +65,26 @@ contains
       endif
     enddo
   end subroutine
-  subroutine step_output_reopen(value,status)
+  subroutine step_output_reopen(value,status,ofl)
+    use filesystem,only:get_filehandle
     type(step_output_state),intent(inout)::value
+    type(s_ofile),intent(inout)::ofl
     integer,intent(out)::status
-    integer::i,ios
+    integer::i,ios,unit
     status=0
     do i=1,2
       if(value%closed(i))then
-        open(unit=value%units(i),file=trim(value%names(i)),status='old', &
+        ! Another context may have reused the old positive unit while closed.
+        ! Select an available unit and update the owning ofile after reconnection.
+        unit=get_filehandle()
+        open(unit=unit,file=trim(value%names(i)),status='old', &
           form='formatted',access='sequential',action='readwrite',position='append',iostat=ios)
         if(ios/=0)then
           status=90
         else
+          value%units(i)=unit
+          if(i==1)ofl%fh_rt=unit
+          if(i==2)ofl%fh_rt_energy=unit
           value%closed(i)=.false.
         endif
       endif

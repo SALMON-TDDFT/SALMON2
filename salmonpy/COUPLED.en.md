@@ -472,3 +472,30 @@ SCF non-convergence is advisory. Finite saved states remain usable downstream; `
 Before fast-PR native startup, admission checks generated k meshes against retained symmetry, representative counts/weights, species pseudopotential references and GS header/occupation/orbital byte lengths. KY parsing accepts continuation records, unused trailing columns and implicit signed exponents, following native list-directed input. Other recognized PP formats receive reference/readability checks; native owns content parsing. Supported legacy GS records use native-endian4-byte markers/integers/logicals, binary64 occupations and one global real64/complex128 orbital stream. Arbitrary `file_kw`, unfolding and even Gamma endpoint meshes remain current fast-PR profile limitations. The original GS producer rank count need not match the new solver group; this differs from direct RT checkpoint partition compatibility.
 
 Fast-PR HSE receives Cartesian three-component A/c, including x/y/z and circular polarization, without a fixed-z requirement. Reduced-k states check the actual vector against retained symmetry before each update; use a matching full-k initial state when no suitable group exists. The corrected core also supports general-cell symmetry initialization. See the [symmetry guide](FAST_HSE_SYMMETRY.en.md).
+
+### Internal RT ownership (development)
+
+Protected-step numerical buffers, output metadata and pending direct-restore
+candidates now belong to their `tddft_context`, rather than a process singleton.
+For internal non-symmetric fast-PR contexts sharing immutable model inputs and
+one communicator, one context's rollback, staged commit/cancel or close does not
+consume another's candidate. Different selected dt/capacity and three-component
+waveforms can be interleaved. Reopened output streams acquire available units;
+closing a rolled-back context cannot close a unit reused by another context.
+
+The public Python/C backend still has one native lifetime per process. This
+internal ownership step does **not** introduce a stable multi-context C handle
+or permit different shared inputs, arbitrary communicators or thread entry.
+Shared symmetry/initialization/I/O/timer state and the synchronous serializer
+allocation bound remain to be extracted. Do not copy whole contexts or owning
+FFT/MPI/Libxc handles. Text-output rollback still restores saved file bytes on
+the host before reopening; numeric checkpoints alone do not truncate logs.
+
+Developers can explicitly run `tools/test_fast_hse_context_owners_mpi.py BUILD
+FULL_K_FIXTURE NEW_OUTPUT`. It compiles an internal probe and compares isolated
+and interleaved Taylor, learned Taylor and learned PT-CN executions, including
+simultaneous protection, staged restore, cancellation, close and output-unit
+reuse. Defaults are two independent solver groups with internal MPI1/2 and
+OpenMP1/2. The fixtures test state isolation, not material convergence.
+
+Reconnection failures retain the transaction metadata, so retry or close cannot act on another context’s reused unit.

@@ -781,3 +781,30 @@ must match before allocation. Learned CN interval1 is an existing method contrac
 not an extra accuracy restriction. Historical learned/PT-CN-unavailable notes
 above are superseded. Remaining next work: broader state/input/I/O/MPI/timer
 ownership and stable native handles, larger environments/scaling and archives.
+
+## 2026-11-18 — Context-owned RT transactions and restore candidates
+
+- [x] Move protected numerical/XC/HSE buffers, output metadata and pending direct
+  restore candidates into each fast-PR `tddft_context`; no whole-context copies.
+- [x] Internal same-model non-symmetric A/B contexts: distinct dt/capacity and
+  z/circular-xy waveforms; isolated vs interleaved numerical probes and traces.
+- [x] Simultaneous transactions, independent rollback, simultaneous staged
+  candidates, commit/cancel, close A with B's candidate/step still live.
+- [x] Reopen acquires available output units and updates its owning descriptor;
+  rolled-back close skips units already reused by another owner.
+- [x] Reconnect/flush failure retains ownership metadata collectively until
+  success; missing-file close/retry leaves B's outputs intact.
+- [x] Taylor, learned Taylor/PT-CN; internal MPI1/2, two material groups,
+  OpenMP1/2. Compare current/energy plus final orbital/density/potential/exchange
+  probes; compare ordinary/late-open RT logs as well.
+- [ ] Continue remaining initialization/symmetry/input/I/O/timer/MPI ownership
+  and generation-checked C handles. Public one-native-lifetime stays in force;
+  this does not claim heterogeneous or threaded same-process TDDFT support.
+
+The serializer allocation limit is still synchronous process-local scratch.
+Numeric restart format and time-update formulas/order are unchanged. Host output
+journaling remains responsible for file-byte rollback. See
+`docs/rt-context-ownership-validation-2026-11-18.md` for scope and verification.
+- [x] Standard embedded close releases its actual energy output unit; MPI2
+  normal/protected-close probes preserve host units. Source/installed590-test
+  suites (one skip each), sdist→wheel/hash and mixed/deep regressions pass.

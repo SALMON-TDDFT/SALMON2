@@ -210,3 +210,6 @@ install(FILES "${ROOT}/salmonpy/_hse_assets.py" DESTINATION salmonpy)
 install(FILES "${ROOT}/tools/test_fast_hse_general_cell_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/tools/test_fast_hse_symmetry_history_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_hse_context_owners.f90" "${ROOT}/tests/native/test_step_output_owners.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+install(FILES "${ROOT}/tools/test_fast_hse_context_owners_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_tddft_output_close.f90" DESTINATION salmonpy/_runtime_source/tests/native)

@@ -143,14 +143,17 @@ integer(c_int) function sp_tddft_step_transaction(mode) bind(C)
   case(2)
     if(allocated(step_saved))then
       if(rank==0)then
-        call step_output_reopen(step_outputs,status)
+        call step_output_reopen(step_outputs,status,state%ofl)
         if(status==0)call step_output_flush(step_outputs,status)
       endif
-      deallocate(step_saved,step_saved_xc)
+      call comm_get_max(status,group)
+      if(status==0)then
+        deallocate(step_saved,step_saved_xc)
+        step_restored=.false.
+      endif
     endif
-    step_restored=.false.
   case(3)
-    if(rank==0)call step_output_reopen(step_outputs,status)
+    if(rank==0)call step_output_reopen(step_outputs,status,state%ofl)
   end select
   call comm_get_max(status,group)
   sp_tddft_step_transaction=status
@@ -360,13 +363,21 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   sp_tddft_step=0
 end function
 integer(c_int) function sp_tddft_close() bind(C)
+  integer::output_status
   sp_tddft_close=1
   if(.not.allocated(state)) return
+  if(comm_is_root(nproc_id_global))then
+    if(allocated(step_saved))then
+      call step_output_close(step_outputs,output_status)
+    else
+      close(state%ofl%fh_rt)
+      close(state%ofl%fh_rt_energy)
+    endif
+  endif
   if(allocated(step_saved))deallocate(step_saved,step_saved_xc)
   call timer_end(LOG_RT_ITERATION)
   call timer_disable_sub
   close(030)
-  if(comm_is_root(nproc_id_global)) close(state%ofl%fh_rt)
   call finalize_xc(state%xc_func)
   call dealloc_cache(state%srg)
   call dealloc_cache(state%srg_scalar)
