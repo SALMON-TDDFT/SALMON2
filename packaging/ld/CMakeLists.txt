@@ -105,7 +105,7 @@ install(FILES "${ROOT}/salmonpy/gs_archive.py" "${ROOT}/salmonpy/GS_ARCHIVE.md" 
 install(FILES "${ROOT}/salmonpy/include/salmonpy_gs_stream.f90" DESTINATION salmonpy/include)
 
 install(FILES "${ROOT}/salmonpy/gs_native.py" DESTINATION salmonpy)
-install(DIRECTORY "${ROOT}/salmonpy/native_adapters/" DESTINATION salmonpy/native_adapters FILES_MATCHING PATTERN "*.f90")
+install(DIRECTORY "${ROOT}/salmonpy/native_adapters/" DESTINATION salmonpy/native_adapters FILES_MATCHING PATTERN "*.f90" PATTERN "*.h")
 install(FILES "${ROOT}/tools/build_gs_restart_converter.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/salmonpy/_gs_export.py" DESTINATION salmonpy)
@@ -213,3 +213,8 @@ install(FILES "${ROOT}/tools/test_fast_hse_symmetry_history_mpi.py" DESTINATION 
 install(FILES "${ROOT}/tests/native/test_hse_context_owners.f90" "${ROOT}/tests/native/test_step_output_owners.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 install(FILES "${ROOT}/tools/test_fast_hse_context_owners_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_tddft_output_close.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/test_fast_hse_handles_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/salmonpy/examples/native_fast_hse_handles.c" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/salmonpy/NATIVE_HANDLES.md" "${ROOT}/salmonpy/NATIVE_HANDLES.en.md" DESTINATION salmonpy)

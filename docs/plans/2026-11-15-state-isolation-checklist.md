@@ -808,3 +808,29 @@ journaling remains responsible for file-byte rollback. See
 - [x] Standard embedded close releases its actual energy output unit; MPI2
   normal/protected-close probes preserve host units. Source/installed590-test
   suites (one skip each), sdist→wheel/hash and mixed/deep regressions pass.
+
+## 2026-11-18 — Generation-checked same-model C contexts
+
+- [x] Version1 host-MPI fast-PR C header and opaque int64 slot/generation tokens;
+  independent original-GS states with per-state dt/capacity/A/failure status.
+- [x] Dynamic registry growth without whole-context copies; closed tokens remain
+  invalid after slot reuse; root close leaves child numerical/restore state live.
+- [x] Collective invalid/mixed token rejection and mismatched initial dt/capacity
+  rejection before model lifetime consumption; corrected initialization retries.
+- [x] Independent simultaneous transactions/candidates, recoverable numerical
+  failure, staged restore, fresh direct9→32/33 continuation without replay.
+- [x] Learned Taylor/PT-CN: two material groups, internal MPI1/2, OpenMP1/2;
+  independent current/energy/history and complete numeric HSE payload equal to
+  preceding singleton controls. External C sample compiles and runs on MPI2.
+- [ ] Python shared-model leases/direct use of the new handle ABI, heterogeneous
+  same-process inputs/symmetry, common initialization/I/O/timers and per-context
+  MPI subgroup retirement. Existing Python one-lifetime behavior remains.
+- [ ] Canonicalize inactive legacy checkpoint workspace before portable archives.
+  Examined periodic fixed-ion files contain unused tpsi overlap flag, Qp_e tail,
+  projection E_old, isolated Poisson counts and +U energy. Do not mistake whole
+  archive byte differences for propagated-state differences. No format change
+  in this slice; raw diagnostic archives remain private local evidence.
+
+See `docs/fast-hse-native-handles-validation-2026-11-18.md` and the JP/EN
+`NATIVE_HANDLES` guide. This is bounded handle identity/dispatch, not completed
+arbitrary native reentrancy. Child MPI communicators currently retire at detach.

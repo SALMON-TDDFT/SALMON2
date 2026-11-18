@@ -499,3 +499,5 @@ reuse. Defaults are two independent solver groups with internal MPI1/2 and
 OpenMP1/2. The fixtures test state isolation, not material convergence.
 
 Reconnection failures retain the transaction metadata, so retry or close cannot act on another context’s reused unit.
+
+Generation-checked same-model C contexts have a separate [native handle entry](NATIVE_HANDLES.en.md). The Python backend keeps its one-lifetime contract.

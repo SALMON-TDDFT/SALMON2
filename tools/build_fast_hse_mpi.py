@@ -50,6 +50,7 @@ def main():
         for name in names:
             path=(root/'runtime/sources/standard/src/salmonpy/parallel_bridge.f90' if name=='parallel_bridge' else adapters/(name+'.f90'))
             shutil.copy2(path,staged/(name+'.f90'))
+        shutil.copy2(adapters/'fast_hse_handles.h',staged/'fast_hse_handles.h')
         flags=(build/'src/CMakeFiles/salmon.dir/flags.make').read_text()
         options=[x for x in shlex.split(re.search(r'^Fortran_FLAGS\s*=\s*(.*)$',flags,re.M)[1]) if not x.startswith('-J')]
         includes=shlex.split(re.search(r'^Fortran_INCLUDES\s*=\s*(.*)$',flags,re.M)[1])
@@ -68,7 +69,8 @@ def main():
        'sha256':digest(library),'origin_sha256':digest(build/'salmon'),'source':marker,
        'source_marker_sha256':digest(marker_path),'source_hashes':{str(x.relative_to(source)):digest(x) for x in sorted((source/'src').rglob('*')) if x.is_file()},
        'adapter_hashes':{x.name:digest(x) for x in staged.iterdir()},'commands':commands,
-       'scope':'host MPI fast-PR k-only HSE, one native lifetime/process, same-topology rank-local direct checkpoint'}
+       'scope':'host MPI fast-PR k-only HSE; legacy Python one lifetime; shared-model generation-checked C contexts; same-topology rank-local checkpoint',
+       'handle_abi':{'protocol':1,'header':'fast_hse_handles.h','shared_immutable_model':True,'main_thread_collective':True}}
     (out/'build.json').write_text(json.dumps(r,indent=2)+'\n');print(out/'build.json')
 
 
