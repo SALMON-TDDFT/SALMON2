@@ -246,7 +246,6 @@ contains
     yn_hse_wannier/='n'.or.yn_md/='n'.or.yn_dc/='n'.or.trans_longi/='tr')goto 900
  if(use_symmetry)then
   ! Internal opt-in only. Existing worker/C/Python callers keep the default prohibition.
-  if(settings_pinned)goto 900
   if(.not.present(allow_symmetry))goto 900
   if(.not.allow_symmetry)goto 900
   if(nproc_size_global<1.or.nproc_size_global>2)goto 900

@@ -41,7 +41,7 @@ density** in atomic units (minus SALMON matter current), and energy is total
 energy in Hartree. Aold must exactly equal the accepted endpoint: query info
 after initialization or restore. x/y/z and rotating/circular input are supported;
 retained symmetry must support the actual field. The fast PR engine is the only
-HSE engine. Multiple symmetry contexts still require remaining shared-table work.
+HSE engine. Same-model symmetry contexts require shared_symmetry_protocol1; different symmetry groups still require further ownership work.
 
 Use [examples/native_fast_hse_handles.c](examples/native_fast_hse_handles.c) with
 the same MPI/toolchain as the explicitly built library. Compile explicitly:

@@ -757,3 +757,5 @@ k-star・擬ポテンシャル内容・再開バイナリとの互換性や全�
 ## Python共有HSEモデル
 
 NativeFastHSEBackend.open_model(initial,dt,context)で入力を一度だけ検証・コピーし、NativeFastHSEModel.new_state(point_id,dt=...,capacity=...)で元GSから独立した状態を作る。最初のnew_stateがnative初期化を行う。状態ごとのstep/checkpoint/closeと出力ラベルを使い、直接復元は対応する新規状態へ行う。model.closeは生成を止めるだけで、生存状態は最後に閉じるまで接続を保持する。finallyで全状態を明示closeする。空のままのモデルや全状態終了後も、開いているモデルから再生成でき、隠れた完全電子状態を保持しない。model protocol1の新しいランタイムが必要。既存のMPI点配置や異種物質の同一プロセス対応を自動変更しない。SHARED_HSE日英ガイドとexamples/shared_fast_hse.pyに従う。
+
+同一物質・セル・kメッシュ・対称操作の共有HSEは allow_symmetry=True で縮約k点にも対応する。shared_symmetry_protocol1の明示ビルドが必要。外場が実際の保持群に適合することを検査し、群や外場を自動変更しない。通常混在セッションはshared_model=Trueとpoints_per_groupを明示する。

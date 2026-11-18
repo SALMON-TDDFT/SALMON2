@@ -200,6 +200,11 @@
       "before_sha256": "85b4098863c13947eddbd2c95ded856ccb67cdebec942980efdd74fe4a359962",
       "after_sha256": "fb5945d1c36b73a3af624a3dedb120cc97c99b5aa46d4ecb61547682c4db862c",
       "source": "overrides/hse-explicit-routing/src/symmetry/symmetry.f90"
+    },
+    "src/symmetry/symmetry_rho.f90": {
+      "before_sha256": "f24816a158e0daa9158ce90206698a0d261ec56b6c23d744a2ac834f0bba7a5b",
+      "after_sha256": "f01e568267cbf11aad028993c62fbcb533d6af7b370a96ec2b613b6e6769a5f9",
+      "source": "overrides/hse-explicit-routing/src/symmetry/symmetry_rho.f90"
     }
   }
 }

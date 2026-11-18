@@ -43,7 +43,8 @@
     "src/xc/exx_symmetry.f90",
     "src/xc/hybrid_semilocal.f90",
     "src/xc/exx_k_orbits.f90",
-    "src/symmetry/symmetry.f90"
+    "src/symmetry/symmetry.f90",
+    "src/symmetry/symmetry_rho.f90"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -73,6 +74,6 @@
   ],
   "scope": "explicit full-support fast HSE native ownership; serial and experimental k-only host-MPI CPU contexts, common immutable per-group configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "59d74b741143ad369e957443bc6a89281303435023f11db62dbbcb96c754ce8d",
+  "replacements_sha256": "47fd2774b16d8ccb83dcc18959242cae58610661c2642a35e1a319984108f782",
   "patch_sha256_role": "historical migration identity; no patch is applied"
 }

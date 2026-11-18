@@ -1,7 +1,7 @@
 """Experimental fast-PR HSE on an explicitly supplied k-only MPI subgroup.
 
 Build explicitly against the host MPI. One native lifetime on the main thread
-per process on the legacy route; open_model provides shared full-k state leases.
+per process on the legacy route; open_model provides shared same-model full/reduced-k state leases.
 Input and shared work directories are caller-owned. No MPI import,
 initialization, finalization, compilation or download occurs on module import.
 """
@@ -291,8 +291,6 @@ class NativeFastHSEBackend:
             symmetry = 'y' in symmetry_setting
             if symmetry and not self.allow_symmetry:
                 raise InputError('symmetry input requires explicit allow_symmetry=True')
-            if shared and symmetry:
-                raise InputError('shared native HSE model requires non-symmetric full-k input')
             operations = None
             if symmetry:
                 factor = _symmetry_factor(groups,propagator)
@@ -335,7 +333,7 @@ class NativeFastHSEBackend:
             if symmetry:_require_history_protocol(lib,factor,propagator)
             if shared:
                 from ._shared_hse import _configure_handles
-                _configure_handles(lib)
+                _configure_handles(lib,symmetry=symmetry)
             else:
                 initializer = _initializer(lib,self.allow_symmetry,comm.size)
         except Exception as exc:
@@ -346,7 +344,7 @@ class NativeFastHSEBackend:
         native = NativeParallelContext(owner,self.library,self.sha256)
         _used = embedded._used = True
         if shared:
-            return NativeFastHSEModel(native,lib,work,dt,initial.max_steps,propagator,self.identity,initial.manifest)
+            return NativeFastHSEModel(native,lib,work,dt,initial.max_steps,propagator,self.identity,initial.manifest,symmetry=symmetry)
         state = _State(native,lib,work,dt,initial.max_steps,propagator)
         state.symmetry_enabled = symmetry
         try:

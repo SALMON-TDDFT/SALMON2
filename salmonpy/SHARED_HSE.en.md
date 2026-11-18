@@ -1,9 +1,9 @@
 # Python shared fast-PR HSE model
 
-[日本語](SHARED_HSE.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.2`
+[日本語](SHARED_HSE.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.3`
 
 `NativeFastHSEBackend.open_model(initial, dt, context)` returns a
-`NativeFastHSEModel`. It verifies/copies one immutable full-k input bundle and
+`NativeFastHSEModel`. It verifies/copies one immutable material/symmetry input bundle and
 attaches one existing host-MPI communicator. The first `new_state` initializes
 the native model; subsequent calls create fresh independent original-GS states.
 There is no hidden numerical template and no per-state GS-directory copy.
@@ -65,11 +65,10 @@ The model context manager does not close surviving states: always close them in
 `finally`. A never-initialized closed model releases its unused Python reservation.
 No MPI cleanup is triggered by Python garbage collection.
 
-Scope: one immutable **non-symmetric full-k** model/process, existing k-only MPI1/2
+Scope: one immutable **full-k or symmetry-reduced-k** model/process, existing k-only MPI1/2
 backend and CPU/main-thread rules. Legacy `create_state` remains single-lifetime;
 choose it or `open_model` for a process. An explicitly rebuilt runtime must expose
-both handle protocol1 and model protocol1. Reduced-k/symmetry multi-context,
-heterogeneous same-process inputs, automatic multipoint rank reassignment and
+both handle protocol1 and model protocol1. Different symmetry groups or heterogeneous same-process inputs, automatic multipoint rank reassignment and
 threaded entry are separate work. Child communicators remain attachment-owned
 until final detach; repeated creation is not an unlimited resource guarantee.
 Budgets and physical-convergence advice remain advisory; inputs are not changed.
@@ -96,7 +95,7 @@ its own state and ID. Points of the same material are grouped in encounter order
 including across separate layers. Omit the option to retain one point/group.
 This is an explicit layout choice; budget warnings never change it automatically.
 Known singleton TDDFT cannot share a group; custom backends may provide their own
-factory. Shared native HSE currently requires non-symmetric full-k inputs.
+factory. Shared native HSE accepts full-k or an explicitly opted-in same-symmetry model.
 
 `ResponseSession` optionally calls `backend.open_group(initial, dt, context)`
 once per local binding. A returned factory supplies `new_state(point_id)` and
@@ -134,3 +133,36 @@ recovery or an interchangeable cross-backend archive format.
 Local Taylor and PT-CN tests compared shared versus separate MPI groups, independent
 serial responses, and continuous versus direct resumed currents/fields/energies.
 See the repository validation record for scope; this is not material convergence.
+
+## Shared reduced-k symmetry
+
+Use `NativeFastHSEBackend(..., allow_symmetry=True, shared_model=True)` in normal
+sessions, or `allow_symmetry=True` with explicit `open_model`. A current runtime
+must expose `sp_fast_hse_shared_symmetry_protocol()==1`; full-k remains compatible
+with earlier model-protocol1 libraries. Every state uses the same immutable cell,
+atoms, k mesh and retained operations. The density map is rebuilt synchronously
+on construction; propagated wavefunctions, exchange maps/kernels and learned
+histories are separate owners. Main-thread/collective ordering remains required.
+
+For the normal mixed example add `--hse-symmetry --hse-reference-bundle FULL_GS`;
+provide the reduced GS as the HSE bundle, and retain `--hse-points-per-group 2`.
+The serial reference is full-k. For the explicit example add `--symmetry`; its two
+drives are then along z (this still requires a group preserving z). Other drives
+are allowed when the actual retained group preserves them; incompatible A is
+rejected without modifying the accepted state. No projection or group conversion.
+Taylor strict/learned and PT-CN off/learned were checked with internal MPI1/2,
+independent controls, full/reduced-k and direct fresh restart. Different symmetry
+groups within one model/process and cross-topology restart remain unsupported.
+
+The supplied 3D localized mixed fixture was verified for128 steps (`--steps 128`,
+`--direct-save-at 63`). At a longer256-step run its local field ceased to preserve
+the retained group after145 steps, and admission correctly rejected it while
+protected stepping preserved the originals. A z-polarized source does not ensure
+that every evolving local FDTD field stays along z. Use a symmetry-compatible
+geometry/field or prepare full-k input for that calculation; do not discard small
+components, rotate/project the drive or silently shorten a user's requested run.
+
+A non-symmetric PBE point can generate components incompatible with the HSE
+retained group even when the incident pulse is along z. The tested combined PBE
+fixture is such a negative case; use full-k HSE for it. Full-k PBE/HSE mixtures
+remain supported and were regression-tested with the new runtime.

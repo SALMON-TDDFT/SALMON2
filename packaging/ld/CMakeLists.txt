@@ -225,3 +225,5 @@ install(FILES "${ROOT}/tools/test_shared_hse_mpi.py" DESTINATION salmonpy/_runti
 install(FILES "${ROOT}/salmonpy/SHARED_HSE.md" "${ROOT}/salmonpy/SHARED_HSE.en.md" DESTINATION salmonpy)
 install(FILES "${ROOT}/salmonpy/examples/mixed_shared_hse_layers.json" "${ROOT}/salmonpy/examples/mixed_shared_tddft_hse_layers.json" DESTINATION salmonpy/examples)
 install(FILES "${ROOT}/tools/test_shared_mixed_restore_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_shared_symmetry_hse_mpi.py" DESTINATION salmonpy/_runtime_source/tools)

@@ -1,4 +1,4 @@
-"""Explicit MPI shared-model fast-PR HSE example; requires a prepared full-k GS.
+"""Explicit MPI shared-model fast-PR HSE example; requires a prepared matching GS.
 
 mpiexec -n 2 python shared_fast_hse.py BUILD_JSON GS NEW_OUTPUT
 No build/download. This checks composition/restart, not physical convergence.
@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--steps',type=int,default=16)
     parser.add_argument('--split',type=int,default=8)
     parser.add_argument('--dt',type=float,default=.001)
+    parser.add_argument('--symmetry',action='store_true',help='explicit same-symmetry reduced-k model; both example drives along z')
     args=parser.parse_args();comm=MPI.COMM_WORLD
     if not 0<args.split<args.steps:parser.error('require 0 < split < steps')
     output=args.output.resolve();error=None
@@ -29,7 +30,7 @@ def main():
     if error:raise ValueError(error)
     context=SimpleNamespace(solver_comm=comm,point_ids=('point-a','point-b'),closed=False,_dependents=0)
     initial=FastHSEMaterialProvider(args.initial,max_steps=args.steps).prepare(context)
-    model=NativeFastHSEBackend(args.build,output).open_model(initial,args.dt,context)
+    model=NativeFastHSEBackend(args.build,output,allow_symmetry=args.symmetry).open_model(initial,args.dt,context)
     states=[];continuous=[];second=[];resumed=[]
     saved=output/f'point-a-{comm.rank}.bin'
     def drive(index):
@@ -41,7 +42,8 @@ def main():
             b=model.new_state('point-b');states.append(b)
             for index in range(1,args.steps+1):
                 continuous.append(np.r_[a.step(drive(index)),a.energy])
-                second.append(np.r_[b.step(np.array([1e-4*np.sin(.2*index*args.dt),0.,0.])),b.energy])
+                bfield=np.array([0.,0.,-7e-5*np.sin(.2*index*args.dt)]) if args.symmetry else np.array([1e-4*np.sin(.2*index*args.dt),0.,0.])
+                second.append(np.r_[b.step(bfield),b.energy])
                 if index==args.split:a.checkpoint(saved,False)
             fresh=model.new_state('point-a');states.append(fresh)
             fresh.checkpoint(saved,True)

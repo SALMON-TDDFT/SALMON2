@@ -52,7 +52,7 @@ def main():
     parser.add_argument('--hse-bundle', type=Path, help='optional separate fast-PR HSE GS bundle; default is BUNDLE')
     parser.add_argument('--hse-symmetry', action='store_true', help='explicit fast-PR symmetry opt-in; native HSE group1/2 with matching mode capability')
     parser.add_argument('--hse-reference-bundle', type=Path, help='explicit equivalent full-k HSE bundle for serial comparison')
-    parser.add_argument('--hse-points-per-group',type=int,default=1,help='explicit shared full-k HSE points per native group')
+    parser.add_argument('--hse-points-per-group',type=int,default=1,help='explicit shared same-model HSE points per native group')
     parser.add_argument('--hse-ranks', type=int, choices=(1, 2), default=1)
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
@@ -97,8 +97,6 @@ def main():
         parser.error('--hse-reference-bundle requires --hse-symmetry')
     if args.hse_points_per_group<1 or (args.hse_points_per_group>1 and args.fast_hse_mpi_build is None):
         parser.error('positive hse-points-per-group; grouping requires fast-hse-mpi-build')
-    if args.hse_points_per_group>1 and args.hse_symmetry:
-        parser.error('shared HSE groups currently require full-k non-symmetric input')
     if args.hse_ranks != 1 and args.fast_hse_mpi_build is None:
         parser.error('hse-ranks > 1 requires --fast-hse-mpi-build')
     if args.memory_budget_gib is not None and (not np.isfinite(args.memory_budget_gib) or args.memory_budget_gib <= 0):

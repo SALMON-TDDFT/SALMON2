@@ -37,7 +37,7 @@ dtは原子時間、AはCartesian **A/cの原子単位**、jは**電荷電流密
 （SALMON物質電流の負）、energyはHartree単位の全エネルギーです。
 Aoldは受理済み端点と厳密に一致させます。初期化・復元後はinfoで照会してください。
 x／y／zと回転・円偏光の入力を扱います。縮約時は実際の外場と保持対称性の整合が必要です。
-HSEは高速PR版だけです。対称性付き複数コンテキストには、残る共有テーブルの分離が必要です。
+HSEは高速PR版だけです。同じ対称性の複数状態にはshared_symmetry_protocol1が必要です。異なる対称群の混在には追加の分離が必要です。
 
 [examples/native_fast_hse_handles.c](examples/native_fast_hse_handles.c) を、ランタイムと
 同じMPI・ツールチェーンで明示的にコンパイルします。

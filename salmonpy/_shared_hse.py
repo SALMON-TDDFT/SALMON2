@@ -12,7 +12,7 @@ from .fast_hse import _positive
 from .sbe import _integer
 
 
-def _configure_handles(lib):
+def _configure_handles(lib, *, symmetry=False):
     vector=np.ctypeslib.ndpointer(dtype=np.float64,ndim=1,shape=(3,),flags='C_CONTIGUOUS')
     specs={'sp_fast_hse_handle_protocol':[], 'sp_fast_hse_model_protocol':[],
            'sp_fast_hse_handle_init':[c.c_char_p,c.c_double,c.c_int,c.c_int,c.POINTER(c.c_int64),vector],
@@ -30,6 +30,12 @@ def _configure_handles(lib):
         fn.argtypes=args;fn.restype=c.c_int
     if lib.sp_fast_hse_handle_protocol()!=1 or lib.sp_fast_hse_model_protocol()!=1:
         raise InputError('unsupported shared HSE model protocol')
+
+    if symmetry:
+        query=getattr(lib,'sp_fast_hse_shared_symmetry_protocol',None)
+        if query is None:raise InputError('shared symmetry HSE requires an explicit current runtime build')
+        query.argtypes=[];query.restype=c.c_int
+        if query()!=1:raise InputError('unsupported shared symmetry HSE protocol')
 
 
 class _Bound:
@@ -60,15 +66,16 @@ class _Lease:
 
 
 class NativeFastHSEModel:
-    """One immutable full-k model and shared host-MPI lease; states evolve independently.
+    """One immutable material/symmetry model and shared host-MPI lease; states evolve independently.
 
     Construct with NativeFastHSEBackend.open_model. close prevents new states;
     existing states keep their connection until individually closed. All calls
     are collective/main-thread. No state or file is finalized by Python GC.
     """
-    def __init__(self,native,lib,work,dt,capacity,propagator,backend_identity,manifest):
+    def __init__(self,native,lib,work,dt,capacity,propagator,backend_identity,manifest,*,symmetry=False):
         self._native=native;self.lib=lib;self.work=work
         self.dt=dt;self.capacity=capacity;self.propagator=propagator
+        self.symmetry_enabled=symmetry
         self.closed=False;self.failed=False;self._attempted=False;self._initialized=False
         self._states=set();self._serial=0
         self.identity='salmonpy.shared-fast-hse/1/'+hashlib.sha256(
@@ -109,7 +116,7 @@ class NativeFastHSEModel:
         first=not self._initialized
         self._attempted=True
         if first:
-            code=self._call(self.lib.sp_fast_hse_handle_init,b'inputfile',timestep,count,0,c.byref(token),current)
+            code=self._call(self.lib.sp_fast_hse_handle_init,b'inputfile',timestep,count,int(self.symmetry_enabled),c.byref(token),current)
         else:
             code=self._call(self.lib.sp_fast_hse_model_new,timestep,count,c.byref(token),current)
         statuses=comm.allgather((int(code),token.value,bool(np.isfinite(current).all())))
@@ -122,7 +129,7 @@ class NativeFastHSEModel:
         state=_State(lease,bound,self.work,timestep,count,self.propagator)
         lease.state=state
         state.handle=token.value;state.point_id=point;state.model_identity=self.identity
-        state.initialized=True;state.symmetry_enabled=False
+        state.initialized=True;state.symmetry_enabled=self.symmetry_enabled
         self._states.add(state)
         try:
             label=c.create_string_buffer(81)

@@ -13,4 +13,4 @@ into SALMON itself. Use README.en.md / README.md for English / Japanese onboardi
 
 This is a standalone SALMONpy layout. Bundled kernels live in native/. Complete SALMON sources are bundled in runtime/sources, with only fast-PR HSE supported. Full SALMON is an explicitly built runtime; see runtime/README.md in the source checkout.
 
-Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). Legacy coupling has one point/group and one native lifetime/process. SHARED_HSE.md describes explicit same-model full-k Python state leases; explicit points_per_group now connects full-k shared HSE to normal sessions; do not infer heterogeneous reentrancy or automatic rank assignment.
+Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). Legacy coupling has one point/group and one native lifetime/process. SHARED_HSE.md describes explicit same-model full-k Python state leases; explicit points_per_group now connects same-model full/reduced-k shared HSE to normal sessions; do not infer heterogeneous reentrancy or automatic rank assignment.

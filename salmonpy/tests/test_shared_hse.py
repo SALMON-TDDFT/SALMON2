@@ -86,3 +86,19 @@ class SharedHSETests(unittest.TestCase):
         group.states=[SimpleNamespace(close=fail),SimpleNamespace(close=lambda:events.append('unadmitted'))]
         with self.assertRaisesRegex(RuntimeFailure,'close failed'):group.close()
         self.assertEqual(events,['first','unadmitted','model'])
+
+    def test_shared_symmetry_requires_new_capability_but_full_k_stays_compatible(self):
+        from salmonpy._shared_hse import _configure_handles
+        from salmonpy.errors import InputError
+        class Fn:
+            def __init__(self,value=0):self.value=value
+            def __call__(self,*args):return self.value
+        names=('init','step','info','history','transaction','checkpoint','close','label')
+        lib=SimpleNamespace(**{'sp_fast_hse_handle_'+name:Fn() for name in names},
+            sp_fast_hse_handle_protocol=Fn(1),sp_fast_hse_model_protocol=Fn(1),sp_fast_hse_model_new=Fn())
+        _configure_handles(lib)
+        with self.assertRaisesRegex(InputError,'shared symmetry HSE'):_configure_handles(lib,symmetry=True)
+        lib.sp_fast_hse_shared_symmetry_protocol=Fn(0)
+        with self.assertRaisesRegex(InputError,'unsupported'):_configure_handles(lib,symmetry=True)
+        lib.sp_fast_hse_shared_symmetry_protocol=Fn(1)
+        _configure_handles(lib,symmetry=True)

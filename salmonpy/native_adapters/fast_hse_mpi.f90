@@ -29,7 +29,7 @@ module salmonpy_fast_hse_mpi
  end type
  type(handle_slot),allocatable,save::handles(:)
  integer(c_int64_t),parameter::handle_stride=2147483648_c_int64_t
- logical,save::handle_mode=.false.
+ logical,save::handle_mode=.false.,model_symmetry=.false.
  integer,save::handle_group=0
 
 contains
@@ -416,11 +416,14 @@ integer(c_int) function sp_fast_hse_handle_init(path,timestep,capacity,symmetry,
  status=initialize(path,timestep,capacity,J,symmetry==1)
  if(status==0)then
   handles(index)%label='native_fast_hse'
-  handle_mode=.true.;handle_group=group
+  handle_mode=.true.;handle_group=group;model_symmetry=symmetry==1
   call handle_unselect(index)
   token=candidate
  endif
  sp_fast_hse_handle_init=status
+end function
+integer(c_int) function sp_fast_hse_shared_symmetry_protocol() bind(C)
+ sp_fast_hse_shared_symmetry_protocol=1
 end function
 integer(c_int) function sp_fast_hse_model_protocol() bind(C)
  sp_fast_hse_model_protocol=1
@@ -481,7 +484,7 @@ integer(c_int) function create_model_state(timestep,capacity,token,J)
  endif
  write(handles(index)%label,'(a,i0,a,i0)')'native_hse_h',index,'_g',handles(index)%generation
  call rt_input_config(config);config%delta_t=timestep;config%max_steps=capacity
- call rt_open(fresh,trim(handles(index)%label),status,config=config)
+ call rt_open(fresh,trim(handles(index)%label),status,config=config,allow_symmetry=model_symmetry)
  call agree(status)
  if(status==0)call rt_current(fresh,J,status)
  call agree(status)

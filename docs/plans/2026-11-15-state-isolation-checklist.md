@@ -11,7 +11,7 @@ The dated sections below retain the scope at their completion time. Older statem
 This is the current queue. Historical unchecked items below record their earlier
 scope and must not be counted again as newly unfinished work.
 
-- [x] Delivery through85a73b92 is committed and pushed to the independent
+- [x] Delivery through7cddd3e9 is committed and pushed to the independent
   SALMONpy branch. Ownership9f07fb54 and C handles8fe6cd15 are included.
 - [x] Low-gradient Libxc HSE correction, full/reduced-k parity and internal MPI1/2.
 - [x] Cell/atom/grid/k-star/representative weights, PP references/KY records and
@@ -19,10 +19,10 @@ scope and must not be counted again as newly unfinished work.
 - [x] General-cell native initialization and actual Cartesian x/y/z/circular A.
 - [x] Symmetry Taylor strict/learned and PT-CN off/learned with direct history resume.
 - [x] Per-context step/restore buffers and generation-checked same-model C handles.
-- [x] Explicit Python full-k shared model: independent dt/capacity/state/output,
+- [x] Explicit Python same-model shared model: independent dt/capacity/state/output,
   one work copy/attachment, idle recreation and direct save/resume. Independent
   and preceding singleton trajectories match in six MPI/OpenMP cases.
-- [x] Latest source/installed suites:602 tests each, one skip each; sdist→wheel,
+- [x] Latest source/installed suites:603 tests each, one skip each; sdist→wheel,
   hashes, installed MPI/example, paired guides and AI catalog verified locally.
 
 Remaining work, grouped rather than duplicating historical bullets:
@@ -31,9 +31,12 @@ Remaining work, grouped rather than duplicating historical bullets:
    rank-plan assembly: multiple local macropoints, LD/SBE/TDDFT/HSE mixtures,
    FDTD coupling and aggregate protected save/resume. Opt-in grouping is implemented; default ordinary plans remain unchanged.
    Taylor/PT-CN, PBE mixture, distributed field and protected failed-restore retry pass.
-2. [ ] Multiple reduced-k/symmetry HSE contexts in one model/process. Existing
-   symmetry propagation, learned histories, MPI and restart are already covered
-   on the established separate-group route; Python sharing currently uses full k.
+2. [x] Multiple reduced-k/symmetry HSE contexts in one immutable model/process.
+   Taylor strict/learned and PT-CN off/learned, MPI1/2, independent controls,
+   full/reduced-k and direct restart verified. Shared mixed restore/retry covered
+   for LD/SBE/HSE128-step compatible local fields; arbitrary PBE fields may break
+   retained symmetry and require full-k, as recorded in the validation.
+   Different symmetry groups within one process remain in item3, not enabled here.
 3. [ ] Broader GS/TDDFT different-input ownership; per-context MPI subgroup
    retirement, common initialization/I/O/timers and specialized SOC/+U/DC resources.
    Same-model HSE token identity is complete within its documented boundary.
@@ -53,15 +56,16 @@ for fixed-dt mixed calculations. Converged physical benchmarks remain material /
 user-owned. Molecular work is paused; budget excess warns; conventional HSE and
 routine Actions are not pending requirements.
 
-Evidence: [normal shared mixed-session validation](../validation/2026-11-18-shared-hse-mixed-session.md).
+Evidence: [normal shared mixed-session validation](../validation/2026-11-18-shared-hse-mixed-session.md) and [shared symmetry validation](../validation/2026-11-18-shared-symmetry-hse.md).
 
 ### Fast-PR HSE priority
 
 Fast PR remains the only HSE engine, with symmetry central. Reduced-k symmetry,
 actual-A admission, general cells and learned Taylor/PT-CN persistence are verified
 on the established internal-MPI1/2 routes. Explicit C/Python same-model sharing is
-now available for full-k states. The factory is integrated into normal mixed point/rank assembly. Next extend
-shared symmetry and remaining resource ownership.
+now available for full/reduced-k states of one immutable symmetry model. The factory
+is integrated into normal mixed point/rank assembly. Next address remaining
+different-input ownership and context resource retirement.
 Do not confuse completed separate-group symmetry support with still-open
 same-process multi-context symmetry. Standard-solver symmetry arithmetic remains
 a distinct port; no physical-convergence or cross-platform certificate is implied.

@@ -1,9 +1,9 @@
 # Pythonから共有する高速PR版HSEモデル
 
-[English](SHARED_HSE.en.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.2`
+[English](SHARED_HSE.en.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.3`
 
 `NativeFastHSEBackend.open_model(initial, dt, context)` が `NativeFastHSEModel` を返します。
-不変の全k点入力を一度だけ検証・コピーし、ホストのMPIコミュニケータに一度接続します。
+不変の物質・対称性入力を一度だけ検証・コピーし、ホストのMPIコミュニケータに一度接続します。
 実際のnative物質初期化は最初の `new_state` です。以後は元のGSから独立した状態を作り、
 他状態の励起履歴を引き継ぎません。隠れた電子状態テンプレートや、状態ごとのGSディレクトリコピーはありません。
 
@@ -59,10 +59,10 @@ nativeハンドルはこれと別です。各状態はA・電流・時計・容�
 native初期化を一度も試していないモデルの終了は、未使用のPython予約も解放します。
 PythonのGCからMPI終了処理は呼びません。
 
-対象は、プロセスごとに一つの不変な**対称性なし・全k点**モデル、既存backendのk点MPI1／2、
+対象は、プロセスごとに一つの不変な**全k点または対称性による縮約k点**モデル、既存backendのk点MPI1／2、
 CPU・メインスレッドの範囲です。従来の `create_state` は1寿命のままで、同じプロセスでは
 こちらか `open_model` のどちらかを選びます。handle protocol1とmodel protocol1を備えた
-ランタイムを明示的にビルドしてください。縮約対称性の複数状態、異なる物質入力の同一プロセス実行、
+ランタイムを明示的にビルドしてください。異なる対称群や物質入力の同一プロセス実行、
 複数点の自動ランク再配置、スレッド実行は別作業です。子コミュニケータは最後のdetachまで接続単位で保持し、
 無制限の生成・終了を保証しません。資源予算と物理収束の助言は警告扱いで、入力を自動変更しません。
 AはCartesian A/cの原子単位、jは電荷電流密度（SALMON物質電流の負）、dtは原子時間、energyはHartreeです。
@@ -85,7 +85,7 @@ mpiexec -n 2 python shared_fast_hse.py BUILD_JSON GS NEW_OUTPUT
 `ranks_per_point` は各群のMPIランク数です。全マクロ点の状態とIDを維持し、同じ物質の点を
 登場順にまとめます。離れた層の点も同じ群にできます。省略時は従来の一群一点です。
 予算超過は警告で、点数や分割を自動変更しません。既知の単一状態TDDFTは群を共有できませんが、
-自作バックエンドは独自の生成器を提供できます。共有native HSEは現在、対称性なし・全k点が対象です。
+自作バックエンドは独自の生成器を提供できます。共有native HSEは全k点、または明示的に指定した同じ対称性のモデルが対象です。
 
 `ResponseSession` は任意の `backend.open_group(initial, dt, context)` をローカルbindingごとに
 一度呼びます。戻り値の生成器は `new_state(point_id)` と `close()` を持ち、`None` なら従来の
@@ -118,3 +118,30 @@ JSONは `importlib.resources.files('salmonpy.examples')` から取得し、そ�
 
 Taylor／PT-CNで、共有群と別群、独立した直列応答、連続実行と直接再開の電流・場・エネルギーを
 比較しました。測定範囲は検証記録を参照してください。物理的収束の保証ではありません。
+
+## 縮約k点・対称性付き共有モデル
+
+通常セッションは `NativeFastHSEBackend(..., allow_symmetry=True, shared_model=True)`、
+明示的な `open_model` は `allow_symmetry=True` を使います。対応ランタイムには
+`sp_fast_hse_shared_symmetry_protocol()==1` が必要です。全k点は従来のmodel protocol1とも互換です。
+各状態のセル・原子・kメッシュ・保持対称操作は共通不変です。密度対称化テーブルは生成時に同期して
+再構築し、時間発展する波動関数・交換の写像／カーネル・学習履歴は別々に所有します。
+メインスレッド・群内同順序の呼び出しが必要です。
+
+通常サンプルは `--hse-points-per-group 2` に
+`--hse-symmetry --hse-reference-bundle FULL_GS` を加え、HSE入力に縮約GSを渡します。
+直列参照は全k点です。明示モデルの例は `--symmetry` を加えると二つの外場がz方向になります
+（zを保つ対称群が必要です）。他方向・円偏光も実際の群が保持すれば利用できます。
+不適合なAは受理済み状態を変えずに拒否し、外場の投影や対称群の自動変換はしません。
+Taylor strict／learnedとPT-CN off／learnedを内部MPI1／2で検証し、独立実行、全／縮約k点、
+新規状態への直接再開を比較しました。異なる対称群の同一モデル混在とMPI分割変更による再開は対象外です。
+
+付属の局在点を持つ3次元混在配置は128ステップ（`--steps 128`、保存は
+`--direct-save-at 63`）で確認しました。256ステップでは145ステップ後に局所場が保持群に
+不適合となり、保護付きステップが元の状態を保って拒否しました。光源がz偏光でも全点の
+局所FDTD場がzのままとは限りません。実際の場・配置に適合する対称性か全k点入力を使い、
+微小成分の切捨て・外場の回転や投影・利用者の要求時間の自動短縮はしません。
+
+非対称PBE点を混ぜると、z偏光入射でもHSEの保持群に不適合な場を作ることがあります。
+今回のPBE混在入力はその拒否例であり、この入力には全k点HSEを使います。
+全k点のPBE／HSE混在は新しいランタイムでも回帰確認しています。
