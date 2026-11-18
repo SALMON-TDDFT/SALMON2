@@ -42,7 +42,25 @@ use sendrecv_grid, only: dealloc_cache
 implicit none
 private
 public :: sp_tddft_init,sp_tddft_step,sp_tddft_close,sp_tddft_checkpoint
+! Only numerical state: communicators, output units and library handles stay in the fresh context.
+type :: checkpoint_payload
+  type(s_orbital) :: spsi_in,spsi_out,tpsi
+  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
+  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
+  type(s_rt) :: rt
+  type(s_poisson) :: poisson
+  type(s_dft_energy) :: energy
+  real(8) :: fields(3,5),worker_A(3),worker_current(3,2),accepted_A(3)
+  integer :: Mit,itt
+end type
 type :: rt_context
+type(checkpoint_payload),allocatable :: step_saved,pending
+real(8) :: step_saved_cval=0d0,pending_xc_cval=0d0
+logical :: step_restored=.false.
+type(s_xc_operator_payload),allocatable :: step_saved_xc
+type(step_output_state) :: step_outputs
+real(8) :: accepted_A(3)=0d0
+integer(8) :: checkpoint_array_limit=0_8
 integer :: mpi_child_owner=0
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
@@ -74,40 +92,297 @@ integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
 end type
-! Only numerical state: communicators, output units and library handles stay in the fresh context.
-type :: checkpoint_payload
-  type(s_orbital) :: spsi_in,spsi_out,tpsi
-  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
-  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
-  type(s_rt) :: rt
-  type(s_poisson) :: poisson
-  type(s_dft_energy) :: energy
-  real(8) :: fields(3,5),worker_A(3),worker_current(3,2),accepted_A(3)
-  integer :: Mit,itt
+type(rt_context),pointer,save :: state=>null()
+logical,save :: used=.false.,handle_mode=.false.,model_timers_alive=.false.,handle_initializing=.false.
+integer,save :: handle_group=0
+integer(c_int64_t),parameter :: handle_stride=2147483648_c_int64_t
+type handle_slot
+  type(rt_context),pointer :: context=>null()
+  integer(c_int64_t) :: generation=0_c_int64_t
+  character(len(sysname)) :: label=''
 end type
-type(checkpoint_payload),allocatable,save :: step_saved
-real(8),save :: step_saved_cval
-logical,save :: step_restored=.false.
-type(s_xc_operator_payload),allocatable,save :: step_saved_xc
-type(step_output_state),save :: step_outputs
-type(checkpoint_payload),allocatable,save :: pending
-real(8),save :: pending_xc_cval
-type(rt_context),allocatable,save :: state
-logical,save :: used=.false.
-real(8),save :: accepted_A(3)=0d0
-integer(8),save :: checkpoint_array_limit=0_8
+type(handle_slot),allocatable,save :: handles(:)
+
 contains
+! Same immutable full-k semilocal model, common dt/capacity/decomposition.
+! Pointer selection never copies numerical/MPI/Libxc owners. Calls are synchronous.
+integer(c_int) function sp_tddft_handle_protocol() bind(C)
+  sp_tddft_handle_protocol=1
+end function
+integer(c_int) function sp_tddft_model_protocol() bind(C)
+  sp_tddft_model_protocol=1
+end function
+logical function handle_main()
+  use communication,only:comm_is_attached
+  use mpi,only:MPI_Is_thread_main,MPI_SUCCESS
+  integer::ierr
+  logical::main
+  handle_main=.false.
+  if(.not.comm_is_attached())return
+  call MPI_Is_thread_main(main,ierr)
+  handle_main=ierr==MPI_SUCCESS.and.main
+end function
+subroutine handle_agree(status)
+  use communication,only:comm_get_max,comm_get_globalinfo
+  integer,intent(inout)::status
+  integer::group,rank,n
+  call comm_get_globalinfo(group,rank,n)
+  call comm_get_max(status,group)
+end subroutine
+integer function live_handles() result(n)
+  integer::i
+  n=0
+  if(.not.allocated(handles))return
+  do i=1,size(handles)
+    if(associated(handles(i)%context))n=n+1
+  enddo
+end function
+subroutine handle_reserve(index,token,status)
+  use communication,only:comm_get_globalinfo
+  integer,intent(out)::index,status
+  integer(c_int64_t),intent(out)::token
+  type(handle_slot),allocatable::grown(:)
+  integer::i,old,n,allocation_status,group,rank,parts(2),reference(2)
+  index=0;status=0;token=0;old=0
+  if(allocated(handles))then
+    old=size(handles)
+    do i=1,old
+      if(associated(handles(i)%context))cycle
+      if(handles(i)%generation>=int(huge(0),c_int64_t))cycle
+      index=i;exit
+    enddo
+  endif
+  if(index==0)then
+    if(old>huge(0)/2)status=16
+    call handle_agree(status)
+    if(status/=0)return
+    allocate(grown(max(4,2*old)),stat=allocation_status)
+    if(allocation_status/=0)status=16
+    call handle_agree(status)
+    if(status/=0)return
+    if(old>0)grown(:old)=handles
+    call move_alloc(grown,handles);index=old+1
+  endif
+  parts=[index,int(handles(index)%generation+1_c_int64_t)];reference=parts
+  call comm_get_globalinfo(group,rank,n);call comm_bcast(reference,group)
+  if(any(reference/=parts))status=11
+  call handle_agree(status)
+  if(status/=0)return
+  handles(index)%generation=handles(index)%generation+1_c_int64_t
+  token=handles(index)%generation*handle_stride+int(index,c_int64_t)
+end subroutine
+subroutine handle_lookup(token,index,status)
+  use communication,only:comm_get_globalinfo
+  integer(c_int64_t),intent(in)::token
+  integer,intent(out)::index,status
+  integer::group,rank,n,parts(2),reference(2)
+  index=0;status=12
+  if(.not.handle_main())return
+  call comm_get_globalinfo(group,rank,n)
+  status=0
+  if(.not.handle_mode.or.group/=handle_group.or.token<=0_c_int64_t)status=12
+  if(token/handle_stride>int(huge(0),c_int64_t))status=12
+  call handle_agree(status)
+  if(status/=0)return
+  parts=[int(mod(token,handle_stride)),int(token/handle_stride)]
+  reference=parts;call comm_bcast(reference,group)
+  if(any(reference/=parts))status=11
+  call handle_agree(status)
+  if(status/=0)return
+  index=parts(1)
+  if(.not.allocated(handles))then
+    status=12
+  else if(index<1.or.index>size(handles))then
+    status=12
+  else if(handles(index)%generation/=int(parts(2),c_int64_t))then
+    status=12
+  else if(.not.associated(handles(index)%context))then
+    status=12
+  endif
+  call handle_agree(status)
+end subroutine
+subroutine handle_select(token,index,status)
+  integer(c_int64_t),intent(in)::token
+  integer,intent(out)::index,status
+  call handle_lookup(token,index,status)
+  if(status==0)state=>handles(index)%context
+end subroutine
+subroutine handle_unselect(index)
+  integer,intent(in)::index
+  handles(index)%context=>state
+  nullify(state)
+end subroutine
+integer(c_int) function sp_tddft_handle_init(path,timestep,capacity,A,decomposition,token,J) bind(C)
+  use communication,only:comm_get_globalinfo
+  use sym_sub,only:use_symmetry
+  use pseudo_pt_plusU_sub,only:PLUS_U_ON
+  character(c_char),intent(in)::path(*)
+  real(c_double),value::timestep
+  integer(c_int),value::capacity
+  real(c_double),intent(in)::A(3)
+  integer(c_int),intent(in)::decomposition(5)
+  integer(c_int64_t),intent(out)::token
+  real(c_double),intent(out)::J(3)
+  integer::index,status,group,rank,n,ignored
+  integer(c_int64_t)::candidate
+  token=0;J=0d0;sp_tddft_handle_init=12
+  if(.not.handle_main())return
+  status=0
+  if(used.or.handle_mode.or.associated(state))status=12
+  call handle_agree(status)
+  if(status/=0)return
+  call handle_reserve(index,candidate,status)
+  if(status==0)then
+    handle_initializing=.true.
+    status=sp_tddft_init(path,timestep,capacity,A,decomposition,J)
+    handle_initializing=.false.
+  endif
+  if(status==0)then
+    select case(trim(xc))
+    case('pz','tbmbj','libxc_pz','libxc_pbe')
+    case default
+      status=15
+    end select
+    if(use_symmetry.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_spinorbit/='n')status=15
+    if(iperiodic/=3.or.propagator/='middlepoint'.or.trans_longi/='tr')status=15
+    if(xname/='none'.or.cname/='none'.or.yn_jm/='n'.or.PLUS_U_ON)status=15
+    if(projection_option/='no'.or.dm_unfold_option/='no'.or.state%singlescale%flag_use)status=15
+    if(yn_out_rvf_rt/='n'.or.gram_schmidt_interval>=1.or.state%Mit/=0)status=15
+    if(yn_out_dns_rt/='n'.or.yn_out_dns_ac_je/='n'.or.yn_out_micro_je/='n')status=15
+    if(yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n'.or.yn_out_current_decomposed/='n')status=15
+    if(yn_out_intraband_current/='n'.or.yn_out_mag_decomposed_rt/='n'.or.yn_out_mag_micro_rt/='n')status=15
+    if(yn_out_spin_current_decomposed/='n'.or.yn_out_spin_current_micro/='n')status=15
+    if(yn_out_mom_distr_rt/='n'.or.yn_out_rt_energy_components/='n')status=15
+    call handle_agree(status)
+    if(status/=0)ignored=sp_tddft_close()
+  endif
+  if(status==0)then
+    handles(index)%label=trim(sysname)
+    call comm_get_globalinfo(group,rank,n);handle_group=group;handle_mode=.true.
+    call handle_unselect(index);token=candidate;J=-J
+  endif
+  sp_tddft_handle_init=status
+end function
+integer(c_int) function sp_tddft_model_new(token,J) bind(C)
+  use communication,only:comm_get_globalinfo
+  integer(c_int64_t),intent(out)::token
+  real(c_double),intent(out)::J(3)
+  integer::status,index,group,rank,n
+  integer(c_int64_t)::candidate
+  token=0;J=0d0;sp_tddft_model_new=12
+  if(.not.handle_main())return
+  call comm_get_globalinfo(group,rank,n)
+  status=0
+  if(.not.handle_mode.or.group/=handle_group.or.associated(state))status=12
+  call handle_agree(status)
+  if(status/=0)return
+  call handle_reserve(index,candidate,status)
+  if(status/=0)then
+    sp_tddft_model_new=status;return
+  endif
+  write(handles(index)%label,'(a,i0,a,i0)')'native_tddft_h',index,'_g',handles(index)%generation
+  call open_initial_state(J,status,trim(handles(index)%label))
+  if(status==0)then
+    call handle_unselect(index);token=candidate;J=-J
+  endif
+  sp_tddft_model_new=status
+end function
+integer(c_int) function sp_tddft_handle_step(token,Aold,Anew,J) bind(C)
+  integer(c_int64_t),value::token
+  real(c_double),intent(in)::Aold(3),Anew(3)
+  real(c_double),intent(out)::J(3)
+  integer::index,status
+  J=0d0
+  call handle_select(token,index,status);sp_tddft_handle_step=status
+  if(status/=0)return
+  sp_tddft_handle_step=sp_tddft_step(Aold,Anew,J);J=-J
+  call handle_unselect(index)
+end function
+integer(c_int) function sp_tddft_handle_info(token,step,A,J) bind(C)
+  integer(c_int64_t),value::token
+  integer(c_int),intent(out)::step
+  real(c_double),intent(out)::A(3),J(3)
+  integer::index,status
+  step=-1;A=0d0;J=0d0
+  call handle_select(token,index,status);sp_tddft_handle_info=status
+  if(status/=0)return
+  step=state%itt;A=state%accepted_A
+  if(state%itt==state%Mit)then
+    J=-sum(state%worker_current(:,1:state%system%nspin),dim=2)
+  else
+    J=-state%rt%curr(:,state%itt)
+  endif
+  call handle_unselect(index)
+end function
+integer(c_int) function sp_tddft_handle_checkpoint(token,path,mode) bind(C)
+  integer(c_int64_t),value::token
+  character(c_char),intent(in)::path(*)
+  integer(c_int),value::mode
+  integer::index,status
+  call handle_select(token,index,status);sp_tddft_handle_checkpoint=status
+  if(status/=0)return
+  sp_tddft_handle_checkpoint=sp_tddft_checkpoint(path,mode)
+  call handle_unselect(index)
+end function
+integer(c_int) function sp_tddft_handle_transaction(token,mode) bind(C)
+  integer(c_int64_t),value::token
+  integer(c_int),value::mode
+  integer::index,status
+  call handle_select(token,index,status);sp_tddft_handle_transaction=status
+  if(status/=0)return
+  sp_tddft_handle_transaction=sp_tddft_step_transaction(mode)
+  call handle_unselect(index)
+end function
+integer(c_int) function sp_tddft_handle_close(token) bind(C)
+  integer(c_int64_t),value::token
+  integer::index,status
+  call handle_select(token,index,status);sp_tddft_handle_close=status
+  if(status/=0)return
+  sp_tddft_handle_close=sp_tddft_close()
+  call handle_unselect(index)
+end function
+integer(c_int) function sp_tddft_handle_label(token,label,capacity) bind(C)
+  integer(c_int64_t),value::token
+  character(c_char),intent(out)::label(*)
+  integer(c_int),value::capacity
+  integer::index,status,i,n
+  call handle_lookup(token,index,status);sp_tddft_handle_label=status
+  if(status/=0)return
+  n=len_trim(handles(index)%label)
+  if(capacity<=n)status=13
+  call handle_agree(status)
+  if(status/=0)then
+    sp_tddft_handle_label=status;return
+  endif
+  do i=1,n
+    label(i)=handles(index)%label(i:i)
+  enddo
+  label(n+1)=c_null_char
+end function
+
 integer(c_int) function sp_tddft_context_mpi_protocol() bind(C)
   sp_tddft_context_mpi_protocol=1
 end function
-! Read-only diagnostics: live tracked children, registry slots, pending payload,
+! Read-only diagnostics: live tracked children, registry slots, state%pending payload,
 ! allocated state. This is not total MPI usage or process memory.
 integer(c_int) function sp_tddft_resources(values) bind(C)
   integer(c_int),intent(out)::values(4)
   values=0
   call comm_child_counts(values(1),values(2))
-  if(allocated(pending))values(3)=1
-  if(allocated(state))values(4)=1
+  block
+  integer::i
+  if(associated(state))then
+    values(4)=1
+    if(allocated(state%pending))values(3)=1
+  endif
+  if(allocated(handles))then
+    do i=1,size(handles)
+      if(.not.associated(handles(i)%context))cycle
+      values(4)=1
+      if(allocated(handles(i)%context%pending))values(3)=1
+    enddo
+  endif
+  end block
   sp_tddft_resources=0
 end function
 ! Protocol1: statuses10..14 reject collectively before numerical/latch changes.
@@ -122,19 +397,19 @@ integer(c_int) function sp_tddft_step_transaction(mode) bind(C)
   status=0;reference=mode
   call comm_bcast(reference,group)
   if(mode/=reference.or.mode<0.or.mode>3)status=11
-  if(.not.allocated(state))status=12
+  if(.not.associated(state))status=12
   call comm_get_max(status,group)
   if(status/=0)then
     sp_tddft_step_transaction=status;return
   endif
   if(mode==0)then
-    if(allocated(step_saved).or.allocated(pending))status=14
+    if(allocated(state%step_saved).or.allocated(state%pending))status=14
     if(yn_out_dns_rt/='n'.or.yn_out_dns_ac_je/='n'.or.yn_out_micro_je/='n')status=15
     if(yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n'.or.yn_out_current_decomposed/='n')status=15
     if(projection_option/='no'.or.dm_unfold_option/='no'.or.yn_out_rvf_rt/='n')status=15
   else if(mode/=2)then
-    if(.not.allocated(step_saved))status=14
-    if(mode==1.and.step_restored)status=14
+    if(.not.allocated(state%step_saved))status=14
+    if(mode==1.and.state%step_restored)status=14
   endif
   call comm_get_max(status,group)
   if(status/=0)then
@@ -142,33 +417,33 @@ integer(c_int) function sp_tddft_step_transaction(mode) bind(C)
   endif
   select case(mode)
   case(0)
-    allocate(step_saved,step_saved_xc)
-    call checkpoint_copy(step_saved,.false.)
-    step_saved_xc=state%system%xc_payload;step_saved_cval=state%xc_func%cval
-    step_restored=.false.
-    if(rank==0)call step_output_capture(step_outputs,state%ofl,status)
+    allocate(state%step_saved,state%step_saved_xc)
+    call checkpoint_copy(state%step_saved,.false.)
+    state%step_saved_xc=state%system%xc_payload;state%step_saved_cval=state%xc_func%cval
+    state%step_restored=.false.
+    if(rank==0)call step_output_capture(state%step_outputs,state%ofl,status)
     call comm_get_max(status,group)
-    if(status/=0)deallocate(step_saved,step_saved_xc)
+    if(status/=0)deallocate(state%step_saved,state%step_saved_xc)
   case(1)
-    call checkpoint_copy(step_saved,.true.)
-    state%system%xc_payload=step_saved_xc;state%xc_func%cval=step_saved_cval
+    call checkpoint_copy(state%step_saved,.true.)
+    state%system%xc_payload=state%step_saved_xc;state%xc_func%cval=state%step_saved_cval
     call update_kvector_nonlocalpt(state%info%ik_s,state%info%ik_e,state%system,state%ppg)
-    step_restored=.true.
-    if(rank==0)call step_output_close(step_outputs,status)
+    state%step_restored=.true.
+    if(rank==0)call step_output_close(state%step_outputs,status)
   case(2)
-    if(allocated(step_saved))then
+    if(allocated(state%step_saved))then
       if(rank==0)then
-        call step_output_reopen(step_outputs,status,state%ofl)
-        if(status==0)call step_output_flush(step_outputs,status)
+        call step_output_reopen(state%step_outputs,status,state%ofl)
+        if(status==0)call step_output_flush(state%step_outputs,status)
       endif
       call comm_get_max(status,group)
       if(status==0)then
-        deallocate(step_saved,step_saved_xc)
-        step_restored=.false.
+        deallocate(state%step_saved,state%step_saved_xc)
+        state%step_restored=.false.
       endif
     endif
   case(3)
-    if(rank==0)call step_output_reopen(step_outputs,status,state%ofl)
+    if(rank==0)call step_output_reopen(state%step_outputs,status,state%ofl)
   end select
   call comm_get_max(status,group)
   sp_tddft_step_transaction=status
@@ -254,16 +529,40 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   calc_mode='RT'
   call read_sw_symmetry(yn_symmetry)
   call timer_initialize
+  call open_initial_state(J,status,'')
+  sp_tddft_init=status
+end function
+subroutine open_initial_state(J,status,name)
+  use communication,only:comm_get_max
+  real(8),intent(out)::J(3)
+  integer,intent(out)::status
+  character(*),intent(in)::name
+  character(len(sysname))::saved_name
+  logical::exists
+  integer::child_owner
+  status=0;J=0d0
+  saved_name=sysname
+  if(len_trim(name)>0)saved_name=name
+  if(len_trim(name)>0.or.handle_initializing)then
+    inquire(file=trim(base_directory)//trim(saved_name)//'_rt.data',exist=exists)
+    if(exists)status=1
+    inquire(file=trim(base_directory)//trim(saved_name)//'_rt_energy.data',exist=exists)
+    if(exists)status=1
+  endif
+  call handle_agree(status)
+  if(status/=0)return
   quiet=.false.
   call comm_begin_children(child_owner,status)
   call comm_get_max(status,nproc_group_global)
   if(status/=0)then
     call comm_end_children(child_owner)
     call comm_release_children(child_owner)
-    sp_tddft_init=16;return
+    status=16;return
   endif
   allocate(state);state%mpi_child_owner=child_owner
-call timer_begin(LOG_TOTAL)
+  saved_name=sysname
+  if(len_trim(name)>0)sysname=name
+if(.not.model_timers_alive)call timer_begin(LOG_TOTAL)
 
 call initialization_rt( state%Mit, state%system, state%energy, state%ewald, state%rt, state%md, &
                         state%singlescale,  &
@@ -285,15 +584,19 @@ if(worker_requested()) then
   J=sum(state%worker_current(:,1:state%system%nspin),dim=2)
 end if
 
+  sysname=saved_name
   call comm_end_children(child_owner)
   state%itt=state%Mit
   call comm_sync_all
-  call timer_enable_sub
-  call timer_begin(LOG_RT_ITERATION)
+  if(.not.model_timers_alive)then
+    call timer_enable_sub
+    call timer_begin(LOG_RT_ITERATION)
+    model_timers_alive=.true.
+  endif
 
-  accepted_A=A
-  sp_tddft_init=0
-end function
+  state%accepted_A=worker_initial_A
+  status=0
+end subroutine
 integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   use pseudo_pt_plusU_sub,only:PLUS_U_ON
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -307,7 +610,7 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   call comm_get_globalinfo(admission_group,admission_rank,admission_size)
   J=0d0
   status=0
-  if(.not.allocated(state))status=12
+  if(.not.associated(state))status=12
   call comm_get_max(status,admission_group)
   if(status/=0)then
     sp_tddft_step=status;return
@@ -315,9 +618,9 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   do i=1,3
     if(.not.ieee_is_finite(Aold(i)).or..not.ieee_is_finite(Anew(i)))status=10
   enddo
-  if(any(Aold/=accepted_A))status=10
+  if(any(Aold/=state%accepted_A))status=10
   if(state%itt>=nt)status=13
-  if(allocated(pending))status=14
+  if(allocated(state%pending))status=14
   call comm_get_max(status,admission_group)
   if(status/=0)then
     sp_tddft_step=status;return
@@ -382,31 +685,37 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   endif
   J=state%rt%curr(:,state%itt)
 
-  accepted_A=Anew
+  state%accepted_A=Anew
   sp_tddft_step=0
 end function
 integer(c_int) function sp_tddft_close() bind(C)
   integer::output_status
   sp_tddft_close=1
-  if(.not.allocated(state)) return
+  if(.not.associated(state)) return
   if(comm_is_root(nproc_id_global))then
-    if(allocated(step_saved))then
-      call step_output_close(step_outputs,output_status)
+    if(allocated(state%step_saved))then
+      call step_output_close(state%step_outputs,output_status)
     else
       close(state%ofl%fh_rt)
       close(state%ofl%fh_rt_energy)
     endif
   endif
-  if(allocated(step_saved))deallocate(step_saved,step_saved_xc)
-  if(allocated(pending))deallocate(pending)
-  call timer_end(LOG_RT_ITERATION)
-  call timer_disable_sub
-  close(030)
+  if(allocated(state%step_saved))deallocate(state%step_saved,state%step_saved_xc)
+  if(allocated(state%pending))deallocate(state%pending)
+  if(.not.handle_mode.or.live_handles()==1)then
+    if(model_timers_alive)then
+      call timer_end(LOG_RT_ITERATION)
+      call timer_disable_sub
+      if(handle_mode)call timer_end(LOG_TOTAL)
+      model_timers_alive=.false.
+    endif
+    close(030)
+  endif
   call dealloc_cache(state%srg)
   call dealloc_cache(state%srg_scalar)
   call finalize_xc(state%xc_func)
   call comm_release_children(state%mpi_child_owner)
-  deallocate(state)
+  deallocate(state);nullify(state)
   ! Other SALMON module configuration remains process-owned. Do not reopen.
   sp_tddft_close=0
 end function
@@ -433,26 +742,30 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   logical::reading,opened,xc_flags(4),expected_xc_flags(4)
   sp_tddft_checkpoint=1
   status=0;opened=.false.;reading=restore==1.or.restore==2
-  if(.not.allocated(state))status=2
+  if(.not.associated(state))status=2
+  call comm_get_max(status,nproc_group_global)
+  if(status/=0)then
+    sp_tddft_checkpoint=status;return
+  endif
   mode=restore
   call comm_bcast(mode,nproc_group_global)
   if(mode/=restore.or.restore<0.or.restore>4)status=2
-  if(allocated(step_saved).and.restore/=0)status=14
-  if(restore==3.and..not.allocated(pending))status=2
+  if(allocated(state%step_saved).and.restore/=0)status=14
+  if(restore==3.and..not.allocated(state%pending))status=2
   call comm_get_max(status,nproc_group_global)
   if(status/=0)then
     sp_tddft_checkpoint=status;return
   endif
   if(restore==4)then
-    if(allocated(pending))deallocate(pending)
+    if(allocated(state%pending))deallocate(state%pending)
     sp_tddft_checkpoint=0;return
   endif
   if(restore==3)then
-    if(.not.allocated(pending))return
-    call checkpoint_install(pending,pending_xc_cval)
-    deallocate(pending);sp_tddft_checkpoint=0;return
+    if(.not.allocated(state%pending))return
+    call checkpoint_install(state%pending,state%pending_xc_cval)
+    deallocate(state%pending);sp_tddft_checkpoint=0;return
   endif
-  if(restore==2.and.allocated(pending))status=2
+  if(restore==2.and.allocated(state%pending))status=2
   if(restore<0.or.restore>4)status=2
   select case(trim(xc))
   case('pz','tbmbj')
@@ -484,9 +797,9 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   if(status/=0)then
     sp_tddft_checkpoint=status;return
   endif
-  checkpoint_array_limit=max(64_8*(int(nt,8)+1_8),64_8*int(state%system%ngrid,8))
-  if(allocated(state%spsi_in%zwf))checkpoint_array_limit=max(checkpoint_array_limit,size(state%spsi_in%zwf,kind=8))
-  if(allocated(state%spsi_in%rwf))checkpoint_array_limit=max(checkpoint_array_limit,size(state%spsi_in%rwf,kind=8))
+  state%checkpoint_array_limit=max(64_8*(int(nt,8)+1_8),64_8*int(state%system%ngrid,8))
+  if(allocated(state%spsi_in%zwf))state%checkpoint_array_limit=max(state%checkpoint_array_limit,size(state%spsi_in%zwf,kind=8))
+  if(allocated(state%spsi_in%rwf))state%checkpoint_array_limit=max(state%checkpoint_array_limit,size(state%spsi_in%rwf,kind=8))
   call checkpoint_copy(copy,.false.)
   expected=[2,nproc_size_global,nproc_id_global,nt,state%system%nspin,state%system%no,state%system%nk, &
     state%lg%num,state%mg%is,state%mg%ie,state%mg%is_array,state%mg%ie_array, &
@@ -557,8 +870,8 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   call comm_get_max(status,nproc_group_global)
   if(status==0.and.reading)then
     if(restore==2)then
-      call move_alloc(copy,pending)
-      pending_xc_cval=saved_xc_cval
+      call move_alloc(copy,state%pending)
+      state%pending_xc_cval=saved_xc_cval
     else
       call checkpoint_install(copy,saved_xc_cval)
     endif
@@ -704,7 +1017,7 @@ subroutine checkpoint_copy(copy,restore)
     state%rt%j_e=copy%rt%j_e
     state%rt%E_old=copy%rt%E_old
     state%rt%rho0_loaded=copy%rt%rho0_loaded
-    accepted_A=copy%accepted_A
+    state%accepted_A=copy%accepted_A
     state%system%vec_Ac=copy%fields(:,1)
     state%system%vec_Ac_ext=copy%fields(:,2)
     state%system%vec_E=copy%fields(:,3)
@@ -831,7 +1144,7 @@ subroutine checkpoint_copy(copy,restore)
     copy%rt%j_e=state%rt%j_e
     copy%rt%E_old=state%rt%E_old
     copy%rt%rho0_loaded=state%rt%rho0_loaded
-    copy%accepted_A=accepted_A
+    copy%accepted_A=state%accepted_A
     copy%fields=0d0
     copy%fields(:,1)=state%system%vec_Ac
     copy%fields(:,2)=state%system%vec_Ac_ext
@@ -891,11 +1204,11 @@ subroutine checkpoint_io(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -938,11 +1251,11 @@ subroutine checkpoint_io(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -985,11 +1298,11 @@ subroutine checkpoint_io(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1078,11 +1391,11 @@ subroutine checkpoint_io_s_scalar(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1137,11 +1450,11 @@ subroutine checkpoint_io_s_vector(unit,reading,value,ios)
       elements=1_8
       do k=1,4
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1196,11 +1509,11 @@ subroutine checkpoint_io_s_orbital(unit,reading,value,ios)
       elements=1_8
       do k=1,7
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1246,11 +1559,11 @@ subroutine checkpoint_io_s_orbital(unit,reading,value,ios)
       elements=1_8
       do k=1,7
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1312,11 +1625,11 @@ subroutine checkpoint_io_s_dft_energy(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1443,11 +1756,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1492,11 +1805,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1541,11 +1854,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1590,11 +1903,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1639,11 +1952,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1688,11 +2001,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1743,11 +2056,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1792,11 +2105,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1841,11 +2154,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1890,11 +2203,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1939,11 +2252,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1988,11 +2301,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2037,11 +2350,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2086,11 +2399,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2135,11 +2448,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2184,11 +2497,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2233,11 +2546,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2282,11 +2595,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2331,11 +2644,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2380,11 +2693,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2429,11 +2742,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2478,11 +2791,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2527,11 +2840,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2576,11 +2889,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2641,11 +2954,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2690,11 +3003,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2739,11 +3052,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2788,11 +3101,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2837,11 +3150,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2886,11 +3199,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2935,11 +3248,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2984,11 +3297,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3033,11 +3346,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3082,11 +3395,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3131,11 +3444,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3180,11 +3493,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3229,11 +3542,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3278,11 +3591,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3325,11 +3638,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3372,11 +3685,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3421,11 +3734,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>state%checkpoint_array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>state%checkpoint_array_limit/extent)then
             ios=1;return
           endif
         endif

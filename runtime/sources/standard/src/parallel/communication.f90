@@ -26,7 +26,7 @@ module communication
   integer, allocatable, private :: embedded_children(:),embedded_child_owner(:)
   integer, private :: active_child_owner=0,next_child_owner=0
   public :: comm_begin_children,comm_end_children,comm_release_children,comm_child_counts
-  public :: comm_attach, comm_detach
+  public :: comm_attach, comm_detach,comm_is_attached
 
   ! call once
   public :: comm_init
@@ -353,6 +353,10 @@ contains
     active_child_owner=0;next_child_owner=0
     call MPI_Comm_free(embedded_comm,ierr)
   end subroutine
+
+  logical function comm_is_attached()
+    comm_is_attached=embedded_comm/=MPI_COMM_NULL
+  end function
 
   subroutine track_embedded_group(group)
     integer,intent(in) :: group

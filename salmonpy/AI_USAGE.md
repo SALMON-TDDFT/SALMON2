@@ -763,3 +763,5 @@ NativeFastHSEBackend.open_model(initial,dt,context)で入力を一度だけ検�
 context_mpi_protocol1の新しい高速PRランタイムでは、rt_open初期化で作った子コミュニケータは状態所有とし、state.closeで通信要求・XC／FFT資源の後に解放する。共通資源・ホストMPIは維持する。異種入力対応や全MPI資源の独立化、初期化異常復帰まで完了とは説明しない。
 
 標準TDDFTのcontext_mpi_protocol1は初期化〜初期電流の子コミュニケータを状態終了時に回収し、pending復元候補も破棄する。一native寿命／プロセスの制約は維持する。ホストMPI継続と多重状態対応を混同しない。MPIラッパーの内部コンパイラ指定もビルド記録に残す。
+
+標準TDDFTのhandle/model protocol1は、同じ全k点物質・dt・容量・MPI分割・初期Aの独立native状態を扱う実験的C入口。返すjは電荷電流で、旧sp_tddft_init/stepの物質Jとは異なる。保護／候補／A／保存上限は状態所有。Python create_stateの一寿命制約は維持し、共有生成器・異種入力対応とは説明しない。STANDARD_HANDLES日英と対応ヘッダーを参照。

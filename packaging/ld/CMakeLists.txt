@@ -231,3 +231,7 @@ install(FILES "${ROOT}/tools/test_shared_symmetry_hse_mpi.py" DESTINATION salmon
 install(FILES "${ROOT}/tools/test_hse_mpi_resource_owners.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/tools/test_tddft_mpi_resource_owner.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/STANDARD_HANDLES.md" "${ROOT}/salmonpy/STANDARD_HANDLES.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/native_adapters/standard_tddft_handles.h" DESTINATION salmonpy/native_adapters)
+install(FILES "${ROOT}/tools/test_standard_tddft_handles_mpi.py" DESTINATION salmonpy/_runtime_source/tools)

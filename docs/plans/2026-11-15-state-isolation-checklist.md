@@ -11,7 +11,7 @@ The dated sections below retain the scope at their completion time. Older statem
 This is the current queue. Historical unchecked items below record their earlier
 scope and must not be counted again as newly unfinished work.
 
-- [x] Delivery throughd142f22c is committed and pushed to the independent
+- [x] Delivery throughbd27f0ed is committed and pushed to the independent
   SALMONpy branch. Ownership9f07fb54 and C handles8fe6cd15 are included.
 - [x] Low-gradient Libxc HSE correction, full/reduced-k parity and internal MPI1/2.
 - [x] Cell/atom/grid/k-star/representative weights, PP references/KY records and
@@ -28,6 +28,10 @@ scope and must not be counted again as newly unfinished work.
 - [x] Standard embedded TDDFT initialization/initial-current children retire at
   close, including pending payload cleanup. PZ/Libxc-PZ/PBE/TB-mBJ auto/fixed,
   orbital2/rgrid2 match old traces; one lifetime/process stays in effect.
+- [x] Standard same-model native C handles: per-context protection/pending/XC/A/
+  serializer ownership, generation tokens, original-GS recreation and direct
+  restart. Fixed common dt/capacity/decomposition; Python shared factory and
+  ordinary standard multipoint session integration are next, not already enabled.
 - [x] Latest source/installed suites:603 tests each, one skip each; sdist→wheel,
   hashes, installed MPI/example, paired guides and AI catalog verified locally.
 
@@ -43,7 +47,8 @@ Remaining work, grouped rather than duplicating historical bullets:
    for LD/SBE/HSE128-step compatible local fields; arbitrary PBE fields may break
    retained symmetry and require full-k, as recorded in the validation.
    Different symmetry groups within one process remain in item3, not enabled here.
-3. [ ] Broader GS/TDDFT different-input ownership; remaining
+3. [ ] Connect standard native C handles to a Python shared model and normal
+   multipoint sessions. Then broader GS/TDDFT different-input ownership; remaining
    unscoped/common MPI resources, common initialization/I/O/timers and specialized
    SOC/+U/DC resources. Fast-PR and standard-TDDFT initialization-child retirement are complete.
    Same-model HSE token identity is complete within its documented boundary.
@@ -63,7 +68,7 @@ for fixed-dt mixed calculations. Converged physical benchmarks remain material /
 user-owned. Molecular work is paused; budget excess warns; conventional HSE and
 routine Actions are not pending requirements.
 
-Evidence: [normal shared mixed-session validation](../validation/2026-11-18-shared-hse-mixed-session.md) [shared symmetry validation](../validation/2026-11-18-shared-symmetry-hse.md), and [context MPI retirement](../validation/2026-11-18-context-mpi-ownership.md), and [standard TDDFT MPI retirement](../validation/2026-11-18-standard-tddft-mpi-ownership.md).
+Evidence: [normal shared mixed-session validation](../validation/2026-11-18-shared-hse-mixed-session.md) [shared symmetry validation](../validation/2026-11-18-shared-symmetry-hse.md), and [context MPI retirement](../validation/2026-11-18-context-mpi-ownership.md), and [standard TDDFT MPI retirement](../validation/2026-11-18-standard-tddft-mpi-ownership.md), and [standard native handles](../validation/2026-11-18-standard-tddft-handles.md).
 
 ### Fast-PR HSE priority
 
