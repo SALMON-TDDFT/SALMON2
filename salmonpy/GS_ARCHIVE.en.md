@@ -88,6 +88,6 @@ Multi-k states support the existing `state.save_checkpoint('new-history')` and `
 
 ## Retained native owners
 
-`NativeGSState.export_archive` adds a serial Gamma DFT-owned export entry.
+`NativeGSState.export_archive` adds a collective regular-mesh DFT-owned export entry (root writes/returns the archive).
 See [NATIVE_GS.en.md](NATIVE_GS.en.md) for scope, provenance and measured limits.
 It is not a complete SCF checkpoint or native GS-handle restoration.

@@ -124,15 +124,16 @@ mpiexec -n 2 python -m salmonpy.examples.memory_gs BUILD EXISTING_GS NEW_WORK
 
 ## 保持GSからの明示的なポータブル保存
 
-`session.run` で作った直列・Γ点の状態は、既存のGS/2形式へ保存できます。
+`session.run` で作った通常k点メッシュの状態は、サブグループ全ランクから同じ呼び出しでGS/2形式へ保存できます。
 
 ```python
 from salmonpy.gs_archive import GroundStateArchive
 
 archive = gs.export_archive("new-portable-gs", orbital_block=16)
 gs.close()
-archive = GroundStateArchive.open("new-portable-gs")
-u = archive.wavefunctions(0)  # (band,z,y,x)、読み取り専用
+if archive is not None:  # サブグループのrootのみ。他ランクはNone
+    archive = GroundStateArchive.open("new-portable-gs")
+    u = archive.wavefunctions(0)  # k=0、(band,z,y,x)、読み取り専用
 ```
 
 新しいnative ABIやコンパイルは不要です。波動関数・占有数・固有値を保持し、
@@ -143,9 +144,9 @@ u = archive.wavefunctions(0)  # (band,z,y,x)、読み取り専用
 擬ポテンシャル本体は同梱しません。SCF未収束は警告のみで最後の状態を保存します。
 既存の保存先は上書きせず、書き込み失敗時は新規作成中の不完全な保存先を除去します。
 
-現段階の対象は、DFT設定を保持する周期・非スピン分極・固定イオン・Γ点・
-直列サブグループの状態です。既存ファイルから読み込んだGSは不変DFT設定を
-持たないため未対応で、保持GSの複数k点・MPI保存も残作業です。
+現段階の対象は、DFT設定を保持する周期・非スピン分極・固定イオン・通常k点メッシュ・
+MPIサブグループの状態です。Γ点と複数k点に対応します。既存ファイルから読み込んだGSは不変DFT設定を
+持たないため未対応で、native GSハンドルの復元も残作業です。
 これは保存機能の範囲で、通常のGS/TDDFT計算の制限は増やしません。
 非立方格子・非対称ハロー・実数／複素数相当の合成native配列で確認しました。
 実GSでの書き出しと、その後のTDDFT結果の一致は未測定です。
@@ -157,7 +158,39 @@ native GSハンドルを復元しません。nativeへの取り込みは
 [GS_ARCHIVE.md](GS_ARCHIVE.md) の明示的な対応コンバーターとランタイム・
 擬ポテンシャルの条件に従います。
 サンプルの `python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT --export-archives`
-は、明示的に2つの粗いΓ点GSを計算して保存します（1ランクのみ）。
+は、明示的に2つの粗い2k点GSを計算してrootで保存します（このデモは1または2ランク）。
 4反復は所有権の確認用で物理的な収束を保証しません。今回の検証ではこのSCFサンプルは
 実行していません。保存時はハローを含む全波動関数のコピー、再構成密度、チャンク用の
 メモリが必要です。`orbital_block` は保存単位で、ピークメモリの上限ではありません。
+
+k点はSALMONの `lattice.f90:init_kvector` に従い、0始まりのiについて
+`(i+0.5)/n-0.5`、x最速・次にy・zの順、重み1/nkとします。
+これは不変の `DFT.input_text` が生成するシフトなし・非Γ中心の全k点メッシュです。
+任意のk点表や対称性による縮約点を推測する処理ではありません。
+密度はnativeのk・バンド順で `重み[k]*占有数[k,b]*abs(u[k,b])**2` を足し合わせます。
+合成の2・3・6・8点で各k・バンド・座標・重み・電子数を確認し、Γ点の全保存ファイルは
+b66b97fdとバイト単位で一致しました。任意／縮約k点の保持状態・native GS
+ハンドルの復元は残作業です。nativeへ取り込むコンバーターには別のランタイム・セル等の
+条件があり、保存できることが全てのnative読込との互換性を保証するわけではありません。
+
+### MPI保存の所有権と失敗時の動作
+
+サブグループ全ランクが同じ引数で `export_archive` を呼びます。
+k点・軌道・空間と混合分割は、ランク番号を推測せずnativeの添字と実領域から組み立てます。
+複製された占有数・固有値の一致、全k点・バンド・格子の重複なしの被覆を検査します。
+rootだけがGS/2を書き込み、`GroundStateArchive` を返し、他ランクは `None` を返します。
+保存先の書き込み権限はrootにだけ必要です。他ランクで後から読む場合は、そのファイルが
+見える場所で明示的に開いてください。`gs.close()` は引き続き全ランクで呼びます。
+
+rootはランクごとに1タイルずつ受信し、全ランクの送信配列を同時には保持しません。
+ただし全体の複素波動関数、ローカル配列のコピー、再構成密度、保存用バッファは必要です。
+任意のメモリ上限は設けません。実際の確保失敗・書き込み失敗は全ランクに通知し、
+元のGS状態は変更しません。新規の不完全な保存先は除去し、既存出力は保持します。
+この保存だけでは、MPI分割を変更したnative状態の復元はできません。
+MPI通信自体の故障やプロセス消失からの復帰は対象外です。
+
+実MPI4ランク・合成配列で、k点／軌道／空間／混合分割（不均等バンド分割を含む）、
+直列版との全保存ファイル一致、範囲・複製・被覆・メタデータ・設定・確保・書込の失敗、
+元配列の保持と再試行を確認しました。SALMONの実GS保存やSCF/RT物理の検証ではありません。
+`mpiexec -n4 python tools/test_retained_gs_archive_mpi.py NEW_OUTPUT` で実行できます。
+インストール後も `salmonpy/_runtime_source/tools` に同梱し、native GSやランタイムを読みません。

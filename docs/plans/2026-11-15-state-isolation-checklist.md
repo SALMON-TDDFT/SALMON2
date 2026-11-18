@@ -7,8 +7,9 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 This section takes precedence over all earlier dated status/check counts below.
 Historical unchecked bullets are scope records, not additional independent tasks.
 Verified GS handoff/HSE registry/test cleanup committed as cd0841fe [skip ci].
-Ordinary HSE assembly committed as 2340787d [skip ci]. No push or Actions.
-Subsequent retained-GS portable export is uncommitted; synthetic validation only.
+Ordinary HSE assembly2340787d and Gamma portable exportb66b97fd committed and
+pushed to salmonpy/codex/salmonpy-state-inputs-recovery with [skip ci].
+Subsequent regular-mesh/MPI retained export is uncommitted; synthetic validation only.
 
 ### Completed within measured scopes
 
@@ -39,12 +40,12 @@ Subsequent retained-GS portable export is uncommitted; synthetic validation only
 ### Remaining work (do not double-count historical notes)
 
 1. [ ] Commit/review and push the currently verified changes when requested;
-   retain CI quota-saving policy. HEAD is 2340787d.
+   retain CI quota-saving policy. HEAD is b66b97fd; preceding work pushed; regular-mesh export uncommitted.
 2. [x] Connect the different-input fast-PR HSE registry to ordinary material-ID/
    ResponseSession/rank-plan assembly. Grouped4/separate6 and protected aggregate
    save8/resume24 are exact. Specialized SOC/+U/DC remain separate; molecular work paused.
 3. [ ] Retained GS checkpoint and portable archive/version migration:
-   serial Gamma DFT-owned GS/2 export is implemented (synthetic validation only);
+   regular-mesh DFT-owned GS/2 collective export is implemented (synthetic validation only);
    physical GS identity, broader PP format/content coverage, inactive legacy
    checkpoint canonicalization, changed subgroup/decomposition restoration.
    Existing same-topology RT direct restore is already complete in measured scopes.
@@ -1230,3 +1231,38 @@ calc2026/salmonpy-hse-layer-assembly-20261118. Local cloud sync unverified.
 
 No new SCF, no real GS data collected, no native rebuild, no CI. Portable array
 readback is not native GS restoration. See docs/retained-gs-export-validation-2026-11-19.md.
+
+
+## 2026-11-19 — retained serial regular-k export
+
+- [x] Push preceding Gamma exportb66b97fd and mixed HSE2340787d to salmonpy remote;
+  remote branch SHA verified. [skip ci], no manual Actions dispatch.
+- [x] Immutable DFT regular full mesh export supports2/3/6/8 k points: exact
+  wavefunction/occupation/eigenvalue payloads, native x-fastest ordering, uniform
+  weights and weighted-electron density; independent readback after source close.
+- [x] Compare both synthetic real/complex Gamma archives against b66b97fd:
+  all saved-file SHA256 values identical, not only decoded numerical values.
+- [x] Source623 tests, one skip; guides/AI metadata and opt-in sample synchronized.
+- [ ] Real native export/TDDFT parity, imported-owner physical identity, retained MPI
+  export/native restoration/full SCF mixing checkpoints remain future work.
+
+No new SCF, real GS collection, native rebuild or wheel rebuild. Evidence:
+docs/retained-gs-multik-validation-2026-11-19.md. Local storage only; sync unverified.
+
+
+## 2026-11-19 — retained GS collective array export
+
+- [x] Native bounds drive k/orbital/spatial tile extraction with halo removal;
+  exact nonoverlapping global coverage and replicated metadata checks before transfer.
+- [x] Root-only publication/return, one rank tile per collective, collective allocation/
+  write error propagation; preserved GS arrays and existing outputs, retry succeeds.
+- [x] Actual MPI4 synthetic runner: five partition cases and collective bounds/
+  replicas/overlap/gap/metadata/options/allocation/write/existing-output checks.
+- [x] Source623 tests (one skip), Gamma archive file parity withb66b97fd; JP/EN/AI
+  metadata/examples and packaging updated. No new SCF/real GS collection/electronic build.
+- [x] Final sdist/wheel source+object audits/hash checks; installed623 tests (one
+  skip) and installed actual-MPI4 all14 cases pass. Audited wheel LD/SBE rebuilt.
+- [ ] Actual native GS export/TDDFT parity, imported-owner physical metadata,
+  native GS handle restore/full SCF mixing checkpoint/changed-topology restoration.
+
+See docs/retained-gs-mpi-export-validation-2026-11-19.md for final wheel/results.

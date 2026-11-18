@@ -153,6 +153,6 @@ initial = archive.tddft_initial_state(converter=converter, executable=engine,
 
 ## 保持native GSからの保存
 
-`NativeGSState.export_archive` で直列Γ点・DFT設定を保持するGSを保存できます。
+`NativeGSState.export_archive` で通常k点メッシュ・DFT設定を保持するGS（全ランク呼び出し、rootが保存）を保存できます。
 対象範囲・来歴・検証の限界は [NATIVE_GS.md](NATIVE_GS.md) を参照してください。
 完全なSCFチェックポイントやnative GSハンドルの復元ではありません。

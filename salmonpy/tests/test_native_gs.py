@@ -118,6 +118,55 @@ class NativeGSTests(unittest.TestCase):
             np.testing.assert_array_equal(reopened.wavefunctions(0),expected[0])
             with self.assertRaises(ValueError):reopened.wavefunctions(0).flat[0]=0
 
+    def test_retained_regular_multik_archive_preserves_order_weights_and_independence(self):
+        import tempfile
+        import numpy as np
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from salmonpy.native_gs import NativeGSState,NativeGSArray,NativeGSInfo
+        from salmonpy.dft import DFT,Pseudopotential
+        from salmonpy.gs_archive import GroundStateArchive
+        comm=SimpleNamespace(size=1,rank=0,allgather=lambda v:[v])
+        session=SimpleNamespace(_live=lambda:None,comm=comm,backend=SimpleNamespace(
+            decomposition=(1,1,1,1,1),sha256='b'*64))
+        # Distinct cell/grid/k/XC model values; no solver or real GS data involved.
+        with tempfile.TemporaryDirectory() as tmp:
+            for mesh in ((2,1,1),(3,1,1),(2,3,1),(2,2,2)):
+                with self.subTest(mesh=mesh):
+                    nk=int(np.prod(mesh));grid=(8,10,12)
+                    model=DFT((2,),np.diag([8.,10.,12.]),[[.1,.2,.3]],
+                              (Pseudopotential(2,0,'_rps.dat',b'synthetic'),),2,2,grid,mesh,xc='libxc_pbe')
+                    state=NativeGSState(session,2,None,'multik',model);state._identity='synthetic-multik'
+                    rng=np.random.default_rng(nk)
+                    waves=rng.normal(size=(nk,2,12,10,8))+1j*rng.normal(size=(nk,2,12,10,8))
+                    raw=waves.transpose(4,3,2,1,0)[:,:,:,None,:,:,None].copy()
+                    occ=np.column_stack((np.linspace(.5,1.5,nk),np.linspace(1.5,.5,nk)))
+                    eigen=np.arange(nk*2,dtype=float).reshape(nk,2)/7
+                    values={'density':NativeGSArray(np.zeros(grid),(1,1,1),'density','bohr^-3'),
+                            'orbitals':NativeGSArray(raw,(1,1,1,1,1,1,1),'orbitals','native'),
+                            'occupations':NativeGSArray(occ.T[:,:,None],(1,1,1),'occupations','1'),
+                            'eigenvalues':NativeGSArray(eigen.T[:,:,None],(1,1,1),'eigenvalues','hartree')}
+                    state.array=Mock(side_effect=lambda name:values[name])
+                    info=NativeGSInfo(-2.,1e-12,1e-9,10,True,1,2)
+                    target=Path(tmp)/('mesh-'+'-'.join(map(str,mesh)))
+                    with patch.object(NativeGSState,'info',new_callable=unittest.mock.PropertyMock,return_value=info):
+                        archive=state.export_archive(target,orbital_block=1)
+                    for k in range(nk):np.testing.assert_array_equal(archive.wavefunctions(k),waves[k])
+                    np.testing.assert_array_equal(archive.array('occupations'),occ)
+                    np.testing.assert_array_equal(archive.array('eigenvalues'),eigen)
+                    np.testing.assert_array_equal(archive.array('weights'),np.full(nk,1/nk))
+                    coordinates=archive.array('kpoints')
+                    # Native order has x fastest, then y, then z.
+                    for k,coordinate in enumerate(coordinates):
+                        ix=k%mesh[0];iy=(k//mesh[0])%mesh[1];iz=k//(mesh[0]*mesh[1])
+                        np.testing.assert_allclose(coordinate,[(ix+.5)/mesh[0]-.5,
+                            (iy+.5)/mesh[1]-.5,(iz+.5)/mesh[2]-.5],rtol=0,atol=0)
+                    expected=sum((occ[k,b]/nk)*abs(waves[k,b])**2 for k in range(nk) for b in range(2))
+                    np.testing.assert_allclose(archive.array('density'),expected,rtol=1e-15,atol=0)
+                    original=waves.copy();raw[:]=0;state.closed=True
+                    reopened=GroundStateArchive.open(target)
+                    for k in range(nk):np.testing.assert_array_equal(reopened.wavefunctions(k),original[k])
+
     def test_retained_export_rejects_unknown_layout_before_writing(self):
         import tempfile
         import numpy as np
@@ -135,7 +184,7 @@ class NativeGSTests(unittest.TestCase):
             target=Path(tmp)/'archive'
             with self.assertRaisesRegex(InputError,'DFT'):state.export_archive(target)
             state._calculation=model;comm.size=2
-            with self.assertRaisesRegex(InputError,'serial'):state.export_archive(target)
+            with self.assertRaisesRegex(InputError,'decomposition'):state.export_archive(target)
             self.assertFalse(target.exists());state.array.assert_not_called()
 
 
