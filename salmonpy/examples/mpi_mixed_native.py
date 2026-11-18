@@ -58,6 +58,7 @@ def main():
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
     parser.add_argument('--tddft-materials',type=Path,help='offline native-tddft-materials/1 JSON: per-ID bundle, input_file, decomposition, points_per_group')
+    parser.add_argument('--tddft-model-groups',type=Path,help='offline JSON mapping group IDs to TDDFT material-ID lists; one registry per group')
     parser.add_argument('--layers', type=Path, help='native-layers/1 JSON referencing sbe-point, si-tddft, hse-point, drude, lorentz')
     parser.add_argument('--run-id', default='mixed-example', help='explicit experiment/run identity; fixture default mixed-example')
     parser.add_argument('--legacy-checkpoint-identity', action='store_true', help='explicit unidentified session for old checkpoint readers; cannot bypass identified archives')
@@ -128,6 +129,10 @@ def main():
                            source=PlaneWave(AcosPulse(.001, 20., .15), 0, -16.), observations=observations)
         _, sbe = models()
         layout = json.loads(args.layers.read_text()) if args.layers is not None else None
+        model_groups = json.loads(args.tddft_model_groups.read_text()) if args.tddft_model_groups is not None else None
+        if model_groups is not None and layout is None:raise ValueError('model groups require --layers')
+        if model_groups is not None and not isinstance(model_groups,dict):raise ValueError('model groups mapping required')
+        grouped_materials={mid for mids in (model_groups or {}).values() for mid in mids}
         selected = {layer['material_id'] for layer in layout.get('layers', [])} if layout is not None else {'sbe-point','si-tddft'}
         if args.hse_symmetry and 'hse-point' not in selected:
             raise ValueError('--hse-symmetry requires an hse-point layer')
@@ -145,7 +150,8 @@ def main():
             available[key]=MaterialBinding(key,
                 NativeTDDFTMaterialProvider(spec.bundle,spec.input_file,max_steps=args.steps),
                 NativeTDDFTBackend(args.build,output,decomposition=spec.decomposition,
-                                   shared_model=spec.points_per_group>1))
+                                   shared_model=spec.points_per_group>1 and key not in grouped_materials,
+                                   registry_model=key in grouped_materials))
         if 'hse-point' in selected:
             if args.fast_hse_build is None: raise ValueError('hse-point requires --fast-hse-build')
             from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
@@ -167,8 +173,8 @@ def main():
             assembly = assemble_native_layers(layout, available,
                 grid=grid, dt=dt, steps=args.steps, source=calculation.source, field_grid=tuple(args.field_grid),
                 ranks_per_point=rank_settings, rank_budget=args.rank_budget if args.rank_budget is not None else world.size,
-                points_per_group=({**{key:spec.points_per_group for key,spec in standard_inputs.items() if spec.points_per_group>1},
-                                   **({'hse-point':args.hse_points_per_group} if args.hse_points_per_group>1 else {})} or None))
+                points_per_group=({**{key:spec.points_per_group for key,spec in standard_inputs.items() if spec.points_per_group>1 and key not in grouped_materials},
+                                   **({'hse-point':args.hse_points_per_group} if args.hse_points_per_group>1 else {})} or None),model_groups=model_groups)
             if assembly.record()['required_ranks'] != world.size:
                 raise ValueError(f"launch exactly {assembly.record()['required_ranks']} ranks for this layout")
             calculation = assembly.calculation; geometry = calculation.geometry
@@ -194,6 +200,7 @@ def main():
                      'sbe_model': hashlib.sha256(b''.join(np.asarray(getattr(sbe, k)).tobytes()
                          for k in ('eigen','momentum','nonlocal_velocity','weights','lattice'))
                          + repr((sbe.electrons,sbe.correction_order,sbe.nonlocal_correction)).encode()).hexdigest()}
+        if model_groups is not None:signature['tddft_model_groups']=model_groups
         if args.tddft_points_per_group>1:signature['tddft_points_per_group']=args.tddft_points_per_group
         if args.tddft_materials is not None:
             signature.pop('tddft_ranks',None)

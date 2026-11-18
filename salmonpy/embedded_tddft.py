@@ -76,7 +76,7 @@ def _admission_rejected(lib, outcomes, allowed=(10, 11, 12, 13, 14, 15), query_n
 
 
 class NativeTDDFTBackend:
-    """Collective native A/c-to-charge-current adapter, one point per group.
+    """Collective native A/c-to-charge-current adapter with explicit sharing modes.
 
     decomposition is (k, orbital, x, y, z); its product must equal group size.
     Declared deep numerical errors restore accepted state before returning.
@@ -85,8 +85,11 @@ class NativeTDDFTBackend:
     execution='collective'
     reduction='leader'
 
-    def __init__(self, build_record, work_root, *, decomposition, shared_model=False):
+    def __init__(self, build_record, work_root, *, decomposition, shared_model=False, registry_model=False):
         if type(shared_model) is not bool:raise InputTypeError("shared_model must be boolean")
+        if type(registry_model) is not bool:raise InputTypeError("registry_model must be boolean")
+        if shared_model and registry_model:raise InputError('choose shared_model or registry_model')
+        self.registry_model=registry_model
         self.shared_model=shared_model
         record=json.loads(Path(build_record).read_text())
         if record.get('schema')!='salmonpy.embedded-tddft/1': raise InputError('embedded TDDFT build record required')
@@ -98,11 +101,23 @@ class NativeTDDFTBackend:
         if len(self.decomposition)!=5: raise InputError('decomposition requires k, orbital, x, y, z')
         identity=[self.sha256,self.decomposition,str(self.work_root)]
         if shared_model:identity.append('shared-model-v1')
+        if registry_model:identity.append('registry-model-v1')
         self.identity='salmonpy.embedded-tddft/1/'+hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
     def open_group(self,initial,dt,context):
-        if not self.shared_model:return None
         from ._native_group import _SessionGroup
+        if getattr(self,'registry_model',False):
+            resources=getattr(context,'group_resources',None)
+            if resources is None:raise InputError('registry_model requires session-owned group resources')
+            key='salmonpy.standard-tddft.registry/1'
+            registry=resources.get(key)
+            if registry is None:
+                registry=self.open_registry(context)
+                resources[key]=registry
+            elif (registry.backend.sha256,registry.backend.work_root)!=(self.sha256,self.work_root):
+                raise InputError('one response group requires the same registry library and work root')
+            return _SessionGroup(registry.open_model(initial,dt,decomposition=self.decomposition))
+        if not self.shared_model:return None
         return _SessionGroup(self.open_model(initial,dt,context))
 
     def open_registry(self,context):
@@ -113,7 +128,7 @@ class NativeTDDFTBackend:
         return self._create(initial,None,dt,context,shared=True)
 
     def create_state(self,initial,point_id,dt,context):
-        if self.shared_model:raise InputError('shared_model uses ResponseSession/open_group or open_model')
+        if self.shared_model or getattr(self,'registry_model',False):raise InputError('shared/registry model uses ResponseSession/open_group or open_model')
         return self._create(initial,point_id,dt,context,shared=False)
 
     def _create(self, initial, point_id, dt, context, *, shared):

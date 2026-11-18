@@ -146,3 +146,58 @@ class LayerAssemblyTests(unittest.TestCase):
         self.assertEqual(grouped.record()['required_ranks'],5)
         self.assertEqual(dict(grouped.points),dict(separate.points))
         self.assertEqual(grouped.parallel_plan.groups[-1].point_ids,(2,3))
+
+class HeterogeneousLayerGroupsTests(unittest.TestCase):
+    materials=LayerAssemblyTests.materials
+    assemble=LayerAssemblyTests.assemble
+    def test_explicit_material_group_preserves_ids_and_saves_ranks(self):
+        assembly=self.assemble(model_groups={'film':['sbe','td']},rank_budget=3)
+        assembly.parallel_plan.validate(3)
+        group=assembly.parallel_plan.groups[1]
+        self.assertEqual(group.point_ids,(1,2))
+        self.assertEqual(group.ranks,(2,))
+        self.assertEqual([p['material_id'] for p in assembly.record()['points']],['sbe','td'])
+        self.assertEqual(assembly.record()['model_groups'],{'film':['sbe','td']})
+
+    def test_bad_membership_or_rank_mismatch_rejects(self):
+        for groups in ({'a':['sbe','missing']},{'a':['sbe','sbe']},{'a':['sbe'],'b':['sbe']}):
+            with self.assertRaises(ValueError):self.assemble(model_groups=groups)
+
+    def test_group_rank_count_must_match(self):
+        from unittest.mock import patch
+        materials=self.materials()
+        old=materials['td']
+        materials['td']=MaterialBinding('td',old.provider,SimpleNamespace(
+            identity='collective',execution='collective',reduction='leader'))
+        with patch.object(self,'materials',return_value=materials):
+            with self.assertRaisesRegex(ValueError,'equal rank'):
+                self.assemble(model_groups={'film':['sbe','td']},ranks_per_point={'sbe':1,'td':2})
+
+    def test_grouping_not_mixed_with_point_capacity(self):
+        with self.assertRaisesRegex(ValueError,'overlap'):
+            self.assemble(model_groups={'film':['sbe','td']},points_per_group={'sbe':2})
+
+    def test_two_native_hse_owners_do_not_form_a_valid_group(self):
+        from unittest.mock import patch
+        from salmonpy.fast_hse_mpi import NativeFastHSEBackend
+        materials=self.materials()
+        for mid in ('sbe','td'):
+            backend=object.__new__(NativeFastHSEBackend)
+            backend.identity=mid;backend.shared_model=True
+            materials[mid]=MaterialBinding(mid,materials[mid].provider,backend)
+        with patch.object(self,'materials',return_value=materials):
+            with self.assertRaisesRegex(ValueError,'HSE'):
+                self.assemble(model_groups={'film':['sbe','td']})
+
+    def test_one_hse_material_multiple_points_requires_shared_model(self):
+        from unittest.mock import patch
+        from salmonpy.fast_hse_mpi import NativeFastHSEBackend
+        backend=object.__new__(NativeFastHSEBackend);backend.identity='hse';backend.shared_model=False
+        materials=self.materials();materials['td']=MaterialBinding('td',materials['td'].provider,backend)
+        data=layout();data['layers'][1]['thickness']=4.
+        with patch.object(self,'materials',return_value=materials):
+            with self.assertRaisesRegex(ValueError,'shared_model'):
+                self.assemble(data,model_groups={'film':['td']})
+            backend.shared_model=True
+            result=self.assemble(data,model_groups={'film':['td']})
+        self.assertEqual(result.parallel_plan.groups[-1].point_ids,(2,3))

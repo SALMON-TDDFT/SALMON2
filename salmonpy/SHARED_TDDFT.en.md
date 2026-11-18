@@ -181,8 +181,8 @@ Inputs, initialized controls, optimization tables and XC scratch switch per mode
 wavefunctions, clocks and checkpoint resources remain state-owned. Existing default
 `open_model` and ordinary layout contracts are preserved.
 
-Remaining work includes automatic heterogeneous registration from ordinary material-ID
-layouts, full GS contexts and specialized SOC/+U/DC resources. Attachment, timers
+Explicit model_groups now connects ordinary material-ID layouts to the registry.
+Remaining work includes full GS contexts and specialized SOC/+U/DC resources. Attachment, timers
 and synchronous compatibility views remain process infrastructure; concurrent
 threads are unsupported. Existing Si fixtures with different cells, atom counts,
 16³/8³ grids, k counts and five XC choices establish implementation parity, not

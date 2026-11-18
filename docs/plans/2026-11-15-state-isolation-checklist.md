@@ -2,6 +2,46 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
+## Standard GS model-owned input boundary — 2026-11-18
+
+- [x] Internal s_gs_model.load/run/clear retains owned parsed values and calls
+  existing SCF with explicit selected inputs; rejected unsupported replacement
+  preserves the model. Default main_dft arithmetic/entry remains unchanged.
+- [x] Caller input/calc_mode/unit views, actual symmetry switches, optimization
+  and XC scratch switch/restore. Model-only GS retires communication requests
+  before local buffers and releases scoped child groups after each run.
+- [x] Nine actual GS cases: PZ/PBE, Libxc-PZ/TB-auto, PBE/TB-fixed × MPI1/orbital2/
+  spatial2,8³/12³ cells/atom/electron/k controls. A→B→A and independent old status,
+  energy/residual/iterations/eigen/info/k output bytes exactly match. Six repeats
+  retain zero live child groups and stable warmed management slots.
+- [x] Two existing TDDFT registry/control MPI6 cases: interleaved currents and
+  direct no-replay resume unchanged. Source628 tests (one skip); paired guide/AI
+  metadata and reusable development probe updated. Final runtime/installed probe
+  repeats all9 GS cases; installed628 tests (one skip), installed TDDFT MPI6 and
+  legacy default GS spatial2 match old controls. Evidence: canonical
+  calc2026/salmonpy-standard-gs-inputs-20261118; cloud sync unverified.
+  No Actions; no GS restart written.
+- [ ] Retained GS wavefunction/state handles, full GS context and Python shared
+  GS factory remain separate. HSE/SOC/+U/DC GS and simultaneous GS/TDDFT are not
+  enabled by this standard sequential input boundary.
+
+## Ordinary heterogeneous layer groups — 2026-11-18
+
+- [x] model_groups maps explicit group IDs to material-ID lists; normal layer
+  planning preserves ID/point order and per-material input/internal decomposition.
+- [x] NativeTDDFTBackend(registry_model=True) and session-owned group resources
+  register one standard model per binding; state/factory/resource close order.
+- [x] Local LD + SBE + two PBE/two TB-mBJ points: separate10 versus combined4
+  MPI ranks,128-step A/E/j exact. Direct save63/resume65 exact, no replay.
+- [x] Late last-material restore failure preserves all original states/outputs;
+  retry succeeds. Paired manuals/AI JSON/sample group file updated.
+- [x] Source/final wheel628 tests each (one skip); installed128-step continuous
+  and final-wheel direct resume65 steps match source continuous exactly.
+  Evidence: canonical calc2026/salmonpy-layer-registry-20261118 (no GS collected;
+  cloud synchronization unverified). No Actions used.
+- [x] Two unsupported native HSE owner cases rejected during planning; custom
+  backends keep their existing callback contracts and explicit grouping.
+
 ## Heterogeneous standard TDDFT registry — 2026-11-18
 
 - [x] Explicit native generation-tagged model registration/spawn/close; input and
@@ -17,7 +57,9 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 - [x] Paired registry guides, public C header, AI JSON and sample synchronized.
   Source/object audits pass; no Actions used. Selected evidence (no GS) stored in
   canonical calc2026/salmonpy-heterogeneous-models-20261118; cloud sync unverified.
-- [ ] Automatic registry construction from ordinary heterogeneous material-ID plans.
+- [x] Explicit model_groups in ordinary material-ID plans builds a shared standard
+  registry via ResponseSession; per-ID inputs/decomposition and per-point state retained.
+  Built-in fast-PR HSE heterogeneous grouping remains unsupported.
 - [ ] Full GS contexts and remaining specialized SOC/+U/DC/process resources;
   concurrent threads, HSE registry and portable changed-topology restart are separate.
 

@@ -89,3 +89,19 @@ class SharedTDDFTTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);(root/'rt.inp').write_text("&system\nyn_periodic='y'\n/\n&emfield\ntrans_longi='tr'\n/\n&atomic_red_coor\n'Si' .3 .4 .45 1\n/\n")
             self.assertEqual(_profile(SimpleNamespace(directory=root,input_file='rt.inp')),Path('.'))
+
+    def test_session_registry_shared_across_bindings_and_owned_by_context(self):
+        from salmonpy.embedded_tddft import NativeTDDFTBackend
+        events=[]
+        registry=SimpleNamespace(backend=None,open_model=lambda initial,dt,**kw:SimpleNamespace(
+            new_state=lambda p:events.append(('state',initial,p)),close=lambda:events.append(('model-close',initial))))
+        backend=object.__new__(NativeTDDFTBackend)
+        backend.registry_model=True;backend.shared_model=False
+        backend.sha256='sha';backend.work_root=Path('/tmp/work');backend.decomposition=(1,1,1,1,1)
+        registry.backend=backend;ctx=SimpleNamespace(group_resources={})
+        with patch.object(backend,'open_registry',return_value=registry) as opener:
+            first=backend.open_group('a',.01,ctx);second=backend.open_group('b',.01,ctx)
+            first.new_state(1);second.new_state(2)
+            self.assertEqual(opener.call_count,1)
+            self.assertIs(ctx.group_resources['salmonpy.standard-tddft.registry/1'],registry)
+            self.assertEqual(events,[('state','a',1),('state','b',2)])

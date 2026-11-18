@@ -42,10 +42,9 @@ finally:
 ```
 
 Choose decompositions compatible with each saved state. Differing dt demonstrates
-independent clocks; it does not add FDTD subcycling. The ordinary layer sample
-still assigns different material IDs to separate groups. Automatic placement of
-different material bindings in one shared response group is separate integration
-work. Explicit registry hosts can use the states directly.
+independent clocks; it does not add FDTD subcycling. Ordinary layer defaults still assign different IDs to separate groups. Explicit
+model_groups now co-locates selected IDs, as described below. Direct registry
+hosts can also use states themselves.
 
 Use an explicitly built/verified CPU runtime with `sp_tddft_registry_protocol()==1`.
 The profile remains periodic, full-k/no symmetry reduction, unpolarized fixed-ion
@@ -78,8 +77,8 @@ General parser/allocation/I/O/process/MPI failure recovery is not promised.
 model, without history replay; filenames are rank-local. Authenticate the same
 binary/inputs/model/dt/capacity/decomposition and files before loading: raw files
 are not a portable archive. Existing owner-specific protected-step/restore helpers
-use the same positive state handles. Automatic ordinary-plan aggregate registry
-construction and changed-topology portable restart are separate work.
+use the same positive state handles. Ordinary-plan registry construction is available through explicit model_groups;
+changed-topology portable restart remains separate work.
 
 Example: `python -m salmonpy.examples.tddft_models BUILD INITIAL_A INITIAL_B NEW_OUTPUT`
 under matching MPI ranks (default orbital split). Developer validation tool
@@ -92,3 +91,34 @@ failed registration and rank-independent cleanup. Existing Si fixtures with
 no new GS is computed. This is implementation parity, not material convergence.
 See [shared TDDFT](SHARED_TDDFT.en.md) for base states and parser ownership, and
 [native registry header](native_adapters/standard_tddft_models.h) for C/C++.
+
+## Ordinary material layouts and mixed runs
+
+Use `assemble_native_layers(..., model_groups={"film": ["silicon-pbe", "silicon-tbmbj"]})`
+to assign all points of the listed IDs to one material MPI group. Bind each ID to
+`NativeTDDFTBackend(..., registry_model=True)`. Standard native bindings in that
+group share the library and work root, while each keeps its input and internal
+decomposition. Each decomposition product and ranks_per_point must match the
+shared group size. Every macro point has independent state.
+
+ResponseSession creates one registry per group and one model per material key.
+It closes states and model factories before group resources. LD remains inside
+FDTD ranks. Coupled dt is common. Default layouts are unchanged. Do not overlap
+model_groups and points_per_group for the same ID; unlisted IDs retain their old
+placement. Use the ordinary sample's --layers and --tddft-materials with:
+
+```text
+--tddft-model-groups mixed_tddft_model_groups.json
+```
+
+The supplied JSON maps silicon-models to [silicon-pbe, silicon-tbmbj]. Set each
+catalog ID to its existing GS bundle and launch with the reported required_ranks.
+Stage inputs, pseudopotentials and runtime before running on offline compute nodes.
+Material/point IDs and actual MPI placement remain in outputs and aggregate
+checkpoints; restarting with changed partitions is unsupported.
+
+Custom backends retain prepare/open_group/create_state. They may register shared
+closeable owners in SolverContext.group_resources, released in insertion order
+after states and material factories. All subgroup ranks must register resources
+and enter callbacks in matching order. Different-input built-in fast-PR HSE
+models still require separate groups.

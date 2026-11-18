@@ -18,6 +18,14 @@
 #include "config.h"
 
 subroutine main_dft
+  call main_dft_impl(.false.)
+end subroutine main_dft
+
+subroutine main_dft_model
+  call main_dft_impl(.true.)
+end subroutine main_dft_model
+
+subroutine main_dft_impl(release_requests)
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -34,6 +42,7 @@ use force_sub
 use write_sub
 use read_gs
 use code_optimization
+use sendrecv_grid, only: dealloc_cache
 use initialization_sub
 use occupation
 use prep_pp_sub
@@ -50,6 +59,7 @@ use dcdft
 use lcfo
 use atomic_orbital, only: verify_atomic_orbital_consistency !!DEBUG
 implicit none
+logical,intent(in) :: release_requests
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin,force_status_unit
 real(8) :: sum1
@@ -392,4 +402,9 @@ end if
 call timer_end(LOG_TOTAL)
 
 
-end subroutine main_dft
+! The model caller releases scoped communicators after these local buffers retire.
+if(release_requests)then
+  call dealloc_cache(srg)
+  call dealloc_cache(srg_scalar)
+endif
+end subroutine main_dft_impl

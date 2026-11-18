@@ -4,7 +4,7 @@ This is a response service, not an E/H FDTD integrator. dt is fixed. A failed
 backend step invalidates the session; no cross-group rollback is promised.
 """
 from .errors import InputError, InputTypeError, RuntimeFailure
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 import time
 from collections.abc import Mapping
@@ -18,6 +18,7 @@ class SolverContext:
     group_name: str
     point_ids: tuple
     point_records: object = None
+    group_resources: dict = field(default_factory=dict, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,7 @@ class ResponseSession:
         self._point_metadata = None
         self._field_contracts = None
         self._group_factories={}
+        self._group_resources={}
         self.states={};self.bindings=dict(bindings);self._A=np.zeros((len(context.plan.point_ids),3))
         error=None;descriptors=None
         try:
@@ -195,7 +197,7 @@ class ResponseSession:
             callback_records = _freeze({p: {'run_id': record['run_id'], **entry}
                                         for p, entry in zip(context.plan.point_ids, record['points'])
                                         if p in context.group.point_ids})
-        callback_context=SolverContext(context.solver_comm,context.group.name,context.group.point_ids,callback_records)
+        callback_context=SolverContext(context.solver_comm,context.group.name,context.group.point_ids,callback_records,self._group_resources)
         for point in context.group.point_ids:
             b=bindings[point];error=None
             try:
@@ -493,6 +495,9 @@ class ResponseSession:
             if factory is not None:
                 try: factory.close()
                 except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+        for resource in self._group_resources.values():
+            try: resource.close()
+            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self.closed=True
         if self._registered:
             self.context._dependents-=1;self._registered=False

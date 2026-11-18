@@ -44,7 +44,7 @@ class NativeLayerAssembly:
 
 
 def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
-                           field_grid, ranks_per_point, rank_budget, points_per_group=None):
+                           field_grid, ranks_per_point, rank_budget, points_per_group=None, model_groups=None):
     """Build FDTD, point bindings and MPI plan from explicit ordered layers.
 
     ``materials`` maps user IDs to LD models (including configured LD models)
@@ -54,6 +54,8 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
     transverse interval starts at anchor - count//2. Reported cell bounds are
     authoritative, including the half-cell shift for an even transverse count.
     Null material_id means a vacuum gap. No implicit interface gap is inserted.
+    model_groups maps group IDs to material-ID lists; all selected points share
+    that group. ranks_per_point must agree; standard TDDFT uses registry_model.
     """
     data = _copy_json(layout)
     _object(data, 'layout', ('schema','length_unit','axis','origin_cell','layers'))
@@ -71,6 +73,18 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
         raise InputTypeError('points_per_group mapping required')
     grouping={} if points_per_group is None else dict(points_per_group)
     for mid,count in grouping.items():_int(count,'points_per_group['+str(mid)+']')
+    if model_groups is not None and not isinstance(model_groups,Mapping):
+        raise InputTypeError('model_groups mapping required')
+    combined={} if model_groups is None else _copy_json(dict(model_groups))
+    membership={}
+    for name,mids in combined.items():
+        _identifier(name,'model group')
+        if not isinstance(mids,list) or not mids:raise InputError('nonempty material ID list required')
+        for mid in mids:
+            _identifier(mid,'model group material')
+            if mid in membership:raise InputError('material appears in multiple model groups: '+mid)
+            membership[mid]=name
+    if set(membership)&set(grouping):raise InputError('model_groups and points_per_group must not overlap')
     totals={}
     origin = data['origin_cell']
     if not isinstance(origin,list) or len(origin)!=3: raise InputError('three origin_cell indices required')
@@ -126,9 +140,9 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
                 width=grouping.get(mid,1)
                 if width>1:
                     from .fast_hse_mpi import NativeFastHSEBackend
-                    if type(model.backend) is NativeTDDFTBackend and not model.backend.shared_model:
+                    if type(model.backend) is NativeTDDFTBackend and not (model.backend.shared_model or getattr(model.backend,'registry_model',False)):
                         raise InputError('multiple TDDFT points require shared_model=True')
-                    if type(model.backend) is NativeFastHSEBackend and not model.backend.shared_model:
+                    if type(model.backend) is NativeFastHSEBackend and not (model.backend.shared_model or getattr(model.backend,'registry_model',False)):
                         raise InputError('multiple HSE points require shared_model=True')
                 electronic[mid]=model
                 totals[mid]=totals.get(mid,0)+cells*math.prod(widths)
@@ -139,7 +153,29 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
     if set(ranks_per_point)!=set(electronic): raise InputError('rank settings required only for selected electronic materials; LD is field-local')
     if not set(grouping)<=set(electronic):
         raise InputError('points_per_group applies only to selected electronic materials')
-    needed=nf+sum(((count+grouping.get(mid,1)-1)//grouping.get(mid,1))*ranks_per_point[mid] for mid,count in totals.items())
+    if not set(membership)<=set(electronic):raise InputError('model_groups require selected electronic material IDs')
+    for name,mids in combined.items():
+        if len({ranks_per_point[mid] for mid in mids})!=1:
+            raise InputError('shared model group requires equal rank counts: '+name)
+        from .embedded_tddft import NativeTDDFTBackend
+        for mid in mids:
+            backend=electronic[mid].backend
+            if type(backend) is NativeTDDFTBackend and not getattr(backend,'registry_model',False):
+                raise InputError('model_groups requires TDDFT registry_model=True')
+        native=[electronic[mid].backend for mid in mids if type(electronic[mid].backend) is NativeTDDFTBackend]
+        if native and len({(b.sha256,str(b.work_root)) for b in native})!=1:
+            raise InputError('native registry group requires matching standard library/work root')
+        from .fast_hse_mpi import NativeFastHSEBackend
+        hse=[electronic[mid].backend for mid in mids if type(electronic[mid].backend) is NativeFastHSEBackend]
+        for mid in mids:
+            backend=electronic[mid].backend
+            if type(backend) is NativeFastHSEBackend and totals[mid]>1 and not backend.shared_model:
+                raise InputError('multiple HSE points require shared_model=True')
+        if len(hse)>1 or (hse and native):
+            raise InputError('HSE supports one native model owner per group; use separate groups')
+    needed=nf+sum(ranks_per_point[mids[0]] for mids in combined.values())+sum(
+        ((count+grouping.get(mid,1)-1)//grouping.get(mid,1))*ranks_per_point[mid]
+        for mid,count in totals.items() if mid not in membership)
     if needed>budget:
         warnings.warn(f'required ranks {needed} exceed rank budget {budget}; continuing planning without subsampling; launch with {needed} ranks', RuntimeWarning, stacklevel=2)
     if not electronic: raise InputError('mixed assembly requires electronic points; use FDTD for LD-only calculations')
@@ -163,10 +199,12 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
             if any(k=='ld' and all(l-1<=v<h+1 for v,l,h in zip(cell,lows,highs)) for lows,highs,m,k,n,r in boxes):
                 raise InputError('electronic point requires an LD-free constitutive neighborhood: '+name)
             point=len(points)+1;points[point]=cell;bindings[point]=electronic[mid]
-            current=pending.get(mid)
-            if current is None or len(current['points'])>=grouping.get(mid,1):
-                current={'name':'point-'+str(point),'ranks':tuple(range(rank,rank+ranks)),'points':[]}
-                pending[mid]=current;grouped.append(current);rank+=ranks
+            group_key=('models',membership[mid]) if mid in membership else ('material',mid)
+            current=pending.get(group_key)
+            if current is None or (mid not in membership and len(current['points'])>=grouping.get(mid,1)):
+                group_name='models-'+membership[mid] if mid in membership else 'point-'+str(point)
+                current={'name':group_name,'ranks':tuple(range(rank,rank+ranks)),'points':[]}
+                pending[group_key]=current;grouped.append(current);rank+=ranks
             current['points'].append(point)
             owned_ranks=list(current['ranks'])
             relative=[v-l for v,l in zip(cell,lo)]
@@ -189,6 +227,7 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
             'field_grid':list(parallel.grid),'length_unit':'bohr','memory_bytes':None,
             'materials':material_records,'grid':asdict(grid),'dt':calculation.dt,'steps':calculation.steps,'source':asdict(source),
             'note':'one independent electronic state per grid cell; LD stays in field group; no implicit gaps'}
+    if model_groups is not None:report['model_groups']=combined
     if points_per_group is not None:report['points_per_group']=grouping
     return NativeLayerAssembly(calculation,plan,MappingProxyType(points),MappingProxyType(bindings),
                                tuple(parallel.grid),_freeze(report))

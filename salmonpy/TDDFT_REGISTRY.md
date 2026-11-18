@@ -38,8 +38,7 @@ finally:
 ```
 
 保存した初期状態に適合する分割を選んでください。dtの違いは独立した時刻の例であり、
-FDTDのサブサイクルを追加するものではありません。通常の層配置サンプルは引き続き
-異なる物質IDを別群に置きます。異種の物質bindingを同じ応答群へ自動配置する接続は別の残作業です。
+FDTDのサブサイクルを追加するものではありません。通常の層配置は既定ではIDを別群に置きます。明示的な model_groups 指定で同じ応答群への登録・配置も可能です（下記）。
 明示的なregistryを使うホストは状態を直接呼べます。
 
 `sp_tddft_registry_protocol()==1` に対応する明示的に構築・検証したCPUランタイムを使います。
@@ -71,7 +70,7 @@ registryは明示的な別経路で、legacy初期化や暗黙のmodel_newと混
 過去のステップを再計算しません。ファイル名はランクごとに分け、同じバイナリ・入力・モデル条件・
 dt・容量・MPI分割とファイルを呼出側で認証してください。単独ファイルは可搬アーカイブではありません。
 既存の所有者単位の保護付きstep／復元は同じ正の状態ハンドルを使います。
-通常計画でregistryを自動構築する一括接続や、MPI分割を変える可搬再開は別作業です。
+通常計画からのregistry構築は明示的な model_groups 指定で利用できます。MPI分割を変える可搬再開は別作業です。
 
 `python -m salmonpy.examples.tddft_models BUILD INITIAL_A INITIAL_B NEW_OUTPUT` を適合するMPI数で実行できます。
 既定は軌道分割です。開発者用 `tools/test_heterogeneous_tddft_mpi.py NEW_BUILD OLD_BUILD INITIAL_A INITIAL_B OUTPUT --size 2 --b-split rgrid`
@@ -80,3 +79,33 @@ dt・容量・MPI分割とファイルを呼出側で認証してください。
 既存Siの16³／8³格子、異なるセル・原子数・k点と5種類のXCを使い、新しいGSは作りません。
 これは実装の一致検証であり、物性の収束保証ではありません。
 基礎状態とパーサーは [共有TDDFT](SHARED_TDDFT.md)、C入口は [専用ヘッダー](native_adapters/standard_tddft_models.h) を参照してください。
+
+## 通常の物質配置・混在計算から使う
+
+`assemble_native_layers(..., model_groups={"film": ["silicon-pbe", "silicon-tbmbj"]})`
+で、指定IDの全マクロ点を一つのMPI物質群へ配置できます。各IDのbindingには
+`NativeTDDFTBackend(..., registry_model=True)` を指定します。同群内の標準TDDFTは
+同じライブラリと作業ルートを使います。各物質の入力・内部分割は別々で、分割の積と
+`ranks_per_point` は群のランク数に一致させます。各マクロ点の状態は独立です。
+
+`ResponseSession` は群に一つのレジストリを作り、物質IDごとにモデルを登録します。
+全状態・モデルの後にレジストリを終了します。LDは引き続きFDTD群内で更新します。
+結合のdtは共通です。既定の配置は変わりません。同じ物質IDへ `points_per_group` と
+`model_groups` を重複指定しないでください。群外のIDには従来の分割を使えます。
+
+通常サンプルでは、既存の `--layers` と `--tddft-materials` に次を追加します。
+
+```text
+--tddft-model-groups mixed_tddft_model_groups.json
+```
+
+同梱のJSONは `{"silicon-models": ["silicon-pbe", "silicon-tbmbj"]}` です。
+物質カタログの各IDへ既存GSバンドルを指定し、配置レポートの `required_ranks` に合わせて
+起動してください。計算ノードでは外部取得せず、入力・擬ポテンシャル・ランタイムを事前搬入します。
+物質ID／点IDと実際のMPI配置は出力・一括チェックポイントにも記録されます。
+変更したMPI分割での再開には対応しません。
+
+自作バックエンドは従来の `prepare`／`open_group`／`create_state` を利用できます。
+必要なら `SolverContext.group_resources` に群所有のclose可能な資源を登録できます。
+共有資源は状態・物質factoryの後に、登録順で終了されます。群内の全ランクで登録順と
+呼出順を揃えてください。組込み高速PR-HSEの異入力モデルは別群へ配置します。

@@ -5,6 +5,7 @@ module sym_sub
   implicit none
 
   private
+  public :: swap_symmetry_switch
   public :: read_sw_symmetry
   public :: init_sym_sub, symmetry_validate_field, symmetry_validate_atoms_cartesian
 
@@ -21,6 +22,15 @@ module sym_sub
   logical :: flag_init=.false.
 
 contains
+
+  subroutine swap_symmetry_switch(enabled,directions)
+    logical,intent(inout)::enabled,directions(3)
+    logical::old_enabled,old_directions(3)
+    old_enabled=use_symmetry;old_directions=use_symmetry_dir
+    use_symmetry=enabled;use_symmetry_dir=directions
+    enabled=old_enabled;directions=old_directions
+  end subroutine
+
 
 
   subroutine read_sw_symmetry( yn )
