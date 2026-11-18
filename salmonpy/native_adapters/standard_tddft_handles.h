@@ -5,7 +5,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Experimental version1: one immutable periodic, non-symmetric, unpolarized,
+/* See standard_tddft_models.h for the additive explicit heterogeneous registry.
+ * Experimental version1: one immutable periodic, non-symmetric, unpolarized,
  * fixed-ion semilocal model (PZ/TB-mBJ/Libxc-PZ/PBE), middlepoint/transverse.
  * dt, capacity, decomposition and initial A are common. New states read original
  * GS, not a sibling excitation. Only RT/current and energy streams are owned;

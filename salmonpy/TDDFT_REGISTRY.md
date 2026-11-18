@@ -1,0 +1,82 @@
+# 同一プロセス内の異入力TDDFTモデル
+
+[English](TDDFT_REGISTRY.en.md) · Topic: `heterogeneous_tddft_models` · Revision: `2026-11-18.1`
+
+`NativeTDDFTBackend.open_registry(context)` で明示的に1つのホストMPI接続を作り、
+`registry.open_model(initial, dt, decomposition=...)` で異なる入力のモデルを登録します。
+`model.new_state(point_id)` は従来と同じA/c→電荷電流の状態を返します。
+モデルごとに入力、XC、セル・格子・k点・原子・擬ポテンシャル参照、dt・容量・内部MPI分割を保持します。
+同じコミュニケータを使うため、分割の積はその群のランク数に合わせます。
+モデル内の入力は不変で、各状態は元のGSから独立に始まります。
+物質ID・点IDはホストが付け、nativeの不透明なモデル／状態トークンとは区別します。
+
+```python
+from salmonpy.embedded_tddft import NativeTDDFTBackend
+
+# 検証済みの初期状態とホストのMPI群を用意する。
+backend = NativeTDDFTBackend(build_record, work_root,
+                            decomposition=(1, 2, 1, 1, 1))
+registry = backend.open_registry(context)
+models, states = [], []
+try:
+    a = registry.open_model(initial_a, 0.003)
+    models.append(a)
+    b = registry.open_model(initial_b, 0.004, decomposition=(1, 1, 1, 1, 2))
+    models.append(b)
+    sa = a.new_state("film-a/0")
+    states.append(sa)
+    sb = b.new_state("film-b/0")
+    states.append(sb)
+    ja = sa.step([1e-4, 0.0, 0.0])
+    jb = sb.step([0.0, 1e-4, 0.0])
+finally:
+    for state in reversed(states):
+        state.close()
+    for model in reversed(models):
+        model.close()
+    registry.close()
+```
+
+保存した初期状態に適合する分割を選んでください。dtの違いは独立した時刻の例であり、
+FDTDのサブサイクルを追加するものではありません。通常の層配置サンプルは引き続き
+異なる物質IDを別群に置きます。異種の物質bindingを同じ応答群へ自動配置する接続は別の残作業です。
+明示的なregistryを使うホストは状態を直接呼べます。
+
+`sp_tddft_registry_protocol()==1` に対応する明示的に構築・検証したCPUランタイムを使います。
+周期・全k点（縮約なし）・非スピン偏極・固定イオンのPZ／TB-mBJ自動・固定c／Libxc-PZ/PBE、
+transverse・middlepointが対象です。Pythonの初期Aは0で、x/y/z・回転するAも扱えます。
+Aは直交座標のA/c、dtは原子時間、jは原子単位の電荷電流密度で、再び符号反転しません。
+HSEは別の高速PRエンジンであり、このregistryには登録しません。
+import時のMPI初期化・ビルド・ダウンロードはありません。
+入力・作業ファイルを変更せず、MPI群で共有する書込み可能なwork_rootを用意します。
+作業コピーは状態ごとではなくモデルごとです。登録時に最初の状態を初期化して保持し、
+最初のnew_stateで返します。使わずにモデルを閉じた場合も解放します。
+
+群内の全ランクがメインスレッドから同じ順に呼びます。
+registryは明示的な別経路で、legacy初期化や暗黙のmodel_newと混ぜません。
+既定の単一モデル入口は維持します。モデル／registryのcloseは新規作成を止めますが、
+既存状態は続行できます。全状態を閉じてからホストMPIを終了してください。
+一方のモデルを閉じても他方は残ります。待機状態の取り出し前に群内のモデル選択を照合し、
+終了順もトークンで統一します。扱える終了失敗では残りの所有者も終了を試し、再試行できます。
+
+モデルは入力・既定値、初期化後の設定ビュー、初期A、最適化表・フラグ、XC作業配列を所有します。
+配列はmove_allocで退避・復帰し、波動関数やLibxcハンドル・MPI資源をコピーしません。
+状態は波動関数・密度・XC演算子・時刻・A・電流・出力と保護／復元候補を所有します。
+擬ポテンシャル形式のフラグは元素の初期化時にリセットします。
+タイマー・MPI接続・同期的な互換ビューはプロセス共通の基盤として残ります。
+並行スレッドや無制限な別ソルバー初期化ではなく、モデルの順次切替です。
+一般の入力・割当・I/O・プロセス・MPI異常からの復帰は保証しません。
+
+状態の `checkpoint(path)` と、新しい状態への `checkpoint(path, restore=True)` も使え、
+過去のステップを再計算しません。ファイル名はランクごとに分け、同じバイナリ・入力・モデル条件・
+dt・容量・MPI分割とファイルを呼出側で認証してください。単独ファイルは可搬アーカイブではありません。
+既存の所有者単位の保護付きstep／復元は同じ正の状態ハンドルを使います。
+通常計画でregistryを自動構築する一括接続や、MPI分割を変える可搬再開は別作業です。
+
+`python -m salmonpy.examples.tddft_models BUILD INITIAL_A INITIAL_B NEW_OUTPUT` を適合するMPI数で実行できます。
+既定は軌道分割です。開発者用 `tools/test_heterogeneous_tddft_mpi.py NEW_BUILD OLD_BUILD INITIAL_A INITIAL_B OUTPUT --size 2 --b-split rgrid`
+は6ランクを3群に分け、最初の群内の2モデルを別群の旧ランタイム独立実行と比較します。
+交互伝播・直接再開・兄弟終了・空モデル再作成・不正／古い／不一致ID・登録失敗・終了順を確認します。
+既存Siの16³／8³格子、異なるセル・原子数・k点と5種類のXCを使い、新しいGSは作りません。
+これは実装の一致検証であり、物性の収束保証ではありません。
+基礎状態とパーサーは [共有TDDFT](SHARED_TDDFT.md)、C入口は [専用ヘッダー](native_adapters/standard_tddft_models.h) を参照してください。

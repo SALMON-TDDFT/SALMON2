@@ -35,7 +35,37 @@ module code_optimization
   ! these tables store results of modulo
   integer,allocatable :: modx(:), mody(:), modz(:)
 
+  type :: s_model_optimization
+    logical :: current_omp_mode=.false.
+    logical :: force_omp_mode=.false.
+    logical :: optimized_stencil_is_callable=.false.
+    logical :: stencil_is_parallelized_by_omp=.false.
+    integer,allocatable :: modx(:)
+    integer,allocatable :: mody(:)
+    integer,allocatable :: modz(:)
+  end type
+
 contains
+  subroutine park_model_optimization(value)
+    type(s_model_optimization),intent(inout) :: value
+    value%current_omp_mode=current_omp_mode
+    value%force_omp_mode=force_omp_mode
+    value%optimized_stencil_is_callable=optimized_stencil_is_callable
+    value%stencil_is_parallelized_by_omp=stencil_is_parallelized_by_omp
+    call move_alloc(modx,value%modx)
+    call move_alloc(mody,value%mody)
+    call move_alloc(modz,value%modz)
+  end subroutine
+  subroutine activate_model_optimization(value)
+    type(s_model_optimization),intent(inout) :: value
+    current_omp_mode=value%current_omp_mode
+    force_omp_mode=value%force_omp_mode
+    optimized_stencil_is_callable=value%optimized_stencil_is_callable
+    stencil_is_parallelized_by_omp=value%stencil_is_parallelized_by_omp
+    call move_alloc(value%modx,modx)
+    call move_alloc(value%mody,mody)
+    call move_alloc(value%modz,modz)
+  end subroutine
   subroutine switch_stencil_optimization(nlens)
     use salmon_global, only: yn_want_stencil_hand_vectorization
     implicit none

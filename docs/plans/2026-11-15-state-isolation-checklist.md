@@ -2,6 +2,25 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
+## Heterogeneous standard TDDFT registry — 2026-11-18
+
+- [x] Explicit native generation-tagged model registration/spawn/close; input and
+  initialized views, optimization arrays and XC workspace owned per model.
+- [x] Python open_registry/open_model, deterministic collective model selection
+  and cleanup; closing one owner leaves live siblings and other models intact.
+- [x] Eight heterogeneous MPI/OMP cases: different cell/atoms/grid/k/XC/dt/splits,
+  independent old-runtime controls and direct resume agree exactly. Fifteen legacy
+  default-model MPI comparisons also pass. No GS computed or collected.
+- [x] Source and installed wheel:621 tests each (one skip); installed MPI sample
+  and six-rank independent comparison pass. Source and wheel capacity tests let
+  model B reach56 steps beyond model A capacity48 without cross-contamination.
+- [x] Paired registry guides, public C header, AI JSON and sample synchronized.
+  Source/object audits pass; no Actions used. Selected evidence (no GS) stored in
+  canonical calc2026/salmonpy-heterogeneous-models-20261118; cloud sync unverified.
+- [ ] Automatic registry construction from ordinary heterogeneous material-ID plans.
+- [ ] Full GS contexts and remaining specialized SOC/+U/DC/process resources;
+  concurrent threads, HSE registry and portable changed-topology restart are separate.
+
 ## Standard parser workspace/default ownership update — 2026-11-18
 
 - [x] Model-owned s_input_parser: scratch units, namelist status/coordinate flags,
@@ -17,9 +36,8 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 - [x] Normal two-PBE/two-TB-mBJ mixed layout: independent/shared/protected direct
   resume and late failed-restore/retry match; source/installed617 tests each,
   one skip. Source-distribution→wheel and installed parser tooling verified locally.
-- [ ] Heterogeneous model registration/activation, remaining common derived
-  resources and Python heterogeneous handles; concurrent parser/live propagation
-  are not enabled by this sequential-read ownership stage.
+- [x] Heterogeneous registration/activation and Python handles completed in the
+  registry section above. Concurrent threads and specialized resources remain separate.
 
 ## Standard native model-input ownership update — 2026-11-18
 

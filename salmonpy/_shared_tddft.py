@@ -18,7 +18,7 @@ def _agree(comm,error,runtime=False):
 
 def _profile(initial):
     groups=_input_groups((initial.directory/initial.input_file).read_text())
-    body='\n'.join(groups.values())
+    body='\n'.join(text for name,text in groups.items() if name not in ('atomic_coor','atomic_red_coor','reentrance'))
     required={'yn_periodic':('y','n'),'spin':('unpolarized','unpolarized'),
               'yn_symmetry':('n','n'),'yn_md':('n','n'),'yn_spinorbit':('n','n'),
               'yn_jm':('n','n'),'propagator':('middlepoint','middlepoint'),

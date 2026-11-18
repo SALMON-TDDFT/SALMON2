@@ -544,3 +544,5 @@ The one-lifetime statements above describe the legacy Python/singleton route.
 they are not yet connected to a Python shared factory or ordinary multipoint plans.
 
 For opt-in standard TDDFT shared models and multipoint groups, see [SHARED_TDDFT.en.md](SHARED_TDDFT.en.md).
+
+For explicit sequential heterogeneous standard-model switching in one process, see [TDDFT_REGISTRY.en.md](TDDFT_REGISTRY.en.md).

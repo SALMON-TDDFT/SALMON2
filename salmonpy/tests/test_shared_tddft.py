@@ -83,3 +83,9 @@ class SharedTDDFTTests(unittest.TestCase):
         state._call=lambda fn,*args:fn(*args)
         with self.assertRaisesRegex(RuntimeFailure,'endpoints differ'):state._refresh()
         self.assertTrue(state.failed);self.assertEqual(state.steps,0)
+
+    def test_profile_ignores_coordinate_blocks_after_last_namelist(self):
+        from salmonpy._shared_tddft import _profile
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);(root/'rt.inp').write_text("&system\nyn_periodic='y'\n/\n&emfield\ntrans_longi='tr'\n/\n&atomic_red_coor\n'Si' .3 .4 .45 1\n/\n")
+            self.assertEqual(_profile(SimpleNamespace(directory=root,input_file='rt.inp')),Path('.'))

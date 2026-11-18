@@ -504,3 +504,5 @@ OpenMPに対応しない場合は、MPIのラッパー設定で対応するも�
 別の同一モデルC ABIを提供しますが、Python共有生成器・通常の複数点配置への接続はまだです。
 
 標準TDDFTの明示的な共有モデルと複数点配置は [SHARED_TDDFT.md](SHARED_TDDFT.md) を参照。
+
+異なる入力を同一プロセスで順次切り替える標準TDDFTは [TDDFT_REGISTRY.md](TDDFT_REGISTRY.md) を参照してください。

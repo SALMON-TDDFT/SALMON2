@@ -51,8 +51,9 @@ files. Standalone native files are host-managed, not portable archives; use the
 normal mixed sample's aggregate checkpoint for provenance checks. Closing the
 model prevents new states but lets live states finish. Close every state and model
 explicitly before host MPI finalization; closing one sibling leaves others live.
-An open idle model can create another state. There is one native electronic model
-lifetime per process, not arbitrary different-input models or concurrent threads.
+An open idle model can create another state. This default API retains one model
+lifetime per process. Use the [explicit registry](TDDFT_REGISTRY.en.md) for
+sequential switching between different-input models; concurrent threads are unsupported.
 
 The supported profile is periodic, full-k (no symmetry reduction), unpolarized,
 fixed-ion PZ, TB-mBJ (automatic/fixed c), Libxc-PZ or Libxc-PBE, transverse
@@ -174,25 +175,18 @@ fields, duplicate keys and invalid decomposition reject before native setup;
 resource estimates stay advisory. The existing aggregate direct save/resume
 and protected failure/retry work across all material groups.
 
-**Same-process different-input models remain unimplemented.** Current C handles
-select an `rt_context`, while `model_new` uses the single already-read model;
-there is no native model-ID registry or second independent input constructor.
-The remaining work is:
+**Same-process different-input models are available through the explicit registry.**
+See [registration/switching](TDDFT_REGISTRY.en.md) and `examples/tddft_models.py`.
+Inputs, initialized controls, optimization tables and XC scratch switch per model;
+wavefunctions, clocks and checkpoint resources remain state-owned. Existing default
+`open_model` and ordinary layout contracts are preserved.
 
-1. Model input/default records and parser workspaces are now owned (see below).
-   Complete model registration/activation and remaining process-global derived controls.
-2. Construct and select more than one model without changing a live sibling;
-   step/restore must use the selected model's dt/capacity/XC and geometry controls.
-3. Complete ownership of common caches, I/O/timers and non-child MPI resources,
-   then define model-local teardown. Specialized SOC/+U/DC remain separate scope.
-4. Connect model handles to Python and verify different cell/grid/k/PP/XC inputs,
-   independent controls, destruction order and direct restore.
-
-State wavefunctions, density/XC payload, clocks, protected/staged state and
-initialization child communicators are already owned; they need not be rewritten.
-No completion percentage is justified by counting these unequal tasks. Current
-PBE/TB-mBJ connection tests use two existing Si inputs and check implementation
-parity, not two-species physical accuracy or same-process reentrancy.
+Remaining work includes automatic heterogeneous registration from ordinary material-ID
+layouts, full GS contexts and specialized SOC/+U/DC resources. Attachment, timers
+and synchronous compatibility views remain process infrastructure; concurrent
+threads are unsupported. Existing Si fixtures with different cells, atom counts,
+16³/8³ grids, k counts and five XC choices establish implementation parity, not
+multi-element physical accuracy or convergence.
 
 ## Model-owned initialization input (2026-11-18)
 
@@ -211,11 +205,10 @@ Sibling states do not own/deallocate that model; an idle open model can still
 create states from the original inputs. Numerical wavefunctions, live MPI/Libxc
 owners and RT checkpoint payloads are not copied into this input record.
 
-This completes the owned-input record and explicit initialization boundary. Parser workspaces and per-read defaults are also owned as described below.
-Singleton model registration, kernel activation/common derived resources and
-heterogeneous model handles remain subsequent work. In particular,
-this **does not enable different-input models in the same process** or change the
-public ABI, supported profile, numerical order or restart format.
+The owned-input record, explicit initialization boundary, parser workspaces and
+defaults now support explicit registration/selection and Python model handles.
+The default API profile, numerical order and restart format remain unchanged;
+the registry adds a separate ABI. See the registry guide above.
 
 Developer validation uses `tools/test_model_input_ownership.py SOURCE NEW_OUTPUT
 --fc gfortran`, compiling the actual record and a two-input deep-copy/resize/release

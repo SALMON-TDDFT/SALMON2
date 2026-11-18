@@ -26,11 +26,13 @@ use math_constants, only: pi
 use salmon_global
 use structures
 use inputoutput, only: s_input_parser
+use salmonpy_model_inputs, only: s_model_inputs
+use code_optimization, only: s_model_optimization,park_model_optimization,activate_model_optimization
 use salmonpy_step_output
 use parallelization, only: adjust_elapse_time, nproc_group_global
-use communication, only: comm_is_root, comm_sync_all, comm_bcast, &
+use communication, only: comm_is_root, comm_sync_all, comm_bcast,comm_get_globalinfo, &
   comm_begin_children,comm_end_children,comm_release_children,comm_child_counts
-use salmon_xc, only: finalize_xc
+use salmon_xc, only: finalize_xc,s_model_xc_workspace,park_model_xc_workspace,activate_model_xc_workspace
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
 use initialization_rt_sub
@@ -55,9 +57,15 @@ type :: checkpoint_payload
   integer :: Mit,itt
 end type
 ! A model owns immutable initialization values, distinct from RT numerical owners.
-! The model registry remains singleton until heterogeneous activation is implemented.
+! Registry tokens own models; state contexts borrow their immutable model owner.
 type :: rt_model
   type(s_input_parser) :: parser
+  type(s_model_inputs) :: runtime_inputs
+  type(s_model_optimization) :: optimization
+  type(s_model_xc_workspace) :: xc_workspace
+  logical :: runtime_ready=.false.,closed=.false.
+  integer :: references=0
+  integer(c_int64_t) :: token=0_c_int64_t
   real(8) :: initial_A(3)=0d0
 end type
 type :: rt_context
@@ -101,7 +109,13 @@ logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
 end type
 type(rt_context),pointer,save :: state=>null()
-type(rt_model),pointer,save :: model=>null()
+type(rt_model),pointer,save :: model=>null(),active_model=>null()
+type model_slot
+  type(rt_model),pointer :: owner=>null()
+  integer(c_int64_t) :: generation=0_c_int64_t
+end type
+type(model_slot),allocatable,save :: models(:)
+logical,save :: registry_mode=.false.,registering=.false.,model_spawning=.false.
 logical,save :: used=.false.,handle_mode=.false.,model_timers_alive=.false.,handle_initializing=.false.
 integer,save :: handle_group=0
 integer(c_int64_t),parameter :: handle_stride=2147483648_c_int64_t
@@ -113,6 +127,192 @@ end type
 type(handle_slot),allocatable,save :: handles(:)
 
 contains
+
+integer function live_contexts() result(n)
+  integer :: i
+  logical :: selected
+  n=live_handles();selected=.false.
+  if(.not.associated(state))return
+  if(allocated(handles))then
+    do i=1,size(handles)
+      if(associated(handles(i)%context,state))selected=.true.
+    enddo
+  endif
+  if(.not.selected)n=n+1
+end function
+subroutine park_active_model()
+  if(.not.associated(active_model))return
+  call park_model_optimization(active_model%optimization)
+  call park_model_xc_workspace(active_model%xc_workspace)
+  nullify(active_model)
+end subroutine
+subroutine select_model(owner,initializing,status)
+  use inputoutput,only:initialize_inputoutput_units
+  use sym_sub,only:read_sw_symmetry
+  type(rt_model),pointer,intent(in) :: owner
+  logical,intent(in) :: initializing
+  integer,intent(out) :: status
+  status=12
+  if(.not.associated(owner))return
+  if(.not.initializing.and..not.owner%runtime_ready)return
+  if(.not.initializing.and.associated(active_model,owner))then
+    status=0;return
+  endif
+  call park_active_model()
+  if(initializing)then
+    call owner%parser%values%activate(status)
+  else
+    call owner%runtime_inputs%activate(status)
+  endif
+  call handle_agree(status)
+  if(status/=0)return
+  call initialize_inputoutput_units
+  calc_mode='RT';worker_embedded=.true.;worker_initial_A=owner%initial_A
+  embedded_dt=dt;embedded_steps=nt
+  embedded_decomposition=[nproc_k,nproc_ob,nproc_rgrid]
+  call read_sw_symmetry(yn_symmetry)
+  call activate_model_optimization(owner%optimization)
+  call activate_model_xc_workspace(owner%xc_workspace)
+  active_model=>owner
+end subroutine
+subroutine release_model(owner)
+  type(rt_model),pointer,intent(inout) :: owner
+  if(.not.associated(owner))return
+  if(.not.owner%closed.or.owner%references/=0)return
+  if(associated(active_model,owner))call park_active_model()
+  if(associated(model,owner))nullify(model)
+  deallocate(owner);nullify(owner)
+end subroutine
+integer(c_int) function sp_tddft_registry_protocol() bind(C)
+  sp_tddft_registry_protocol=1
+end function
+subroutine model_reserve(index,token,status)
+  integer,intent(out)::index,status
+  integer(c_int64_t),intent(out)::token
+  type(model_slot),allocatable :: grown(:)
+  integer::old,i,allocation_status,group,rank,n,parts(2),reference(2)
+  status=0;index=0;old=0;token=0
+  if(allocated(models))then
+    old=size(models)
+    do i=1,old
+      if(associated(models(i)%owner))cycle
+      if(models(i)%generation>=int(huge(0),c_int64_t))cycle
+      index=i;exit
+    enddo
+  endif
+  if(index==0)then
+    if(old>huge(0)/2)status=16
+    call handle_agree(status)
+    if(status/=0)return
+    allocate(grown(max(4,2*old)),stat=allocation_status)
+    if(allocation_status/=0)status=16
+    call handle_agree(status)
+    if(status/=0)return
+    if(old>0)grown(:old)=models
+    call move_alloc(grown,models);index=old+1
+  endif
+  parts=[index,int(models(index)%generation+1_c_int64_t)];reference=parts
+  call comm_get_globalinfo(group,rank,n);call comm_bcast(reference,group)
+  if(any(reference/=parts))status=11
+  call handle_agree(status)
+  if(status/=0)return
+  models(index)%generation=models(index)%generation+1_c_int64_t
+  token=-(models(index)%generation*handle_stride+int(index,c_int64_t))
+end subroutine
+subroutine model_lookup(token,index,status)
+  integer(c_int64_t),intent(in)::token
+  integer,intent(out)::index,status
+  integer::parts(2),reference(2),group,rank,n
+  index=0;status=12
+  if(.not.handle_main())return
+  call comm_get_globalinfo(group,rank,n)
+  status=0
+  if(.not.registry_mode.or.group/=handle_group.or.token>=0_c_int64_t)status=12
+  if(token<-(int(huge(0),c_int64_t)*handle_stride+int(huge(0),c_int64_t)))status=12
+  call handle_agree(status)
+  if(status/=0)return
+  parts=[int(mod(-token,handle_stride)),int((-token)/handle_stride)];reference=parts
+  call comm_bcast(reference,group)
+  if(any(reference/=parts))status=11
+  call handle_agree(status)
+  if(status/=0)return
+  index=parts(1)
+  if(.not.allocated(models))then
+    status=12
+  else if(index<1.or.index>size(models))then
+    status=12
+  else if(models(index)%generation/=int(parts(2),c_int64_t))then
+    status=12
+  else if(.not.associated(models(index)%owner))then
+    status=12
+  endif
+  call handle_agree(status)
+end subroutine
+integer(c_int) function sp_tddft_model_register(path,timestep,capacity,A,decomposition,model_token,state_token,J) bind(C)
+  character(c_char),intent(in)::path(*)
+  real(c_double),value::timestep
+  integer(c_int),value::capacity
+  real(c_double),intent(in)::A(3)
+  integer(c_int),intent(in)::decomposition(5)
+  integer(c_int64_t),intent(out)::model_token,state_token
+  real(c_double),intent(out)::J(3)
+  type(rt_model),pointer :: previous,failed,old_default
+  integer::status,index,group,rank,n,restore_status
+  integer(c_int64_t)::candidate
+  model_token=0;state_token=0;J=0d0;sp_tddft_model_register=12
+  if(.not.handle_main())return
+  call comm_get_globalinfo(group,rank,n)
+  status=0
+  if(associated(state).or.(used.and..not.registry_mode))status=12
+  if(registry_mode.and.group/=handle_group)status=12
+  call handle_agree(status)
+  if(status/=0)return
+  call model_reserve(index,candidate,status)
+  if(status/=0)then
+    sp_tddft_model_register=status;return
+  endif
+  previous=>active_model;old_default=>model
+  call park_active_model()
+  registering=.true.
+  status=sp_tddft_handle_init(path,timestep,capacity,A,decomposition,state_token,J)
+  registering=.false.
+  if(status==0)then
+    registry_mode=.true.;model%token=candidate
+    models(index)%owner=>model;model_token=candidate
+  else
+    if(associated(model))then
+      if(.not.associated(model,old_default))then
+        failed=>model;failed%closed=.true.;call release_model(failed)
+      endif
+    endif
+    model=>old_default
+    if(associated(previous))call select_model(previous,.false.,restore_status)
+  endif
+  sp_tddft_model_register=status
+end function
+integer(c_int) function sp_tddft_model_spawn(token,state_token,J) bind(C)
+  integer(c_int64_t),value::token
+  integer(c_int64_t),intent(out)::state_token
+  real(c_double),intent(out)::J(3)
+  integer::index,status
+  state_token=0;J=0d0
+  call model_lookup(token,index,status);sp_tddft_model_spawn=status
+  if(status/=0)return
+  model=>models(index)%owner
+  model_spawning=.true.
+  sp_tddft_model_spawn=sp_tddft_model_new(state_token,J)
+  model_spawning=.false.
+end function
+integer(c_int) function sp_tddft_model_close(token) bind(C)
+  integer(c_int64_t),value::token
+  integer::index,status
+  type(rt_model),pointer::owner
+  call model_lookup(token,index,status);sp_tddft_model_close=status
+  if(status/=0)return
+  owner=>models(index)%owner;nullify(models(index)%owner)
+  owner%closed=.true.;call release_model(owner)
+  sp_tddft_model_close=0
+end function
 ! Same immutable full-k semilocal model, common dt/capacity/decomposition.
 ! Pointer selection never copies numerical/MPI/Libxc owners. Calls are synchronous.
 integer(c_int) function sp_tddft_handle_protocol() bind(C)
@@ -214,6 +414,7 @@ subroutine handle_select(token,index,status)
   integer(c_int64_t),intent(in)::token
   integer,intent(out)::index,status
   call handle_lookup(token,index,status)
+  if(status==0)call select_model(handles(index)%context%model,.false.,status)
   if(status==0)state=>handles(index)%context
 end subroutine
 subroutine handle_unselect(index)
@@ -237,7 +438,8 @@ integer(c_int) function sp_tddft_handle_init(path,timestep,capacity,A,decomposit
   token=0;J=0d0;sp_tddft_handle_init=12
   if(.not.handle_main())return
   status=0
-  if(used.or.handle_mode.or.associated(state))status=12
+  if(associated(state))status=12
+  if(.not.registering.and.(used.or.handle_mode))status=12
   call handle_agree(status)
   if(status/=0)return
   call handle_reserve(index,candidate,status)
@@ -283,6 +485,7 @@ integer(c_int) function sp_tddft_model_new(token,J) bind(C)
   call comm_get_globalinfo(group,rank,n)
   status=0
   if(.not.handle_mode.or.group/=handle_group.or.associated(state))status=12
+  if(registry_mode.and..not.model_spawning)status=12
   call handle_agree(status)
   if(status/=0)return
   call handle_reserve(index,candidate,status)
@@ -487,11 +690,11 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   integer :: i,status,reference_capacity,reference_decomposition(5),admission_group,admission_rank,admission_size,child_owner
   real(8) :: reference_dt,reference_A(3)
   character(4096) :: reference_filename
-  logical :: exists
+  logical :: exists,first_init
   call comm_get_globalinfo(admission_group,admission_rank,admission_size)
   J=0d0
   status=0
-  if(used)status=12
+  if(used.and..not.registering)status=12
   call comm_get_max(status,admission_group)
   if(status/=0)then
     sp_tddft_init=status;return
@@ -528,17 +731,20 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
     sp_tddft_init=status;return
   endif
   ! Only actual initialization consumes the process-owned lifetime.
+  first_init=.not.used
   used=.true.
   worker_embedded=.true.
   worker_initial_A=A; embedded_dt=timestep; embedded_steps=capacity
   embedded_decomposition=decomposition
-  call set_math_constants
-  call setup_parallel
+  if(first_init)then
+    call set_math_constants
+    call setup_parallel
+  endif
   allocate(model)
   call read_input(trim(filename),model%parser)
   calc_mode='RT'
   call read_sw_symmetry(yn_symmetry)
-  call timer_initialize
+  if(first_init)call timer_initialize
   model%initial_A=worker_initial_A
   call open_initial_state(model,J,status,'')
   sp_tddft_init=status
@@ -552,17 +758,15 @@ subroutine open_initial_state(owner,J,status,name)
   character(*),intent(in)::name
   character(len(sysname))::saved_name
   logical::exists
-  integer::child_owner
+  integer::child_owner,restore_status
+  type(rt_model),pointer :: previous
   status=0;J=0d0
   if(.not.associated(owner))status=12
   call handle_agree(status)
   if(status/=0)return
-  ! Explicit compatibility view for legacy initialization, not a numerical snapshot.
-  call owner%parser%values%activate(status)
-  call handle_agree(status)
+  previous=>active_model
+  call select_model(owner,.true.,status)
   if(status/=0)return
-  call initialize_inputoutput_units
-  worker_initial_A=owner%initial_A
   saved_name=sysname
   if(len_trim(name)>0)saved_name=name
   if(len_trim(name)>0.or.handle_initializing)then
@@ -572,7 +776,10 @@ subroutine open_initial_state(owner,J,status,name)
     if(exists)status=1
   endif
   call handle_agree(status)
-  if(status/=0)return
+  if(status/=0)then
+    if(associated(previous))call select_model(previous,.false.,restore_status)
+    return
+  endif
   quiet=.false.
   call comm_begin_children(child_owner,status)
   call comm_get_max(status,nproc_group_global)
@@ -617,6 +824,9 @@ end if
   endif
 
   state%accepted_A=worker_initial_A
+  call owner%runtime_inputs%capture()
+  owner%runtime_ready=.true.
+  owner%references=owner%references+1
   status=0
 end subroutine
 integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
@@ -712,6 +922,7 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
 end function
 integer(c_int) function sp_tddft_close() bind(C)
   integer::output_status
+  type(rt_model),pointer :: owner
   sp_tddft_close=1
   if(.not.associated(state)) return
   if(comm_is_root(nproc_id_global))then
@@ -724,7 +935,7 @@ integer(c_int) function sp_tddft_close() bind(C)
   endif
   if(allocated(state%step_saved))deallocate(state%step_saved,state%step_saved_xc)
   if(allocated(state%pending))deallocate(state%pending)
-  if(.not.handle_mode.or.live_handles()==1)then
+  if(.not.handle_mode.or.live_contexts()==1)then
     if(model_timers_alive)then
       call timer_end(LOG_RT_ITERATION)
       call timer_disable_sub
@@ -737,7 +948,9 @@ integer(c_int) function sp_tddft_close() bind(C)
   call dealloc_cache(state%srg_scalar)
   call finalize_xc(state%xc_func)
   call comm_release_children(state%mpi_child_owner)
+  owner=>state%model;owner%references=owner%references-1
   deallocate(state);nullify(state)
+  call release_model(owner)
   ! Other SALMON module configuration remains process-owned. Do not reopen.
   sp_tddft_close=0
 end function

@@ -65,6 +65,9 @@ subroutine input_pp(pp,hx,hy,hz)
   if (comm_is_root(nproc_id_global)) then
 
     do ik=1,nelem
+      flag_potential_is_given=.true.
+      flag_beta_proj_is_given=.false.
+      flag_so=.false.
          
       ps_file = trim(file_pseudo(ik))
 

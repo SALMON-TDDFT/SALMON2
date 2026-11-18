@@ -144,3 +144,5 @@ NativeFastHSEBackendはnative寿命前に周期セル・格子・原子入力を
 SCFの閾値未達は `RuntimeWarning` として通知し、有限で読み出せる結果を後続へ渡します。
 `GroundStateResult.converged` と保存JSONの `converged` が収束状態を表します。
 保存JSONの `status='complete'` は実行完了を意味し、収束済みを意味しません。
+
+異なる入力を同一プロセスで順次切り替える標準TDDFTは [TDDFT_REGISTRY.md](TDDFT_REGISTRY.md) を参照してください。

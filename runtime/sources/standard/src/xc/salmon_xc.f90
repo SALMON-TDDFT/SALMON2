@@ -69,7 +69,49 @@ module salmon_xc
   real(8),allocatable :: vexc_1d(:)
   real(8),allocatable :: vexc_sp_1d(:,:)
 
+  type :: s_model_xc_workspace
+    real(8),allocatable :: rho_tmp(:,:,:)
+    real(8),allocatable :: rho_s_tmp(:,:,:,:)
+    real(8),allocatable :: eexc_tmp(:,:,:)
+    real(8),allocatable :: vxc_tmp(:,:,:)
+    real(8),allocatable :: vxc_s_tmp(:,:,:,:)
+    real(8),allocatable :: rho_s_1d(:)
+    real(8),allocatable :: rho_s_sp_1d(:,:)
+    real(8),allocatable :: exc_1d(:)
+    real(8),allocatable :: eexc_1d(:)
+    real(8),allocatable :: vexc_1d(:)
+    real(8),allocatable :: vexc_sp_1d(:,:)
+  end type
+
 contains
+  subroutine park_model_xc_workspace(value)
+    type(s_model_xc_workspace),intent(inout) :: value
+    call move_alloc(rho_tmp,value%rho_tmp)
+    call move_alloc(rho_s_tmp,value%rho_s_tmp)
+    call move_alloc(eexc_tmp,value%eexc_tmp)
+    call move_alloc(vxc_tmp,value%vxc_tmp)
+    call move_alloc(vxc_s_tmp,value%vxc_s_tmp)
+    call move_alloc(rho_s_1d,value%rho_s_1d)
+    call move_alloc(rho_s_sp_1d,value%rho_s_sp_1d)
+    call move_alloc(exc_1d,value%exc_1d)
+    call move_alloc(eexc_1d,value%eexc_1d)
+    call move_alloc(vexc_1d,value%vexc_1d)
+    call move_alloc(vexc_sp_1d,value%vexc_sp_1d)
+  end subroutine
+  subroutine activate_model_xc_workspace(value)
+    type(s_model_xc_workspace),intent(inout) :: value
+    call move_alloc(value%rho_tmp,rho_tmp)
+    call move_alloc(value%rho_s_tmp,rho_s_tmp)
+    call move_alloc(value%eexc_tmp,eexc_tmp)
+    call move_alloc(value%vxc_tmp,vxc_tmp)
+    call move_alloc(value%vxc_s_tmp,vxc_s_tmp)
+    call move_alloc(value%rho_s_1d,rho_s_1d)
+    call move_alloc(value%rho_s_sp_1d,rho_s_sp_1d)
+    call move_alloc(value%exc_1d,exc_1d)
+    call move_alloc(value%eexc_1d,eexc_1d)
+    call move_alloc(value%vexc_1d,vexc_1d)
+    call move_alloc(value%vexc_sp_1d,vexc_sp_1d)
+  end subroutine
 
 
 ! wrapper for calc_xc

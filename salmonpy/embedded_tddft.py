@@ -1,7 +1,8 @@
 """Experimental one-point TDDFT on a supplied host-MPI communicator.
 
-One native electronic lifetime per Python process, on its main thread. SALMON
-module configuration is not reentrant: start a fresh MPI job for another run.
+Default entry points have one electronic lifetime per process, on the main thread.
+Explicit open_registry supports different standard models on one attachment;
+do not mix registry mode and legacy initializers.
 A shared writable work root is required across members of each material group.
 """
 from .errors import InputError, InputTypeError, RuntimeFailure, NumericalError
@@ -103,6 +104,10 @@ class NativeTDDFTBackend:
         if not self.shared_model:return None
         from ._native_group import _SessionGroup
         return _SessionGroup(self.open_model(initial,dt,context))
+
+    def open_registry(self,context):
+        from ._tddft_registry import open_registry
+        return open_registry(self,context)
 
     def open_model(self,initial,dt,context):
         return self._create(initial,None,dt,context,shared=True)
@@ -260,6 +265,9 @@ class _NativeState:
 
 
 def __getattr__(name):
+    if name=='NativeTDDFTRegistry':
+        from ._tddft_registry import NativeTDDFTRegistry
+        return NativeTDDFTRegistry
     if name=='NativeTDDFTModel':
         from ._shared_tddft import NativeTDDFTModel
         return NativeTDDFTModel

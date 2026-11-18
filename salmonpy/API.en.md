@@ -168,3 +168,5 @@ Missing the SCF threshold emits RuntimeWarning and permits usable finite results
 in downstream workflows. `GroundStateResult.converged` and the saved JSON
 `converged` field expose convergence. Manifest `status='complete'` denotes
 completed execution, not convergence.
+
+For explicit sequential heterogeneous standard-model switching in one process, see [TDDFT_REGISTRY.en.md](TDDFT_REGISTRY.en.md).

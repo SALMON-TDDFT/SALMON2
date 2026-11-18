@@ -251,3 +251,8 @@ install(FILES "${ROOT}/tests/native/test_model_inputs.f90" DESTINATION salmonpy/
 
 install(FILES "${ROOT}/tools/test_parser_ownership.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_parser_ownership.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/_tddft_registry.py" "${ROOT}/salmonpy/TDDFT_REGISTRY.md" "${ROOT}/salmonpy/TDDFT_REGISTRY.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/native_adapters/standard_tddft_models.h" DESTINATION salmonpy/native_adapters)
+install(FILES "${ROOT}/tools/test_heterogeneous_tddft_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/salmonpy/examples/tddft_models.py" DESTINATION salmonpy/examples)
