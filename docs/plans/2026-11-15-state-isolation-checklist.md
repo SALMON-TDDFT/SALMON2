@@ -2,6 +2,35 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
+## Retained standard GS handles and Python — 2026-11-18
+
+- [x] Stable heap owners for GS numerical arrays, XC and child communicators;
+  default temporary GS and optional retained model run share the original SCF.
+- [x] Generation-tagged native create/info/shape/read/close/resources and Python
+  NativeGSBackend/session/state. Immutable material ID/calculation and fixed
+  runtime/decomposition. Requested arrays are read-only copies, valid after close.
+- [x] Ten real MPI/OMP cases, PZ/Libxc-PZ/PBE, real/complex orbitals, different
+  cells/grids/atoms/electrons/k; interleaved A/B and independent arrays exactly
+  match. Close/reuse/stale/mixed tokens, sibling preservation and resource release pass.
+- [x] Native SCF flag snapshots preserve exact convergence semantics; unfinished
+  SCF warns and retains. Existing Fortran GS9 cases match old status/eigen/info/k.
+- [x] Darwin NumPy/Accelerate complex-BLAS ABI interposition reproduced and fixed
+  with two-level library binding and actual shared libmpi COMMON sentinels.
+  Host Fortran probes use the same link helper. Linux link path unchanged.
+- [x] Rank-local work visibility/content and chdir failures agree before native
+  collectives. Existing TDDFT currents and direct resume stay exact in MPI6 controls.
+- [x] Paired retained-GS guide, public C header, Python sample and AI JSON updated.
+- [x] Source/final-wheel635 tests each (one skip). Installed MPI6 real/complex
+  visibility-rejection test, public MPI2 sample, different per-state SCF cap/
+  tolerance test and true-convergence-flag test pass. Array values agree with
+  independent controls at the same MPI partition; no physical-convergence claim.
+- [x] Selected hash-only/diagnostic evidence, approved runtime/wheel and explicitly
+  unapproved failed-library evidence saved to canonical
+  calc2026/salmonpy-retained-gs-20261118; no GS restart/orbital/density collection.
+  Local OneDrive writes verified; cloud sync unverified. No Actions dispatched.
+- [ ] Retained GS checkpoint and in-memory GS→TDDFT handoff; HSE/SOC/+U/DC GS,
+  simultaneous GS/TDDFT and broader GS initialization recovery remain separate.
+
 ## Standard GS model-owned input boundary — 2026-11-18
 
 - [x] Internal s_gs_model.load/run/clear retains owned parsed values and calls
@@ -21,9 +50,8 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
   legacy default GS spatial2 match old controls. Evidence: canonical
   calc2026/salmonpy-standard-gs-inputs-20261118; cloud sync unverified.
   No Actions; no GS restart written.
-- [ ] Retained GS wavefunction/state handles, full GS context and Python shared
-  GS factory remain separate. HSE/SOC/+U/DC GS and simultaneous GS/TDDFT are not
-  enabled by this standard sequential input boundary.
+- [x] Retained standard GS/Python handles are implemented in the newer section
+  above. Full specialized GS contexts, HSE/SOC/+U/DC and concurrent GS/TDDFT remain separate.
 
 ## Ordinary heterogeneous layer groups — 2026-11-18
 

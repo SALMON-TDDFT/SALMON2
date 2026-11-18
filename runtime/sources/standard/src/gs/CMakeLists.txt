@@ -7,6 +7,8 @@ set(SOURCES
     gram_schmidt_orth.f90
     init_gs.f90
     initialization_dft.f90
+    gs_storage.f90
+    embedded_gs.f90
     gs_model.f90
     main_dft.f90
     main_dft_md.f90

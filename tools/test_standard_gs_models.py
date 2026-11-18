@@ -12,6 +12,7 @@ from pathlib import Path
 import subprocess
 import sys
 import numpy as np
+from build_embedded_tddft import mpi_link_command
 
 
 def digest(path):
@@ -55,7 +56,7 @@ def main():
         run([a.fc,'-I'+str(build),'-J'+str(out),'-c',source/'probe.f90','-o',obj],stdout=log,stderr=subprocess.STDOUT)
         run([sys.executable,a.checker,'--object-tree',out],stdout=log,stderr=subprocess.STDOUT)
         probe=out/'probe'
-        run([a.fc,obj,library,'-Wl,-rpath,'+str(library.parent),'-o',probe],stdout=log,stderr=subprocess.STDOUT)
+        run(mpi_link_command([a.fc,obj,library,'-Wl,-rpath,'+str(library.parent),'-o',probe]),stdout=log,stderr=subprocess.STDOUT)
     probe_sha=digest(probe)
     from salmonpy.dft import DFT,Pseudopotential,SCFSettings
     pseudo_path=repo/'salmonpy/examples/si_intro_data/Si_rps.dat'

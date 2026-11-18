@@ -146,3 +146,5 @@ SCFの閾値未達は `RuntimeWarning` として通知し、有限で読み出�
 保存JSONの `status='complete'` は実行完了を意味し、収束済みを意味しません。
 
 異なる入力を同一プロセスで順次切り替える標準TDDFTは [TDDFT_REGISTRY.md](TDDFT_REGISTRY.md) を参照してください。
+
+[保持GSハンドルとPython接続](NATIVE_GS.md)。

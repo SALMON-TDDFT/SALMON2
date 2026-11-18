@@ -170,3 +170,5 @@ in downstream workflows. `GroundStateResult.converged` and the saved JSON
 completed execution, not convergence.
 
 For explicit sequential heterogeneous standard-model switching in one process, see [TDDFT_REGISTRY.en.md](TDDFT_REGISTRY.en.md).
+
+[Retained GS handles and Python](NATIVE_GS.en.md).

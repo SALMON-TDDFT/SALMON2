@@ -106,8 +106,9 @@ python -m salmonpy.examples.configured_si RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY
 同じ群の全ランクで同じモデルを同じ順序で呼びます。入力は原子座標の読み込み後に保存し、
 実行前後で呼出側の入力ビュー・単位表・calc_mode・対称性の実スイッチ・最適化表・XC作業領域を
 切り替えます。モデル用の呼出しは通信キャッシュをローカル配列より先に終了し、
-各回の子通信資源を解放します。状態を保持しない順次GS入口であり、波動関数を保持する
-GSハンドル、同時GS／TDDFT、スレッド並行、HSE／SOC／+U／DCのGS独立化ではありません。
+各回の子通信資源を解放します。既定の run(status) は状態を保持しない順次GS入口です。run(status,state) による保持と
+Pythonハンドルは[保持GS](NATIVE_GS.md)で利用できます。同時GS／TDDFT、
+スレッド並行、HSE／SOC／+U／DCのGS独立化は別作業です。
 
 statusは0が正常復帰、1が空モデル／使用中の子通信スコープ、2がこの内部入口の未対応条件です。
 SCF未収束は別扱いで、従来どおり警告して最後の反復結果を出力します。

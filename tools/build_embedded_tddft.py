@@ -8,6 +8,32 @@ import argparse,hashlib,json,os,re,shlex,subprocess,sys
 from pathlib import Path
 
 
+def mpi_link_command(command,*,shared=False):
+    """Keep a host/probe and its library's Darwin BLAS/MPI bindings consistent."""
+    command=list(command)
+    # Some Darwin MPI wrappers inject -flat_namespace after user arguments.
+    # Resolve their documented compiler/link flags so the library binds its own
+    # BLAS, rather than NumPy Accelerate's incompatible complex-return ABI.
+    if sys.platform=='darwin':
+        try:
+            compiler=shlex.split(subprocess.check_output([command[0],'--showme:command'],text=True,stderr=subprocess.DEVNULL))
+            flags=shlex.split(subprocess.check_output([command[0],'--showme:link'],text=True,stderr=subprocess.DEVNULL))
+        except (subprocess.CalledProcessError,OSError):
+            compiler=[];flags=[]
+        if compiler:command=compiler+command[1:]+flags
+        command=[arg for arg in command if arg not in ('-flat_namespace','-Wl,-flat_namespace')]
+        # MPI Fortran sentinels are COMMON blocks: bind them to libmpi rather
+        # than defining private copies that break MPI_IN_PLACE/status handling.
+        # OpenMPI's ignore-tkr dylib also exports tentative sentinel copies;
+        # prefer libmpi's actual sentinel definitions when resolving COMMON.
+        if '-lmpi' in command:
+            command.remove('-lmpi');command.insert(1,'-lmpi')
+        command[1:1]=(['-dynamiclib'] if shared else [])+['-Wl,-commons,use_dylibs']
+    elif shared:
+        command.insert(1,'-shared')
+    return command
+
+
 def link_library(build,output,source):
     checker=Path(__file__).with_name('check_forbidden_eigensolvers.py').resolve()
     subprocess.run([sys.executable,str(checker),'--source-root',str(source)],check=True)
@@ -21,7 +47,7 @@ def link_library(build,output,source):
     library=output/('libsalmonpy_tddft.dylib' if sys.platform=='darwin' else 'libsalmonpy_tddft.so')
     command[out_index+1]=str(library)
     command=[v for v in command if v!='CMakeFiles/salmon.dir/main.f90.o']
-    command.insert(1,'-shared')
+    command=mpi_link_command(command,shared=True)
     subprocess.run(command,cwd=build/'src',check=True)
     source_hashes={str(p.relative_to(source)):hashlib.sha256(p.read_bytes()).hexdigest()
                    for p in sorted((source/'src').rglob('*')) if p.is_file()}

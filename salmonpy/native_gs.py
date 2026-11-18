@@ -1,0 +1,237 @@
+"""Retained standard GS on explicit host MPI. Import never loads/builds a runtime."""
+import ctypes as c
+from dataclasses import dataclass
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import tempfile
+import threading
+from types import SimpleNamespace
+import warnings
+import numpy as np
+from .errors import InputError, InputTypeError, RuntimeFailure, NumericalError
+from .sbe import _integer
+
+__all__=['NativeGSBackend','NativeGSSession','NativeGSState','NativeGSArray','NativeGSInfo']
+
+
+def _agree(comm,error):
+    errors=comm.allgather(error)
+    if any(errors):raise InputError('retained GS admission: '+str(errors))
+
+
+def _configure(lib):
+    specs={'protocol':[], 'create':[c.c_char_p,c.POINTER(c.c_int64)],
+           'info':[c.c_int64,c.c_void_p,c.c_void_p],
+           'array_info':[c.c_int64,c.c_int,c.POINTER(c.c_int),c.c_void_p,c.c_void_p],
+           'read':[c.c_int64,c.c_int,c.c_void_p,c.c_void_p,c.c_int64],
+           'close':[c.c_int64], 'resources':[c.c_void_p]}
+    for name,args in specs.items():
+        fn=getattr(lib,'sp_gs_'+name,None)
+        if fn is None:raise InputError('retained GS protocol missing; explicitly build a matching runtime')
+        fn.argtypes=args;fn.restype=c.c_int
+    if lib.sp_gs_protocol()!=1:raise InputError('unsupported retained GS protocol')
+
+
+@dataclass(frozen=True)
+class NativeGSInfo:
+    energy_hartree: float
+    residual: float
+    tolerance: float
+    iterations: int
+    converged: bool
+    atoms: int
+    bands: int
+
+
+@dataclass(frozen=True)
+class NativeGSArray:
+    values: np.ndarray
+    lower_indices: tuple
+    quantity: str
+    unit: str
+
+
+class NativeGSBackend:
+    def __init__(self,build_record,work_root,*,decomposition=(1,1,1,1,1)):
+        record=json.loads(Path(build_record).read_text())
+        if record.get('schema')!='salmonpy.embedded-tddft/1':raise InputError('verified standard embedded build record required')
+        self._library=Path(record['library']).resolve();self._sha256=record['sha256']
+        if hashlib.sha256(self.library.read_bytes()).hexdigest()!=self.sha256:raise InputError('native library checksum mismatch')
+        self._work_root=Path(work_root).expanduser().resolve()
+        if not self.work_root.is_dir():raise InputError('existing shared work root required')
+        self._decomposition=tuple(_integer(v,'decomposition',1,2**31-1) for v in decomposition)
+        if len(self.decomposition)!=5:raise InputError('five decomposition values required')
+
+    @property
+    def library(self):return self._library
+    @property
+    def sha256(self):return self._sha256
+    @property
+    def work_root(self):return self._work_root
+    @property
+    def decomposition(self):return self._decomposition
+
+    def open(self,context):
+        from . import embedded_tddft
+        from .distributed import NativeParallelContext
+        comm=context.solver_comm;error=None
+        try:
+            if embedded_tddft._used:raise InputError('one electronic native attachment lifetime per process')
+            if threading.current_thread() is not threading.main_thread():raise InputError('main thread required')
+            if math.prod(self.decomposition)!=comm.size:raise InputError('decomposition must match subgroup size')
+            if hashlib.sha256(self.library.read_bytes()).hexdigest()!=self.sha256:raise InputError('native library changed')
+            lib=c.CDLL(str(self.library));_configure(lib)
+        except Exception as exc:error=str(exc)
+        _agree(comm,error)
+        descriptor=(self.sha256,str(self.work_root),self.decomposition)
+        _agree(comm,'backend parameters differ' if any(v!=descriptor for v in comm.allgather(descriptor)) else None)
+        owner=context if hasattr(context,'closed') and hasattr(context,'_dependents') else SimpleNamespace(
+            solver_comm=comm,closed=False,_dependents=0)
+        native=NativeParallelContext(owner,self.library,self.sha256)
+        embedded_tddft._used=True
+        return NativeGSSession(self,native,lib)
+
+
+class NativeGSSession:
+    def __init__(self,backend,native,lib):
+        self.backend=backend;self._native=native;self.lib=lib;self.closed=False;self._states={}
+    @property
+    def comm(self):return self._native.context.solver_comm
+    def _live(self):
+        self._native._live()
+        if self.closed:raise InputError('GS session is closed')
+    def _call(self,work,fn,*args):
+        self._live();previous=Path.cwd();error=None
+        try:
+            try:os.chdir(work)
+            except Exception as exc:error=str(exc)
+            _agree(self.comm,error)
+            return fn(*args)
+        finally:os.chdir(previous)
+    def _check(self,code):
+        codes=self.comm.allgather(code)
+        if any(codes):raise RuntimeFailure('retained GS native call failed: '+str(codes))
+
+    def run(self,calculation,*,scf=None,material_id='material'):
+        from .dft import DFT,SCFSettings
+        from .config import _identifier
+        self._live();error=None
+        try:
+            if not isinstance(calculation,DFT):raise InputTypeError('immutable DFT calculation required')
+            scf=SCFSettings() if scf is None else scf
+            _identifier(material_id,'material_id')
+            text=calculation.input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
+            k,ob,x,y,z=self.backend.decomposition
+            text=text.replace('&system',f'&parallel\n nproc_k={k},nproc_ob={ob},nproc_rgrid={x},{y},{z}\n/\n&system',1)
+            descriptor=(material_id,text,tuple(p.sha256 for p in calculation.pseudopotentials))
+        except Exception as exc:error=str(exc)
+        _agree(self.comm,error)
+        _agree(self.comm,'DFT inputs/material IDs differ' if any(v!=descriptor for v in self.comm.allgather(descriptor)) else None)
+        work=None;error=None
+        if self.comm.rank==0:
+            try:
+                work=Path(tempfile.mkdtemp(prefix='gs-',dir=self.backend.work_root))
+                (work/'gs.inp').write_text(text)
+                for i,pseudo in enumerate(calculation.pseudopotentials):
+                    (work/calculation._pseudo_name(i)).write_bytes(pseudo.data)
+            except Exception as exc:error=str(exc)
+        error=self.comm.bcast(error,root=0);work=self.comm.bcast(work,root=0)
+        _agree(self.comm,error)
+        error=None
+        try:
+            if not work.is_dir() or (work/'gs.inp').read_text()!=text:
+                raise InputError('GS work/input is not visible or differs on this rank')
+            for i,pseudo in enumerate(calculation.pseudopotentials):
+                if hashlib.sha256((work/calculation._pseudo_name(i)).read_bytes()).hexdigest()!=pseudo.sha256:
+                    raise InputError('GS pseudopotential differs on this rank')
+        except Exception as exc:error=str(exc)
+        _agree(self.comm,error)
+        token=c.c_int64()
+        code=self._call(work,self.lib.sp_gs_create,b'gs.inp',c.byref(token))
+        self._check(code)
+        state=NativeGSState(self,token.value,work,material_id,calculation)
+        self._states[token.value]=state
+        try:info=state.info
+        except BaseException:
+            state.close();raise
+        if not info.converged:
+            warnings.warn(f'SCF not converged after {info.iterations} iterations '
+                          f'(residual={info.residual:g}, tolerance={info.tolerance:g}); retaining the last iterate',
+                          RuntimeWarning,stacklevel=2)
+        return state
+
+    def resources(self):
+        self._live();counts=np.zeros(3,dtype=np.int32)
+        self._check(self.lib.sp_gs_resources(counts.ctypes.data))
+        return {'states':int(counts[0]),'live_child_communicators':int(counts[1]),'communicator_slots':int(counts[2])}
+
+    def close(self):
+        if self.closed:return
+        errors=[]
+        for token in sorted(self._states):
+            try:self._states[token].close()
+            except Exception as exc:errors.append(str(exc))
+        if errors:raise RuntimeFailure('GS session cleanup failed: '+str(errors))
+        self._native.close();self.closed=True
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()
+
+
+_QUANTITIES={'density':(1,'bohr^-3'),'occupations':(2,'1'),'eigenvalues':(3,'hartree'),
+             'forces':(4,'hartree/bohr'),'orbitals':(5,'native orbital amplitude')}
+
+
+class NativeGSState:
+    def __init__(self,session,token,work,material_id,calculation):
+        self.session=session;self._token=token;self.directory=work
+        self._material_id=material_id;self._calculation=calculation;self.closed=False
+    @property
+    def material_id(self):return self._material_id
+    @property
+    def calculation(self):return self._calculation
+    def _live(self):
+        self.session._live()
+        _agree(self.session.comm,'GS state is closed' if self.closed else None)
+    @property
+    def info(self):
+        self._live();stats=np.zeros(4,dtype=np.int32);values=np.zeros(3,dtype=np.float64)
+        self.session._check(self.session.lib.sp_gs_info(self._token,stats.ctypes.data,values.ctypes.data))
+        if any(self.session.comm.allgather(not bool(np.isfinite(values).all()))):
+            raise NumericalError('nonfinite retained GS metadata')
+        return NativeGSInfo(*map(float,values),int(stats[0]),bool(stats[1]),int(stats[2]),int(stats[3]))
+    @property
+    def energy_hartree(self):return self.info.energy_hartree
+    @property
+    def converged(self):return self.info.converged
+    @property
+    def iterations(self):return self.info.iterations
+    def array(self,quantity):
+        self._live();error=None
+        if quantity not in _QUANTITIES:error='unknown GS array quantity'
+        _agree(self.session.comm,error)
+        code,unit=_QUANTITIES[quantity];ndim=c.c_int()
+        shape=np.ones(7,dtype=np.int64);lower=np.ones(7,dtype=np.int64)
+        self.session._check(self.session.lib.sp_gs_array_info(self._token,code,c.byref(ndim),shape.ctypes.data,lower.ctypes.data))
+        dims=tuple(map(int,shape[:ndim.value]));size=math.prod(dims)
+        real=np.empty(size,dtype=np.float64);imag=np.empty(size,dtype=np.float64) if code==5 else None
+        self.session._check(self.session.lib.sp_gs_read(self._token,code,real.ctypes.data,
+                            None if imag is None else imag.ctypes.data,size))
+        values=real if imag is None else real+1j*imag
+        if any(self.session.comm.allgather(not bool(np.isfinite(values).all()))):
+            raise NumericalError('nonfinite retained GS array: '+quantity)
+        frozen=np.frombuffer(values.tobytes(),dtype=values.dtype).reshape(dims,order='F')
+        return NativeGSArray(frozen,tuple(map(int,lower[:ndim.value])),quantity,unit)
+    def close(self):
+        if self.session.closed and self.closed:return
+        self.session._native._live()
+        descriptor=(self._token,self.closed)
+        _agree(self.session.comm,'state close selections differ' if any(
+            v!=descriptor for v in self.session.comm.allgather(descriptor)) else None)
+        if self.closed:return
+        self.session._check(self.session.lib.sp_gs_close(self._token))
+        self.closed=True;self.session._states.pop(self._token,None)
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()

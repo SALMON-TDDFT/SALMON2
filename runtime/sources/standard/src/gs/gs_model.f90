@@ -1,6 +1,8 @@
 ! Model-owned input boundary for sequential standard GS calls.
 ! Internal Fortran API: no retained orbitals, simultaneous TDDFT or thread reentry.
 module salmonpy_gs_model
+  use salmonpy_gs_storage, only: s_gs_storage
+  use salmonpy_gs_solver, only: gs_solve
   use inputoutput, only: s_input_parser,read_input,initialize_inputoutput_units
   use salmonpy_model_inputs, only: s_model_inputs
   use code_optimization, only: s_model_optimization,park_model_optimization,activate_model_optimization
@@ -42,7 +44,7 @@ contains
     status=0
   end subroutine
 
-  subroutine gs_model_run(self,status)
+  subroutine gs_model_run(self,status,state)
     use salmon_global, only: calc_mode
     use code_optimization, only: modx,mody,modz
     use plusU_global, only: PLUS_U_ON
@@ -50,18 +52,25 @@ contains
     use sym_sub, only: swap_symmetry_switch
     class(s_gs_model),intent(inout) :: self
     integer,intent(out) :: status
+    type(s_gs_storage),optional,target,intent(inout) :: state
+    type(s_gs_storage),target :: temporary
+    type(s_gs_storage),pointer :: selected
     type(s_model_inputs) :: previous
     type(s_model_optimization) :: old_optimization
     type(s_model_xc_workspace) :: old_xc
     character(len(calc_mode)) :: old_mode
     integer :: restore_status,child_owner
     logical :: had_optimization,old_symmetry,old_directions(3)
-    external :: main_dft_model
     status=1
     if(.not.self%ready)return
     if(PLUS_U_ON.or..not.comm_is_attached())then
       status=2
       return
+    endif
+    selected=>temporary
+    if(present(state))then
+      if(state%active)return
+      selected=>state
     endif
     call comm_begin_children(child_owner,status)
     if(status/=0)return
@@ -82,9 +91,13 @@ contains
     old_symmetry=.false.;old_directions=.false.
     call swap_symmetry_switch(old_symmetry,old_directions)
     calc_mode='GS'
-    call main_dft_model
+    call gs_solve(selected,.true.,present(state))
     call comm_end_children(child_owner)
-    call comm_release_children(child_owner)
+    if(present(state))then
+      state%mpi_child_owner=child_owner
+    else
+      call comm_release_children(child_owner)
+    endif
     call swap_symmetry_switch(old_symmetry,old_directions)
     call park_model_optimization(self%optimization)
     call park_model_xc_workspace(self%xc_workspace)
@@ -94,6 +107,9 @@ contains
     call initialize_inputoutput_units
     calc_mode=old_mode
     status=restore_status
+    if(present(state))then
+      if(state%report_status/=0)status=3
+    endif
   end subroutine
 
   subroutine gs_model_clear(self)

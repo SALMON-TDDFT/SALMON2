@@ -122,9 +122,9 @@ initializes MPI, comm_attach, math/parallel infrastructure and timers. All subgr
 ranks call the same model in matching order. Runs switch/restore caller input and
 unit views, calc_mode, actual symmetry switches, modulo tables and XC scratch.
 The model-only call retires persistent communication caches before local buffers
-expire and releases scoped child communicators after each call. This sequential
-entry retains no GS orbitals; retained GS handles, simultaneous GS/TDDFT, threads,
-HSE/SOC/+U/DC GS independence remain separate work.
+expire and releases scoped child communicators after each call. The default run(status) call retains no GS orbitals. Optional retained storage
+and Python handles are now available through [retained GS](NATIVE_GS.en.md).
+Simultaneous GS/TDDFT, threads and HSE/SOC/+U/DC GS remain separate work.
 
 Status0 means returned normally,1 means empty model/occupied child scope,2 means
 unsupported conditions for this internal entry. SCF nonconvergence remains a

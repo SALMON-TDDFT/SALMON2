@@ -261,3 +261,8 @@ install(FILES "${ROOT}/salmonpy/examples/mixed_tddft_model_groups.json" DESTINAT
 
 install(FILES "${ROOT}/tools/test_standard_gs_models.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_gs_model.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/native_gs.py" "${ROOT}/salmonpy/NATIVE_GS.md" "${ROOT}/salmonpy/NATIVE_GS.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/retained_gs.py" DESTINATION salmonpy/examples)
+install(FILES "${ROOT}/salmonpy/native_adapters/standard_gs.h" DESTINATION salmonpy/native_adapters)
+install(FILES "${ROOT}/tools/test_retained_gs_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
