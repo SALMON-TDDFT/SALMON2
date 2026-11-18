@@ -25,6 +25,7 @@ use hamiltonian, only: update_kvector_nonlocalpt
 use math_constants, only: pi
 use salmon_global
 use structures
+use salmonpy_model_inputs, only: s_model_inputs
 use salmonpy_step_output
 use parallelization, only: adjust_elapse_time, nproc_group_global
 use communication, only: comm_is_root, comm_sync_all, comm_bcast, &
@@ -53,7 +54,14 @@ type :: checkpoint_payload
   real(8) :: fields(3,5),worker_A(3),worker_current(3,2),accepted_A(3)
   integer :: Mit,itt
 end type
+! A model owns immutable initialization values, distinct from RT numerical owners.
+! The model registry remains singleton until heterogeneous activation is implemented.
+type :: rt_model
+  type(s_model_inputs) :: inputs
+  real(8) :: initial_A(3)=0d0
+end type
 type :: rt_context
+  type(rt_model),pointer :: model=>null()
 type(checkpoint_payload),allocatable :: step_saved,pending
 real(8) :: step_saved_cval=0d0,pending_xc_cval=0d0
 logical :: step_restored=.false.
@@ -93,6 +101,7 @@ logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
 end type
 type(rt_context),pointer,save :: state=>null()
+type(rt_model),pointer,save :: model=>null()
 logical,save :: used=.false.,handle_mode=.false.,model_timers_alive=.false.,handle_initializing=.false.
 integer,save :: handle_group=0
 integer(c_int64_t),parameter :: handle_stride=2147483648_c_int64_t
@@ -281,7 +290,7 @@ integer(c_int) function sp_tddft_model_new(token,J) bind(C)
     sp_tddft_model_new=status;return
   endif
   write(handles(index)%label,'(a,i0,a,i0)')'native_tddft_h',index,'_g',handles(index)%generation
-  call open_initial_state(J,status,trim(handles(index)%label))
+  call open_initial_state(model,J,status,trim(handles(index)%label))
   if(status==0)then
     call handle_unselect(index);token=candidate;J=-J
   endif
@@ -529,11 +538,16 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   calc_mode='RT'
   call read_sw_symmetry(yn_symmetry)
   call timer_initialize
-  call open_initial_state(J,status,'')
+  allocate(model)
+  call model%inputs%capture()
+  model%initial_A=worker_initial_A
+  call open_initial_state(model,J,status,'')
   sp_tddft_init=status
 end function
-subroutine open_initial_state(J,status,name)
+subroutine open_initial_state(owner,J,status,name)
   use communication,only:comm_get_max
+  use inputoutput,only:initialize_inputoutput_units
+  type(rt_model),pointer,intent(in)::owner
   real(8),intent(out)::J(3)
   integer,intent(out)::status
   character(*),intent(in)::name
@@ -541,6 +555,15 @@ subroutine open_initial_state(J,status,name)
   logical::exists
   integer::child_owner
   status=0;J=0d0
+  if(.not.associated(owner))status=12
+  call handle_agree(status)
+  if(status/=0)return
+  ! Explicit compatibility view for legacy initialization, not a numerical snapshot.
+  call owner%inputs%activate(status)
+  call handle_agree(status)
+  if(status/=0)return
+  call initialize_inputoutput_units
+  worker_initial_A=owner%initial_A
   saved_name=sysname
   if(len_trim(name)>0)saved_name=name
   if(len_trim(name)>0.or.handle_initializing)then
@@ -559,7 +582,7 @@ subroutine open_initial_state(J,status,name)
     call comm_release_children(child_owner)
     status=16;return
   endif
-  allocate(state);state%mpi_child_owner=child_owner
+  allocate(state);state%mpi_child_owner=child_owner;state%model=>owner
   saved_name=sysname
   if(len_trim(name)>0)sysname=name
 if(.not.model_timers_alive)call timer_begin(LOG_TOTAL)
@@ -865,7 +888,10 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   if(ios/=0)status=4
   if(reading.and.status==0)then
     if(copy%Mit/=state%Mit.or.copy%itt<copy%Mit.or.copy%itt>nt)status=5
-    if(.not.all(ieee_is_finite(copy%accepted_A)).or..not.all(ieee_is_finite(copy%fields(:,1))))status=5
+    do i=1,3
+      if(.not.ieee_is_finite(copy%accepted_A(i)))status=5
+      if(.not.ieee_is_finite(copy%fields(i,1)))status=5
+    enddo
   endif
   call comm_get_max(status,nproc_group_global)
   if(status==0.and.reading)then

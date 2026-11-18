@@ -193,3 +193,36 @@ initialization child communicators are already owned; they need not be rewritten
 No completion percentage is justified by counting these unequal tasks. Current
 PBE/TB-mBJ connection tests use two existing Si inputs and check implementation
 parity, not two-species physical accuracy or same-process reentrancy.
+
+## Model-owned initialization input (2026-11-18)
+
+The standard native runtime now owns227 initialization values in `s_model_inputs`:
+cell/grid/k points, PP/XC references and coefficients, electron/occupation/mixing,
+propagation/dt/capacity/parallel settings, output choices, input units and atom
+coordinates/species/names. Allocatable inputs are deep copies; cloning or changing
+the legacy parser arrays cannot change the captured model. An uncaptured record
+cannot be activated. Unit conversion tables are reconstructed from stored unit
+selectors; already converted physical inputs are not converted again.
+
+A native `rt_model` owns this record and initial A. `open_initial_state(owner,...)`
+receives its owner explicitly, installs a synchronous compatibility view for the
+existing initialization kernels and assigns the context a borrowed model pointer.
+Sibling states do not own/deallocate that model; an idle open model can still
+create states from the original inputs. Numerical wavefunctions, live MPI/Libxc
+owners and RT checkpoint payloads are not copied into this input record.
+
+This completes the owned-input record and explicit initialization boundary. The
+parser itself, singleton model registration, kernel activation/common derived
+resources and heterogeneous model handles remain subsequent work. In particular,
+this **does not enable different-input models in the same process** or change the
+public ABI, supported profile, numerical order or restart format.
+
+Developer validation uses `tools/test_model_input_ownership.py SOURCE NEW_OUTPUT
+--fc gfortran`, compiling the actual record and a two-input deep-copy/resize/release
+driver. `tools/test_standard_tddft_handles_mpi.py` compares the new library against
+unchanged old controls; `test_standard_checkpoint_finite_mpi.py` checks NaN/Inf in
+each restored A component with a rank-local corrupt shard and valid continuation.
+The latter retains scalar IEEE inquiries on every checked element. New runtimes
+require source/object prohibition audits; unchanged validated binaries use recorded
+SHA256. No new GS fixtures are required. Cross-compiler validation is recorded
+separately; a local GNU build is not a Fujitsu compilation certificate.

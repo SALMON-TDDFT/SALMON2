@@ -245,3 +245,6 @@ install(FILES "${ROOT}/salmonpy/SHARED_TDDFT.md" "${ROOT}/salmonpy/SHARED_TDDFT.
 install(FILES "${ROOT}/salmonpy/examples/_tddft_materials.py" DESTINATION salmonpy/examples)
 
 install(FILES "${ROOT}/salmonpy/examples/mixed_distinct_tddft_layers.json" "${ROOT}/salmonpy/examples/distinct_tddft_materials.json" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/tools/test_model_input_ownership.py" "${ROOT}/tools/test_standard_checkpoint_finite_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_model_inputs.f90" DESTINATION salmonpy/_runtime_source/tests/native)

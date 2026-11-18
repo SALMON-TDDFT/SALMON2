@@ -2,6 +2,20 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
+## Standard native model-input ownership update — 2026-11-18
+
+- [x] Model-owned initialization record (227 scalar/array settings including atom
+  coordinates/species, units, PP/XC/cell/grid/k and effective dt/parallel inputs),
+  deep allocation ownership and explicit `open_initial_state(owner,...)` boundary.
+- [x] Actual Fortran two-input capture/clone/resize/release tests. New/old traces
+  match exactly at PZ, Libxc-PZ/PBE, automatic/fixed TB-mBJ × MPI1/orbital2/spatial2;
+  direct resume and independent sibling lifetimes retain parity (15 cases).
+- [x] Scalar IEEE restored-A checks retain all6 original elements; two-rank NaN/Inf
+  corruption at each element rejects before publication (12 cases), valid resume exact.
+- [ ] Parser-owned defaults/scratch, model registry and different-model activation,
+  remaining derived/global resource ownership and heterogeneous Python handles.
+  This owned-input step does not enable same-process heterogeneous live models.
+
 ## Different TDDFT input audit — 2026-11-18
 
 - [x] Different inputs can use separate native MPI groups. Normal sample now accepts
@@ -15,7 +29,8 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
   Installed unequal per-material MPI (PBE2/TB-mBJ1) agrees within2e-12 absolute
   tolerance (largest current difference8.61e-19); no new GS/native build required.
 - [ ] Same-process heterogeneous native models remain unimplemented. Four stages:
-  immutable model input/defaults/initialization ownership; model-ID registry and
+  model input record/explicit initialization ownership is complete; remaining
+  parser/default scratch isolation; model-ID registry and
   activation; common cache/I/O/timer/MPI lifetime; Python wiring and heterogeneous
   cell/grid/k/PP/XC independent/restart validation. Existing state-owned numerical
   payloads/child communicators are completed foundations, not unfinished duplicates.
@@ -70,7 +85,7 @@ scope and must not be counted again as newly unfinished work.
   serializer ownership, generation tokens, original-GS recreation and direct
   restart. Fixed common dt/capacity/decomposition. Python shared factory and
   ordinary standard multipoint session integration are now implemented opt-in.
-- [x] Latest source/installed suites:614 tests each, one skip each; sdist→wheel,
+- [x] Latest source/installed suites:616 tests each, one skip each; sdist→wheel,
   hashes, installed MPI/example, paired guides and AI catalog verified locally.
 
 Remaining work, grouped rather than duplicating historical bullets:
@@ -86,7 +101,8 @@ Remaining work, grouped rather than duplicating historical bullets:
    retained symmetry and require full-k, as recorded in the validation.
    Different symmetry groups within one process remain in item3, not enabled here.
 3. [ ] Standard native C handles now connect to an opt-in Python shared model and normal
-   multipoint sessions (see SHARED_TDDFT). Remaining: broader GS/TDDFT different-input ownership; remaining
+   multipoint sessions (see SHARED_TDDFT). Model input records/explicit initialization
+   ownership are complete; remaining: broader GS/TDDFT different-input activation, parser scratch,
    unscoped/common MPI resources, common initialization/I/O/timers and specialized
    SOC/+U/DC resources. Fast-PR and standard-TDDFT initialization-child retirement are complete.
    Same-model HSE token identity is complete within its documented boundary.
