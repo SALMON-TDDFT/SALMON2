@@ -49,7 +49,7 @@ continuation. GS saving/reuse and the approved validation datasets are authorize
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
    physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
    silently changing existing results.
-4. [ ] Extend measured ordinary-XC k/orbital-only and dense fast-PR HSE k-only1↔2 SCF repartition to spatial/mixed layouts and packed/tiled HSE states;
+4. [ ] Extend measured ordinary-XC k/orbital/spatial and dense fast-PR HSE k/orbital SCF repartition to HSE spatial/mixed layouts and packed/tiled HSE states;
    add portable/checkpoint-version migration across runtimes. Covered active-SCF
    and same-topology RT direct restart are complete within measured scopes.
 5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
@@ -2058,3 +2058,25 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
   unsupported. Historical HSE-orbital-repartition-open entries are superseded only
   within this dense explicit Gamma profile.
 - Evidence: calc2026/salmonpy-hse-orbital-repartition-record-20261120.
+
+## 2026-11-20 Ordinary-XC spatial SCF rank-count restart
+
+- [x] Commit/push previous HSE orbital migration as3f341842 [skip ci].
+- [x] Spatial protocol1 + grid_bounds metadata, pure r-grid input/file/box admission.
+  Fortran remaps all orbital/CG interiors, density/potentials/Fourier density and
+  full density/potential mixing histories. Periodic halos copy accepted interiors.
+- [x] Static new-topology transform/communication tables and dead FFT/XC scratch
+  use zero-SCF bootstrap resources; no guessed states, density evaluation or SCF
+  replay. Late missing donor preserves live arrays; original source hashes retained.
+- [x] PZ/Libxc-PZ/PBE real/complex1↔2, x/y/z changes,16³2↔4 and
+  2×2×1→1×1×2: physical cut interiors exact, zero bootstrap work, continuation
+  within preset1e-9/1e-10. Previous normal spatial/HSE results and protected
+  independent-state continuation checked. Existing unit-test case count remains637.
+- [x] Related HSE phase lifetime: preserve orbital_scf selector when phase reset
+  clears numerical owner caches, like native_resources_enabled. Synthetic old
+  runtime red/new runtime green; PBE-stage orbital1→2 direct continuation passes.
+- [ ] HSE spatial, k/orbital/spatial mixed and changed-runtime migration; packed/
+  tiled/sparse HSE and orbital GS→RT remain separate. General OOM/process/MPI
+  failure handling and large-scale I/O optimization remain open.
+- Evidence: calc2026/salmonpy-scf-spatial-record-20261120. No CI dispatch;
+  local OneDrive writes do not establish cloud synchronization.

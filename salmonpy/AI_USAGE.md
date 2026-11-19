@@ -808,7 +808,7 @@ SCFデータ保存時には残差履歴も確認します。新しいnative GS�
 
 native SCFの準備済み復元候補を使わない場合はclose/discardまたはwith文で破棄します。GS状態のcloseと元のsnapshotのcloseも、それぞれが所有するPython候補を先に破棄します。MPI各rankで同順に呼び、Cホストが直接作った予約やGCによる自動MPI終了まで保証すると説明しません。
 
-通常XCのSCFディスク再開では、対応ランタイムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSEのk／軌道分割変更は後述の対応protocolで扱い、空間／混合配置は未対応です。既定と共通保護付き復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
+通常XCのSCFディスク再開では、対応ランタイムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSEのk／軌道分割変更は後述の対応protocolで扱います。通常XCの空間分割は後述の専用入口を使い、HSE空間／混合配置は未対応です。既定と共通保護付き復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
 
 ## SCFのk点MPI数を変える再開
 
@@ -816,7 +816,7 @@ native SCFの準備済み復元候補を使わない場合はclose/discardまた
 物理入力を保ち、k点だけのMPI分割を変える明示的な入口です。通常XCはprotocol1/2、
 密なACEを使う高速PR版HSEはk-repartition protocol2が必要です。確認済みは1↔2ランク、
 HSEの全k点／縮約k点とPBE準備段階です。FortranがACE・キャッシュ・履歴を再配置し、
-SCFを再実行しません。HSEの軌道分割は後述の専用入口を使い、空間分割、packed/distributed ACE、異なるランタイムは
+SCFを再実行しません。HSEの軌道分割は後述の専用入口を使い、HSE空間分割、packed/distributed ACE、異なるランタイムは
 未対応です。保護付き復元のMPI分割は従来どおり同一にします。詳細はNATIVE_GS.md／
 NATIVE_GS.en.mdを参照し、物理収束の検証と混同しないでください。
 
@@ -839,3 +839,12 @@ NATIVE_GS.en.mdを参照し、物理収束の検証と混同しないでくだ�
 orbital-repartition protocol2が必要です。密なACE・タイルなしgaugeのCPU全支持
 Gamma SCFを対象とし、空間／混合配置や軌道GS→RTを対応済みとは案内しません。
 サンプルの `--xc hse06 --orbital-parallel` はこの明示設定を行います。
+
+通常XCの純粋な空間分割変更は、spatial-repartition protocol1の新ランタイムで
+`NativeGSBackend(..., decomposition=(1,1,nx,ny,nz))` と
+`run(restart=..., repartition=True)` を使います。新保存のgrid_boundsが必要です。
+Fortranが密度・ポテンシャル・軌道／CG内部値と混合履歴を再配置し、SCFは再実行しません。
+周期haloは内部値からコピーします。新分割の静的FFT／通信資源と履歴を持たないXC／
+FFT作業バッファの準備を、GS再計算と混同しないでください。比較は格子内部で行います。
+サンプルは両側に `--spatial-parallel` を指定します。対象はPZ／Libxc-PZ／PBEで、
+HSE空間分割・k／軌道との混合配置変更・別ランタイム移行は未対応です。

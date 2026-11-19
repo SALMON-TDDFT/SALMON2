@@ -981,7 +981,7 @@ The sample accepts `--orbital-parallel --save-scf NEW_CHECKPOINT`, followed by
 `--orbital-parallel --restart CHECKPOINT --repartition` on a fresh rank count.
 Its orbital layout uses a fixed Gamma mesh unless explicit symmetry is requested.
 Fast HSE orbital repartition uses the explicit protocol2 entry below. Changes between k-only and orbital-only layouts,
-spatial/mixed repartition and changed-runtime migration remain unsupported.
+Ordinary spatial restart uses the entry below; mixed repartition and changed-runtime migration remain unsupported.
 Default and common protected restore still require identical MPI layouts.
 
 ### Fast-PR HSE Gamma orbital SCF: same-layout direct restart
@@ -1041,3 +1041,46 @@ The constructor option is needed even when the source has one rank. Packed/
 distributed ACE, tiled gauges, localized sparse support, multi-k orbital HSE,
 spatial/mixed layouts, changed-runtime migration and orbital GS→RT remain outside
 this dense Gamma contract. Common protected restore still keeps the same layout.
+
+### Ordinary-XC spatial rank-count restart
+
+A matching runtime declaring `sp_gs_scf_r_repartition_protocol()==1` accepts
+periodic scalar fixed-ion PZ/Libxc-PZ/PBE SCF restart between pure spatial
+layouts. Use `decomposition=(1, 1, nx, ny, nz)` with `nx*ny*nz == comm.size`
+on each fresh host. Only the parallel block may differ; runtime, material ID,
+physical inputs, assets, SCF cap and mixing settings must match.
+
+```python
+backend = NativeGSBackend(build_record, work_root,
+    decomposition=(1, 1, comm.size, 1, 1))
+with backend.open(context) as session:
+    with session.run(calculation, scf=scf, material_id="Si",
+                     restart=checkpoint, repartition=True) as state:
+        assert state.scf_status["executed_iterations"] == 0
+        state.continue_scf(steps=5)
+```
+
+New manifests record each file's three interior `grid_bounds` pairs. Admission
+checks boxes, overlap/gaps, physical-input/runtime identity and file hashes.
+Fortran maps accepted density, potentials, wavefunction/CG interiors, Fourier
+density and every density/potential mixing history by global grid coordinates.
+Periodic halo values are copied from saved interiors, without wavefunction
+evolution. Mixing age, residual history, occupations and scalar state remain saved
+values. Compare accepted interiors; old scratch halos need not have been current.
+
+The existing zero-SCF bootstrap prepares the new topology's static grid, transform
+and communication resources. Dead FFT partial-transform and reusable XC scratch
+use that new layout rather than incompatible old buffers; they contain no SCF
+history. No initial guess, density evaluation, eigenstate solve or SCF replay
+reconstructs accepted values. Publication follows complete interior coverage and
+a global success vote. A failed donor read preserves the live state.
+
+Measured controls cover real/complex1↔2, x/y/z changes,16³2↔4 and
+2×2×1→1×1×2 groups. Accepted cut interiors are exact; five subsequent iterations
+match source-initialized continuous8 at rtol1e-9/atol1e-10. These are execution
+checks, not physical convergence certification. The sample uses
+`--spatial-parallel --save-scf NEW_CHECKPOINT` followed by
+`--spatial-parallel --restart CHECKPOINT --repartition` with a different rank count.
+Older saves without grid_bounds still support same-layout restoration.
+HSE spatial, k/orbital/spatial mixed migration and changed-runtime portability
+remain unsupported; common protected restore still keeps the same layout.

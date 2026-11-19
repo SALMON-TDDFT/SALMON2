@@ -142,6 +142,20 @@ class NativeGSTests(unittest.TestCase):
             from salmonpy.native_gs import _scf_o_repartition_api
             local.lib.sp_gs_scf_o_repartition_protocol.return_value=2
             self.assertIs(_scf_o_repartition_api(local.lib,hse=True),local.lib.sp_gs_scf_o_repartition)
+            manifest['input_text']=text
+            (checkpoint/'manifest.json').write_text(json.dumps(manifest))
+            local.comm.size=2;local.backend.decomposition=(1,1,2,1,1)
+            local.lib.sp_gs_scf_r_repartition_protocol=Mock(return_value=1)
+            local.lib.sp_gs_scf_r_repartition=Mock()
+            spatial_text=text.replace('nproc_rgrid=1,1,1','nproc_rgrid=2,1,1')
+            with self.assertRaisesRegex(InputError,'grid_bounds'):
+                _scf_disk_manifest(checkpoint,local,spatial_text,assets,'Si',repartition=True)
+            manifest['files'][0]['grid_bounds']=[[1,8],[1,8],[1,8]]
+            (checkpoint/'manifest.json').write_text(json.dumps(manifest))
+            _,saved=_scf_disk_manifest(checkpoint,local,spatial_text,assets,'Si',repartition=True)
+            self.assertEqual(saved['files'][0]['grid_bounds'],[[1,8],[1,8],[1,8]])
+            local.lib.sp_gs_scf_r_repartition.assert_not_called()
+
 
 
 

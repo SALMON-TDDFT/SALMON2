@@ -142,7 +142,7 @@ contains
   subroutine exx_set_phase(system,pre_scf)
     type(s_dft_system),intent(inout) :: system
     logical,intent(in) :: pre_scf
-    logical :: binding_enabled
+    logical :: binding_enabled,orbital_profile
     ! Phase transitions invalidate only this explicitly bound owner's operator/history.
     ! Unbound systems can select a phase before binding; they must not reuse legacy caches.
     if(exx_pre_scf(system).neqv.pre_scf)then
@@ -150,8 +150,10 @@ contains
         select type(owner=>system%salmonpy_hse_owner)
         type is(s_exx_rt_state)
           binding_enabled=owner%native_resources_enabled
+          orbital_profile=owner%orbital_scf
           call rt_state_clear(owner)
           owner%native_resources_enabled=binding_enabled
+          owner%orbital_scf=orbital_profile
         class default
           error stop 'Invalid HSE owner for phase transition'
         end select

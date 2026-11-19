@@ -914,7 +914,8 @@ Pythonのローダーでは数値配列を並べ替えません。
 サンプルの保存は `--orbital-parallel --save-scf NEW_CHECKPOINT`、再開は
 新しいランク数で `--orbital-parallel --restart CHECKPOINT --repartition` です。
 軌道配置は明示的な対称性指定がなければ固定Gamma格子を使います。高速HSEの軌道並列は後述の専用入口を使います。
-k並列と軌道並列の相互変更、空間／混合配置、別ランタイムへの移行は未対応です。
+通常XCの空間分割は後述の入口を使います。k並列と軌道並列の相互変更、
+混合配置、別ランタイムへの移行は未対応です。
 通常の復元と共通の保護付き復元は、従来どおり同一MPI配置で使います。
 
 ### 高速PR版HSEのGamma軌道並列SCF：同じ配置への直接再開
@@ -967,3 +968,42 @@ ACE評価やSCF反復は行いません。保存元のファイルは変更し�
 ACE、タイル形式gauge、局在疎表現、複数k点の軌道HSE、空間／混合配置、別ランタイム
 への移行と軌道並列GS→RTは、この密なGamma経路の対象外です。
 共通の保護付き復元は従来どおり同一MPI配置で使います。
+
+### 通常XCの空間並列数を変えるSCF再開
+
+`sp_gs_scf_r_repartition_protocol()==1` の対応ランタイムでは、周期・非スピン分極・
+固定イオンのPZ／Libxc-PZ／PBEを、純粋な空間分割間で直接再開できます。各ホストを
+`decomposition=(1, 1, nx, ny, nz)`、`nx*ny*nz == comm.size` で開きます。
+並列設定だけを変え、ランタイム・物質ID・物理入力・資産・SCF上限・混合条件は揃えます。
+
+```python
+backend = NativeGSBackend(build_record, work_root,
+    decomposition=(1, 1, comm.size, 1, 1))
+with backend.open(context) as session:
+    with session.run(calculation, scf=scf, material_id="Si",
+                     restart=checkpoint, repartition=True) as state:
+        assert state.scf_status["executed_iterations"] == 0
+        state.continue_scf(steps=5)
+```
+
+新しいmanifestは各rankの格子内部範囲 `grid_bounds` を3組の始点・終点として記録し、
+範囲・重複・欠落・入力／ランタイムの一致・全ファイルのハッシュを検査します。
+Fortranがglobal格子座標に従って密度・ポテンシャル・軌道／CGの内部値、Fourier密度、
+全ての密度／ポテンシャル混合履歴を再配置します。周期境界の通信領域は保存した
+内部値をコピーして埋め、軌道を時間発展させません。混合の世代・残差・占有・
+スカラー状態も保持します。比較するのは格子内部の値で、古い作業用haloの一致は要求しません。
+
+既存のSCF実行ゼロのbootstrapで、新分割の静的格子・変換・通信資源を準備します。
+FFTの部分変換バッファとXCの再利用作業領域は履歴ではないため、新しい配置のものを
+使います。保存値の再構築に初期軌道生成・密度評価・固有状態計算・SCF反復は行いません。
+格子内部の完全な被覆と全rankの成功を確認してから公開し、途中読込失敗では元の状態を保持します。
+
+実軌道／複素軌道の1↔2、x/y/z方向の変更、16³格子の2↔4、
+2×2×1→1×1×2分割を検証しています。内部値の復元直後は完全一致し、
+続く5反復は保存元と同じ初期状態からの連続8反復とrtol1e-9／atol1e-10で一致します。
+これは実装の検証であり、物理収束の認定ではありません。サンプルは保存側に
+`--spatial-parallel --save-scf NEW_CHECKPOINT`、ランク数を変えた再開側に
+`--spatial-parallel --restart CHECKPOINT --repartition` を指定します。
+grid_boundsがない旧保存も、同一配置では復元できます。HSEの空間分割、
+k／軌道／空間の混合配置変更、別ランタイムへの可搬化は未対応です。
+共通の保護付き復元は引き続き同じMPI分割で使います。

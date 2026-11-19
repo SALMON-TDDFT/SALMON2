@@ -15,6 +15,11 @@ def main():
     p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='libxc_pbe')
     p.add_argument('--split',choices=('k','orbital','spatial'),default='k')
     p.add_argument('--symmetry',action='store_true')
+    p.add_argument('--spatial-axis',choices=('x','y','z'),default='x')
+    p.add_argument('--restore-axis',choices=('x','y','z'))
+    p.add_argument('--rgrid',type=int,nargs=3)
+    p.add_argument('--restore-rgrid',type=int,nargs=3)
+    p.add_argument('--grid',type=int,default=8)
     p.add_argument('--two-atoms',action='store_true',help='four occupied bands for uneven orbital splits')
     p.add_argument('--gamma',action='store_true',help='Gamma-only ordinary-XC orbital restart control')
     p.add_argument('--pre-scf-threshold',type=float,default=0.)
@@ -29,7 +34,10 @@ def main():
             command=['mpiexec','-n',str(ranks),sys.executable,str(Path(__file__).resolve()),str(args.build.resolve()),str(args.output.resolve()),
                      '--size',str(ranks),'--xc',args.xc,'--split',args.split,'--worker',phase,
                      '--pre-scf-threshold',str(args.pre_scf_threshold),'--pre-scf-steps',str(args.pre_scf_steps)]
-            if args.restore_size and phase in ('resume','reject'):command+=['--repartition']
+            command+=['--grid',str(args.grid),'--spatial-axis',args.restore_axis if phase in ('resume','reject') and args.restore_axis else args.spatial_axis]
+            layout=args.restore_rgrid if phase in ('resume','reject') and args.restore_rgrid else args.rgrid
+            if layout:command+=['--rgrid',*map(str,layout)]
+            if (args.restore_size or args.restore_axis or args.restore_rgrid) and phase in ('resume','reject'):command+=['--repartition']
             if args.symmetry:command+=['--symmetry']
             if args.gamma:command+=['--gamma']
             if args.two_atoms:command+=['--two-atoms']
@@ -37,10 +45,10 @@ def main():
             with (args.output/(phase+'.log')).open('w') as log:
                 subprocess.run(command,env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'},stdout=log,stderr=subprocess.STDOUT,check=True)
         result={'status':'pass','fresh_processes':4,'MPI_size':args.size,'xc':args.xc,'split':args.split,
-                'symmetry':args.symmetry,'continuous_resume_arrays_exact':not bool(args.restore_size),'restore_MPI_size':args.restore_size or args.size,
-                'comparison_rtol':1e-9 if args.restore_size else 0.,'comparison_atol':1e-10 if args.restore_size else 0.,
+                'symmetry':args.symmetry,'continuous_resume_arrays_exact':not bool(args.restore_size or args.restore_axis or args.restore_rgrid),'restore_MPI_size':args.restore_size or args.size,
+                'comparison_rtol':1e-9 if args.restore_size or args.restore_axis or args.restore_rgrid else 0.,'comparison_atol':1e-10 if args.restore_size or args.restore_axis or args.restore_rgrid else 0.,
                 'restored_accepted_iterations':3,'bootstrap_executed_iterations':0,
-                'resume_executed_iterations':5,'restored_k_slices_exact':args.split=='k','restored_orbital_slices_exact':args.split=='orbital','corrupt_rank_rejected_before_creation':True,
+                'resume_executed_iterations':5,'restored_k_slices_exact':args.split=='k','restored_orbital_slices_exact':args.split=='orbital','restored_spatial_interiors_exact':args.split=='spatial','corrupt_rank_rejected_before_creation':True,
                 'native_read_failure_preserves_live_state':True,'pre_scf_threshold':args.pre_scf_threshold,
                 'GS_datasets_saved':True}
         report=json.loads((args.output/'checkpoint/diagnostics/report.json').read_text())
@@ -71,15 +79,37 @@ def main():
             text=super().input_text(scf)
             if self.xc=='hse06':text=text.replace('exx_pre_scf_threshold=0',f'exx_pre_scf_threshold={args.pre_scf_threshold},exx_pre_scf_steps={args.pre_scf_steps}')
             return text
-    calc=DiskDFT((14,),np.diag([8.]*3),[[0,0,0]] if args.symmetry else [[.3,.4,.45]],(pp,),4,2,(8,8,8),mesh,xc=args.xc,symmetry=symmetry)
+    calc=DiskDFT((14,),np.diag([8.]*3),[[0,0,0]] if args.symmetry else [[.3,.4,.45]],(pp,),4,2,(args.grid,)*3,mesh,xc=args.xc,symmetry=symmetry)
     if args.two_atoms:
         from dataclasses import replace
         calc=replace(calc,numbers=(14,14),fractional_positions=[[.3,.4,.45],[.7,.6,.55]],electrons=8,states=4)
     scf=SCFSettings(max_iterations=8,tolerance=1e-30)
     dec=(args.size,1,1,1,1) if args.split=='k' else (1,args.size,1,1,1) if args.split=='orbital' else (1,1,args.size,1,1)
+    if args.split=='spatial':
+        axes=[1,1,1];axes['xyz'.index(args.spatial_axis)]=args.size;dec=(1,1,*(args.rgrid or axes))
     backend=NativeGSBackend(args.build,work,decomposition=dec,hse_orbital=args.xc=='hse06' and args.split=='orbital')
     checkpoint=args.output/'checkpoint'
+    def spatial_expected(directory,array,lower):
+        result=np.empty_like(array);covered=np.zeros(array.shape[:3],dtype=bool)
+        for file in sorted(directory.glob('rank-*.npz')):
+            with np.load(file) as old:
+                box=old['grid_bounds'];orig=old['orbital_lower'] if array.ndim==7 else old['density_lower']
+                for z in range(array.shape[2]):
+                    for y in range(array.shape[1]):
+                        for x in range(array.shape[0]):
+                            g=(np.array([x,y,z])+np.asarray(lower[:3])-1)%args.grid+1
+                            if np.all(g>=box[:,0]) and np.all(g<=box[:,1]):
+                                q=g-orig[:3]
+                                src=old['orbitals'] if array.ndim==7 else old['density']
+                                result[x,y,z]=src[tuple(q)];covered[x,y,z]=True
+        assert covered.all()
+        return result
+    def interior(value,state):
+        rho=state.array('density');orb=state.array('orbitals')
+        start=np.asarray(rho.lower_indices)-np.asarray(orb.lower_indices[:3])
+        return value[tuple(slice(int(a),int(a+n)) for a,n in zip(start,rho.values.shape))]
     def expected_orbitals(directory,orbital):
+        if args.split=='spatial':return spatial_expected(directory,orbital.values,orbital.lower_indices)
         # Test-only global-k assembly, never used by the production loader.
         dim=4 if args.split=='orbital' else 5
         combined=np.empty_like(orbital.values);covered=np.zeros(combined.shape[dim],dtype=bool)
@@ -234,6 +264,9 @@ def main():
                 else:state.save_scf(checkpoint)
                 cut={q:state.array(q).values for q in ('density','orbitals','occupations','eigenvalues','scf_history')}
                 cut['orbital_lower']=np.asarray(state.array('orbitals').lower_indices,dtype=np.int64)
+                rho=state.array('density')
+                cut['density_lower']=np.asarray(rho.lower_indices,dtype=np.int64)
+                cut['grid_bounds']=np.asarray([[lo,lo+n-1] for lo,n in zip(rho.lower_indices,rho.values.shape)],dtype=np.int64)
                 np.savez(work/f'rank-{comm.rank:08d}.npz',**cut)
                 if comm.rank==0:
                     import csv
@@ -245,7 +278,10 @@ def main():
                 if args.repartition:
                     with np.load(args.output/'save/rank-00000000.npz') as cut:
                         for q in ('density','occupations','eigenvalues','scf_history'):
-                            np.testing.assert_array_equal(state.array(q).values,cut[q],err_msg='restored cut '+q)
+                            if args.split=='spatial' and q=='density':
+                                density=state.array(q)
+                                np.testing.assert_array_equal(density.values,spatial_expected(args.output/'save',density.values,density.lower_indices))
+                            else:np.testing.assert_array_equal(state.array(q).values,cut[q],err_msg='restored cut '+q)
                     orbital=state.array('orbitals')
                     np.testing.assert_array_equal(orbital.values,expected_orbitals(args.output/'save',orbital))
                 assert state.scf_status['executed_iterations']==0,'bootstrap replayed SCF'
@@ -268,11 +304,11 @@ def main():
                 assert state.scf_status['executed_iterations']==0
                 for q,value in before.items():np.testing.assert_array_equal(state.array(q).values,value)
                 if args.repartition:
-                    from salmonpy.native_gs import _scf_o_repartition_api,_scf_k_repartition_api
+                    from salmonpy.native_gs import _scf_o_repartition_api,_scf_k_repartition_api,_scf_r_repartition_api
                     saved=json.loads((checkpoint/'manifest.json').read_text())
                     orbital=args.split=='orbital'
-                    bounds=np.asarray([entry['orbital_bounds' if orbital else 'k_bounds'] for entry in saved['files']],dtype=np.int32)
-                    migrate=_scf_o_repartition_api(session.lib,hse=args.xc=='hse06') if orbital else _scf_k_repartition_api(session.lib,hse=args.xc=='hse06')
+                    bounds=np.asarray([entry['grid_bounds' if args.split=='spatial' else 'orbital_bounds' if orbital else 'k_bounds'] for entry in saved['files']],dtype=np.int32)
+                    migrate=_scf_r_repartition_api(session.lib) if args.split=='spatial' else _scf_o_repartition_api(session.lib,hse=args.xc=='hse06') if orbital else _scf_k_repartition_api(session.lib,hse=args.xc=='hse06')
                     last=checkpoint/saved['files'][-1]['name'];withheld=last.with_suffix('.withheld')
                     if comm.rank==0:last.rename(withheld)
                     comm.Barrier()
@@ -293,6 +329,9 @@ def main():
             orbital=state.array('orbitals')
             arrays['info']=np.array([state.info.energy_hartree,state.info.residual,state.info.iterations])
             arrays['orbital_lower']=np.asarray(orbital.lower_indices,dtype=np.int64)
+            rho=state.array('density')
+            arrays['density_lower']=np.asarray(rho.lower_indices,dtype=np.int64)
+            arrays['grid_bounds']=np.asarray([[lo,lo+n-1] for lo,n in zip(rho.lower_indices,rho.values.shape)],dtype=np.int64)
             name=f'rank-{comm.rank:08d}.npz'
             if args.worker=='continuous':np.savez(work/name,**arrays)
             elif not args.repartition:
@@ -303,7 +342,11 @@ def main():
                 # a separately initialized target layout with different guesses.
                 with np.load(args.output/'continuous/rank-00000000.npz') as expected:
                     for key,value in arrays.items():
-                        if key not in ('orbitals','orbital_lower'):np.testing.assert_allclose(value,expected[key],rtol=1e-9,atol=1e-10,err_msg=key)
+                        if key not in ('orbitals','orbital_lower','density_lower','grid_bounds') and not (args.split=='spatial' and key=='density'):
+                            np.testing.assert_allclose(value,expected[key],rtol=1e-9,atol=1e-10,err_msg=key)
                 combined=expected_orbitals(args.output/'continuous',orbital)
-                np.testing.assert_allclose(arrays['orbitals'],combined,rtol=1e-9,atol=1e-10,err_msg='migrated orbitals')
+                if args.split=='spatial':
+                    np.testing.assert_allclose(arrays['density'],spatial_expected(args.output/'continuous',rho.values,rho.lower_indices),rtol=1e-9,atol=1e-10)
+                    np.testing.assert_allclose(interior(arrays['orbitals'],state),interior(combined,state),rtol=1e-9,atol=1e-10)
+                else:np.testing.assert_allclose(arrays['orbitals'],combined,rtol=1e-9,atol=1e-10,err_msg='migrated orbitals')
 if __name__=='__main__':main()
