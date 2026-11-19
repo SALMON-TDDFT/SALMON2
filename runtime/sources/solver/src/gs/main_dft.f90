@@ -22,6 +22,8 @@ use iso_c_binding
 use structures
 use salmonpy_model_inputs,only:s_model_inputs
 use salmonpy_gs_seed,only:s_gs_seed
+use sym_sub,only:s_hse_symmetry_workspace
+use sym_rho_sub,only:s_hse_density_workspace
 use sendrecv_grid,only:dealloc_cache
 #ifdef USE_MPI
 use communication,only:comm_begin_children,comm_end_children,comm_release_children, &
@@ -30,6 +32,9 @@ use communication,only:comm_begin_children,comm_end_children,comm_release_childr
 use salmon_xc,only:finalize_xc
 #ifdef USE_HSE
 use exx_rt_state,only:s_exx_rt_state,rt_state_clear,rt_values_copy
+use exx_ace,only:s_exx_ace
+use exx_symmetry,only:s_exx_symmetry_map
+use exx_factor_history,only:s_factor_history
 use exx_native,only:exx_unbind_system
 #endif
 implicit none
@@ -69,7 +74,10 @@ type s_gs_context
  logical::active=.false.,imported=.false.,scf_capable=.false.
  integer :: initializations=0,executed_iterations=0
  type(s_scf_snapshot_slot),allocatable :: scf_snapshots(:)
+ type(s_scf_payload),allocatable :: scf_pending
  integer::mpi_child_owner=0
+ type(s_hse_symmetry_workspace)::symmetry
+ type(s_hse_density_workspace)::density_symmetry
  type(s_model_inputs)::inputs,continuation_inputs
  integer::iterations=0
  logical::converged=.false.
@@ -125,7 +133,7 @@ subroutine gs_input_config(value)
  value%max_iterations=nscf;value%threshold=threshold
  value%pre_scf_threshold=exx_pre_scf_threshold;value%pre_scf_steps=exx_pre_scf_steps
 end subroutine
-subroutine gs_run(ctx,status,config,import_only)
+subroutine gs_run(ctx,status,config,import_only,disk_bootstrap)
 use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 use exx_functional,only:is_hybrid
 use math_constants, only: pi, zi
@@ -168,7 +176,7 @@ type(s_gs_context),target,intent(inout)::ctx
 integer,intent(out)::status
 type(s_gs_run_config),optional,intent(in)::config
 type(s_gs_run_config)::selected
-logical,optional,intent(in)::import_only
+logical,optional,intent(in)::import_only,disk_bootstrap
 logical::reading_only
 #ifdef USE_HSE
  integer :: gs_hse_status
@@ -277,7 +285,7 @@ call timer_begin(LOG_INIT_GS)
 call init_dft(nproc_group_global,ctx%info,ctx%lg,ctx%mg,ctx%system,ctx%stencil,ctx%fg,ctx%poisson, &
   ctx%srg,ctx%srg_scalar,ctx%ofl,ctx%unfold)
 #ifdef USE_HSE
-call exx_bind_gs_system(ctx%system,ctx%info,ctx%hse,gs_hse_status)
+call exx_bind_gs_system(ctx%system,ctx%info,ctx%hse,gs_hse_status,allow_symmetry=ctx%mpi_child_owner>0)
 if(gs_hse_status==1)error stop 'GS HSE owner binding conflict'
 ctx%hse_bound=gs_hse_status==0
 if(ctx%mixing%scf_progress%stop_after>0.and.trim(xc)=='hse06'.and..not.ctx%hse_bound)then
@@ -302,6 +310,25 @@ call initialization1_dft( ctx%system, ctx%energy, ctx%stencil, ctx%fg, ctx%poiss
                           ctx%spsi, ctx%shpsi, ctx%sttpsi,  &
                           ctx%pp, ctx%ppg, ctx%ppn,  &
                           ctx%ofl )
+
+! Disk restart recreates static resources only: no guessed orbitals/density,
+! mixing initialization, eigenvalue/energy evaluation, or SCF replay.
+if(present(disk_bootstrap))then
+ if(disk_bootstrap)then
+  ctx%ewald%yn_bookkeep='y'
+  call init_nion_div(ctx%system,ctx%lg,ctx%mg,ctx%info)
+  call init_ewald(ctx%system,ctx%info,ctx%ewald)
+  call ctx%continuation_inputs%capture()
+  ctx%mixing%scf_progress%paused=.true.
+  call timer_end(LOG_INIT_GS)
+  call timer_end(LOG_TOTAL)
+#ifdef USE_MPI
+  if(ctx%mpi_child_owner>0)call comm_end_children(ctx%mpi_child_owner)
+#endif
+  status=0
+  return
+ endif
+endif
 
 call initialization2_dft( Miter, nspin, rion_update,  &
                           ctx%system, ctx%energy, ctx%ewald, ctx%stencil, ctx%fg, ctx%poisson,&
@@ -749,7 +776,6 @@ logical function scf_supported() result(ok)
 #endif
  if(theory/='dft'.or.yn_periodic/='y'.or.spin/='unpolarized')return
  if(yn_spinorbit/='n'.or.yn_dc/='n'.or.yn_opt/='n'.or.yn_md/='n')return
- if(verify(trim(yn_symmetry),'n')/=0)return
  if(PLUS_U_ON.or.yn_jm/='n'.or.xname/='none'.or.cname/='none')return
  select case(trim(xc))
  case('pz','libxc_pz','libxc_pbe')
@@ -778,6 +804,9 @@ integer(c_int) function sp_gs_start(path,steps,token) bind(C)
  character(c_char),intent(in)::path(*)
  integer(c_int),value::steps
  integer(c_int64_t),intent(out)::token
+ if(steps<1)then
+  token=0;sp_gs_start=11;return
+ endif
  sp_gs_start=create_gs(path,token,.false.,steps)
 end function
 integer(c_int) function sp_gs_scf_info(token,values) bind(C)
@@ -805,9 +834,13 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
  use salmon_global,only:calc_mode
  use timer
  use force_sub,only:calc_force
+ use sym_sub,only:swap_hse_symmetry_workspace
+ use sym_rho_sub,only:swap_hse_density_workspace
  integer(c_int64_t),value::token
  integer(c_int),value::steps
  type(s_model_inputs)::previous
+ type(s_hse_symmetry_workspace)::previous_symmetry
+ type(s_hse_density_workspace)::previous_density_symmetry
  integer::index,status,old_iter,group,rank,nproc,reference_steps,restore_status
  real(8)::residual
  character(len(calc_mode))::old_mode
@@ -819,6 +852,7 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
  status=0
  if(steps<1.or.steps/=reference_steps)status=11
  if(.not.scf_context_ok(gs_handles(index)%context))status=15
+ if(allocated(gs_handles(index)%context%scf_pending))status=11
  call comm_get_max(status,group)
  sp_gs_continue=status
  if(status/=0)return
@@ -831,6 +865,10 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
    call previous%activate(restore_status)
    sp_gs_continue=status;return
   endif
+  call swap_hse_symmetry_workspace(previous_symmetry)
+  call swap_hse_density_workspace(previous_density_symmetry)
+  call swap_hse_symmetry_workspace(ctx%symmetry)
+  call swap_hse_density_workspace(ctx%density_symmetry)
   old_mode=calc_mode;calc_mode='GS'
   old_iter=ctx%iterations
   ctx%mixing%scf_progress%continuing=.true.
@@ -857,6 +895,10 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
   call timer_disable_sub
   call timer_end(LOG_TOTAL)
   calc_mode=old_mode
+  call swap_hse_density_workspace(ctx%density_symmetry)
+  call swap_hse_symmetry_workspace(ctx%symmetry)
+  call swap_hse_density_workspace(previous_density_symmetry)
+  call swap_hse_symmetry_workspace(previous_symmetry)
   call previous%activate(restore_status)
   call comm_get_max(restore_status,group)
   sp_gs_continue=restore_status
@@ -908,6 +950,9 @@ integer(c_int) function sp_gs_scf_snapshot(token,snapshot) bind(C)
   if(.not.scf_context_ok(ctx))then
    sp_gs_scf_snapshot=15;return
   endif
+  if(allocated(ctx%scf_pending))then
+   sp_gs_scf_snapshot=11;return
+  endif
   n=0;i=0
   if(allocated(ctx%scf_snapshots))then
    n=size(ctx%scf_snapshots)
@@ -951,7 +996,7 @@ integer(c_int) function scf_snapshot_action(token,snapshot,restore) result(statu
     slot=i;exit
    enddo
   endif
-  if(slot==0)local=11
+  if(slot==0.or.allocated(ctx%scf_pending))local=11
   call comm_get_max(local,group)
   if(local/=0)then
    status=local;return
@@ -973,6 +1018,61 @@ end function
 integer(c_int) function sp_gs_scf_snapshot_close(token,snapshot) bind(C)
  integer(c_int64_t),value::token,snapshot
  sp_gs_scf_snapshot_close=scf_snapshot_action(token,snapshot,.false.)
+end function
+integer(c_int) function sp_gs_scf_candidate_protocol() bind(C)
+ sp_gs_scf_candidate_protocol=1
+end function
+integer(c_int) function sp_gs_scf_candidate(token,snapshot,mode) bind(C) result(status)
+ ! Numerical candidates only: resource owners stay live and are never cloned.
+ ! Mode2 stages, mode3 publishes after the host ready vote, mode4 discards.
+ integer(c_int64_t),value::token,snapshot
+ integer(c_int),value::mode
+ integer::index,group,rank,nproc,expected_mode,parts(2),expected(2),slot,i,local
+ type(s_scf_payload),allocatable::candidate
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ call comm_get_globalinfo(group,rank,nproc)
+ expected_mode=mode;call comm_bcast(expected_mode,group)
+ parts=transfer(snapshot,parts);expected=parts;call comm_bcast(expected,group)
+ local=0;slot=0
+ if(mode/=expected_mode.or.any(parts/=expected))local=11
+ associate(ctx=>gs_handles(index)%context)
+  if(.not.scf_context_ok(ctx))local=15
+  select case(mode)
+  case(2)
+   if(allocated(ctx%scf_pending))local=11
+   if(allocated(ctx%scf_snapshots))then
+    do i=1,size(ctx%scf_snapshots)
+     if(ctx%scf_snapshots(i)%token/=snapshot)cycle
+     if(.not.allocated(ctx%scf_snapshots(i)%value))cycle
+     slot=i;exit
+    enddo
+   endif
+   if(slot==0)local=11
+  case(3)
+   if(.not.allocated(ctx%scf_pending).or.snapshot/=0_c_int64_t)local=11
+  case(4)
+   if(snapshot/=0_c_int64_t)local=11
+  case default
+   local=11
+  end select
+  call comm_get_max(local,group)
+  status=local
+  if(status/=0)return
+  select case(mode)
+  case(2)
+   allocate(candidate)
+   candidate=ctx%scf_snapshots(slot)%value
+   call move_alloc(candidate,ctx%scf_pending)
+  case(3)
+   ! No parsing, resource initialization, orbital solve or exchange evaluation.
+   ! Allocation/process failure during assignments is outside handled recovery.
+   call move_alloc(ctx%scf_pending,candidate)
+   call scf_copy(ctx,candidate,.true.)
+  case(4)
+   if(allocated(ctx%scf_pending))deallocate(ctx%scf_pending)
+  end select
+ end associate
 end function
 integer(c_int) function sp_gs_protocol() bind(C)
  sp_gs_protocol=1
@@ -1047,7 +1147,7 @@ integer(c_int) function create_gs(path,token,reading_only,steps)
  root_selection=selection;call comm_bcast(root_selection,group)
  if(any(selection/=root_selection))status=11
  if(present(steps))then
-  if(steps<1)status=11
+  if(steps<0)status=11
  endif
  call comm_get_max(status,group)
  if(status/=0)then
@@ -1068,7 +1168,7 @@ integer(c_int) function create_gs(path,token,reading_only,steps)
  call read_sw_symmetry(yn_symmetry)
  previous_mode=calc_mode;calc_mode='GS'
  if(present(steps))then
-  if(steps<1.or..not.scf_supported())then
+  if(steps<0.or..not.scf_supported())then
    calc_mode=previous_mode
    call swap_hse_density_workspace(old_density_symmetry)
    call swap_hse_symmetry_workspace(old_symmetry)
@@ -1076,7 +1176,13 @@ integer(c_int) function create_gs(path,token,reading_only,steps)
   endif
   candidate%mixing%scf_progress%stop_after=steps
  endif
- call gs_run(candidate,status,import_only=reading_only)
+ if(present(steps))then
+  call gs_run(candidate,status,import_only=reading_only,disk_bootstrap=steps==0)
+ else
+  call gs_run(candidate,status,import_only=reading_only)
+ endif
+ call swap_hse_density_workspace(candidate%density_symmetry)
+ call swap_hse_symmetry_workspace(candidate%symmetry)
  calc_mode=previous_mode
  call swap_hse_density_workspace(old_density_symmetry)
  call swap_hse_symmetry_workspace(old_symmetry)
@@ -1151,6 +1257,11 @@ subroutine array_layout(s,quantity,ndim,shape_out,lower,status)
     else
       shape_out=shape(s%spsi%zwf,kind=c_int64_t);lower=lbound(s%spsi%zwf,kind=c_int64_t)
     endif
+  case(6)
+    if(.not.allocated(s%mixing%scf_progress%residual_history))then
+      status=11;return
+    endif
+    ndim=2;shape_out(:2)=[4_c_int64_t,int(s%mixing%scf_progress%residual_count,c_int64_t)]
   case default
     status=11
   end select
@@ -1199,6 +1310,8 @@ integer(c_int) function sp_gs_read(token,quantity,real_ptr,imag_ptr,length) bind
       re=reshape(s%energy%esp,[length])
     case(4)
       re=reshape(s%system%Force,[length])
+    case(6)
+      re=reshape(s%mixing%scf_progress%residual_history(:,:s%mixing%scf_progress%residual_count),[length])
     case(5)
       call c_f_pointer(imag_ptr,im,[length])
       k=0
@@ -1233,6 +1346,9 @@ integer(c_int) function sp_gs_close(token) bind(C)
  call gs_lookup(token,index,status)
  sp_gs_close=status
  if(status/=0)return
+ if(allocated(gs_handles(index)%context%scf_pending))then
+  sp_gs_close=11;return
+ endif
  call gs_close(gs_handles(index)%context)
  deallocate(gs_handles(index)%context)
  nullify(gs_handles(index)%context)
@@ -1250,6 +1366,10 @@ integer(c_int) function sp_gs_resources(counts) bind(C)
  counts(2:3)=[live,nslots]
  sp_gs_resources=0
 end function
+#endif
+#ifdef USE_MPI
+#include "scf_disk_native.inc"
+#include "scf_disk_io.inc"
 #endif
 end module salmonpy_gs_context
 

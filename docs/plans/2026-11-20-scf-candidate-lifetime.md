@@ -1,0 +1,7 @@
+# Deterministic SCF numerical-candidate lifetime
+
+Extend the existing candidate with close/context-manager discard. Closing its Python-owned GS state discards its pending candidate first; normal session cleanup inherits this behavior. Agree owner/closed/reservation selection before collective cleanup. Never discard a reservation created directly by an external C host: native refusal remains intact. No garbage-collection/destructor MPI calls, cloning or native rebuild.
+
+Validate exceptional candidate context exit, owner/state context exit with pending memory/disk candidates, zero GS/child communicator counts, and subsequent independent continuation parity in the same session. Preserve source test count by extending existing reservation coverage and the existing disk tool. Reuse recorded SHA256-validated ordinary/fast-HSE runtimes; update paired guides/AI JSON/checklist and installed wheel evidence. No CI or commit/push.
+
+Verified corresponding-snapshot exceptional close as well as owner close; original host exceptions are preserved. Source PBE spatial MPI2/HSE C2 kMPI2 and installed-wheel HSE kMPI2 cleanup/evolution pass, including unowned C reservations. GS and live child communicators return to zero. Source/installed637 tests (636pass,1skip), byte parity and JP/EN/AI sync pass; no new unittest method or native build. Evidence: calc2026/salmonpy-scf-candidate-lifetime-record-20261120. No CI or commit/push.

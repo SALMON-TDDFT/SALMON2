@@ -345,3 +345,90 @@ The guarded profile is the existing native E/H plane-wave path with local LD. TT
 Run `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` with one/two ranks, OMP/BLAS1 and an external timeout. `--split` uses two independent two-rank groups. `--faults` requires a separate explicit `SALMONPY_RECOVERY_TESTING` build; production exports no injection entry. Overflow stress values are not scientific inputs.
 
 See [NATIVE_STEPPING.en.md](NATIVE_STEPPING.en.md) for native numerical/ordinary-output rollback after a step failure. Checkpoint LOAD is not a substitute for the step backup; concurrent use is rejected. Rebuild step targets when publication replaces owners.
+
+## Native SCF memory snapshots through the common API
+
+A live computed NativeGSState exposes `checkpoint_capability` and
+`checkpoint_target(snapshot=None)`. These are collective on its internal group;
+binding queries the runtime protocol and live SCF metadata, but performs no save or numerical iteration.
+The format is `salmonpy.native-scf-memory/1`. Identity binds the material/model,
+runtime and live native owner token; even identical-model sibling owners differ.
+Decomposition is the actual `(k, orbital, x, y, z)` tuple.
+
+```python
+from salmonpy.checkpointing import execute_checkpoint
+comm = state.session.comm
+plan = [{"name": "scf", "ranks": list(range(comm.size)), "point_ids": ["film"]}]
+saved_run = execute_checkpoint(comm, plan, states={"film": state.checkpoint_target()})
+with saved_run["states"]["film"] as payload:
+    state.continue_scf(steps=5)
+    execute_checkpoint(comm, plan, operation="restore", saved=saved_run["compatibility"],
+                       states={"film": state.checkpoint_target(payload)})
+    state.continue_scf(steps=5)
+```
+
+Only compatibility metadata is exchanged. NativeSCFSnapshot stays rank-local in
+Fortran memory and must be explicitly closed. JSON metadata alone cannot restore
+it, and it is not a process/disk restart. Ordinary PZ/Libxc-PZ/PBE and full-k CPU
+fast-PR HSE06 retain their existing scope and numerical implementation.
+
+`execute_checkpoint(operation="restore")` remains **direct execution**.
+Older runtimes without SCF candidate protocol1 provide no stage_restore, so
+`restore_checkpoint` rejects those direct-only targets before numerical callbacks.
+New matching runtimes support the staged path below. A common execute_checkpoint restore can leave earlier components
+changed if a later callback fails; it does not promise group-wide rollback.
+Wrong-owner/closed tokens and incompatible declarations reject before their
+numerical callbacks. Do not substitute destructive restore for candidate staging.
+`python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT` uses this entry;
+add `--xc hse06` with the matching fast-PR HSE build.
+
+### Protected SCF staging and explicit native publication
+
+A matching runtime with `sp_gs_scf_candidate_protocol()==1` adds independent
+**numerical** candidates to `state.checkpoint_target(payload)`. These are not
+new runnable GS solvers: FFT/XC/MPI resources remain in the live original owner.
+Staging deep-copies the snapshot into a detached Fortran payload, performs no
+SCF initialization/orbital solve/exchange calculation, and reserves that owner.
+Metadata can still be read; evolution/direct restore/snapshot/close are rejected
+until the candidate is published or discarded. Calls remain collective and on
+the main thread, with the original memory-only/profile/topology restrictions.
+
+```python
+from salmonpy.checkpointing import CheckpointState, restore_checkpoint
+holder = CheckpointState(states={"film": state})
+prepared = restore_checkpoint(
+    comm, plan, live=holder, saved=saved_run["compatibility"],
+    states={"film": state.checkpoint_target(payload)})
+# All participants are now ready. Until this point native originals are unchanged.
+for candidate in prepared["states"].values():
+    candidate.publish()  # collective within its own native group; returns state
+state.continue_scf(steps=5)
+```
+
+The holder contains readiness candidates, not independently runnable states.
+Publish every native candidate in the same group order before resuming work.
+A handled staging failure invokes discard callbacks (also for partly staged
+slots), clears reservations and leaves original numerical data intact, so the
+original trajectory can continue and restoration can be retried with new targets.
+Before the ready vote, call candidate.discard() to abandon a manually staged
+candidate; do not continue a partially published bundle after publication errors.
+Native publication uses numerical assignments and may allocate. Fatal allocation,
+process/communication failures, and arbitrary errors during native publication
+are outside this handled staging-error guarantee. This is not general rollback.
+No files or numerical propagation are used by publish/discard. Snapshots must
+remain open through staging/publication, and are closed explicitly afterwards.
+
+Use `python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT --protected`;
+add `--xc hse06` for a matching full-k fast-PR HSE build. Old runtimes keep direct
+mode; there is no destructive fallback when protected staging is unavailable.
+
+Native SCF same-build/input/decomposition disk checkpoints bind through
+`state.checkpoint_target(directory=...)`. scf_disk_capability is metadata-only;
+staging authenticates SHA256 and inputs. Publish every returned candidate after
+the ready vote, and recreate targets before retrying a failed restore.
+See [NATIVE_GS.en.md](NATIVE_GS.en.md) for a two-state example and scope.
+
+Prepared native SCF candidates support close/context-manager discard. GS-owner
+close discards its Python-owned candidate; snapshot close discards a candidate
+derived from that snapshot. Direct C-host reservations are not automatically
+discarded. Matching MPI call order is still required.

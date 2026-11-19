@@ -39,5 +39,5 @@
   "integrated": true,
   "source_tree": "sources/solver",
   "source_tree_manifest": "source-trees/solver.json",
-  "source_tree_sha256": "f498e57bbd8e0cc20b2424c4a4ad59f9b1aaadc010a98e7d54cd19693a7a2caf"
+  "source_tree_sha256": "bf06a2eb53feb8500aa0e357748a1967a07c29756ae8d80434d6c68ecfd4395b"
 }

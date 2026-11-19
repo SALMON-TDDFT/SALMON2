@@ -141,3 +141,8 @@ eigenvalues, k output, restored symmetry and repeated communicator counts.
 It sets write_gs_restart_data='no', generating/collecting no GS restart bundles.
 Four-iteration diagnostic inputs establish implementation parity, not converged
 material properties.
+
+Attach explicit symmetry with salmonpy.dft.SymmetryOperations via DFT.symmetry.
+Operations are owned sym.dat assets; the default None preserves prior behavior.
+See NATIVE_GS.en.md for reduced-k HSE SCF scope, examples and the corrected
+Cartesian force basis after symmetry averaging.

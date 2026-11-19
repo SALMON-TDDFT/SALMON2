@@ -611,6 +611,8 @@ module structures
   end type s_cg
 
   type s_scf_iteration_progress
+    real(8),allocatable :: residual_history(:,:)
+    integer :: residual_count=0
     type(s_scalar) :: rho_old,Vlocal_old
     real(8) :: electron_normalization=0d0,residual=1d9
     integer :: iterations=0,no_mix_converged_count=0

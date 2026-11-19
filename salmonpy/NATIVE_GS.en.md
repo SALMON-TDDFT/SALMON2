@@ -639,7 +639,8 @@ at the user's request. No GS datasets are collected by the validation probes.
 ## Active SCF pause and in-memory snapshots
 
 New explicitly built CPU runtimes expose SCF protocol1 for periodic,
-unpolarized, nonsymmetric fixed-ion PZ/Libxc-PZ/PBE and fast-PR HSE06. Existing run() remains a
+unpolarized fixed-ion PZ/Libxc-PZ/PBE (with or without explicit symmetry), and fast-PR HSE06
+(full k or the reduced-k scope below). Existing run() remains a
 full SCF call. A steps budget pauses only at an accepted iteration boundary:
 
 ```python
@@ -707,8 +708,9 @@ A target-HSE iteration cap without convergence warns and retains the last
 iterate, including after PBE pre-SCF; it is not labelled converged. An unfinished
 PBE-only pre-stage is still not a target-HSE result. SCF thresholds in the small
 phase-transition tests are control-flow settings, not physical certification.
-The snapshots remain memory-only, same owner/build/decomposition; symmetry,
-SOC/+U/DC, ionic motion and process/disk restart are not added by this change.
+The snapshots remain memory-only, same owner/build/decomposition. Reduced-k
+HSE is covered below; SOC/+U/DC, ionic motion and
+process/disk restart remain outside the current entry.
 
 ```sh
 mpiexec -n 2 python -m salmonpy.examples.scf_resume HSE_BUILD_JSON NEW_OUTPUT --xc hse06
@@ -720,3 +722,242 @@ the PBE→HSE switch retain mixing history; a separate tight-threshold test conf
 nonconvergence warns. Interleaved different-material snapshots remain independent.
 GS→16-step TDDFT currents also match exactly. These are execution regressions;
 they do not establish physical convergence. No GS datasets are collected.
+
+### Common checkpoint binding
+
+`state.checkpoint_capability` declares native-scf-memory/1 for this live owner.
+`state.checkpoint_target()` binds save; `state.checkpoint_target(snapshot)` also
+binds direct restore. Use execute_checkpoint from CHECKPOINTING.en.md; the scf_resume
+example now exercises this common entry. Payloads stay local Fortran memory.
+The binding does not execute a save or SCF iteration. New matching runtimes add
+independent numerical candidate staging; after restore_checkpoint's ready vote,
+publish each returned candidate before continuing (CHECKPOINTING.en.md).
+Old runtimes reject protected staging, with no silent in-place fallback.
+Multi-component direct callbacks remain non-atomic.
+
+### Explicit symmetry and reduced-k HSE SCF
+
+`DFT(..., symmetry=SymmetryOperations(operations, directions="yyn"))` attaches
+explicit fractional rotations and translations. operations has shape (n,3,4):
+the first three columns are the rotation and the fourth is the fractional shift.
+Data are copied and immutable. No symmetry discovery, cell standardization or
+network lookup occurs. Native fast-PR admission retains the existing fractional
+signed-permutation subset and checks that cell/grid/atoms/k stars are compatible.
+The user chooses a subgroup preserving the actual crystal and, for later RT,
+the applied field; this does not impose a global z-polarization restriction.
+
+```python
+from dataclasses import replace
+import numpy as np
+from salmonpy.dft import SymmetryOperations
+ops = np.zeros((2, 3, 4))
+ops[:, :, :3] = np.eye(3)
+ops[1, :2, :2] = -np.eye(2)  # C2 about z; identity is also retained
+calculation = replace(calculation, symmetry=SymmetryOperations(ops, directions="yyn"))
+```
+
+`input_assets` includes generated sym.dat and pseudopotentials. Native/batch
+inputs write these same owned bytes; MPI checks asset content before entry.
+Symmetry hashes enter model/warm-start identity and assets follow GS→HSE TDDFT.
+Default symmetry=None preserves existing input text and calculation paths.
+Reduced-k native SCF currently uses CPU fast-PR HSE, full q, one/two internal
+k ranks. Pause/continue/snapshot, direct restore and protected numerical staging
+use the same APIs as full k. Explicit symmetric PZ/Libxc-PZ/Libxc-PBE SCF uses the same APIs.
+Internal k-MPI2 and spatial-MPI2 controls verify interleaved-material isolation,
+protected restore and exact uninterrupted parity.
+Symmetry/density maps are owned by each GS context and swapped around continuation;
+immutable initialization tables stay with their live model, not a new solver clone.
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.scf_resume HSE_BUILD_JSON NEW_OUTPUT --xc hse06 --symmetry c2z --protected
+```
+
+C2 reduced SCF/restore orbitals, occupations, energy/density and 16-step z-driven
+RT match fixed preceding continuous results exactly; interleaved materials use
+different cell/grid settings. The intentional symmetric-force units change is
+compared after reconstructing the old basis, as explained below. These are execution tests, not physical convergence certificates.
+A fixed-grid diamond-Si check separately SCF-converges full8/reduced6 k points:
+energy agrees within1e-6 Hartree and density within rtol1e-4/atol1e-7 bohr^-3.
+The comparison exposed an existing units defect: force averaging converted
+Cartesian force into direct-lattice vector components but failed to convert the
+average back. Identity/C2/skew-cell probes reproduce the failure on the old
+routine. The maintained Fortran now returns `Amat * average(Ainv * F)`.
+**Symmetric force values intentionally change to Cartesian Hartree/bohr.**
+Nonsymmetric forces, energies, densities and fixed-ion currents are unchanged.
+Old symmetric force output is compared only after reconstructing its Cartesian
+basis in the regression test; that conversion is not an application fallback.
+
+The same fixed-grid, SCF-converged full8/reduced6 Si comparison now also passes
+the1e-6 Hartree/bohr force criterion (largest difference about1.15e-7).
+This checks symmetry equivalence and units, not complete physical force, grid/k,
+finite-displacement or geometry-optimization certification. NLCC/ASE capability
+gates are not relaxed. Historical outputs are preserved, not rewritten.
+
+A new runtime query sp_gs_cartesian_force_protocol()==1 declares this basis.
+For older symmetric runtimes without it, Python warns, keeps values available,
+and labels their basis unverified rather than falsely claiming Hartree/bohr.
+Use a matching corrected runtime for Cartesian symmetric forces. There is no
+implicit runtime build or Python numerical conversion. Reduced-k GS archive
+export, disk/process restart and topology changes remain separate work.
+
+The small developer probe is `python tools/test_symmetry_force_units.py NEW_OUTPUT`
+(requires an explicit Fortran compiler; it compiles/audits the actual module, not
+a new GS). It is not a prerequisite for ordinary prebuilt-runtime use.
+
+### Disk SCF checkpoints and fresh-process continuation
+
+A matching new runtime supports `state.save_scf(new_directory)` and loading in a
+fresh host with `session.run(calculation, scf=scf, material_id=..., restart=directory)`.
+This differs from reusable converged-GS `export_archive()` output. The runtime
+SHA256, material ID, input/pseudopotential/symmetry assets, rank count and actual
+MPI decomposition must match. This is not a changed-input warm start or repartitioned restart.
+
+```python
+# Saving process
+with session.run(calculation, scf=scf, material_id="Si", steps=3) as state:
+    state.save_scf(checkpoint_directory)  # New directory; never overwrite.
+# Fresh process, same calculation/scf and decomposition
+with session.run(calculation, scf=scf, material_id="Si", restart=checkpoint_directory) as state:
+    assert state.scf_status["executed_iterations"] == 0
+    state.continue_scf(steps=5)
+```
+
+Fortran writes rank-local stream arrays, density-mixing history/rates, accepted
+iteration/no-mix progress, XC phase, and fast-HSE ACE/history/occupation/cache.
+Python authenticates versioned metadata and SHA256; the manifest is written only
+after every rank succeeds. Incomplete output is not a valid checkpoint. Use the
+calculation-results area for saved GS data.
+
+Load validates all rank files and model inputs before creating a context. Static
+communication/grid/pseudopotential/Ewald and FFT/Libxc resources are prepared;
+arrays are read into detached candidates and published only after collective
+success. Initial guessed orbitals/density, mixing initialization, initial energy
+evaluation and all SCF iterations are skipped. `executed_iterations` counts work
+actually performed in the current process; prior counters remain in the manifest.
+FFT handles, pointers and MPI communicator IDs are not serialized. The HSE FFT
+kernel is prepared when the next natural iteration needs it, without replay.
+
+PZ/Libxc-PZ/PBE and fast-PR HSE controls cover k-MPI2, ordinary-XC spatial-MPI2,
+C2 reduced k and the PBE-prestage→HSE boundary: save at3 plus5 iterations in a fresh
+process exactly matches continuous8. A corrupt rank file is rejected before
+state creation; native read failure preserves the existing state. These are
+execution regressions, not physical convergence certification. Nonconvergence
+still warns and retains the result.
+
+The existing scf_resume sample accepts `--save-scf NEW_CHECKPOINT` to save the
+paused boundary. A separate invocation uses `--restart CHECKPOINT`; keep material
+settings, `--xc`, symmetry, `--iterations` and MPI decomposition identical. The
+accepted SCF position is restored from the file. Format: salmonpy.native-scf-disk/1;
+optional ABI: sp_gs_scf_disk_protocol()==1. Different binaries, changed topology
+and portable GS conversion remain outside this format.
+
+### Residual history and unconverged-SCF plots
+
+`save_scf()` also writes diagnostics/residuals.csv, diagnostics/residuals.png and
+diagnostics/report.json. The logarithmic figure shows residual detail and a second panel overlaying
+the residual and threshold, and explicitly labels unconverged results. CSV columns are accepted iteration,
+residual, threshold and PBE-prestage flag. Initial no-mixing iterations do not
+evaluate this residual and are excluded. The residual follows the chosen native
+SCF convergence metric; it is not a physical convergence certificate.
+
+`state.array("scf_history")` returns the same read-only4×iteration-count array.
+Fortran retains the history across memory snapshots and disk restart, so a report
+can show both sides of a resumed run. Use `state.write_scf_report(new_directory)`
+for a report without saving another checkpoint, including after continuation.
+
+Matplotlib is optional. Missing plotting support or a plotting failure only
+warns: the checkpoint and CSV remain available. A plotting failure must not be
+reported as a failed SCF calculation.
+
+### Common disk execution and protected restore
+
+`state.scf_disk_capability` declares the format, actual MPI decomposition and
+material/input/runtime identity, without file I/O. Bind
+`state.checkpoint_target(directory=path)` to execute_checkpoint/restore_checkpoint.
+Choose either the memory snapshot argument or directory, never both.
+
+```python
+from salmonpy.checkpointing import execute_checkpoint, restore_checkpoint, CheckpointState
+# a,b are independent SCF states on the same solver_comm; matching rank call order.
+groups = [{"name": "scf", "ranks": list(range(comm.size)), "point_ids": ["A", "B"]}]
+targets = {"A": a.checkpoint_target(directory=checkpoint_a),
+           "B": b.checkpoint_target(directory=checkpoint_b)}
+saved = execute_checkpoint(comm, groups, states=targets)
+# After advancing the original states, restore the saved boundaries.
+live = CheckpointState(states={"A": a, "B": b})
+prepared = restore_checkpoint(comm, groups, states=targets,
+                              saved=saved["compatibility"], live=live)
+for candidate in prepared["states"].values():
+    candidate.publish()  # Publish every candidate before resuming computation.
+```
+
+Staging authenticates files/inputs and reads detached numerical candidates; the
+common API votes across participants. Handled staging failure discards candidates
+and leaves originals available for continuation. Recreate checkpoint targets for
+a retry after failure. Formats and I/O remain backend-owned under the existing
+common contract.
+
+For one owner, `state.restore_scf(directory)` uses the same staged implementation.
+Direct calls across multiple owners are not atomic as a whole: use
+restore_checkpoint for coordinated protection. Save/restore performs no SCF
+iterations or resource cloning. Fatal allocation/process/publication failure is
+outside this rollback guarantee.
+
+The existing scf_resume sample uses `--disk --save-scf NEW_CHECKPOINT --protected`
+for the common disk path. Omitting --disk retains its existing memory behavior.
+
+### Numerical-candidate cleanup
+
+Prepared native SCF candidates support `candidate.close()` (equivalent to discard)
+and context-manager use. Leaving the context before publish discards only the
+candidate and preserves original numerical values. Closing an already published
+or discarded candidate is a no-op; a closed candidate cannot be published.
+
+Closing the Python GS owner first discards its Python-owned pending candidate.
+Closing a memory snapshot first discards an unpublished candidate derived from
+that snapshot. Host-code exceptions can therefore unwind these contexts without
+leaving GS/MPI resources reserved. A snapshot does not discard unrelated candidates.
+
+All MPI ranks must call close/publish/discard in matching order. No garbage
+collector/destructor performs MPI operations. Reservations staged directly by an
+external C host remain that host's responsibility; Python never silently discards
+them, and native admission/refusal remains in effect.
+
+### Changing ordinary-XC k-MPI rank count at restart
+
+A matching new runtime supports periodic scalar fixed-ion PZ/Libxc-PZ/Libxc-PBE
+SCF restart between k-only layouts; measured controls cover1→2 and2→1 ranks.
+Default restart still requires the same decomposition. Opt in explicitly:
+
+```python
+# Same calculation/scf/material_id and runtime; open the new host MPI group with
+# decomposition=(comm.size,1,1,1,1).
+with session.run(calculation, scf=scf, material_id="Si",
+                 restart=checkpoint_directory, repartition=True) as state:
+    assert state.scf_status["executed_iterations"] == 0
+    state.continue_scf(steps=5)
+```
+
+New manifests record each file's global k bounds. Only k parallelism may change:
+keep cell/grid/k set/electron count/XC/mixing/tolerance/total cap/assets identical.
+Admission validates format, runtime SHA256, material/input identity, contiguous
+nonoverlapping old k ranges and all old rank-file hashes before creation.
+Fortran reads overlapping donors and reindexes every wavefunction/CG k slice,
+retaining density/mixing/Poisson/XC numerical state and residual history. The
+continuation's parallel inputs bind to new live resources. Native staging also
+checks complete target-k coverage before publication. Source files stay intact.
+
+Immediately restored orbitals/density/occupation/eigenvalues/history exactly match
+the saved boundary. Five subsequent iterations are compared with continuous8
+from the same source-initialized state at rtol1e-9/atol1e-10. The default Gaussian seed includes the first local k index, so fresh
+initialization with a different decomposition may produce different orbitals.
+Initialization itself is unchanged; a different guess is not the same initial condition. These are execution controls, not physical
+grid/k convergence certification.
+
+Fast HSE, orbital/spatial repartition and changed-runtime migration remain outside
+this entry. Common checkpoint_target/protected restore still requires unchanged
+MPI decomposition. Optional ABI: sp_gs_scf_k_repartition_protocol()==1; no implicit build.
+
+The existing sample saves with `--k-parallel --save-scf NEW_CHECKPOINT` and loads
+with a different rank count using `--restart CHECKPOINT --repartition`. Both
+ordinary-XC invocations use the same2×2×2 k mesh; keep other inputs identical.

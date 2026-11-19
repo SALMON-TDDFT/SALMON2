@@ -50,14 +50,104 @@ def _configure_scf(lib):
     if lib.sp_gs_scf_protocol()!=1:raise InputError('unsupported active SCF protocol')
 
 
+def _scf_disk_api(lib):
+    probe=getattr(lib,'sp_gs_scf_disk_protocol',None)
+    if probe is None:raise InputError('SCF disk restart requires a matching explicitly built runtime')
+    probe.argtypes=[];probe.restype=c.c_int
+    if probe()!=1:raise InputError('unsupported SCF disk protocol')
+    if _scf_candidate_function(lib) is None:raise InputError('SCF disk restart requires protected publication support')
+    lib.sp_gs_scf_bootstrap.argtypes=[c.c_char_p,c.POINTER(c.c_int64)]
+    lib.sp_gs_scf_bootstrap.restype=c.c_int
+    lib.sp_gs_scf_disk.argtypes=[c.c_int64,c.c_char_p,c.c_int]
+    lib.sp_gs_scf_disk.restype=c.c_int
+    return lib.sp_gs_scf_disk
+
+
+def _scf_k_repartition_api(lib):
+    probe=getattr(lib,'sp_gs_scf_k_repartition_protocol',None)
+    if probe is None:raise InputError('k-only SCF repartition requires a matching explicitly built runtime')
+    probe.argtypes=[];probe.restype=c.c_int
+    if probe()!=1:raise InputError('unsupported SCF k repartition protocol')
+    fn=lib.sp_gs_scf_k_repartition
+    fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
+    return fn
+
+
+def _scf_k_input(text,decomposition):
+    # Only the generated parallel block may differ. Every physical/input byte in
+    # other groups is retained; do not ignore arbitrary parallel algorithm flags.
+    import re
+    from .bands import _input_groups,_scalar
+    groups=_input_groups(text)
+    body=groups.pop('parallel','')
+    match=re.fullmatch(r'\s*nproc_k\s*=\s*(\d+)\s*,\s*nproc_ob\s*=\s*(\d+)\s*,\s*nproc_rgrid\s*=\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*',body,re.I)
+    if match is None or tuple(map(int,match.groups()))!=tuple(decomposition):
+        raise InputError('SCF repartition requires an explicit matching k-only parallel block')
+    if _scalar(groups.get('functional',''),'xc','').lower() not in ('pz','libxc_pz','libxc_pbe'):
+        raise InputError('SCF k repartition currently supports PZ/Libxc-PZ/Libxc-PBE')
+    return groups
+
+
+def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=False):
+    directory=Path(directory).expanduser().resolve()
+    record=json.loads((directory/'manifest.json').read_text())
+    expected={'schema':'salmonpy.native-scf-disk/1','runtime_sha256':session.backend.sha256,
+              'decomposition':list(session.backend.decomposition),'ranks':session.comm.size,
+              'input_text':text,'material_id':material_id,
+              'assets':{name:hashlib.sha256(data).hexdigest() for name,data in assets}}
+    migrating=repartition and (record.get('ranks')!=session.comm.size or record.get('decomposition')!=list(session.backend.decomposition))
+    for key,value in expected.items():
+        if migrating and key in ('decomposition','ranks','input_text'):continue
+        if record.get(key)!=value:raise InputError('SCF disk checkpoint incompatible: '+key)
+    old_size=record.get('ranks')
+    if type(old_size) is not int or not 1<=old_size<2**31:raise InputError('invalid SCF saved rank count')
+    if migrating:
+        old_decomposition=record.get('decomposition')
+        if old_decomposition!=[old_size,1,1,1,1] or tuple(session.backend.decomposition)!=(session.comm.size,1,1,1,1):
+            raise InputError('SCF repartition currently requires k-only old and new layouts')
+        if _scf_k_input(record['input_text'],old_decomposition)!=_scf_k_input(text,session.backend.decomposition):
+            raise InputError('SCF repartition physical inputs differ')
+        _scf_k_repartition_api(session.lib)
+    files=record.get('files')
+    if not isinstance(files,list) or len(files)!=old_size:raise InputError('SCF checkpoint rank files missing')
+    for rank,entry in enumerate(files):
+        if entry.get('name')!=f'rank-{rank:08d}.bin':raise InputError('invalid SCF rank filename')
+    if migrating:
+        bounds=[]
+        for entry in files:
+            pair=entry.get('k_bounds')
+            if not isinstance(pair,list) or len(pair)!=2 or any(type(v) is not int or not 1<=v<2**31 for v in pair) or pair[1]<pair[0]:
+                raise InputError('SCF repartition requires valid saved global k bounds')
+            bounds.append(pair)
+        ordered=sorted(bounds)
+        if ordered[0][0]!=1 or any(b[0]!=a[1]+1 for a,b in zip(ordered,ordered[1:])):
+            raise InputError('SCF saved k ranges overlap or have gaps')
+        if session.comm.size>ordered[-1][1]:
+            raise InputError('more k ranks than saved k points; choose fewer k ranks')
+        selected=[entry for index,entry in enumerate(files) if index%session.comm.size==session.comm.rank]
+    else:selected=[files[session.comm.rank]]
+    for entry in selected:
+        path=directory/entry['name']
+        with path.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
+        if path.stat().st_size!=entry['bytes'] or digest!=entry['sha256']:
+            raise InputError('SCF checkpoint rank file checksum mismatch')
+    return directory,record
+
+
 class NativeSCFSnapshot:
     """Collective native in-memory numerical snapshot, tied to its live GS owner."""
     def __init__(self,owner,token):
         self._owner=owner;self._token=token;self.closed=False
     def close(self):
-        if self.closed:return
         if not self._owner.closed:
             self._owner._live()
+            candidate=getattr(self._owner,'_restore_candidate',None)
+            owns_candidate=candidate is not None and candidate.snapshot is self
+            selection=(self._owner._token,self._token,self.closed,owns_candidate)
+            _agree(self._owner.session.comm,'SCF snapshot close selections differ' if any(
+                v!=selection for v in self._owner.session.comm.allgather(selection)) else None)
+            if self.closed:return
+            if owns_candidate:candidate.close()
             self._owner.session._check(self._owner.session.lib.sp_gs_scf_snapshot_close(
                 self._owner._token,self._token))
         self.closed=True
@@ -65,6 +155,78 @@ class NativeSCFSnapshot:
         raise TypeError('native SCF snapshots are live in-memory tokens, not portable files')
     def __enter__(self):return self
     def __exit__(self,*args):self.close()
+
+
+def _scf_candidate_function(lib):
+    probe=getattr(lib,'sp_gs_scf_candidate_protocol',None)
+    if probe is None:return None  # old runtimes retain direct execution
+    probe.argtypes=[];probe.restype=c.c_int
+    if probe()!=1:raise InputError('unsupported native SCF candidate protocol')
+    fn=lib.sp_gs_scf_candidate
+    fn.argtypes=[c.c_int64,c.c_int64,c.c_int];fn.restype=c.c_int
+    return fn
+
+
+class _SCFRestoreCandidate:
+    """Detached native numerical payload; publish only after the host ready vote.
+
+    The original owner/resources stay live and reserved. Memory or authenticated
+    disk input supplies the numerical payload; this is not a second runnable solver. Allocation/process failures during
+    native publication are outside handled staging-error recovery.
+    """
+    def __init__(self,state,snapshot,fn,*,directory=None):
+        self.state=state;self.snapshot=snapshot;self.fn=fn;self.directory=directory
+        self.ready=False;self.reserved=False;self.finished=False
+
+    def stage(self):
+        self.state._scf_ready()
+        error=None
+        if self.ready or self.finished:error='SCF candidate already staged or retired'
+        if getattr(self.state,'_restore_candidate',None) is not None:error='SCF owner already reserved'
+        if self.snapshot is not None and self.snapshot.closed:error='SCF candidate snapshot closed before staging'
+        _agree(self.state.session.comm,error)
+        path=None;error=None
+        if self.directory is not None:
+            try:
+                root,_=_scf_disk_manifest(self.directory,self.state.session,self.state._input_text,
+                                          self.state._assets,self.state.material_id)
+                path=root/f'rank-{self.state.session.comm.rank:08d}.bin'
+            except Exception as exc:error=str(exc)
+            _agree(self.state.session.comm,error)
+        self.state._restore_candidate=self;self.reserved=True
+        if path is None:code=self.fn(self.state._token,self.snapshot._token,2)
+        else:code=self.state.session.lib.sp_gs_scf_disk(self.state._token,os.fsencode(path),2)
+        if code:
+            # Candidate1 errors are admitted before allocation. Never discard a
+            # pre-existing raw-C reservation that this failed call did not own.
+            self.reserved=False;self.state._restore_candidate=None
+        self.state.session._check(code)
+        self.ready=True
+        return self
+
+    def discard(self):
+        if self.finished or not self.reserved:return
+        self.state._scf_ready()
+        self.state.session._check(self.fn(self.state._token,0,4))
+        self.finished=True;self.state._restore_candidate=None
+
+    def publish(self):
+        self.state._scf_ready()
+        _agree(self.state.session.comm,None if self.ready and not self.finished
+            else 'prepared live SCF candidate required')
+        self.state.session._check(self.fn(self.state._token,0,3))
+        self.finished=True;self.state._restore_candidate=None
+        self.state._metadata_converged=self.state.info.converged
+        return self.state
+
+    def close(self):
+        self.discard()
+
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()
+
+    def __reduce__(self):
+        raise TypeError('native SCF candidates are rank-local live resources')
 
 
 @dataclass(frozen=True)
@@ -177,7 +339,7 @@ class NativeGSSession:
         finally:
             if boundary is not None:self._check(boundary(1))
 
-    def run(self,calculation,*,scf=None,material_id='material',steps=None):
+    def run(self,calculation,*,scf=None,material_id='material',steps=None,restart=None,repartition=False):
         from .dft import DFT,SCFSettings
         from .config import _identifier
         self._live();error=None
@@ -190,6 +352,12 @@ class NativeGSSession:
                     raise InputError('HSE06 GS requires a declared fast-PR HSE runtime')
                 if self.backend.decomposition!=(self.comm.size,1,1,1,1):
                     raise InputError('fast HSE GS requires k-only MPI decomposition')
+            if type(repartition) is not bool or (repartition and restart is None):
+                raise InputError('repartition is an explicit boolean option requiring restart')
+            if restart is not None and steps is not None:
+                raise InputError('restart loads the saved boundary; call continue_scf separately')
+            if restart is not None:
+                _configure_scf(self.lib);_scf_disk_api(self.lib)
             if steps is not None:
                 steps=_integer(steps,'steps',1,2**31-2)
                 if calculation.xc not in ('pz','libxc_pz','libxc_pbe','hse06'):
@@ -200,7 +368,12 @@ class NativeGSSession:
             text=calculation.input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
             k,ob,x,y,z=self.backend.decomposition
             text=text.replace('&system',f'&parallel\n nproc_k={k},nproc_ob={ob},nproc_rgrid={x},{y},{z}\n/\n&system',1)
+            assets=calculation.input_assets
             descriptor=(material_id,text,tuple(p.sha256 for p in calculation.pseudopotentials))
+            if calculation.symmetry is not None:descriptor+=(calculation.symmetry.sha256,)
+            if restart is not None:
+                restart,saved=_scf_disk_manifest(restart,self,text,assets,material_id,repartition=repartition)
+                descriptor+=(str(restart),saved)
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
         _agree(self.comm,'DFT inputs/material IDs differ' if any(v!=(descriptor,steps) for v in self.comm.allgather((descriptor,steps))) else None)
@@ -209,8 +382,7 @@ class NativeGSSession:
             try:
                 work=Path(tempfile.mkdtemp(prefix='gs-',dir=self.backend.work_root))
                 (work/'gs.inp').write_text(text)
-                for i,pseudo in enumerate(calculation.pseudopotentials):
-                    (work/calculation._pseudo_name(i)).write_bytes(pseudo.data)
+                for name,data in assets:(work/name).write_bytes(data)
             except Exception as exc:error=str(exc)
         error=self.comm.bcast(error,root=0);work=self.comm.bcast(work,root=0)
         _agree(self.comm,error)
@@ -218,30 +390,51 @@ class NativeGSSession:
         try:
             if not work.is_dir() or (work/'gs.inp').read_text()!=text:
                 raise InputError('GS work/input is not visible or differs on this rank')
-            for i,pseudo in enumerate(calculation.pseudopotentials):
-                if hashlib.sha256((work/calculation._pseudo_name(i)).read_bytes()).hexdigest()!=pseudo.sha256:
-                    raise InputError('GS pseudopotential differs on this rank')
+            for name,data in assets:
+                if (work/name).read_bytes()!=data:raise InputError('GS input asset differs on this rank: '+name)
+            if calculation.symmetry is not None and calculation.xc=='hse06':
+                from .fast_hse_mpi import _symmetry_preflight
+                from ._hse_geometry import preflight
+                from .bands import _input_groups
+                operations=_symmetry_preflight(work/'sym.dat',calculation.symmetry.directions)
+                preflight(work,_input_groups(text),operations)
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
         token=c.c_int64()
-        if steps is None:
+        if restart is not None:
+            code=self._gs_call(work,self.lib.sp_gs_scf_bootstrap,b'gs.inp',c.byref(token))
+        elif steps is None:
             code=self._gs_call(work,self.lib.sp_gs_create,b'gs.inp',c.byref(token))
         else:
             code=self._gs_call(work,self.lib.sp_gs_start,b'gs.inp',steps,c.byref(token))
         self._check(code)
         state=NativeGSState(self,token.value,work,material_id,calculation)
-        state._scf_controlled=steps is not None
+        state._scf_controlled=steps is not None or restart is not None
         state._input_text=text;state._input_origin='computed'
         state._electrons=calculation.electrons
-        state._assets=tuple((calculation._pseudo_name(i),pp.data) for i,pp in enumerate(calculation.pseudopotentials))
+        state._assets=assets
         self._states[token.value]=state
-        try:info=state.info
+        try:
+            if restart is not None:
+                fn=_scf_disk_api(self.lib)
+                if repartition and saved['decomposition']!=list(self.backend.decomposition):
+                    bounds=np.asarray([entry['k_bounds'] for entry in saved['files']],dtype=np.int32)
+                    migrate=_scf_k_repartition_api(self.lib)
+                    self._check(migrate(state._token,os.fsencode(restart),saved['ranks'],bounds.ctypes.data))
+                else:
+                    path=restart/f'rank-{self.comm.rank:08d}.bin'
+                    self._check(fn(state._token,os.fsencode(path),2))
+                candidate=_scf_candidate_function(self.lib)
+                if candidate is None:raise InputError('SCF disk publication protocol missing')
+                self._check(candidate(state._token,0,3))
+                state._metadata_converged=state.info.converged
+            info=state.info
         except BaseException:
             state.close();raise
         state._metadata_converged=info.converged
         state._identity='salmonpy.retained-gs/1/'+hashlib.sha256(json.dumps(
             [descriptor,self.backend.sha256,self.backend.decomposition,vars(info)],sort_keys=True).encode()).hexdigest()
-        if not info.converged and (steps is None or not state.scf_status['paused']):
+        if not info.converged and ((steps is None and restart is None) or not state.scf_status['paused']):
             warnings.warn(f'SCF not converged after {info.iterations} iterations '
                           f'(residual={info.residual:g}, tolerance={info.tolerance:g}); retaining the last iterate',
                           RuntimeWarning,stacklevel=2)
@@ -369,7 +562,7 @@ class NativeGSSession:
 
 
 _QUANTITIES={'density':(1,'bohr^-3'),'occupations':(2,'1'),'eigenvalues':(3,'hartree'),
-             'forces':(4,'hartree/bohr'),'orbitals':(5,'native orbital amplitude')}
+             'forces':(4,'hartree/bohr'),'orbitals':(5,'native orbital amplitude'),'scf_history':(6,'mixed; see columns')}
 
 
 class NativeGSState:
@@ -432,6 +625,82 @@ class NativeGSState:
         result=dict(zip(('paused','iterations','max_iterations','initializations','executed_iterations','snapshots'),map(int,values)))
         result['paused']=bool(result['paused'])
         return result
+    @property
+    def checkpoint_capability(self):
+        """Collective declaration for memory snapshots of this live SCF owner."""
+        from .checkpointing import CheckpointCapability
+        # Query the actual live profile: a computed/imported or symmetry owner
+        # must not advertise capabilities that its numerical entry rejects.
+        _ = self.scf_status
+        identity=hashlib.sha256(json.dumps(
+            [self.identity,self.material_id,self._token],sort_keys=True).encode()).hexdigest()
+        return CheckpointCapability('salmonpy.native-scf-memory/1',('save','restore'),
+            tuple(self.session.backend.decomposition),identity=identity)
+
+    def checkpoint_target(self,snapshot=None,*,directory=None):
+        """Bind common execution; use snapshot for memory or directory for disk.
+
+        No snapshot is taken here. With a snapshot and candidate protocol1,
+        protected staging retains independent numerical data. After the common
+        ready vote, publish each returned candidate collectively. Old runtimes
+        expose direct-only callbacks, never an in-place protected fallback.
+        A disk binding performs no file I/O; stage authenticates files later.
+        """
+        from .checkpointing import CheckpointTarget
+        if directory is not None:
+            error=None
+            if snapshot is not None:error='select a memory snapshot or a disk directory, not both'
+            try:directory=Path(directory).expanduser().resolve()
+            except Exception as exc:error=str(exc)
+            _agree(self.session.comm,error)
+            paths=self.session.comm.allgather(str(directory))
+            _agree(self.session.comm,'SCF disk target paths differ' if any(p!=paths[0] for p in paths) else None)
+            capability=self.scf_disk_capability
+            fn=_scf_candidate_function(self.session.lib)
+            candidate=_SCFRestoreCandidate(self,None,fn,directory=directory)
+            return CheckpointTarget(capability,save=lambda:self.save_scf(directory),
+                restore=lambda:self.restore_scf(directory),stage_restore=candidate.stage,
+                discard_restore=lambda unused:candidate.discard())
+        capability=self.checkpoint_capability
+        error=None
+        if snapshot is not None and (not isinstance(snapshot,NativeSCFSnapshot)
+                or snapshot._owner is not self or snapshot.closed):
+            error='SCF checkpoint target requires an open snapshot of the same live owner'
+        _agree(self.session.comm,error)
+        fn=None;error=None
+        try:fn=_scf_candidate_function(self.session.lib)
+        except Exception as exc:error=str(exc)
+        _agree(self.session.comm,error)
+        candidate=None if snapshot is None or fn is None else _SCFRestoreCandidate(self,snapshot,fn)
+        return CheckpointTarget(capability,save=self.snapshot,
+            restore=None if snapshot is None else lambda:self.restore(snapshot),
+            stage_restore=None if candidate is None else candidate.stage,
+            discard_restore=None if candidate is None else lambda unused:candidate.discard())
+
+    @property
+    def scf_disk_capability(self):
+        """Metadata-only same-build/model/topology disk declaration; no file reads."""
+        from .checkpointing import CheckpointCapability
+        self._scf_ready();error=None
+        try:_scf_disk_api(self.session.lib)
+        except Exception as exc:error=str(exc)
+        _agree(self.session.comm,error)
+        identity=hashlib.sha256(json.dumps([self.material_id,self._input_text,
+            {name:hashlib.sha256(data).hexdigest() for name,data in self._assets},
+            self.session.backend.sha256],sort_keys=True).encode()).hexdigest()
+        return CheckpointCapability('salmonpy.native-scf-disk/1',('save','restore'),
+            tuple(self.session.backend.decomposition),identity=identity)
+
+    def restore_scf(self,directory):
+        """Collectively restore this live owner from authenticated disk data.
+
+        A single owner is staged before publication. Use common protected restore
+        for multiple owners; direct restore across several callbacks is non-atomic.
+        """
+        target=self.checkpoint_target(directory=directory)
+        candidate=target.stage_restore()
+        return candidate.publish()
+
     def continue_scf(self,*,steps):
         self._live();error=None
         try:steps=_integer(steps,'steps',1,2**31-2)
@@ -456,6 +725,106 @@ class NativeGSState:
         self._scf_ready()
         self.session._check(self.session._gs_call(self.directory,self.session.lib.sp_gs_scf_restore,self._token,snapshot._token))
         self._metadata_converged=self.info.converged
+
+    def write_scf_report(self,directory):
+        """Save residual history as CSV and an optional logarithmic plot.
+
+        Plotting failure warns and leaves the numerical report available.
+        New output directory only; collective, with root writing the files.
+        """
+        self._scf_ready();comm=self.session.comm;error=None
+        try:directory=Path(directory).expanduser().resolve()
+        except Exception as exc:error=str(exc)
+        _agree(comm,error)
+        history=self.array('scf_history').values
+        info=self.info
+        _agree(comm,'SCF report paths differ' if any(p!=str(directory) for p in comm.allgather(str(directory))) else None)
+        report=None
+        if comm.rank==0:
+            try:
+                directory.mkdir(parents=True,exist_ok=False)
+                import csv
+                with (directory/'residuals.csv').open('w',newline='') as stream:
+                    writer=csv.writer(stream);writer.writerow(['iteration','residual','threshold','PBE_pre_scf'])
+                    writer.writerows(history.T)
+                report={'info':vars(info),'columns':['iteration','residual','threshold','PBE_pre_scf'],
+                        'metric':self._input_text.split("convergence='")[-1].split("'")[0]
+                            if "convergence='" in self._input_text else 'native SCF convergence criterion',
+                        'plot_status':'not attempted'}
+            except Exception as exc:error=str(exc)
+        _agree(comm,error)
+        if comm.rank==0:
+            figure=None
+            try:
+                from matplotlib.figure import Figure
+                from matplotlib.backends.backend_agg import FigureCanvasAgg
+                from matplotlib.ticker import MaxNLocator
+                figure=Figure(figsize=(7,6));FigureCanvasAgg(figure)
+                detail,axis=figure.subplots(2,1,sharex=True)
+                detail.semilogy(history[0],history[1],marker='o')
+                detail.set(ylabel=report['metric'],title='Residual detail')
+                axis.semilogy(history[0],history[1],marker='o',label='Residual')
+                if any(value>0 for value in history[2]):axis.semilogy(history[0],history[2],linestyle='--',label='Threshold')
+                axis.set(xlabel='SCF iteration',ylabel=report['metric'])
+                figure.suptitle('SCF converged' if info.converged else 'SCF not converged — last iterate retained')
+                for panel in (detail,axis):
+                    panel.grid(True,which='both',alpha=.25)
+                    panel.xaxis.set_major_locator(MaxNLocator(integer=True))
+                axis.legend();figure.tight_layout()
+                figure.savefig(directory/'residuals.png',dpi=150)
+                report['plot_status']='saved'
+            except Exception as exc:
+                report['plot_status']='unavailable';report['plot_error']=str(exc)
+                warnings.warn('SCF data saved; residual plot unavailable: '+str(exc),UserWarning,stacklevel=2)
+            finally:
+                if figure is not None:figure.clear()
+            try:(directory/'report.json').write_text(json.dumps(report,indent=2)+'\n')
+            except Exception as exc:
+                warnings.warn('Residual CSV saved; report metadata unavailable: '+str(exc),UserWarning,stacklevel=2)
+        return directory
+
+    def save_scf(self,directory):
+        """Collectively save a complete same-build/topology numerical SCF boundary.
+
+        The manifest is committed last. Failed output stays incomplete; never
+        overwrite an existing checkpoint. No SCF iterations or exchange calls.
+        """
+        self._scf_ready();comm=self.session.comm;error=None
+        try:
+            fn=_scf_disk_api(self.session.lib)
+            directory=Path(directory).expanduser().resolve()
+        except Exception as exc:error=str(exc)
+        _agree(comm,error)
+        _agree(comm,'SCF output paths differ' if any(p!=str(directory) for p in comm.allgather(str(directory))) else None)
+        if comm.rank==0:
+            try:directory.mkdir(parents=True,exist_ok=False)
+            except Exception as exc:error=str(exc)
+        _agree(comm,error)
+        path=directory/f'rank-{comm.rank:08d}.bin'
+        self.session._check(fn(self._token,os.fsencode(path),0))
+        shape=np.ones(7,dtype=np.int64);lower=np.ones(7,dtype=np.int64);ndim=c.c_int()
+        self.session._check(self.session.lib.sp_gs_array_info(self._token,5,c.byref(ndim),shape.ctypes.data,lower.ctypes.data))
+        entry=None;error=None
+        try:
+            with path.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
+            entry={'name':path.name,'bytes':path.stat().st_size,'sha256':digest,
+                   'k_bounds':[int(lower[5]),int(lower[5]+shape[5]-1)]}
+        except Exception as exc:error=str(exc)
+        _agree(comm,error);files=comm.allgather(entry)
+        info=self.info;progress=self.scf_status
+        record={'schema':'salmonpy.native-scf-disk/1','runtime_sha256':self.session.backend.sha256,
+                'decomposition':list(self.session.backend.decomposition),'ranks':comm.size,
+                'material_id':self.material_id,'input_text':self._input_text,
+                'assets':{name:hashlib.sha256(data).hexdigest() for name,data in self._assets},
+                'files':files,'info':vars(info),'progress':progress}
+        if comm.rank==0:
+            try:(directory/'manifest.json').write_text(json.dumps(record,indent=2)+'\n')
+            except Exception as exc:error=str(exc)
+        _agree(comm,error)
+        try:self.write_scf_report(directory/'diagnostics')
+        except Exception as exc:
+            warnings.warn('SCF checkpoint saved; residual report unavailable: '+str(exc),UserWarning,stacklevel=2)
+        return directory
 
     def tddft_model(self,*,dt,max_steps=1000):
         from ._gs_tddft import open_model
@@ -485,6 +854,15 @@ class NativeGSState:
         if quantity=='forces' and getattr(self,'_scf_controlled',False) and self.scf_status['paused']:
             raise InputError('forces are not evaluated at a paused SCF boundary')
         code,unit=_QUANTITIES[quantity];ndim=c.c_int()
+        symmetry=getattr(self._calculation,'symmetry',None)
+        if quantity=='forces' and symmetry is not None and 'y' in symmetry.directions:
+            query=getattr(self.session.lib,'sp_gs_cartesian_force_protocol',None)
+            if query is not None:query.argtypes=[];query.restype=c.c_int
+            if query is None or query()!=1:
+                unit='native force components (Cartesian basis unverified)'
+                warnings.warn('Runtime lacks the Cartesian symmetric-force basis declaration; values remain '
+                    'available with an unverified basis. Explicitly use a corrected runtime for hartree/bohr.',
+                    UserWarning,stacklevel=2)
         shape=np.ones(7,dtype=np.int64);lower=np.ones(7,dtype=np.int64)
         self.session._check(self.session.lib.sp_gs_array_info(self._token,code,c.byref(ndim),shape.ctypes.data,lower.ctypes.data))
         dims=tuple(map(int,shape[:ndim.value]));size=math.prod(dims)
@@ -502,10 +880,12 @@ class NativeGSState:
     def close(self):
         if self.session.closed and self.closed:return
         self.session._native._live()
-        descriptor=(self._token,self.closed)
+        candidate=getattr(self,'_restore_candidate',None)
+        descriptor=(self._token,self.closed,candidate is not None)
         _agree(self.session.comm,'state close selections differ' if any(
             v!=descriptor for v in self.session.comm.allgather(descriptor)) else None)
         if self.closed:return
+        if candidate is not None:candidate.close()
         self.session._check(self.session.lib.sp_gs_close(self._token))
         self.closed=True;self.session._states.pop(self._token,None)
     def __enter__(self):return self

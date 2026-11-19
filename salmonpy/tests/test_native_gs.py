@@ -88,6 +88,27 @@ class NativeGSTests(unittest.TestCase):
                                ('work_root',Path('/tmp/other')),('sha256','different')]:
                 with self.assertRaises(AttributeError):setattr(backend,name,value)
 
+            # A k-only repartition must reject an empty target k owner before
+            # any native GS creation or scientific file decode.
+            from salmonpy.native_gs import _scf_disk_manifest
+            checkpoint=root/'k-checkpoint';checkpoint.mkdir()
+            payload=b'fixture';(checkpoint/'rank-00000000.bin').write_bytes(payload)
+            text="&parallel\n nproc_k=1,nproc_ob=1,nproc_rgrid=1,1,1\n/\n&functional\n xc='pz'\n/\n"
+            assets=(('Si_rps.dat',b'pp'),)
+            manifest={'schema':'salmonpy.native-scf-disk/1','runtime_sha256':'fixture',
+                'decomposition':[1,1,1,1,1],'ranks':1,'input_text':text,'material_id':'Si',
+                'assets':{'Si_rps.dat':hashlib.sha256(b'pp').hexdigest()},
+                'files':[{'name':'rank-00000000.bin','bytes':len(payload),
+                          'sha256':hashlib.sha256(payload).hexdigest(),'k_bounds':[1,2]}]}
+            (checkpoint/'manifest.json').write_text(json.dumps(manifest))
+            probe=Mock(return_value=1)
+            local=SimpleNamespace(comm=SimpleNamespace(size=3,rank=0),
+                backend=SimpleNamespace(sha256='fixture',decomposition=(3,1,1,1,1)),
+                lib=SimpleNamespace(sp_gs_scf_k_repartition_protocol=probe,sp_gs_scf_k_repartition=Mock()))
+            with self.assertRaisesRegex(InputError,'more k ranks'):
+                _scf_disk_manifest(checkpoint,local,text.replace('nproc_k=1','nproc_k=3'),assets,'Si',repartition=True)
+            local.lib.sp_gs_scf_k_repartition.assert_not_called()
+
 
     def test_imported_force_and_native_complex_array_contract(self):
         from salmonpy.native_gs import NativeGSState
@@ -423,3 +444,79 @@ class NativeGSLinkTests(unittest.TestCase):
         with self.assertRaises(InputError):first.continue_scf(steps=0)
         session.lib.sp_gs_scf_restore.assert_not_called()
         session.lib.sp_gs_continue.assert_not_called()
+
+    def test_common_scf_target_binds_local_tokens_and_rejects_wrong_owner_or_atomic_fallback(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from salmonpy.native_gs import NativeGSState,NativeSCFSnapshot
+        from salmonpy.checkpointing import execute_checkpoint,restore_checkpoint,CheckpointState
+        from salmonpy.errors import InputError
+        comm=SimpleNamespace(allgather=lambda value:[value])
+        session=SimpleNamespace(comm=comm,_live=lambda:None,
+            backend=SimpleNamespace(decomposition=(1,1,1,1,1)),
+            lib=SimpleNamespace(sp_gs_scf_info=lambda *args:0),_check=lambda code:None)
+        state=NativeGSState(session,1,None,'film',None)
+        state._identity='model/runtime';state._scf_ready=Mock()
+        other=NativeGSState(session,2,None,'film',None)
+        other._identity=state._identity;other._scf_ready=Mock()
+        saved=NativeSCFSnapshot(state,7)
+        state.snapshot=Mock(return_value=saved);state.restore=Mock()
+        groups=[{'name':'gs','ranks':[0],'point_ids':['film']}]
+        target=state.checkpoint_target()
+        self.assertIsNone(target.restore);state.snapshot.assert_not_called()
+        result=execute_checkpoint(None,groups,states={'film':target})
+        self.assertIs(result['states']['film'],saved)
+        self.assertNotEqual(state.checkpoint_capability.identity,other.checkpoint_capability.identity)
+        with self.assertRaises(InputError):other.checkpoint_target(saved)
+        with self.assertRaises(InputError):
+            execute_checkpoint(None,groups,states={'film':other.checkpoint_target()},
+                               operation='restore',saved=result['compatibility'])
+        restore=state.checkpoint_target(saved)
+        with self.assertRaises(InputError):
+            restore_checkpoint(None,groups,states={'film':restore},
+                live=CheckpointState(states={'film':state}),saved=result['compatibility'])
+        state.restore.assert_not_called()
+        execute_checkpoint(None,groups,states={'film':restore},operation='restore',saved=result['compatibility'])
+        state.restore.assert_called_once_with(saved)
+        saved.closed=True
+        with self.assertRaises(InputError):state.checkpoint_target(saved)
+
+    def test_scf_candidate_reservation_stage_discard_and_publication(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from salmonpy.native_gs import _SCFRestoreCandidate
+        from salmonpy.errors import InputError
+        calls=Mock(return_value=0)
+        session=SimpleNamespace(comm=SimpleNamespace(allgather=lambda v:[v]),
+            _check=lambda rc:None,_gs_call=lambda directory,fn,*args:fn(*args))
+        state=SimpleNamespace(session=session,_scf_ready=lambda:None,directory=None,_token=1,
+            _restore_candidate=object(),info=SimpleNamespace(converged=False))
+        snapshot=SimpleNamespace(closed=False,_token=2)
+        candidate=_SCFRestoreCandidate(state,snapshot,calls)
+        with self.assertRaises(InputError):candidate.stage()
+        calls.assert_not_called()
+        state._restore_candidate=None
+        self.assertIs(candidate.stage(),candidate)
+        candidate.discard();self.assertIsNone(state._restore_candidate)
+        self.assertEqual([call.args[-1] for call in calls.call_args_list],[2,4])
+        with self.assertRaises(InputError):candidate.publish()
+        candidate=_SCFRestoreCandidate(state,snapshot,calls)
+        candidate.stage();self.assertIs(candidate.publish(),state)
+        self.assertIsNone(state._restore_candidate)
+        self.assertFalse(state._metadata_converged)
+        with self.assertRaises(InputError):candidate.stage()
+        def reject(code):
+            if code:raise InputError('native admission')
+        candidate=_SCFRestoreCandidate(state,snapshot,calls)
+        with self.assertRaisesRegex(RuntimeError,'host failure'):
+            with candidate.stage() as staged:
+                self.assertIs(staged,candidate)
+                raise RuntimeError('host failure')
+        self.assertIsNone(state._restore_candidate)
+        candidate.close()  # idempotent after the exceptional context exit
+        session._check=reject;failed=Mock(return_value=11)
+        candidate=_SCFRestoreCandidate(state,snapshot,failed)
+        with self.assertRaises(InputError):candidate.stage()
+        candidate.discard()
+        self.assertIsNone(state._restore_candidate)
+        self.assertEqual([call.args[-1] for call in failed.call_args_list],[2])

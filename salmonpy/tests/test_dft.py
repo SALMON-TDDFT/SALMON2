@@ -170,3 +170,23 @@ class WarmStartTest(unittest.TestCase):
             with patch('subprocess.run') as run, self.assertRaisesRegex(ValueError, 'checksum'):
                 displaced.run(engine, root/'tampered', initial_guess=source)
             run.assert_not_called()
+
+class SymmetryInputTest(unittest.TestCase):
+    def test_symmetry_is_owned_and_serialized_as_input_asset(self):
+        from salmonpy.dft import SymmetryOperations
+        from dataclasses import replace
+        ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3);ops[1,0,0]=-1
+        symmetry=SymmetryOperations(ops,directions='yyn')
+        ops[1,0,0]=99
+        self.assertEqual(symmetry.operations[1,0,0],-1)
+        with self.assertRaises(ValueError):symmetry.operations.setflags(write=True)
+        model=DFT((14,),np.eye(3)*8,[[0,0,0]],
+            (Pseudopotential(14,2,'_rps.dat',b'20 .01 2 4\n'),),4,2,(8,)*3,(2,)*3,
+            xc='hse06',symmetry=symmetry)
+        self.assertIn("yn_symmetry='yyn'",model.input_text())
+        self.assertEqual(dict(model.input_assets)['sym.dat'],symmetry.data)
+        self.assertEqual(len(symmetry.data.splitlines()),6)
+        self.assertNotEqual(model._restart_signature(),replace(model,symmetry=None)._restart_signature())
+        for invalid in ([],np.full((1,3,4),np.nan),np.full((1,3,4),np.inf),np.zeros((2,3,3)),np.ones((1,3,4),dtype=complex)):
+            with self.assertRaises(ValueError):SymmetryOperations(invalid)
+        with self.assertRaises(ValueError):SymmetryOperations(np.zeros((1,3,4)),directions="y's")

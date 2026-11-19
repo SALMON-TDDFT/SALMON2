@@ -560,6 +560,10 @@ DFT_Iteration : do iter=Miter+1,max_iterations
    if(iteration_support_changed)sum1=huge(sum1)
 #endif
 
+   ! Diagnostics only: preserve the reported accepted-iteration residual.
+   if(calc_mode/='DFT_BAND') &
+    call record_scf_residual(mixing%scf_progress,Miter,sum1,scf_threshold,system%xc_pre_scf_active)
+
    if(theory=='dft' .and. yn_opt=='n')then
      is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval) == 0)
      is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
@@ -623,6 +627,28 @@ mixing%scf_progress%residual=sum1
 mixing%scf_progress%rion_update=rion_update
 
 contains
+
+subroutine record_scf_residual(progress,iteration,residual,tolerance,pre_scf)
+ type(s_scf_iteration_progress),intent(inout)::progress
+ integer,intent(in)::iteration
+ real(8),intent(in)::residual,tolerance
+ logical,intent(in)::pre_scf
+ real(8),allocatable::grown(:,:)
+ integer::capacity,n
+ n=progress%residual_count
+ if(.not.allocated(progress%residual_history))then
+  allocate(progress%residual_history(4,64));progress%residual_history=0d0
+ endif
+ capacity=size(progress%residual_history,2)
+ if(n==capacity)then
+  allocate(grown(4,capacity+max(64,capacity)));grown=0d0
+  grown(:,:n)=progress%residual_history(:,:n)
+  call move_alloc(grown,progress%residual_history)
+ endif
+ progress%residual_count=n+1
+ progress%residual_history(:,n+1)=[dble(iteration),residual,tolerance,merge(1d0,0d0,pre_scf)]
+end subroutine
+
 
 #ifdef USE_HSE
   subroutine consume_support_event(changed)

@@ -221,16 +221,20 @@ contains
     system%salmonpy_hse_owner=>owner
     status=0
   end subroutine
-  subroutine exx_bind_gs_system(system,info,owner,status)
+  subroutine exx_bind_gs_system(system,info,owner,status,allow_symmetry)
     type(s_dft_system),intent(inout)::system
     type(s_parallel_info),intent(in)::info
     type(s_exx_rt_state),target,intent(inout)::owner
     integer,intent(out)::status
+    logical,optional,intent(in)::allow_symmetry
     ! 2 means the GS entry retains the legacy owner; 1 is a binding conflict.
     status=2
     if(theory/='dft'.or.yn_opt/='n')return
-    ! Keep automatic GS binding policy unchanged; explicit symmetry owners are audited separately.
-    if(system%kpoint_input%use_symmetry)return
+    ! Native retained GS opts into owned symmetry; CLI legacy policy stays unchanged.
+    if(system%kpoint_input%use_symmetry)then
+      if(.not.present(allow_symmetry))return
+      if(.not.allow_symmetry)return
+    endif
     if(.not.native_owner_supported(system,info))return
     call exx_bind_system(system,owner,status)
   end subroutine
@@ -253,9 +257,11 @@ contains
       ok=.false.
       ! Explicit-owner symmetry scope: one/two k ranks, CPU full-q scalar exchange.
       ! Histories belong to local representatives and use the same full-q action.
-      if(exx_factor_mode/='off'.and.exx_factor_mode/='strict'.and.exx_factor_mode/='learned')return
-      if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full'.and.propagator/='hse_ptcn')return
-      if(propagator=='hse_taylor4_full'.and.exx_factor_mode/='off')return
+      if(theory/='dft')then
+        if(exx_factor_mode/='off'.and.exx_factor_mode/='strict'.and.exx_factor_mode/='learned')return
+        if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full'.and.propagator/='hse_ptcn')return
+        if(propagator=='hse_taylor4_full'.and.exx_factor_mode/='off')return
+      endif
       if(info%isize_k>2.or.info%isize_k>system%nk.or.any(hse_q_reduction/=1).or.any(system%kmesh<1))return
       if(.not.allocated(system%kpoint_input%symmat_a))return
       if(.not.allocated(system%kpoint_input%symmat_b))return

@@ -6,6 +6,8 @@
 extern "C" {
 #endif
 int sp_gs_protocol(void);
+/* Optional1 confirms Cartesian force output after symmetry averaging. */
+int sp_gs_cartesian_force_protocol(void);
 /* Immutable relative input and dependencies must be visible on every subgroup rank.
  * Standard profile: create computes SCF; fast import-only profile returns2. Unconverged SCF still succeeds and retains the last iterate.
  * Handles retain numerical/XC/MPI owners, with unique tokens invalidated at close. */
@@ -31,6 +33,28 @@ int sp_gs_scf_info(int64_t token,int values[6]);
 int sp_gs_scf_snapshot(int64_t token,int64_t *snapshot);
 int sp_gs_scf_restore(int64_t token,int64_t snapshot);
 int sp_gs_scf_snapshot_close(int64_t token,int64_t snapshot);
+/* Optional candidate1: stage detached numerical payload (mode2/snapshot), then
+ * host votes globally before publish (mode3/snapshot0), or discard (mode4/0).
+ * Same live owner, one pending payload; pending owners reject evolution/direct
+ * restore/snapshot/close. Metadata reads remain available. No resource creation,
+ * SCF replay, exchange evaluation or file access. Publication assignments can
+ * allocate: fatal OOM/process failure is not a handled rollback guarantee.
+ * All ranks agree token/mode/snapshot before writes; mode4 is idempotent. */
+/* Rank-local SCF disk v1: same binary/input/topology. mode0 writes a NEW file;
+ * mode2 stages a numerical read collectively, then candidate(token,0,3) publishes.
+ * Host verifies manifest/SHA256 first. Bootstrap prepares static runtime resources
+ * but skips initial orbitals/density, mixing and every SCF iteration. */
+/* Optional ordinary PZ/Libxc-PZ/PBE full-grid k-only repartition.
+ * Host validates binary/model/input/old-file hashes first. kbounds is2*old_size
+ * integers in [lo0,hi0,lo1,hi1,...] global-k order; stage then candidate publish.
+ * HSE and orbital/spatial repartition are not supported by this protocol. */
+int sp_gs_scf_k_repartition_protocol(void);
+int sp_gs_scf_k_repartition(int64_t token,const char *directory,int old_size,const int *kbounds);
+int sp_gs_scf_disk_protocol(void);
+int sp_gs_scf_bootstrap(const char *filename,int64_t *token);
+int sp_gs_scf_disk(int64_t token,const char *filename,int mode);
+int sp_gs_scf_candidate_protocol(void);
+int sp_gs_scf_candidate(int64_t token,int64_t snapshot,int mode);
 /* Import existing wfn with yn_restart=y/read_gs_restart_data=wfn; no SCF or GS writes.
  * Imported forces are unavailable (array_info/read return11). */
 int sp_gs_import(const char *filename,int64_t *token);
@@ -44,7 +68,7 @@ int sp_tddft_model_from_gs(int64_t gs,double dt,int capacity,const int decomposi
  * Fast import-only: values are undefined placeholders; Python returns None.
  * Fast import does not expose eigenvalues/forces or the optional GS-to-RT symbols. */
 int sp_gs_info(int64_t token,int stats[4],double values[3]);
-/* q:1 density,2 occupations,3 eigenvalues,4 force,5 orbital. Fortran-order arrays;
+/* q:1 density,2 occupations,3 eigenvalues,4 force,5 orbital,6 SCF history (4 rows: iteration/residual/threshold/PBE phase). Fortran-order arrays;
  * shape/lower use7 slots; ndim selects meaningful slots. Local density/orbitals
  * may include halos; eigen/occupation/force are native replicated arrays. */
 int sp_gs_array_info(int64_t token,int quantity,int *ndim,int64_t shape[7],int64_t lower[7]);

@@ -294,3 +294,86 @@ Pythonは宣言された版と全ランクの既知エラーを確認できる�
 `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` を1／2ランク、OMP／BLAS1、外側timeoutで実行します。`--split` は4ランクの独立2群です。`--faults` は明示した別の `SALMONPY_RECOVERY_TESTING` ビルドだけに使います。本番には注入入口を含めません。数値オーバーフローの試験値は科学入力ではありません。
 
 ステップ失敗時のnative数値／通常出力の巻戻しは [NATIVE_STEPPING.md](NATIVE_STEPPING.md) を参照。checkpointのLOADをステップ退避の代用にせず、両者の同時利用は拒否します。反映でownerが変わったらstep targetを作り直します。
+
+## SCFメモリ保存を共通APIから使う
+
+計算済みの生存中の `NativeGSState` は `checkpoint_capability` と
+`checkpoint_target(snapshot=None)` を公開します。内部MPI群の全ランクが同順序で
+呼びます。接続時にランタイムのプロトコルと生存SCFのメタデータを確認しますが、保存や数値反復は行いません。
+形式は `salmonpy.native-scf-memory/1` です。識別子は物質・モデル・ランタイムと
+生存native所有者のトークンに結び付き、同じ物質入力の別状態とも区別します。
+MPI分割は実際の `(k, orbital, x, y, z)` です。
+
+```python
+from salmonpy.checkpointing import execute_checkpoint
+comm = state.session.comm
+plan = [{"name": "scf", "ranks": list(range(comm.size)), "point_ids": ["film"]}]
+saved_run = execute_checkpoint(comm, plan, states={"film": state.checkpoint_target()})
+with saved_run["states"]["film"] as payload:
+    state.continue_scf(steps=5)
+    execute_checkpoint(comm, plan, operation="restore", saved=saved_run["compatibility"],
+                       states={"film": state.checkpoint_target(payload)})
+    state.continue_scf(steps=5)
+```
+
+通信するのは互換性メタデータだけです。`NativeSCFSnapshot` は各ランクのFortran
+メモリに残り、明示的に終了します。JSONだけでは復元できず、ディスク保存／プロセス
+再開でもありません。通常PZ／Libxc-PZ/PBEと全k点CPU高速PR版HSE06の対応範囲・
+数値実装は従来どおりです。
+
+`execute_checkpoint(operation="restore")` は引き続き**直接復元**です。
+SCF candidate protocol1を持たない旧ランタイムでは `stage_restore` がないため、
+`restore_checkpoint` は数値コールバック前に拒否します。対応ランタイムでは次節の
+独立した数値候補による準備を使えます。`execute_checkpoint` では後の部品が実行途中で失敗すると、先の部品だけ
+復元済みになり得ます。全状態のロールバックを保証するものではありません。
+異なる所有者・終了済みトークン・互換性不一致は数値コールバック前に拒否します。
+候補作成の代わりに破壊的な復元へ落とさないでください。
+`python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT` は共通入口を使います。
+高速PR版HSE用ビルドでは `--xc hse06` を付けます。
+
+### SCF候補の保護付き準備とnative状態への反映
+
+`sp_gs_scf_candidate_protocol()==1` の対応ランタイムでは、
+`state.checkpoint_target(payload)` が独立した**数値候補**を作れます。
+別の計算可能なGSソルバーを作る方式ではなく、FFT・XC・MPI資源は元の生存状態に
+保持します。Fortranでスナップショットを切り離した領域へコピーし、SCF初期化・軌道
+計算・交換演算を行いません。候補がある間は元の状態を予約し、メタデータの参照は
+できますが、継続・直接復元・保存・終了は反映または破棄まで拒否します。
+呼び出しは同じ内部MPI群の全ランクがメインスレッドで同順序に行います。
+メモリ内・同じ生存状態・対応XC／MPI分割の制約は変わりません。
+
+```python
+from salmonpy.checkpointing import CheckpointState, restore_checkpoint
+holder = CheckpointState(states={"film": state})
+prepared = restore_checkpoint(
+    comm, plan, live=holder, saved=saved_run["compatibility"],
+    states={"film": state.checkpoint_target(payload)})
+# 全参加者の準備が成功。この時点まで元のnative数値状態は変わりません。
+for candidate in prepared["states"].values():
+    candidate.publish()  # 内部MPI群のcollective。戻り値は元のstate。
+state.continue_scf(steps=5)
+```
+
+holderに入るのは準備済み候補で、独立に計算を走らせる状態ではありません。
+全native候補を群内の同じ順序で反映してから計算を再開してください。
+準備途中で処理可能な例外が出ると、途中の候補も含めて破棄して予約を解除し、
+元の数値状態を保持します。元の軌道を継続でき、新しいtargetで復元を再試行できます。
+手動準備を中止する場合は全体の準備成功確認前に `candidate.discard()` を呼びます。
+一部反映後のエラーを無視して計算を続けないでください。native反映では配列代入による
+メモリ確保があり得るため、致命的な確保失敗・プロセス／通信故障・反映途中の任意の
+異常を元に戻す保証ではありません。反映／破棄にファイル操作や時間発展はありません。
+元スナップショットは準備・反映が終わるまで保持し、その後明示的に終了します。
+
+`python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT --protected` で試せます。
+全k点の高速PR版HSEビルドなら `--xc hse06` も付けます。
+旧ランタイムでは直接復元を維持し、未対応の保護付き復元を直接復元へ落としません。
+
+native SCFの同一ビルド・入力・MPI分割ディスク形式は、
+`state.checkpoint_target(directory=...)` でこの共通APIに接続できます。
+`scf_disk_capability` はファイルを読まない宣言で、stageがSHA256と入力を検査します。
+全候補の準備後に各candidate.publish()を実行してください。失敗後の再試行には新しい
+targetを作ります。詳細と2状態の例は [NATIVE_GS.md](NATIVE_GS.md) を参照してください。
+
+native SCFの準備済み候補はclose／with文で明示的に破棄できます。GS状態のcloseは
+その状態のPython所有候補を、snapshotのcloseはそのsnapshot由来の候補を先に破棄します。
+C ABIで直接準備した外部所有候補は自動破棄しません。すべて同じMPI呼出し順が必要です。

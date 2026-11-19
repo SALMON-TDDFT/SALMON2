@@ -10,6 +10,12 @@ module sym_vector_sub
 
 contains
 
+  function sp_gs_cartesian_force_protocol() result(protocol) bind(C)
+    use iso_c_binding,only:c_int
+    integer(c_int) :: protocol
+    protocol=1_c_int
+  end function
+
   subroutine sym_vector_xyz( vxyz )
     implicit none
     real(8),intent(inout) :: vxyz(3)
@@ -75,7 +81,8 @@ contains
 
     end do !iatm
 
-    Fxyz = Ftmp/nsym
+    ! Ftmp is in the direct-lattice basis; callers require Cartesian force.
+    Fxyz = matmul( Amat, Ftmp/nsym )
 
     deallocate( Faaa )
     deallocate( Raaa )

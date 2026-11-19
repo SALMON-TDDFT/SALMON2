@@ -105,6 +105,34 @@ def _read_forces(path,natoms):
 
 
 @dataclass(frozen=True,eq=False)
+class SymmetryOperations:
+    """Explicit fractional rotations/translations, shape (operations,3,4).
+
+    This records user-supplied symmetry, not symmetry discovery or a certificate
+    that atoms/grid/k stars preserve it. Native/geometry admission still applies.
+    """
+    operations: np.ndarray
+    directions: str='yyy'
+
+    def __post_init__(self):
+        values=np.asarray(self.operations)
+        if np.iscomplexobj(values):raise InputError('symmetry operations must be real')
+        if values.ndim!=3 or values.shape[0]<1 or values.shape[1:]!=(3,4):
+            raise InputError('symmetry operations require shape (n,3,4), n>=1')
+        if not isinstance(self.directions,str) or not 1<=len(self.directions)<=3 or any(c not in 'yn' for c in self.directions):
+            raise InputError('symmetry directions require one to three y/n characters')
+        object.__setattr__(self,'operations',_frozen(values,values.shape))
+
+    @property
+    def data(self):
+        return (''.join(' '.join(format(float(x),'.17g') for x in row)+'\n'
+                        for row in self.operations.reshape(-1,4))).encode('ascii')
+
+    @property
+    def sha256(self):return hashlib.sha256(self.data).hexdigest()
+
+
+@dataclass(frozen=True,eq=False)
 class DFT:
     """Geometry (cell rows in bohr, fractional positions) and fixed model settings.
 
@@ -120,8 +148,11 @@ class DFT:
     grid: tuple
     kmesh: tuple
     xc: str='pz'
+    symmetry: SymmetryOperations | None=None
 
     def __post_init__(self):
+        if self.symmetry is not None and not isinstance(self.symmetry,SymmetryOperations):
+            raise InputTypeError('symmetry requires explicit SymmetryOperations or None')
         numbers=tuple(_integer(n,'atomic number',1,118) for n in self.numbers)
         if not numbers: raise InputError('at least one atom required')
         pseudos=tuple(self.pseudopotentials)
@@ -144,10 +175,16 @@ class DFT:
 
     def _pseudo_name(self,i): return f'pseudo{i+1}'+self.pseudopotentials[i].suffix
 
+    @property
+    def input_assets(self):
+        values=tuple((self._pseudo_name(i),p.data) for i,p in enumerate(self.pseudopotentials))
+        return values if self.symmetry is None else values+(('sym.dat',self.symmetry.data),)
+
     def input_text(self,scf=SCFSettings()):
         if not isinstance(scf,SCFSettings): raise InputTypeError('expected SCFSettings')
         vector=lambda x: ','.join(f'{v:.17e}' for v in x)
         lattice='\n'.join(f' al_vec{i+1}='+vector(row)+',' for i,row in enumerate(self.cell))
+        if self.symmetry is not None:lattice+=f"\n yn_symmetry='{self.symmetry.directions}',"
         pseudo='\n'.join(f" file_pseudo({i+1})='{self._pseudo_name(i)}', izatom({i+1})={p.atomic_number}, lloc_ps({i+1})={p.local_channel},"
                          for i,p in enumerate(self.pseudopotentials))
         index={p.atomic_number:i+1 for i,p in enumerate(self.pseudopotentials)}
@@ -189,12 +226,14 @@ class DFT:
 
     def _restart_signature(self):
         """Physical/discretization identity; only ionic positions may change."""
-        return {'xc': self.xc, 'electrons': self.electrons, 'states': self.states,
+        value={'xc': self.xc, 'electrons': self.electrons, 'states': self.states,
                 'grid': list(self.grid), 'kmesh': list(self.kmesh),
                 'cell_bohr': self.cell.tolist(), 'numbers': list(self.numbers),
                 'pseudopotentials': [{'atomic_number': p.atomic_number,
                                      'sha256': p.sha256, 'local_channel': p.local_channel}
                                     for p in self.pseudopotentials]}
+        if self.symmetry is not None:value['symmetry']={'directions':self.symmetry.directions,'sha256':self.symmetry.sha256}
+        return value
 
     def run(self,executable,directory,*,scf=SCFSettings(),threads=1,timeout=600.,initial_guess=None,save_restart=True):
         import os,subprocess
@@ -228,6 +267,7 @@ class DFT:
                 'cell_bohr':self.cell.tolist(),'fractional_positions':self.fractional_positions.tolist(),'numbers':self.numbers,
                 'pseudopotentials':[{'atomic_number':p.atomic_number,'sha256':p.sha256,'local_channel':p.local_channel} for p in self.pseudopotentials],
                 'max_iterations':scf.max_iterations,'tolerance':scf.tolerance,'threads':threads,'restart_saved':save_restart}
+        if self.symmetry is not None:record['symmetry']=self._restart_signature()['symmetry']
         manifest=dest/'ground-state.json'
         try:
             if source is not None:
@@ -242,7 +282,7 @@ class DFT:
                     'source_directory': str(source.directory),
                     'manifest_sha256': _digest(source.directory/'ground-state.json')}
             (work/'gs.inp').write_text(text)
-            for i,p in enumerate(self.pseudopotentials): (work/self._pseudo_name(i)).write_bytes(p.data)
+            for name,data in self.input_assets:(work/name).write_bytes(data)
             record['input_sha256']=_digest(work/'gs.inp');manifest.write_text(json.dumps(record,indent=2))
             env={k:v for k,v in os.environ.items() if k!='SALMONPY_TDDFT_WORKER'}
             env.update(OMP_NUM_THREADS=str(threads),OPENBLAS_NUM_THREADS='1')

@@ -40,7 +40,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
  'salmonpy.coupled': ('NativeEHField', 'MultiscaleField', 'CoupledStepper', 'PacketCoupledStepper'),
  'salmonpy.crystal': ('AResponseState', 'AInitialState', 'CrystalResponse', 'respond'),
  'salmonpy.native_gs': ('NativeGSBackend','NativeGSSession','NativeGSState','NativeGSArray','NativeGSInfo','NativeSCFSnapshot'),
- 'salmonpy.dft': ('Pseudopotential', 'SCFSettings', 'DFT', 'GroundStateResult'),
+ 'salmonpy.dft': ('Pseudopotential', 'SCFSettings', 'SymmetryOperations', 'DFT', 'GroundStateResult'),
  'salmonpy.distributed': ('SolverGroup',
                           'ParallelPlan',
                           'ParallelContext',

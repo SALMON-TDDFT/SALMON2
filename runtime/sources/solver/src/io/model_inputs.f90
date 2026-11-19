@@ -523,10 +523,19 @@ module salmonpy_model_inputs
     character(1) :: yn_exx_dc_mlwf
     character(1) :: yn_hse_wannier
   contains
+    procedure :: parallel_from => copy_model_parallel
+    procedure,pass(value) :: disk_io => scf_io_s_model_inputs
     procedure :: capture => capture_model_inputs
     procedure :: activate => activate_model_inputs
   end type
 contains
+  subroutine copy_model_parallel(self,source)
+    class(s_model_inputs),intent(inout)::self
+    type(s_model_inputs),intent(in)::source
+    self%nproc_k=source%nproc_k
+    self%nproc_ob=source%nproc_ob
+    self%nproc_rgrid=source%nproc_rgrid
+  end subroutine
   subroutine capture_model_inputs(self)
     class(s_model_inputs),intent(out) :: self
     self%exx_ace_support=exx_ace_support
@@ -1074,4 +1083,5 @@ contains
     iflag_atom_coor=self%iflag_atom_coor
     status=0
   end subroutine
+#include "scf_model_disk_io.inc"
 end module

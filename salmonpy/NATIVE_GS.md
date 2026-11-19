@@ -599,8 +599,8 @@ NLCCなしの既存計算は数値回帰で確認します。旧ソースの削�
 
 ## SCFの途中停止・メモリ内保存／再開
 
-新しく明示ビルドしたCPUランタイムでは、周期・非スピン分極・対称性なし・
-固定イオンのPZ／Libxc-PZ/PBEと高速PR版HSE06でSCF protocol1を利用できます。従来のrun()は
+新しく明示ビルドしたCPUランタイムでは、周期・非スピン分極・
+固定イオンのPZ／Libxc-PZ/PBE（明示的な対称性あり／なし）と高速PR版HSE06（全k点、または後述の縮約k点）でSCF protocol1を利用できます。従来のrun()は
 変更せず、stepsを指定した場合だけ反復境界で止めます。
 
 ```python
@@ -666,7 +666,7 @@ FFT／backendカーネルは生存資源として残し、数値部分のコピ�
 HSEへ移行済みなら、反復上限で未収束でも警告して最終反復を保持します。
 未収束を収束済みとは表示しません。PBE事前段階が終わらない結果はHSE結果とは
 扱えません。小さな試験の緩い閾値は段階切替の検査用で、物理精度の保証ではありません。
-保存は同じ生存状態・ビルド・MPI分割でのメモリ内保存です。対称性、SOC/+U/DC、
+保存は同じ生存状態・ビルド・MPI分割でのメモリ内保存です。縮約k点は後述し、SOC/+U/DC、
 イオン運動、ディスク保存／プロセス再開は今回の拡張に含みません。
 
 ```sh
@@ -678,3 +678,220 @@ mpiexec -n 2 python -m salmonpy.examples.scf_resume HSE_BUILD_JSON NEW_OUTPUT --
 挟んだ独立性、未収束時の警告と保持、GSから続けた16ステップのTDDFT電流も
 確認しました。実装の回帰検証であり物理的収束の検証ではありません。
 GSの波動関数・密度データは収集していません。
+
+### 共通の保存／復元APIへの接続
+
+`state.checkpoint_capability` は生存状態用のnative-scf-memory/1を宣言します。
+`state.checkpoint_target()` は保存、`state.checkpoint_target(snapshot)` は直接復元も
+接続します。CHECKPOINTING.mdの `execute_checkpoint` を使えます。
+scf_resumeサンプルもこの共通入口を使用します。保存データは各ランクのFortranメモリに
+残り、接続の作成だけでは保存やSCF反復は走りません。新しい対応ランタイムは独立した
+数値候補の準備にも対応します。restore_checkpointで全体の準備成功を確認した後、
+各候補をpublishしてから継続します（CHECKPOINTING.md参照）。旧ランタイムは
+保護付き準備を拒否し、暗黙の直接復元へのフォールバックはありません。
+複数部品の直接復元は引き続き原子的ではありません。
+
+### 明示的な対称操作と縮約k点HSEのSCF
+
+`DFT(..., symmetry=SymmetryOperations(operations, directions="yyn"))` で
+分率座標の回転と並進を渡せます。operationsの形は(n,3,4)で、最初の3列が回転、
+4列目が分率並進です。入力はコピーして不変に保持します。対称性の自動検出、セルの
+標準化、ネットワーク参照は行いません。高速PR版は既存の分率符号付き置換行列の範囲で、
+セル・格子・原子・k点の適合性も検査します。利用者が結晶と、後のRTでは実際の外場を
+保存する部分群を選びます。全体の偏光をz方向に限定する機能ではありません。
+
+```python
+from dataclasses import replace
+import numpy as np
+from salmonpy.dft import SymmetryOperations
+ops = np.zeros((2, 3, 4))
+ops[:, :, :3] = np.eye(3)
+ops[1, :2, :2] = -np.eye(2)  # z軸まわりのC2。恒等操作も含む。
+calculation = replace(calculation, symmetry=SymmetryOperations(ops, directions="yyn"))
+```
+
+`input_assets` は生成したsym.datと擬ポテンシャルを含みます。native／バッチとも同じ
+保持済みのバイト列を書き、MPIでは実行前に資産の内容を照合します。対称性のハッシュを
+物質・warm startの識別に含め、GS→HSE TDDFTにも資産を引き継ぎます。
+既定のsymmetry=Noneでは従来の入力本文と計算経路を維持します。
+縮約k点のSCF継続はCPU高速PR版HSE・全q点・内部k点MPI1／2に対応し、全k点と
+同じ停止／継続／snapshot／直接復元／保護付き数値候補のAPIを使います。
+PZ／Libxc-PZ／Libxc-PBEの明示的な対称性付きSCFにも同じAPIを使えます。
+内部k点MPI2と空間MPI2で、物質を交互に進めた場合の独立性・保護付き復元・連続実行との一致を確認しました。
+対称性・密度対称化のテーブルは各GS
+コンテキストが所有し、継続時に切り替えます。固定の初期化テーブルは元のモデルに残り、
+別のソルバーを初期化する方式ではありません。
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.scf_resume HSE_BUILD_JSON NEW_OUTPUT --xc hse06 --symmetry c2z --protected
+```
+
+C2で縮約したSCFの復元、異なるセル・格子の物質を挟む実行で、軌道・占有数・エネルギー・
+密度と続く16ステップのz駆動RTが旧実装の連続実行と完全一致しています。
+対称力の意図的な単位修正だけは、後述の旧基底を復元して比較します。これは実装の検証で、物理精度の認定ではありません。
+別の固定格子Si試験では全8点／縮約6点をSCF収束させ、エネルギーは1e-6 Hartree以内、
+密度は相対1e-4・絶対1e-7 bohr^-3以内でした。
+比較から既存の単位不整合も見つかりました。力をCartesian座標から直接格子基底へ変換して
+対称化した後、平均をCartesianへ戻していませんでした。恒等操作・C2・一般セルの
+実コード試験で旧処理の失敗を確認し、Fortranで `Amat * average(Ainv * F)` を返すよう
+修正しました。**対称化した力は、正しいCartesianのHartree/bohrへ意図的に変わります。**
+対称性なしの力、エネルギー、密度、固定イオンでの電流は変更しません。
+旧対称力との回帰比較だけは旧基底からの復元を行いますが、アプリ側の自動変換ではありません。
+
+修正後の同じ固定格子・SCF収束済みSiでは、全8点／縮約6点の力も1e-6 Hartree/bohr以内で
+一致し、最大差は約1.15e-7でした。これは対称性等価性と単位の検証で、格子・k点収束、
+エネルギー微分、構造最適化までの物理精度を認定するものではありません。
+NLCC／ASEの検証ゲートは解除せず、過去の出力も上書きしません。
+
+新しい `sp_gs_cartesian_force_protocol()==1` が座標基底の修正を宣言します。
+宣言のない旧ランタイムの対称力は、警告して値を保持し、Hartree/bohrと誤表示せず
+基底未確認と表示します。Cartesianの対称力には対応する修正版を明示的に選んでください。
+暗黙のビルドやPythonでの数値変換は行いません。縮約GSアーカイブ、ディスク再開、
+MPI分割変更は引き続き別の残作業です。
+
+開発用の小さな検査は `python tools/test_symmetry_force_units.py NEW_OUTPUT` です。
+Fortranコンパイラを明示的に使い、実際の対称化モジュールを監査・ビルドして調べます。
+新しいGS計算や、ビルド済みランタイムを通常利用するための前提ではありません。
+
+### SCF途中状態のディスク保存・別プロセスでの再開
+
+対応する新規ランタイムでは `state.save_scf(new_directory)` で反復境界を保存し、
+別プロセスの `session.run(calculation, scf=scf, material_id=..., restart=directory)`
+で読み込めます。これは収束済みGSの `export_archive()` による再利用とは別の機能です。
+同じランタイムのSHA256、物質ID、入力・擬ポテンシャル・対称性資産、MPIランク数と
+分割が必要です。入力条件を変えて続けるwarm startや、MPI再分割の形式ではありません。
+
+```python
+# 保存するプロセス
+with session.run(calculation, scf=scf, material_id="Si", steps=3) as state:
+    state.save_scf(checkpoint_directory)  # 新しい保存先。既存の保存は上書きしない。
+# 別プロセス。同じcalculation/scfとMPI分割を指定する。
+with session.run(calculation, scf=scf, material_id="Si", restart=checkpoint_directory) as state:
+    assert state.scf_status["executed_iterations"] == 0
+    state.continue_scf(steps=5)
+```
+
+Fortranが各rankの数値配列、密度混合履歴・混合率・反復位置、初期無混合の進捗、
+XC段階、高速HSEのACE・履歴・占有・キャッシュをstream形式で保存します。
+Pythonは版付きmanifestとファイルのSHA256を扱い、全rankの保存成功後にmanifestを
+書きます。不完全な保存は再開用として受け付けません。保存先は計算結果領域を指定します。
+
+読み込みはまず全rankの入力・ファイルを検査します。通信、格子、擬ポテンシャル、
+Ewald、FFT／Libxcなど実行資源を準備し、保存配列を独立候補へ読み、全rankの成功を
+確認して公開します。初期波動関数・密度の生成、混合の初期化、初回エネルギー評価、
+SCF反復は通りません。`executed_iterations` は今回のプロセスで実際に実行した回数です。
+保存前の実行回数はmanifestに残します。FFTハンドル、ポインタ、MPIコミュニケータ番号は
+保存せず、実行側の資源を使用します。HSEのFFTカーネルは必要な次反復で準備されます。
+
+検証ではPZ／Libxc-PZ/PBEと高速PR版HSE、k点MPI2／通常XCの空間MPI2、
+C2縮約k点、PBE事前段階からHSEへの切替で、3反復保存＋別プロセス5反復が連続8反復と
+完全一致しました。rankファイル破損は状態作成前に拒否し、native読込失敗でも既存状態を
+保持します。これは実装検証で、物理収束の認定ではありません。未収束は警告して保持します。
+
+既存のサンプルで `--save-scf NEW_CHECKPOINT` を指定すると停止位置を保存できます。
+別の実行で `--restart CHECKPOINT` を指定してください。物質設定、`--xc`、対称性、
+`--iterations`、MPI分割は揃えます。保存済みのSCF位置はファイルから復元します。
+形式は `salmonpy.native-scf-disk/1`、ABIは `sp_gs_scf_disk_protocol()==1` です。
+別ランタイム・MPI分割変更・可搬GSアーカイブへの変換は、この形式の対象外です。
+
+### 残差の反復履歴と未収束時の図
+
+`save_scf()` は数値チェックポイントに加え、`diagnostics/residuals.csv`、
+`diagnostics/residuals.png`、`diagnostics/report.json` を出します。PNGは残差の変化を拡大した図と、残差・
+収束閾値を対数軸で重ねた図を並べ、未収束ならその旨を表示します。CSVの列は反復番号、残差、
+閾値、PBE事前段階フラグです。初期の無混合反復は残差を評価しないため、この表には含めません。
+残差の定義は指定したSCF収束指標です。小さな残差だけで物理的収束を保証するものではありません。
+
+`state.array("scf_history")` は同じ4行×反復数の読み取り専用配列です。
+履歴はFortranが保持し、メモリsnapshot・ディスク保存・再開で引き継ぐため、再開前後を
+1本の図にできます。保存を伴わず図だけ必要なら `state.write_scf_report(new_directory)` を
+呼びます。再開後にこの関数を呼ぶと、それまでの全履歴を出力できます。
+
+描画には任意依存のMatplotlibを使います。導入されていない場合や描画が失敗した場合も、
+警告だけにしてチェックポイントとCSVを保持します。描画失敗をSCF計算失敗と表示しません。
+
+### 共通APIからのディスク保存と保護付き復元
+
+`state.scf_disk_capability` は保存形式・実際のMPI分割・物質／入力／ランタイム識別を
+宣言します。ファイルは読みません。`state.checkpoint_target(directory=path)` で
+`execute_checkpoint()` と `restore_checkpoint()` に接続できます。
+メモリ用の引数snapshotとdirectoryは同時には指定しません。
+
+```python
+from salmonpy.checkpointing import execute_checkpoint, restore_checkpoint, CheckpointState
+# a,bは同じsolver_comm上にある独立したSCF状態。各rankが同じ順で呼ぶ。
+groups = [{"name": "scf", "ranks": list(range(comm.size)), "point_ids": ["A", "B"]}]
+targets = {"A": a.checkpoint_target(directory=checkpoint_a),
+           "B": b.checkpoint_target(directory=checkpoint_b)}
+saved = execute_checkpoint(comm, groups, states=targets)
+# 必要な計算を進めた後、保存した位置へ戻す。
+live = CheckpointState(states={"A": a, "B": b})
+prepared = restore_checkpoint(comm, groups, states=targets,
+                              saved=saved["compatibility"], live=live)
+for candidate in prepared["states"].values():
+    candidate.publish()  # 全候補を公開してから計算を再開する。
+```
+
+ファイルのSHA256・入力を照合し、各状態の独立した数値候補へ読み込んでから、共通APIが
+全体の成功を確認します。途中失敗では候補を破棄し、元の状態はそのまま継続できます。
+失敗後に再試行するときはcheckpoint_target()を作り直します。保存形式と読み書きは
+バックエンド側に任せる、既存の共通契約を使います。
+
+1状態だけなら `state.restore_scf(directory)` も使えます。複数状態への直接呼出しは
+全体として原子的ではないため、まとめて保護する場合は上のrestore_checkpoint()を使います。
+保存・復元はSCF反復を実行せず、通信・FFT・Libxc資源を共有コピーしません。
+公開時の致命的なメモリ不足・プロセス消失まで巻き戻せるという保証ではありません。
+
+サンプルは `--disk --save-scf NEW_CHECKPOINT --protected` で共通APIのディスク経路を
+実行します。--diskを省いた既存のメモリ経路は維持します。
+
+### 復元候補の後片付け
+
+native SCFの準備済み候補は `candidate.close()`（discardと同じ）とwith文に対応します。
+publish前にwith文を抜けると候補だけを破棄し、元の数値状態を保持します。
+publish済み／破棄済み候補のcloseは何もしません。close後のpublishはできません。
+
+Pythonが保持するGS状態をcloseすると、その状態が所有する未公開候補も先に破棄します。
+メモリsnapshotをcloseすると、そのsnapshotから作った未公開候補を先に破棄します。
+これにより、候補準備後に利用者コードの例外でwith文を抜けても、状態とMPI資源を閉じられます。
+別のsnapshotや外部Cホストに属する候補は、このsnapshotの終了では破棄しません。
+
+各MPIランクは同じ順でclose/publish/discardを呼びます。ガベージコレクションから
+MPI操作を実行する機能ではありません。C ABIで直接準備した候補はそのホストの責任で
+破棄してください。Pythonは外部ホストの予約を勝手に解放せず、native側の拒否を保持します。
+
+### 通常XCのk点MPI数を変えて再開する
+
+新しい対応ランタイムでは、PZ／Libxc-PZ／Libxc-PBEの周期・非スピン分極・固定イオンSCFを、
+k点だけで並列化した配置間で再開できます。確認済みは1→2ランクと2→1ランクです。
+通常のrestartは従来どおり同じMPI分割を要求し、変更時だけ明示的に指定します。
+
+```python
+# 保存時と同じcalculation/scf/material_id、同じランタイムを使う。
+# 新しいMPI群はdecomposition=(comm.size,1,1,1,1)で開く。
+with session.run(calculation, scf=scf, material_id="Si",
+                 restart=checkpoint_directory, repartition=True) as state:
+    assert state.scf_status["executed_iterations"] == 0
+    state.continue_scf(steps=5)
+```
+
+新規保存のmanifestにはrankごとのglobal k範囲を記録します。入力のうちk並列数だけを
+変更し、セル・格子・k点集合・電子数・XC・混合条件・閾値・反復上限・資産は同じにします。
+保存形式、ランタイムSHA256、物質ID、旧k範囲の重複・範囲間の欠落、全rankファイルのSHA256を
+作成前に検査します。Fortranが必要な旧rankファイルを読み、波動関数とCG作業配列の
+k部分を再配置します。密度・混合履歴・Poisson／XC数値状態・残差履歴は保持し、
+継続用の並列設定を新しい実行資源に結び直します。新しい担当k範囲がすべて埋まることは
+公開前にnative側でも検査します。保存元のファイルは変更しません。
+
+読込直後の波動関数・密度・占有・固有値・残差履歴は保存値と完全一致しました。
+続く5反復は、保存元と同じ初期状態からの連続8反復とrtol1e-9／atol1e-10で比較しています。
+既定のGaussian初期化では乱数seedに担当開始k点が含まれ、MPI分割によって初期軌道が
+変わる場合があります。初期化自体は変更せず、別の初期状態を比較基準にしません。これは実装の検証であり、格子・k点などの物理収束を認定するものではありません。
+
+高速HSE、軌道／空間分割の変更、異なるランタイムへの移行はこの入口の対象外です。
+共通checkpoint_target／保護付き復元は、引き続き同一MPI分割で使います。
+必要なABIはsp_gs_scf_k_repartition_protocol()==1で、暗黙にはビルドしません。
+
+既存サンプルでは、保存側に `--k-parallel --save-scf NEW_CHECKPOINT`、
+異なるランク数の再開側に `--restart CHECKPOINT --repartition` を指定できます。
+通常XCで両側とも同じ2×2×2 k格子を使い、その他の入力も揃えます。

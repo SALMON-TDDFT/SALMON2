@@ -7,9 +7,11 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
 Molecular work remains paused. Memory budgets warn; SCF nonconvergence warns and
-retains results. Do not collect GS datasets or dispatch routine CI.
+retains results. GS saving/reuse and validation datasets in calc2026 are authorized by the user (2026-11-19/20). Do not dispatch routine CI.
 
 ### Completed and verified
+
+- [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC k-only1↔2 changed-rank restart is now measured; HSE/spatial/orbital/changed-runtime migration remains open.
 
 - [x] One maintained fast-PR solver tree and shared default preparation/build path;
   ordinary XC does not require HSE dependencies. Historical source evidence retained.
@@ -25,7 +27,7 @@ retains results. Do not collect GS datasets or dispatch routine CI.
   completes with maximum relative electron loss4.22e-10. This is not an optical
   or general-grid convergence certificate. Existing12³→16³ current error18.83%
   does not pass5%;12³ SCF was unconverged, so that comparison is provisional.
-- [x] Source/installed633 tests:632pass,1skip. Fresh source/object audits,
+- [x] Source/installed637 tests:636pass,1skip. Fresh source/object audits,
   sdist→wheel, installed examples, JP/EN/AI byte parity and guide sync verified.
 
 ### User-directed execution order (2026-11-19)
@@ -35,7 +37,7 @@ prioritize fast-HSE norm wiring or a current-grid campaign now. Molecular work
 remains paused. Group6 follows separately with the existing CI budget constraint.
 First group4 step: retain SCF convergence history/progress in the owning mixing
 state without changing arithmetic, then complete numerical checkpoint and live
-continuation. No GS dataset collection is authorized.
+continuation. GS saving/reuse and the approved validation datasets are authorized; keep results in calc2026.
 
 ### Remaining groups (not a count of individual implementation patches)
 
@@ -47,9 +49,9 @@ continuation. No GS dataset collection is authorized.
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
    physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
    silently changing existing results.
-4. [ ] Complete active SCF/mixing/cache continuation and portable checkpoint/version
-   migration, including changed-decomposition restore. Existing same-topology RT
-   direct restart is complete within measured scopes.
+4. [ ] Extend measured ordinary-XC k-only1↔2 SCF repartition to HSE/orbital/spatial layouts;
+   add portable/checkpoint-version migration across runtimes. Covered active-SCF
+   and same-topology RT direct restart are complete within measured scopes.
 5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
    ABI and wider initialization/allocation/process-failure recovery. Existing
    rollback does not guarantee arbitrary STOP/OOM/MPI-failure or threaded reentrancy.
@@ -1890,8 +1892,96 @@ Active SCF validation: source/installed634 tests (633pass,1skip). Six native ord
 - [x] Preserve mixing age and pre-SCF first iteration/count/phase across segments. No GS initialization, no-mix replay or exchange evaluation in restore.
 - [x] Actual MPI1/2 full-k and Gamma controls, interleaved different materials, snapshot3/5, continuous new/fixed preceding arrays/forces/info exact. Sixteen TDDFT currents from continued GS exact too.
 - [x] PBE→HSE switch across cuts exact against fixed continuous runtime with a control-flow tolerance. Tight-threshold target HSE warns/retains (no false convergence) against the new continuous runtime; preceding binary rejects this case and is not claimed to pass it.
-- [ ] Same-process memory scope only. Symmetry/SOC/+U/DC/ionic motion, portable disk/process restart, topology change and common protected checkpoint integration remain open.
+- [ ] Same-process memory scope only. Symmetry/SOC/+U/DC/ionic motion, portable disk/process restart, topology change and common direct integration completed below; candidate integration follows below.
 
 No GS datasets or CI; numerical arrays remain in RAM. Regression cases establish execution equivalence, not physical convergence.
 
 Fast-PR HSE SCF validation: source/installed634 tests (633pass,1skip), sdist→wheel and JP/EN/AI/API/tool byte parity. Five native full-k/Gamma/MPI1/2 cases exact to continuous execution; four also compare fixed preceding runtime, while the newly warning-only nonconverged pre-SCF case uses new continuous controls. Normal-XC PBE spatialMPI2 regression, fresh arithmetic/copy MPI1/2×OMP1/2, HSE GS→RT and learned/PT-CN history controls pass. Source/installed examples show init1/executed8 and zero restore work. Evidence: calc2026/salmonpy-hse-scf-live-resume-20261119. Disk/process restart and symmetry remain pending.
+
+### Group4: common direct SCF checkpoint entry
+
+- [x] NativeGSState checkpoint_capability / checkpoint_target bind existing opaque snapshots through execute_checkpoint. Format native-scf-memory/1; identity pins material/model/runtime/live owner and actual MPI layout.
+- [x] Binding does not snapshot or iterate. Payloads stay rank-local; wrong-owner/closed snapshots and incompatible metadata fail before numerical callbacks. Candidate-only protected restore rejects direct-only targets, no destructive fallback.
+- [x] Ordinary PBE spatialMPI2 and fast-PR HSE kMPI2, including PBE→HSE cuts and GS→16-step RT, match continuous new/preceding runtime exactly. Both material owners remain independent; restore initialization/replay0.
+- [x] Existing user-backend common execution MPI4 control passes. Source635 tests (634pass,1skip). Updated the existing scf_resume sample and JP/EN/AI guides, without adding a module or changing the numerical runtime.
+- [ ] Candidate staging for supported live SCF profiles is completed below. Disk/process restart/topology change/symmetry/SOC/+U/DC/ionic evolution remain pending; direct multi-component execution remains non-atomic.
+
+No GS datasets or CI; unchanged validated native binaries are reused by recorded SHA256.
+
+Common SCF entry verification: source/installed635 tests (634pass,1skip), unchanged validated native runtime SHA checks, sdist→wheel and installed HSE sample/native MPI common entry exact. JP/EN/AI/API/sample/tool byte parity checked. Canonical evidence: calc2026/salmonpy-scf-common-checkpoint-20261119. No GS datasets or CI.
+
+### Group4: protected SCF numerical staging
+
+- [x] Optional native SCF candidate1 ABI stages a detached full numerical payload per live owner, never cloning FFT/XC/MPI resources, initializing GS or evaluating orbitals/exchange.
+- [x] Same-owner reservations reject evolution/direct restore/snapshot/close until publish/discard; metadata remains readable. Token/mode/snapshot disagreement rejects collectively before writes; discard is idempotent.
+- [x] Common restore_checkpoint performs the global ready vote/holder publication; explicitly publish returned native candidates afterwards, matching the existing native field/TDDFT pattern. Not a new runnable GS owner.
+- [x] Injected late B-candidate failure leaves A/B numerical arrays/counters intact, clears pending candidates, and original mixing/HSE trajectory continues exactly before retry. Retry and continuous/fixed-preceding runtime controls exact for PZ/MPI1, PBE spatialMPI2, HSE kMPI2/Gamma and pre-SCF transition. Continued HSE GS→16-step TDDFT currents exact.
+- [ ] Disk/process restart, changed topology, broader XC/mode coverage and fatal allocation/process/publication-failure rollback remain outside this memory-stage implementation. Direct execution remains non-atomic.
+
+No GS datasets or CI. Handled staging-error protection is distinct from arbitrary failures during numerical publication, which may allocate. Numerical state remains in Fortran/C.
+
+Protected SCF staging verification: source636 tests (635pass,1skip). PZ1/PBE spatial2/HSE k2/Gamma/pre-SCF actual MPI controls preserve originals after late staging failure, original continuation and retry exact, normal new/preceding runtimes exact. Source protected HSE example passes; source/all application-object prohibition audits retained. Evidence: calc2026/salmonpy-scf-protected-candidates-20261119. No GS datasets or CI.
+
+### Group4: reduced-k HSE SCF continuation
+
+- [x] GS contexts retain symmetry and density-symmetrization workspaces; continuation installs/restores each model's tables without reinitialization. Immutable tables remain with the live model.
+- [x] Explicit native GS may bind the validated fast HSE reduced-k owner (CPU, full q, kMPI1/2); default CLI binding policy and normal RT gate remain unchanged.
+- [x] SymmetryOperations in existing dft module owns immutable fractional operations; DFT.input_assets carries sym.dat/PP bytes, hashes enter identity/warm start and assets follow GS→RT. Default None preserves prior input text.
+- [x] Reduced4/8 C2 SCF/direct/protected/failure/retry and 16-step RT equal fixed prior continuous results, with symmetric forces compared after intentional old-basis reconstruction. Mixed cell/grid state isolation passes.
+- [x] Fixed-grid SCF-converged diamond Si full8/reduced6: energy/density pass preset tolerances (1e-6 Ha; density rtol1e-4/atol1e-7). Not grid/k convergence certification.
+- [x] Initial full/reduced force mismatch (~2.495644e-3 Ha/bohr) reproduced in isolated old/new controls. Diagnosed and corrected below; force tolerance is unchanged, and full force-physics validation remains separate.
+- [ ] Ordinary-XC symmetric/SOC/+U/DC/ionic continuation, disk/process restart and changed topology remain outside this scope.
+
+No GS datasets collected; numerical arrays remain in RAM. No CI; source/all application-object eigensolver audits retained on fresh ordinary/HSE builds.
+
+Reduced-k SCF verification: source637 tests (636pass,1skip). C2 kMPI2 and mirror kMPI1 continuation/protected failure/original continuation/retry exact against prior runtime; C2 16-step RT exact. Ordinary PBE spatial2 and full-k HSE2 regression exact. SCF-converged diamond comparison: E/density pass, force mismatch remains explicit in JSON and warn-only API. Canonical evidence: calc2026/salmonpy-scf-symmetry-20261119. No GS datasets or CI.
+
+### Symmetric-force coordinate-basis defect discovered by the full-k check
+
+- [x] Root cause in actual sym_vector_force_xyz: Ftmp retained Ainv*F components, missing the final Amat transform. Identity/C2/skew probes fail before correction and pass after; every linked application probe object/source is audited.
+- [x] Restore Cartesian result in Fortran. This intentionally corrects force values whenever symmetry averaging is enabled; nonsymmetric force/E/density/fixed-ion J are unchanged. No physical projector/XC/SCF algorithm change.
+- [x] Fixed-grid SCF-converged diamond full8/reduced6 force difference now~1.14722e-7 Ha/bohr, passing original1e-6 criterion; E/density criteria unchanged. Historical evidence preserved. Old-force regression requires explicit old-basis reconstruction, not raw equality.
+- [x] New force-basis query prevents false Hartree/bohr labelling with old symmetric runtimes; warn/retain unverified-basis values, no implicit build/conversion.
+- [ ] Independent finite-displacement/mesh/k/real-material force certification and NLCC/ASE enablement remain group3 work. This units repair does not complete those tasks.
+
+Cartesian-force repair verification: actual-module identity/C2/skew probes source/object-audited; red old routine fails identity, corrected routine passes. New ordinary and HSE source/object-audited builds pass nonsymmetric PBE/full-HSE regression exactly; C2/mirror old-force comparison explicitly reconstructs Cartesian units, other arrays/J remain exact. Full8/reduced6 SCF-converged E/density/force pass original criteria. Source637 tests (636pass,1skip). No GS datasets or CI.
+
+## 2026-11-19 Ordinary-XC symmetric SCF
+
+- [x] Extend existing context-owned symmetry maps to PZ/Libxc-PZ/PBE SCF continuation; retain ordinary input/numerical order.
+- [x] MPI controls: C2, k/spatial MPI2, different material inputs, common protected restore failure/continue/retry and continuous preceding-runtime parity.
+- [x] Existing scf_resume sample accepts ordinary XC with explicit symmetry; no extra sample/module.
+- [ ] Fresh-process disk SCF restart including mixing/HSE numerical state. Latest user instruction explicitly makes GS saving/reuse the normal workflow; do not treat former collection restriction as prohibiting this development.
+
+## 2026-11-19 Same-build/topology SCF disk restart and residual diagnostics
+
+- [x] Fortran rank-local numerical IO, versioned/hash-checked manifest, input/material/assets/runtime/decomposition admission and static-only zero-SCF bootstrap.
+- [x] Fresh-process ordinary XC and fast-PR HSE continuation, including reduced k and a cut before PBE→HSE transition, match continuous execution.
+- [x] Retain accepted residual history in Fortran progress/snapshots/disk; CSV and optional residual/threshold PNG on save. Plot failure warns and preserves saved scientific data.
+- [ ] Portable changed-binary/decomposition SCF restart, broader SOC/+U/DC/ionic-motion modes remain separate.
+
+- [x] 2026-11-20: explicit GS dataset permission received; installed-wheel reduced-k fast-PR HSE MPI2 fresh-process restart, zero replay, late rank-read rejection and full residual-history parity pass. Residual PNG/CSV verified;637 tests (636pass,1skip). No CI. Portable changed-topology restart remains open.
+
+## 2026-11-20 Common SCF disk execution
+
+- [x] Bind native-scf-disk/1 capability and save/direct/protected callbacks through existing common API; numerical staging reuses the same candidate owner, no new native code or handles.
+- [x] Two different-input PZ/HSE states, late last-rank second-candidate failure, original continuation before retry and exact independent/continued parity. Restore executes no SCF.
+- [ ] Portable changed-decomposition SCF format and broader ownership/mode coverage remain open; this extends same-topology execution only.
+
+- [x] Common disk binding: source/installed637 (636pass,1skip), installed-wheel HSE MPI2 protected two-model failure/continue/retry and source sample pass. Guides/AI/sample/tool bytes match installed wheel. Unchanged native runtimes verified by SHA256; no CI. Evidence: calc2026/salmonpy-scf-common-disk-record-20261120.
+
+## 2026-11-20 Deterministic SCF candidate cleanup (group5)
+
+- [x] Candidate close/context-manager discard, Python-owned GS close and corresponding snapshot close release pending numerical reservations; no native rebuild or GC/MPI destructor.
+- [x] Native memory/disk MPI2 ordinary PBE spatial and fast-HSE C2 k controls preserve host exceptions, release GS/child communicators, protect direct-C reservations, and allow subsequent independent evolution with unchanged results.
+- [ ] Arbitrary process/MPI/OOM and publication-failure recovery, threaded ownership and portable repartitioned SCF remain open.
+
+- [x] Candidate cleanup installed-wheel HSE MPI2 and source PBE spatial/HSE k MPI2 verified;637 tests (636pass,1skip), no new unittest method. JP/EN/AI/tool byte parity; unchanged native SHA256 reuse. No CI. Evidence: calc2026/salmonpy-scf-candidate-lifetime-record-20261120.
+
+## 2026-11-20 Ordinary-XC SCF k-only repartition
+
+- [x] Explicit run(restart=...,repartition=True), k-bound metadata and native detached waveform/CG k remap; retain mixing/XC/Poisson/history and rebind parallel inputs. No replay or Python scientific kernel.
+- [x] PBE/Libxc-PZ2→1 and C2 PZ1→2 controls: exact cut arrays, continuous source-initial-state parity at preset rtol1e-9/atol1e-10, corruption rejection.
+- [ ] HSE/spatial/orbital repartition and changed-binary/portable migration remain open; common protected targets retain exact-layout compatibility.
+
+- [x] Final release source/object audits, source/installed637 (636pass,1skip), installed ordinary-XC1↔2 migration, exact restored cuts/zero replay and fixed tolerances. Excess k ranks rejected before GS creation. Default ordinary/HSE prior-binary/current equality retained. JP/EN/AI/sample/tool/solver parity; no CI. Evidence: calc2026/salmonpy-scf-k-repartition-record-20261120.
