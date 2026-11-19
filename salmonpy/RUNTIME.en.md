@@ -275,6 +275,23 @@ shared native kernels and rebuild/test affected profiles before distribution.
 The optimized native HSE owner is connected as described above; the standalone generic resource primitive remains a separate diagnostic component.
 
 
+### Shared kernels and field runtime in current fast-PR builds
+
+New explicit-routing fast-PR builds share SBE, FDTD and LD source with the
+ordinary profile. Native/solver kernels are byte-checked during preparation.
+The same tree builds with HSE ON/OFF; OFF requires no HSE FFTW linkage.
+
+Use NEW_BUILD/build.json for NativeEHField and HSE material groups when the
+record declares field_abi protocol1 / salmonpy.eh-centered-current/1. Use the
+separate NEW_BUILD/executable-build.json with SalmonExecutable.from_mpi_build
+for batch MPI FDTD. Both records bind different binaries by their own SHA256.
+Existing embedded field records remain supported; only new capable builds carry
+the new declaration. Import never builds or downloads anything.
+
+Field and material groups remain separate processes with host-owned MPI. Full
+standard GS/TDDFT source migration and concurrent same-process field/electronic
+ownership are unfinished; default preparation commands and old binaries stay valid.
+
 ## Experimental full TDDFT contexts with a fixed timestep per state
 
 `salmonpy/native_adapters/tddft_context.f90` provides internal Fortran development
@@ -588,3 +605,33 @@ Save at an accepted step with initialized exchange resources. Step-zero saving i
 For outer-MPI/FDTD fast-HSE coupling, explicitly build the dedicated worker and use FastHSEResponseBackend. In this worker mode each outer material rank calls its own serial process. See COUPLED.en.md for build/coupling/direct-restart instructions. This does not add inner HSE MPI.
 
 For internal k-only MPI use `tools/build_fast_hse_mpi.py` and `salmonpy.fast_hse_mpi.NativeFastHSEBackend`. Supported material groups have one or two ranks, no orbital/rgrid split, and one native lifetime per process on the main thread. The host owns MPI; the backend temporarily changes cwd. Same-topology rank-local direct restart preserves numerical HSE histories and rebuilds static FFT resources. See COUPLED.en.md for the four-rank FDTD/SBE/HSE example and failure limits.
+
+The fast source now shares ordinary initialization input storage and RT output
+management too. The duplicated adapter output source is removed. Existing MPI
+and serial builders reuse the compiled solver helper, or compile the same shared
+source for ABI-compatible older prepared builds. HSE-specific settings retain their own complete
+snapshot; ordinary retained GS/embedded TDDFT migration is still unfinished.
+
+Fast HSE model registration now uses the same model-owned parser workspace
+contract as the standard profile: scratch connections, namelist diagnostics,
+coordinate-source flags and common input/default snapshots belong to each read.
+The full fast-HSE defaults, conversion rules and checks are retained; registered
+models still capture all HSE-specific settings in hse_model_inputs. The common
+parser values record alone is not a complete HSE model snapshot. Legacy batch
+reads keep their named temporary files for MD compatibility. This is parser
+migration, not completion of retained GS/ordinary embedded TDDFT integration.
+
+The fast native GS context now has an internal import-only path:
+`gs_run(..., import_only=.true.)` reads an existing compatible GS wavefunction
+restart through the original initialization, without SCF, PBE warmup or GS
+checkpoint output. States retain independent XC/HSE/MPI resources; closing one
+must preserve the others. `gs_export_seed` returns detached orbitals, occupations,
+common input values and ownership/grid metadata using the shared gs_seed module.
+This seed is not a complete HSE model or portable checkpoint. Python
+NativeGSBackend.load now accepts a fast build explicitly declaring gs_abi/1.
+That profile returns density/occupations/orbitals and material IDs; energies,
+residuals, tolerance and convergence remain None. Standard-runtime SCF behavior
+is unchanged. Fast session.run, eigenvalues/forces, archive export and direct
+GS→TDDFT model creation are not connected yet. The imported
+state does not certify convergence, energy or forces. MD/DC/optimization import
+and real-material convergence validation are outside this measured path.

@@ -46,9 +46,13 @@ def main():
             if re.search(r'^#define '+f+r'\b',config,re.M):raise ValueError('unsupported profile: '+f)
         adapters=root/'salmonpy/native_adapters'
         if not adapters.exists():adapters=root.parent/'native_adapters'
-        names=['hse_model_inputs','step_output','hse_checkpoint','tddft_context','fast_hse_mpi','parallel_bridge']
+        names=['hse_model_inputs','hse_checkpoint','tddft_context','fast_hse_mpi','parallel_bridge']
+        if not (build/'src/CMakeFiles/salmon.dir/io/step_output.f90.o').is_file():
+            names.insert(1,'step_output')
         for name in names:
-            path=(root/'runtime/sources/standard/src/salmonpy/parallel_bridge.f90' if name=='parallel_bridge' else adapters/(name+'.f90'))
+            path=(root/'runtime/sources/standard/src/salmonpy/parallel_bridge.f90' if name=='parallel_bridge'
+                  else root/'runtime/sources/standard/src/io/step_output.f90' if name=='step_output'
+                  else adapters/(name+'.f90'))
             shutil.copy2(path,staged/(name+'.f90'))
         shutil.copy2(adapters/'fast_hse_handles.h',staged/'fast_hse_handles.h')
         flags=(build/'src/CMakeFiles/salmon.dir/flags.make').read_text()
@@ -71,6 +75,28 @@ def main():
        'adapter_hashes':{x.name:digest(x) for x in staged.iterdir()},'commands':commands,
        'scope':'host MPI fast-PR k-only HSE; legacy Python one lifetime; shared-model generation-checked C contexts; same-topology rank-local checkpoint',
        'handle_abi':{'protocol':1,'header':'fast_hse_handles.h','shared_immutable_model':True,'main_thread_collective':True}}
+    # One build can serve field and material rank groups. Keep the executable
+    # fingerprint separate from the host-library fingerprint.
+    if (build/'src/CMakeFiles/salmon.dir/maxwell/embedded_eh.f90.o').is_file():
+        import ctypes as c
+        probe=c.CDLL(str(library))
+        probe.sp_eh_checkpoint_protocol.argtypes=[]
+        probe.sp_eh_checkpoint_protocol.restype=c.c_int
+        if probe.sp_eh_checkpoint_protocol()!=1:raise ValueError('unsupported compiled field protocol')
+        r['field_abi']={'protocol':1,'scheme':'salmonpy.eh-centered-current/1'}
+    if (build/'src/CMakeFiles/salmon.dir/gs/main_dft.f90.o').is_file():
+        import ctypes as c
+        probe=c.CDLL(str(library))
+        protocol=getattr(probe,'sp_gs_protocol',None)
+        if protocol is not None:
+            protocol.argtypes=[];protocol.restype=c.c_int
+            if protocol()!=1:raise ValueError('unsupported compiled GS protocol')
+            r['gs_abi']={'protocol':1,'modes':['import'],'arrays':['density','occupations','orbitals']}
+    executable_record={'schema':'salmonpy.runtime-build/1','status':'built-and-audited',
+        'executable':str(build/'salmon'),'sha256':r['origin_sha256'],
+        'build_configuration':{'mpi_enabled':True,'hse_enabled':True},
+        'source':marker,'source_marker_sha256':r['source_marker_sha256']}
+    (out/'executable-build.json').write_text(json.dumps(executable_record,indent=2)+'\n')
     (out/'build.json').write_text(json.dumps(r,indent=2)+'\n');print(out/'build.json')
 
 

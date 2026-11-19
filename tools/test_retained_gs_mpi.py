@@ -17,6 +17,71 @@ from salmonpy.native_gs import NativeGSBackend
 from salmonpy.errors import InputError,RuntimeFailure
 
 
+def import_controls(args):
+    """Three-group import comparison; no SCF or saved numerical-array dataset."""
+    w=MPI.COMM_WORLD
+    if w.size!=3*args.size:raise ValueError('launch 3*size ranks')
+    if w.rank==0:args.output.mkdir(parents=True,exist_ok=False)
+    w.Barrier();group=w.rank//args.size;comm=w.Split(group,w.rank)
+    work=args.output/str(group)
+    if comm.rank==0:work.mkdir()
+    comm.Barrier();ctx=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
+    backend=NativeGSBackend(args.build,work,decomposition=(args.size,1,1,1,1))
+    def snapshot(state):
+        info=state.info
+        assert info.energy_hartree is None and info.residual is None and info.converged is None
+        result={}
+        for q in ('density','occupations','orbitals'):
+            a=state.array(q);assert not a.values.flags.writeable
+            result[q]=(a.lower_indices,a.values.copy())
+        return result
+    def equal(a,b):
+        for q in a:
+            assert a[q][0]==b[q][0];np.testing.assert_array_equal(a[q][1],b[q][1])
+    bundles={1:args.import_bundle,2:args.second_bundle or args.import_bundle}
+    frames={}
+    with backend.open(ctx) as session:
+        if group:
+            state=session.load(bundles[group],material_id='material-'+str(group))
+            frames[group]=snapshot(state);state.close()
+        else:
+            a=session.load(bundles[1],material_id='material-1');before=snapshot(a)
+            b=session.load(bundles[2],material_id='material-2');equal(before,snapshot(a))
+            frames={1:before,2:snapshot(b)}
+            for operation in (lambda:session.run(None),lambda:a.tddft_model(dt=.001),
+                              lambda:a.export_archive(work/'must-not-exist')):
+                try:operation()
+                except InputError:pass
+                else:raise AssertionError('computed-only operation was accepted')
+            equal(before,snapshot(a));equal(frames[2],snapshot(b))
+            for q in ('forces','eigenvalues'):
+                try:a.array(q)
+                except InputError:pass
+                else:raise AssertionError('uncomputed quantity advertised')
+            old=a._token;a.close();equal(frames[2],snapshot(b))
+            fresh=session.load(bundles[1],material_id='material-1');equal(before,snapshot(fresh))
+            assert fresh._token!=old
+            assert session.lib.sp_gs_close(old)!=0
+            if comm.size>1:
+                bad=fresh._token if comm.rank==0 else b._token
+                stats=np.zeros(4,np.int32);values=np.zeros(3)
+                assert session.lib.sp_gs_info(bad,stats.ctypes.data,values.ctypes.data)!=0
+                equal(before,snapshot(fresh));equal(frames[2],snapshot(b))
+            fresh.close();b.close()
+        assert session.resources()['states']==0
+        assert session.resources()['live_child_communicators']==0
+    local=comm.gather(frames,root=0)
+    all_frames=w.gather(local if comm.rank==0 else None,root=0)
+    if w.rank==0:
+        mixed=all_frames[0];first=all_frames[args.size];second=all_frames[2*args.size]
+        for rank in range(args.size):
+            equal(mixed[rank][1],first[rank][1]);equal(mixed[rank][2],second[rank][2])
+        result={'status':'pass','ranks':w.size,'independent_arrays_exact':True,
+                'fresh_import_exact':True,'close_isolation':True,'stale_tokens_rejected':True,
+                'collective_mixed_tokens_rejected':args.size>1,'SCF_calls':0}
+        (args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(result,flush=True)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('build',type=Path);parser.add_argument('output',type=Path)
@@ -28,7 +93,12 @@ def main():
     parser.add_argument('--tolerance',type=float,default=1e-12)
     parser.add_argument('--b-iterations',type=int,default=4)
     parser.add_argument('--b-tolerance',type=float)
-    args=parser.parse_args();world=MPI.COMM_WORLD
+    parser.add_argument('--import-bundle',type=Path,help='existing synthetic GS; import-only mode, never SCF')
+    parser.add_argument('--second-bundle',type=Path)
+    args=parser.parse_args()
+    if args.import_bundle:
+        import_controls(args);return
+    world=MPI.COMM_WORLD
     if world.size!=3*args.size:raise ValueError('launch exactly 3*size ranks')
     if world.rank==0:args.output.mkdir(parents=True,exist_ok=False)
     world.Barrier();g=world.rank//args.size;comm=world.Split(g,world.rank)

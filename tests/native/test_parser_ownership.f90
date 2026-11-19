@@ -22,10 +22,18 @@ program test_parser_ownership
   a%log_path='a.variables.log';b%log_path='b.variables.log';again%log_path='again.variables.log'
   call read_input('a.inp',a)
   if(xc/='libxc_pbe'.or.natom/=2.or.mixrate/=.23d0)error stop 'first parsed input'
+#ifdef SALMONPY_FAST_PARSER_TEST
+  if(abs(hse_omega-.17d0*.52917721067d0)>1d-14.or.exx_gpu_batch_size/=7) &
+    error stop 'fast HSE explicit parameters lost'
+#endif
   if(any([a%fh_namelist,a%fh_atomic_coor,a%fh_atomic_red_coor,a%fh_reentrance]/=0)) &
     error stop 'first scratch units leaked'
   call read_input('b.inp',b)
   if(xc/='none'.or.natom/=1.or.mixrate/=.5d0)error stop 'omitted defaults inherited'
+#ifdef SALMONPY_FAST_PARSER_TEST
+  if(abs(hse_omega-.11d0)>1d-14.or.exx_gpu_batch_size/=8) &
+    error stop 'fast HSE defaults inherited'
+#endif
   if(any(num_kgrid/=1).or.E_amplitude1/=0d0)error stop 'k/pulse input inherited'
   if(allocated(Rion).and.size(Rion,2)/=1)error stop 'atom allocation inherited'
   if(a%inml_functional/=0.or.b%inml_functional>=0)error stop 'diagnostic ownership'

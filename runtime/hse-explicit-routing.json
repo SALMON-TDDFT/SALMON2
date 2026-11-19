@@ -44,7 +44,23 @@
     "src/xc/hybrid_semilocal.f90",
     "src/xc/exx_k_orbits.f90",
     "src/symmetry/symmetry.f90",
-    "src/symmetry/symmetry_rho.f90"
+    "src/symmetry/symmetry_rho.f90",
+    "src/ssbe/CMakeLists.txt",
+    "src/ssbe/sbe_types.f90",
+    "src/ssbe/sbe_velocity_kernel.f90",
+    "src/ssbe/gs_info_ssbe.f90",
+    "src/ssbe/bloch_solver_ssbe.f90",
+    "src/maxwell/CMakeLists.txt",
+    "src/maxwell/lorentz_drude.f90",
+    "src/maxwell/fdtd_eh_kernel.f90",
+    "src/maxwell/fdtd_eh.f90",
+    "src/maxwell/main_maxwell.f90",
+    "src/maxwell/embedded_eh.f90",
+    "src/io/CMakeLists.txt",
+    "src/io/model_inputs.f90",
+    "src/io/step_output.f90",
+    "src/gs/gs_seed.f90",
+    "src/gs/CMakeLists.txt"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -74,6 +90,11 @@
   ],
   "scope": "explicit full-support fast HSE native ownership; serial and experimental k-only host-MPI CPU contexts, common immutable per-group configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "81d0a61104061b1ebbf818045410c15bb677af245246d5af82867cd17748bf87",
-  "patch_sha256_role": "historical migration identity; no patch is applied"
+  "replacements_sha256": "e2c37acc4a94f008f4bd943cca67779e1dda6c83b9fe1b97be183e05b78f18e9",
+  "patch_sha256_role": "historical migration identity; no patch is applied",
+  "shared_kernels": {
+    "native/sbe_types.f90": "src/ssbe/sbe_types.f90",
+    "native/sbe_velocity_kernel.f90": "src/ssbe/sbe_velocity_kernel.f90",
+    "native/lorentz_drude.f90": "src/maxwell/lorentz_drude.f90"
+  }
 }

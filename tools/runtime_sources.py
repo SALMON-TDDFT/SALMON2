@@ -82,6 +82,13 @@ def replace_files(root,spec,dest):
         if digest(target)!=expected:raise ValueError('replacement changed while copying: '+str(target))
 
 
+def check_shared_kernels(root,prepared,files):
+    """Require actual prepared kernels to match the Python/native source bytes."""
+    for local,external in files.items():
+        if digest(path_in(root,local))!=digest(path_in(prepared,external)):
+            raise ValueError('shared kernel differs from bundled runtime: '+local)
+
+
 def copy_files(source,dest,files):
     for name,expected in files.items():
         origin=path_in(source,name);target=path_in(dest,name)

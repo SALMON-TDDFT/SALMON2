@@ -1,6 +1,7 @@
+#include "config.h"
 ! Sequential GS lifecycle regression, not a concurrent GS context API.
 program probe
- use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
+ use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan,ieee_is_finite
  use structures,only:s_gs_run_config,s_mixing,gs_density_normalization
  use mixing_sub,only:reset_mixing_rate,check_mixing_half
  use salmon_global
@@ -9,6 +10,14 @@ program probe
  use math_constants
  use timer
  use salmonpy_gs_context,only:s_gs_context,gs_run,gs_close,gs_probe_write,gs_input_config
+#ifdef SALMONPY_GS_IMPORT_PROBE
+ use salmonpy_gs_context,only:gs_export_seed
+ use salmonpy_gs_seed,only:s_gs_seed
+#ifdef USE_MPI
+ use mpi,only:MPI_COMM_WORLD,MPI_Finalize
+ use communication,only:comm_attach,comm_child_counts
+#endif
+#endif
  use plusU_global,only:read_Hubbard_parameters
  use sym_sub,only:read_sw_symmetry
  implicit none
@@ -25,6 +34,21 @@ program probe
  call read_sw_symmetry(yn_symmetry)
  call timer_initialize
  if(theory/='dft'.or.yn_dc/='n'.or.yn_opt/='n')stop 1
+#ifdef SALMONPY_GS_IMPORT_PROBE
+ call get_command_argument(1,mode)
+ if(mode=='import')then
+#ifdef USE_MPI
+  call comm_attach(MPI_COMM_WORLD,status)
+  if(status/=0)error stop 'GS probe attach failed'
+#endif
+  call import_control
+  call end_parallel
+#ifdef USE_MPI
+  call MPI_Finalize(status)
+#endif
+  stop
+ endif
+#endif
  call gs_input_config(config_a);config_b=config_a
  ! Count selection is independent of all legacy module variables.
  config_a%normalization%nelec=4;config_a%normalization%nelec_spin=[2,3]
@@ -106,4 +130,77 @@ program probe
  call gs_close(a);call gs_close(a)
  call end_parallel
  print *,'Sequential GS lifecycle PASS'
+#ifdef SALMONPY_GS_IMPORT_PROBE
+contains
+ subroutine import_control
+  type(s_gs_context),target::empty
+  type(s_gs_seed)::first,second,copy
+  type(s_input_parser)::parser
+  character(:),allocatable::before,after,before_b
+  character(64)::first_xc
+  real(8)::first_position(3)
+  complex(8),allocatable::flat(:)
+  integer::code,live,slots,j
+  call gs_export_seed(empty,copy,code)
+  if(code==0)error stop 'empty GS exported'
+  call gs_run(a,code,import_only=.true.)
+  if(code/=0)error stop 'import A failed'
+  first_xc=xc
+  before=snapshot(a)
+  call gs_export_seed(a,first,code)
+  if(code/=0)error stop 'export A failed'
+  flat=reshape(first%psi%zwf,[size(first%psi%zwf)])
+  do j=1,size(flat)
+   if(.not.ieee_is_finite(real(flat(j),8)))error stop 'nonfinite imported real orbital'
+   if(.not.ieee_is_finite(aimag(flat(j))))error stop 'nonfinite imported imaginary orbital'
+  enddo
+  call read_input('b.inp',parser)
+  call read_sw_symmetry(yn_symmetry)
+  call gs_run(b,code,import_only=.true.)
+  if(code/=0)error stop 'import B failed'
+  after=snapshot(a)
+  if(before/=after)error stop 'import B changed A'
+  before_b=snapshot(b)
+  call gs_export_seed(b,second,code)
+  if(code/=0)error stop 'export B failed'
+  call first%inputs%activate(code)
+  if(code/=0.or.xc/=first_xc)error stop 'first model inputs mixed'
+  first_position=Rion_red(:,1)
+  call second%inputs%activate(code)
+  if(code/=0)error stop 'second model inputs unavailable'
+  if(xc==first_xc.and.all(Rion_red(:,1)==first_position))error stop 'second model inputs mixed'
+  copy=first;copy%psi%zwf=(9d0,2d0);copy%occupations=0d0
+  call gs_export_seed(a,copy,code)
+  if(code/=0.or.any(copy%psi%zwf/=first%psi%zwf))error stop 'detached orbitals alias'
+  if(any(copy%occupations/=first%occupations))error stop 'detached occupations alias'
+  call gs_close(a);call gs_close(a)
+  after=snapshot(b)
+  if(before_b/=after)error stop 'close A changed B'
+  call read_input('a.inp',parser)
+  call read_sw_symmetry(yn_symmetry)
+  call gs_run(a,code,import_only=.true.)
+  if(code/=0)error stop 'fresh import A failed'
+  after=snapshot(a)
+  if(before/=after)error stop 'fresh imported A differs'
+  call gs_close(b);call gs_close(b)
+  after=snapshot(a)
+  if(before/=after)error stop 'close B changed A'
+  call gs_close(a)
+#ifdef USE_MPI
+  call comm_child_counts(live,slots)
+  if(live/=0)error stop 'GS import leaked communicators'
+#endif
+  print *,'GS_IMPORT independent/seed/fresh/close PASS'
+ end subroutine
+ function snapshot(value) result(bytes)
+  type(s_gs_context),intent(in)::value
+  character(:),allocatable::bytes
+  integer::u,n
+  open(newunit=u,status='scratch',access='stream',form='unformatted')
+  call gs_probe_write(value,u)
+  inquire(unit=u,size=n)
+  allocate(character(n)::bytes)
+  rewind(u);read(u)bytes;close(u)
+ end function
+#endif
 end program

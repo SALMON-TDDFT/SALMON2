@@ -28,7 +28,16 @@ class FieldRecoveryTests(unittest.TestCase):
         np.testing.assert_array_equal(f.advance(np.ones((1,3))),np.full((1,3),-.02))
         self.assertEqual(f.step_index,2)
 
-    def test_unknown_protocol_error_remains_conservative(self):
+    def test_runtime_and_step_protocol_admission(self):
+        from salmonpy.coupled import _require_field_record
+        _require_field_record({'schema':'salmonpy.embedded-tddft/1'})
+        _require_field_record({'schema':'salmonpy.fast-hse-mpi/1',
+            'field_abi':{'protocol':1,'scheme':NativeEHField.scheme}})
+        for declaration in (None,{}, {'protocol':True,'scheme':NativeEHField.scheme},
+                            {'protocol':2,'scheme':NativeEHField.scheme}, {'protocol':1,'scheme':'other'}):
+            with self.subTest(declaration=declaration),self.assertRaises(InputError):
+                _require_field_record({'schema':'salmonpy.fast-hse-mpi/1','field_abi':declaration})
+        with self.assertRaises(InputError):_require_field_record({'schema':'unknown'})
         comm=SimpleNamespace(allgather=lambda x:[x])
         f=NativeEHField.__new__(NativeEHField)
         f.context=SimpleNamespace(solver_comm=comm)

@@ -84,9 +84,9 @@ class NativeStepTests(unittest.TestCase):
             with self.assertRaises(InputError):_NativeBackup(owner,None,'tx',d,())
             self.assertEqual(calls,[])
 
-    def test_standard_and_adapter_output_helpers_match(self):
+    def test_output_helper_has_one_maintained_source(self):
         import salmonpy
         package=Path(salmonpy.__file__).resolve().parent
         root=package/'_runtime_source' if (package/'_runtime_source').is_dir() else package.parent
-        self.assertEqual((package/'native_adapters/step_output.f90').read_bytes(),
-                         (root/'runtime/sources/standard/src/io/step_output.f90').read_bytes())
+        self.assertFalse((package/'native_adapters/step_output.f90').exists())
+        self.assertTrue((root/'runtime/sources/standard/src/io/step_output.f90').is_file())

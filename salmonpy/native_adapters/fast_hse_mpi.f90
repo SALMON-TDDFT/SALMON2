@@ -136,7 +136,7 @@ end function
  sp_fast_hse_init_symmetry=initialize(path,timestep,capacity,J,.true.)
  end function
  integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry,registered,output_name)
- use inputoutput,only:read_input
+ use inputoutput,only:read_input,s_input_parser
  use math_constants,only:set_math_constants
  use plusU_global,only:read_Hubbard_parameters
  use sym_sub,only:read_sw_symmetry
@@ -155,6 +155,7 @@ end function
  integer(c_int),value::capacity
  real(c_double),intent(out)::J(3)
  type(s_rt_run_config)::config
+ type(s_input_parser)::parser
  character(4096)::filename
  integer::status,saved_capacity
  real(8)::saved_dt
@@ -182,7 +183,11 @@ end function
  if(saved_dt/=timestep.or.saved_capacity/=capacity)status=1
  call agree(status)
  if(status/=0)return
- call read_input(trim(filename))
+ if(registration)then
+  call read_input(trim(filename),parser)
+ else
+  call read_input(trim(filename))
+ endif
  if(theory/='tddft_response'.or.xc/='hse06')status=1
  if(allow_symmetry.and.(nproc_size_global<1.or.nproc_size_global>2))status=1
  if(nproc_k/=nproc_size_global.or.nproc_ob/=1.or.any(nproc_rgrid/=1))status=1

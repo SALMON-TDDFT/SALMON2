@@ -1,14 +1,24 @@
 # MPI TDDFTとMultiscale1D／E/H FDTDの結合（実験的）
 
-[English](COUPLED.en.md) · Topic: `coupled` · Paired revision: `2026-11-14.1`
+[English](COUPLED.en.md) · Topic: `coupled` · Paired revision: `2026-11-19.1`
 
-PythonのMPIジョブを場群と物質群へ分け、**各物質群に一物質・一マクロ点**を置きます。
-物質群の全ランクがSALMONの電子計算に参加し、k点・軌道・実空間の内部分割はその群内に閉じます。
+PythonのMPIジョブを場群と物質群へ分けます。旧来の既定構成は各物質群に一物質・
+一マクロ点で、後述する明示的なshared／registry経路では群内に複数点・モデルを保持できます。
+物質群の全ランクがその群の電子計算に参加し、k点・軌道・実空間の内部分割は群内に閉じます。
 子プロセスや二重のMPI起動は使いません。LDは場群内の既存FDTDが多数の局所状態を管理します。
 
 入口は `NativeTDDFTMaterialProvider`、`NativeTDDFTBackend`、`NativeEHField`、`CoupledStepper`。
 後二つは別モジュール `salmonpy.coupled` です。既存のプロセス分離型 `TDDFTResponseBackend` と
 バッチFDTDも従来どおり利用でき、それらの制約をこの新しい入口と混同しないでください。
+
+## 場のランタイム記録
+
+NativeEHFieldは従来のembedded-tddft/1記録と、同じE/H時刻配置を表すfield_abi
+protocol1宣言がある新しいfast-hse-mpi/1記録を受け付けます。新しい
+build_fast_hse_mpiのbuild.jsonを、mixed_hse_models例のFIELD_BUILDとHSE_BUILDの
+両方へ指定できます。場・物質は別プロセスのMPI群として保持します。
+MPIバッチFDTDには別のexecutable-build.jsonを使います。記録のschema変更だけで
+通常TDDFT／GSの機能が高速版へ追加されるわけではなく、import時のビルドもありません。
 
 ## 次元と応答モデルの選び方
 
@@ -19,7 +29,7 @@ PythonのMPIジョブを場群と物質群へ分け、**各物質群に一物質
 **電子応答を結合する3次元計算は、SBEまたはユーザー作成の電流計算コードを使う場合に推奨**します。
 TDDFTの3次元計算は禁止しませんが、必要な物理・独立状態数・メモリ・計算時間を確認して選びます。
 SBEや独自コードも、モデルの有効範囲と各マクロ点の独立状態、A/c→電荷電流密度の契約を満たす必要があります。
-これはモデル選択の推奨であり、未実装のSBE結合アダプターや自動1次元化を対応済みとするものではありません。
+通常の混在サンプルはSBEとnative E/Hの結合に対応します。自動的に1次元化する機能ではありません。
 LD単独の3次元FDTDは別の利用経路です。
 
 現在の40³格子・TDDFT二点のサンプルは接続回帰用です。一般利用向けの3次元TDDFT推奨例でも、

@@ -24,7 +24,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   use inputoutput, only: n_hamil
   use structures
   use rt_step_recovery,only:recovery_wave
+#ifdef USE_HSE
   use exx_native,only:exx_recovery_status
+#endif
   use hamiltonian, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
   use nvtx_wrapper
@@ -50,7 +52,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
     if(mod(nn,2)==1)then
       call hpsi(tspsi_in,sshtpsi,info,mg,V_local,system,stencil,srg,ppg)
       if(rt%recover_errors)then
+#ifdef USE_HSE
         rt%step_error=max(rt%step_error,exx_recovery_status(system))
+#endif
         call recovery_wave(mg,info,sshtpsi,rt%step_error)
         if(rt%step_error/=0)then
           call nvtxEndRange
@@ -108,7 +112,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
     else
       call hpsi(sshtpsi,tspsi_in,info,mg,V_local,system,stencil,srg,ppg)
       if(rt%recover_errors)then
+#ifdef USE_HSE
         rt%step_error=max(rt%step_error,exx_recovery_status(system))
+#endif
         call recovery_wave(mg,info,tspsi_in,rt%step_error)
         if(rt%step_error/=0)then
           call nvtxEndRange

@@ -264,6 +264,22 @@ python tools/test_tddft_contexts.py HSE_BUILD_RECORD SYNTHETIC_FIXTURES NEW_OUTP
 ローカル検証の記録は `docs/tddft-state-settings-validation-2026-11-15.md` に残します。
 
 
+### 現在の高速PR版での共有カーネルと場のランタイム
+
+新しいexplicit-routing高速PR版は、通常版とSBE・FDTD・LDのソースを共有し、
+準備時にnative/wheel側のカーネルとのバイト一致を検査します。同じソースをHSE有効／
+無効でビルドでき、無効側はHSE用FFTWをリンクしません。
+
+NativeEHFieldとHSE物質群にはNEW_BUILD/build.jsonを使います。高速版で場を使う
+記録にはfield_abiのprotocol1／salmonpy.eh-centered-current/1宣言が必要です。
+MPIバッチFDTDのSalmonExecutable.from_mpi_buildには別の
+NEW_BUILD/executable-build.jsonを渡します。それぞれ実体のSHA256を記録します。
+旧embeddedの場記録も引き続き使え、import時のビルド・通信は増やしません。
+
+場・物質はホスト管理の別MPI群で実行します。標準GS／TDDFTのソース統合と、
+同一プロセスで場・電子状態を同時所有する対応は未完です。既定の準備入口と
+配布済みバイナリは切り替えていません。
+
 ## 開発用：XC作業配列とステンシル表の所有
 
 explicit高速HSEプロファイルでは、XC格子配列とPZ作業配列を各`s_dft_system%xc_work`が所有します。
@@ -539,3 +555,30 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python tools/test_hse_direct_checkpoint
 高速PR版HSEの外側MPI／FDTD接続には、明示ビルドした専用ワーカーと `FastHSEResponseBackend` を使います。このワーカーモードでは、外側MPIの各物質点から別のserialプロセスを呼びます。構築・結合・直接再開はCOUPLED.mdを参照してください。HSE内部MPIへの対応ではありません。
 
 内部k点MPIには `tools/build_fast_hse_mpi.py` と `salmonpy.fast_hse_mpi.NativeFastHSEBackend` を使います。物質群は1／2ランク、軌道／実空間分割なし、メインスレッドで1プロセス1回のnative寿命に限定します。MPIの管理はホストが行い、呼出中はcwdを一時変更します。同じ分割のランク別直接保存でHSE数値履歴を復元し、静的FFT資源は再構築します。4ランクのFDTD/SBE/HSE例と失敗時の制約はCOUPLED.mdを参照してください。
+
+高速版では通常の初期化入力の保存領域とRT出力管理も共通ソースから構築します。
+アダプター側の同一出力ソースは削除しました。MPI・直列ビルドはソルバーの
+構築済み出力管理を使い、ABIが適合する旧準備済みビルドでは同じ共通ソースを明示的に構築します。
+HSE固有設定の完全な保存は従来どおり維持します。通常のGS保持・埋め込みTDDFTの
+高速版への移行は、まだ完了していません。
+
+高速HSEのモデル登録でも、通常版と同じモデル別パーサー作業領域を使います。
+一時ファイル接続・namelist診断・座標入力の識別・共通入力と既定値の保存領域を
+読み込みごとに分離しました。高速HSEの既定値・単位変換・検査は維持し、
+HSE固有設定の完全な保存には従来のhse_model_inputsを引き続き使います。
+パーサーの共通valuesだけを完全なHSEモデルとして扱うことはできません。
+従来のバッチ読み込みではMDとの互換性のため名前付き一時ファイルを維持します。
+今回の変更はパーサー移行であり、GS保持・通常の埋め込みTDDFTの統合は残ります。
+
+高速版の内部GSコンテキストに、既存の互換なGS波動関数を読み込む専用経路
+`gs_run(..., import_only=.true.)`を追加しました。従来の初期化を通し、SCF・
+PBE予備計算・GSチェックポイント出力を行いません。各状態がXC・HSE・MPI資源を
+保持し、一方の破棄は他方に影響しません。共通gs_seedモジュールを使う
+`gs_export_seed`で軌道・占有数・共通入力・格子と分割の情報を独立した値として
+取り出せます。この値は完全なHSEモデルや可搬チェックポイントではありません。
+PythonのNativeGSBackend.loadも、gs_abi/1を明示した高速版ビルド記録に接続しました。
+密度・占有数・軌道と物質IDを保持し、未計算のエネルギー・残差・許容誤差・収束は
+Noneとして返します。通常版のSCF経路は維持します。高速版のsession.run、固有値・力、
+アーカイブ出力、GSから直接TDDFTモデルを作る入口はまだ接続していません。
+読み込みは収束・エネルギー・力を保証しません。MD・DC・構造最適化の読み込みと
+実物質での収束検証は、今回の検証範囲に含めていません。

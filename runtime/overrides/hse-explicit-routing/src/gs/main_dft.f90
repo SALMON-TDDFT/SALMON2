@@ -18,7 +18,15 @@
 #include "config.h"
 
 module salmonpy_gs_context
+use iso_c_binding
 use structures
+use salmonpy_model_inputs,only:s_model_inputs
+use salmonpy_gs_seed,only:s_gs_seed
+use sendrecv_grid,only:dealloc_cache
+#ifdef USE_MPI
+use communication,only:comm_begin_children,comm_end_children,comm_release_children, &
+ comm_is_attached,comm_get_globalinfo,comm_get_max,comm_bcast,comm_child_counts
+#endif
 use salmon_xc,only:finalize_xc
 #ifdef USE_HSE
 use exx_rt_state,only:s_exx_rt_state,rt_state_clear
@@ -26,12 +34,14 @@ use exx_native,only:exx_unbind_system
 #endif
 implicit none
 private
-public::s_gs_context,gs_run,gs_close,gs_probe_write,gs_input_config
+public::s_gs_context,gs_run,gs_close,gs_probe_write,gs_input_config,gs_export_seed
 ! Internal retained GS storage. Actual contexts must have TARGET and a stable address.
 ! Never copy a live context; global inputs remain shared.
 type s_gs_context
  private
- logical::active=.false.
+ logical::active=.false.,imported=.false.
+ integer::mpi_child_owner=0
+ type(s_model_inputs)::inputs
  integer::iterations=0
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
@@ -63,6 +73,16 @@ type(s_unfold) :: unfold
  logical::hse_bound=.false.
 #endif
 end type
+#ifdef USE_MPI
+type gs_handle_slot
+ type(s_gs_context),pointer::context=>null()
+ integer(c_int64_t)::token=0
+end type
+type(gs_handle_slot),allocatable,save::gs_handles(:)
+integer(c_int64_t),save::gs_handle_serial=0
+integer(c_int64_t),parameter::gs_handle_prefix=int(z'4A00000000000000',c_int64_t)
+logical,save::gs_host_initialized=.false.
+#endif
 contains
 subroutine gs_input_config(value)
  use salmon_global,only:nscf,threshold,exx_pre_scf_threshold,exx_pre_scf_steps,convergence,nelec,nelec_spin
@@ -74,7 +94,7 @@ subroutine gs_input_config(value)
  value%max_iterations=nscf;value%threshold=threshold
  value%pre_scf_threshold=exx_pre_scf_threshold;value%pre_scf_steps=exx_pre_scf_steps
 end subroutine
-subroutine gs_run(ctx,status,config)
+subroutine gs_run(ctx,status,config,import_only)
 use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 use exx_functional,only:is_hybrid
 use math_constants, only: pi, zi
@@ -117,6 +137,8 @@ type(s_gs_context),target,intent(inout)::ctx
 integer,intent(out)::status
 type(s_gs_run_config),optional,intent(in)::config
 type(s_gs_run_config)::selected
+logical,optional,intent(in)::import_only
+logical::reading_only
 #ifdef USE_HSE
  integer :: gs_hse_status
 #endif
@@ -137,11 +159,25 @@ integer :: ilevel_print
 
 status=1
 if(ctx%active)return
+reading_only=.false.
+if(present(import_only))reading_only=import_only
+if(reading_only)then
+ if(yn_restart/='y'.or.read_gs_restart_data/='wfn')return
+ if(yn_dc/='n'.or.yn_opt/='n'.or.yn_md/='n')return
+endif
 if(present(config))then
  selected=config
 else
  call gs_input_config(selected)
 endif
+! Imported orbitals do not run convergence iterations or PBE warmup.
+if(reading_only)then
+ if(selected%mixing%initial_no_mix_steps==-1)selected%mixing%initial_no_mix_steps=0
+ selected%pre_scf_threshold=0d0;selected%pre_scf_steps=1
+endif
+if(.not.valid_mixing_input(selected%mixing))return
+if(selected%mixing%method=='simple_dm'.and.yn_spinorbit/='y')return
+if(.not.reading_only)then
 select case(selected%convergence_metric)
 case('rho_dne','norm_rho','norm_rho_dng','norm_pot','norm_pot_dng')
 case default
@@ -150,8 +186,6 @@ end select
 if(selected%convergence_metric=='rho_dne'.and.yn_dc/='y')then
  if(gs_density_normalization(selected%normalization,merge(1,2,spin=='unpolarized'))<=0d0)return
 endif
-if(.not.valid_mixing_input(selected%mixing))return
-if(selected%mixing%method=='simple_dm'.and.yn_spinorbit/='y')return
 if(selected%max_iterations<1.or.selected%max_iterations>=huge(0))return
 if(selected%pre_scf_steps<1)return
 if(.not.ieee_is_finite(selected%threshold))return
@@ -166,8 +200,16 @@ if(selected%pre_scf_threshold>0d0)then
  if(selected%convergence_metric/='rho_dne'.and.selected%convergence_metric/='norm_rho'.and. &
     selected%convergence_metric/='norm_rho_dng')return
 endif
+endif
 if(theory=='dft_band'.and.iperiodic/=3) return
+#ifdef USE_MPI
+if(reading_only)then
+ call comm_begin_children(ctx%mpi_child_owner,status)
+ if(status/=0)return
+endif
+#endif
 ctx%active=.true.
+call ctx%inputs%capture()
 ctx%system%gs_input=selected;ctx%system%gs_input_owned=.true.
 ctx%mixing%input=selected%mixing;ctx%mixing%input_owned=.true.
 
@@ -228,6 +270,17 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           ctx%xc_func, ctx%mixing )
 
 
+! Import through the original initialization without entering SCF or GS output.
+if(reading_only)then
+ call timer_end(LOG_INIT_GS)
+ call timer_end(LOG_TOTAL)
+#ifdef USE_MPI
+ call comm_end_children(ctx%mpi_child_owner)
+#endif
+ ctx%iterations=Miter;ctx%imported=.true.
+ status=0
+ return
+endif
 Miopt = 0
 nopt_max = 1
 if(yn_opt=='y') call initialization_opt(Miopt,ctx%opt,ctx%system,flag_opt_conv,nopt_max,ctx%ofl)
@@ -492,6 +545,8 @@ subroutine gs_close(ctx)
  type(s_gs_context),target,intent(inout)::ctx
  type(s_gs_context)::empty
  if(.not.ctx%active)return
+ call dealloc_cache(ctx%srg)
+ call dealloc_cache(ctx%srg_scalar)
  call finalize_xc(ctx%xc_func)
 #ifdef USE_HSE
  if(ctx%hse_bound)then
@@ -499,13 +554,39 @@ subroutine gs_close(ctx)
   call rt_state_clear(ctx%hse)
  endif
 #endif
+#ifdef USE_MPI
+ call comm_release_children(ctx%mpi_child_owner)
+#endif
  ctx=empty
+end subroutine
+subroutine gs_export_seed(ctx,seed,status)
+ type(s_gs_context),intent(in)::ctx
+ type(s_gs_seed),intent(out)::seed
+ integer,intent(out)::status
+ status=1
+ if(.not.ctx%active)return
+ seed%inputs=ctx%inputs
+ seed%psi=ctx%spsi
+ seed%occupations=ctx%system%rocc
+ seed%grid=ctx%lg%num;seed%core_start=ctx%mg%is;seed%core_end=ctx%mg%ie
+ seed%decomposition=[ctx%info%npk,ctx%info%nporbital,ctx%info%nprgrid]
+ seed%orbital_start=ctx%info%io_s;seed%orbital_end=ctx%info%io_e
+ seed%k_start=ctx%info%ik_s;seed%k_end=ctx%info%ik_e
+ status=0
 end subroutine
 subroutine gs_probe_write(ctx,unit)
  type(s_gs_context),intent(in)::ctx
  integer,intent(in)::unit
  integer::i,j
  if(.not.ctx%active)error stop 'GS probe requires a live context'
+ if(ctx%imported)then
+  ! Initial import has no converged energy/residual/force report.
+  write(unit)ctx%iterations,ctx%spsi%zwf,ctx%rho%f,ctx%vh%f,ctx%vpsl%f,ctx%system%rocc
+  do i=1,size(ctx%vxc)
+   write(unit)ctx%vxc(i)%f,ctx%v_local(i)%f,ctx%rho_s(i)%f
+  enddo
+  return
+ endif
  write(unit)ctx%iterations,ctx%energy%E_tot,ctx%energy%E_xc
  write(unit)ctx%spsi%zwf,ctx%rho%f,ctx%vh%f,ctx%vpsl%f
  write(unit)ctx%system%rocc,ctx%system%Force
@@ -570,6 +651,245 @@ subroutine gs_probe_write(ctx,unit)
  if(allocated(ctx%hse%ace%factors))write(unit)ctx%hse%ace%factors
 #endif
 end subroutine
+#ifdef USE_MPI
+integer(c_int) function sp_gs_protocol() bind(C)
+ sp_gs_protocol=1
+end function
+integer(c_int) function sp_gs_create(path,token) bind(C)
+ character(c_char),intent(in)::path(*)
+ integer(c_int64_t),intent(out)::token
+ token=0;sp_gs_create=2 ! Import-only profile: never start SCF implicitly.
+end function
+subroutine gs_lookup(token,index,status)
+ integer(c_int64_t),intent(in)::token
+ integer,intent(out)::index,status
+ integer::group,rank,nproc,i,parts(2),expected(2)
+ index=0;status=10
+ if(.not.comm_is_attached())return
+ call comm_get_globalinfo(group,rank,nproc)
+ parts=transfer(token,parts);expected=parts
+ call comm_bcast(expected,group)
+ if(all(expected==parts).and.allocated(gs_handles))then
+  do i=1,size(gs_handles)
+   if(gs_handles(i)%token/=token.or..not.associated(gs_handles(i)%context))cycle
+   index=i;status=0;exit
+  enddo
+ endif
+ call comm_get_max(status,group)
+ if(status/=0)index=0
+end subroutine
+integer(c_int) function sp_gs_import(path,token) bind(C)
+ use inputoutput,only:read_input,s_input_parser
+ use salmon_global,only:yn_symmetry,calc_mode
+ use plusU_global,only:read_Hubbard_parameters
+ use sym_sub,only:s_hse_symmetry_workspace,swap_hse_symmetry_workspace,read_sw_symmetry
+ use sym_rho_sub,only:s_hse_density_workspace,swap_hse_density_workspace
+ use math_constants,only:set_math_constants
+ use parallelization,only:setup_parallel
+ use timer,only:timer_initialize
+ character(c_char),intent(in)::path(*)
+ integer(c_int64_t),intent(out)::token
+ type(s_input_parser)::parser
+ type(s_hse_symmetry_workspace)::old_symmetry
+ type(s_hse_density_workspace)::old_density_symmetry
+ type(s_gs_context),pointer::candidate
+ type(gs_handle_slot),allocatable::enlarged(:)
+ character(len(calc_mode))::previous_mode
+ character(4096)::filename,expected
+ integer::group,rank,nproc,i,index,status
+ token=0;sp_gs_import=10
+ if(.not.comm_is_attached())return
+ call comm_get_globalinfo(group,rank,nproc)
+ filename='';status=0
+ do i=1,len(filename)
+  if(path(i)==c_null_char)exit
+  filename(i:i)=path(i)
+ enddo
+ if(i>len(filename).or.len_trim(filename)==0)status=11
+ expected=filename;call comm_bcast(expected,group)
+ if(filename/=expected)status=11
+ call comm_get_max(status,group)
+ if(status/=0)then
+  sp_gs_import=status;return
+ endif
+ if(.not.gs_host_initialized)then
+  call setup_parallel
+  call set_math_constants
+  call timer_initialize
+  gs_host_initialized=.true.
+ endif
+ call read_input(trim(filename),parser)
+ call read_Hubbard_parameters
+ allocate(candidate)
+ call swap_hse_symmetry_workspace(old_symmetry)
+ call swap_hse_density_workspace(old_density_symmetry)
+ call read_sw_symmetry(yn_symmetry)
+ previous_mode=calc_mode;calc_mode='GS'
+ call gs_run(candidate,status,import_only=.true.)
+ calc_mode=previous_mode
+ call swap_hse_density_workspace(old_density_symmetry)
+ call swap_hse_symmetry_workspace(old_symmetry)
+ call comm_get_max(status,group)
+ if(status/=0)then
+  call gs_close(candidate);deallocate(candidate)
+  sp_gs_import=status;return
+ endif
+ index=0
+ if(allocated(gs_handles))then
+  do i=1,size(gs_handles)
+   if(.not.associated(gs_handles(i)%context))then
+    index=i;exit
+   endif
+  enddo
+ endif
+ if(index==0)then
+  i=0
+  if(allocated(gs_handles))i=size(gs_handles)
+  allocate(enlarged(i+1))
+  if(i>0)enlarged(:i)=gs_handles
+  call move_alloc(enlarged,gs_handles)
+  index=i+1
+ endif
+ gs_handle_serial=gs_handle_serial+1
+ token=gs_handle_prefix+gs_handle_serial
+ gs_handles(index)%context=>candidate
+ gs_handles(index)%token=token
+ sp_gs_import=0
+end function
+integer(c_int) function sp_gs_info(token,stats,values) bind(C)
+ integer(c_int64_t),value::token
+ integer(c_int),intent(out)::stats(4)
+ real(c_double),intent(out)::values(3)
+ integer::index,status
+ stats=0;values=0d0
+ call gs_lookup(token,index,status)
+ sp_gs_info=status
+ if(status/=0)return
+ associate(s=>gs_handles(index)%context)
+  stats=[s%iterations,-1,s%system%nion,s%system%no]
+ end associate
+end function
+subroutine array_layout(s,quantity,ndim,shape_out,lower,status)
+  type(s_gs_context),intent(in) :: s
+  integer,intent(in) :: quantity
+  integer(c_int),intent(out) :: ndim
+  integer(c_int64_t),intent(out) :: shape_out(7),lower(7)
+  integer,intent(out) :: status
+  ndim=0;shape_out=1;lower=1;status=0
+  select case(quantity)
+  case(1)
+    ndim=3;shape_out(:3)=shape(s%rho%f,kind=c_int64_t);lower(:3)=lbound(s%rho%f,kind=c_int64_t)
+  case(2)
+    ndim=3;shape_out(:3)=shape(s%system%rocc,kind=c_int64_t);lower(:3)=lbound(s%system%rocc,kind=c_int64_t)
+  case(3,4)
+    status=11;return ! Eigenvalues/forces were not calculated by import.
+  case(5)
+    ndim=7
+    if(allocated(s%spsi%rwf))then
+      shape_out=shape(s%spsi%rwf,kind=c_int64_t);lower=lbound(s%spsi%rwf,kind=c_int64_t)
+    else
+      shape_out=shape(s%spsi%zwf,kind=c_int64_t);lower=lbound(s%spsi%zwf,kind=c_int64_t)
+    endif
+  case default
+    status=11
+  end select
+end subroutine
+
+integer(c_int) function sp_gs_array_info(token,quantity,ndim,shape_out,lower) bind(C)
+  integer(c_int64_t),value :: token
+  integer(c_int),value :: quantity
+  integer(c_int),intent(out) :: ndim
+  integer(c_int64_t),intent(out) :: shape_out(7),lower(7)
+  integer :: index,status
+  call gs_lookup(token,index,status)
+  if(status==0)call array_layout(gs_handles(index)%context,quantity,ndim,shape_out,lower,status)
+  sp_gs_array_info=status
+end function
+
+integer(c_int) function sp_gs_read(token,quantity,real_ptr,imag_ptr,length) bind(C)
+  integer(c_int64_t),value :: token,length
+  integer(c_int),value :: quantity
+  type(c_ptr),value :: real_ptr,imag_ptr
+  real(c_double),pointer :: re(:),im(:)
+  integer(c_int64_t) :: shape_out(7),lower(7),k
+  integer(c_int) :: ndim
+  integer :: index,status,i1,i2,i3,i4,i5,i6,i7,group,rank,nproc
+  call gs_lookup(token,index,status)
+  if(status/=0)then
+    sp_gs_read=status;return
+  endif
+  call array_layout(gs_handles(index)%context,quantity,ndim,shape_out,lower,status)
+  if(status==0)then
+    if(length/=product(shape_out).or..not.c_associated(real_ptr))status=11
+    if(quantity==5.and..not.c_associated(imag_ptr))status=11
+  endif
+  call comm_get_globalinfo(group,rank,nproc)
+  call comm_get_max(status,group)
+  sp_gs_read=status
+  if(status/=0)return
+  call c_f_pointer(real_ptr,re,[length])
+  associate(s=>gs_handles(index)%context)
+    select case(quantity)
+    case(1)
+      re=reshape(s%rho%f,[length])
+    case(2)
+      re=reshape(s%system%rocc,[length])
+    case(3)
+      re=reshape(s%energy%esp,[length])
+    case(4)
+      re=reshape(s%system%Force,[length])
+    case(5)
+      call c_f_pointer(imag_ptr,im,[length])
+      k=0
+      do i7=int(lower(7)),int(lower(7)+shape_out(7)-1)
+      do i6=int(lower(6)),int(lower(6)+shape_out(6)-1)
+      do i5=int(lower(5)),int(lower(5)+shape_out(5)-1)
+      do i4=int(lower(4)),int(lower(4)+shape_out(4)-1)
+      do i3=int(lower(3)),int(lower(3)+shape_out(3)-1)
+      do i2=int(lower(2)),int(lower(2)+shape_out(2)-1)
+      do i1=int(lower(1)),int(lower(1)+shape_out(1)-1)
+        k=k+1
+        if(allocated(s%spsi%rwf))then
+          re(k)=s%spsi%rwf(i1,i2,i3,i4,i5,i6,i7);im(k)=0d0
+        else
+          re(k)=real(s%spsi%zwf(i1,i2,i3,i4,i5,i6,i7),c_double)
+          im(k)=aimag(s%spsi%zwf(i1,i2,i3,i4,i5,i6,i7))
+        endif
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+    end select
+  end associate
+end function
+
+integer(c_int) function sp_gs_close(token) bind(C)
+ integer(c_int64_t),value::token
+ integer::index,status
+ call gs_lookup(token,index,status)
+ sp_gs_close=status
+ if(status/=0)return
+ call gs_close(gs_handles(index)%context)
+ deallocate(gs_handles(index)%context)
+ nullify(gs_handles(index)%context)
+end function
+integer(c_int) function sp_gs_resources(counts) bind(C)
+ integer(c_int),intent(out)::counts(3)
+ integer::i,live,nslots
+ counts=0
+ if(allocated(gs_handles))then
+  do i=1,size(gs_handles)
+   if(associated(gs_handles(i)%context))counts(1)=counts(1)+1
+  enddo
+ endif
+ call comm_child_counts(live,nslots)
+ counts(2:3)=[live,nslots]
+ sp_gs_resources=0
+end function
+#endif
 end module salmonpy_gs_context
 
 subroutine main_dft

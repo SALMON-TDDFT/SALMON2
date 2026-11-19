@@ -1,8 +1,8 @@
-# メモリ上に保持する標準GS
+# メモリ上に保持するGS
 
 [English](NATIVE_GS.en.md) · Topic: `retained_native_gs`
 
-`salmonpy.native_gs` は、標準DFTのGSを同じプロセス内に複数保持します。
+通常版ランタイムでは、`salmonpy.native_gs` はDFTのGSを同じプロセス内に複数保持します。
 各状態は入力・波動関数・密度・占有数・固有値・力・XC・MPI資源を個別に所有します。
 異なるセル・格子・k点・電子数・原子配置・XCの計算を作成した後も、先の状態を参照できます。
 Pythonの通常の `DFT.run` は従来の別プロセス実行を維持します。
@@ -381,3 +381,36 @@ GSファイル・GS/2読込み・RTチェックポイントの形式は変更し
 これは内部状態分離の段階で、SCF続行の公開APIと完全保存はまだありません。
 直前場の配列2本は、GSをリセット／解放するまで保持されます。今回の変更は
 標準版のみで、HSEのソースプロファイルは変更していません。
+
+## 高速版で既存GSを読み込む
+
+上のSCF例は通常版ランタイムを対象とします。gs_abiプロトコル1を明示した高速版
+ビルドでも、SCFなしの既存GS読み込みを使えます。
+
+```python
+context = SimpleNamespace(solver_comm=MPI.COMM_WORLD, closed=False, _dependents=0)
+backend = NativeGSBackend(fast_build_record, shared_work_root,
+                         decomposition=(MPI.COMM_WORLD.size, 1, 1, 1, 1))
+with backend.open(context) as session:
+    a = session.load(bundle_a, material_id="film-a")
+    b = session.load(bundle_b, material_id="film-b")
+    density = a.array("density")  # 元の状態から独立した読み取り専用コピー
+    occupations = b.array("occupations")
+    a.close()                     # bは引き続き参照できる
+```
+
+機能宣言のない古い高速ライブラリは自動で採用・再構築しません。入力は既存の
+波動関数と互換である必要があります。全k点・縮約k点の初期化でモデル別に
+対称性作業領域を切り替え、必要なsym.datも引き継ぎます。読み込みでは不要な
+RT因数学習と予備SCFだけを無効にし、XC・HSE遮蔽係数は保持します。
+呼び出しは主スレッドでMPI群内の全ランクが同じ順に行います。
+
+高速版では密度・占有数・軌道を取得できます。infoのenergy_hartree・residual・
+tolerance・convergedは未計算を示すNoneで、物理的なゼロではありません。
+固有値・力は計算していません。高速版のsession.run・export_archive・tddft_modelは
+未接続です。通常版の既存機能は維持します。読み込みだけで収束を保証しません。
+
+既存サンプルに読み込みモードを追加しました。
+`mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT --import-bundle GS_A --second-bundle GS_B`
+各状態のmaterial_idを保持し、出力JSONの未計算値はnullとします。合成入力での
+独立性検証であり、実物質の物理精度の検証ではありません。

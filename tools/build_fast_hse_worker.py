@@ -55,9 +55,12 @@ def main():
     adapters = root/'salmonpy/native_adapters'
     if not adapters.is_dir():
         adapters = root.parent/'native_adapters'
-    names = ('step_output', 'hse_checkpoint', 'tddft_context', 'fast_hse_worker')
+    names = ['hse_checkpoint', 'tddft_context', 'fast_hse_worker']
+    shared_output = root/'runtime/sources/standard/src/io/step_output.f90'
+    if not (build/'src/CMakeFiles/salmon.dir/io/step_output.f90.o').is_file():
+        names.insert(0, 'step_output')
     for name in names:
-        if not (adapters/(name+'.f90')).is_file():
+        if not (shared_output if name=='step_output' else adapters/(name+'.f90')).is_file():
             raise ValueError('missing adapter source: '+name)
     flags = (build/'src/CMakeFiles/salmon.dir/flags.make').read_text()
     options = [v for v in shlex.split(re.search(r'^Fortran_FLAGS\s*=\s*(.*)$', flags, re.M)[1])
@@ -76,7 +79,7 @@ def main():
     staged = out/'src'
     staged.mkdir()
     for name in names:
-        shutil.copy2(adapters/(name+'.f90'), staged/(name+'.f90'))
+        shutil.copy2(shared_output if name=='step_output' else adapters/(name+'.f90'), staged/(name+'.f90'))
     worker = out/'fast_hse_worker'
     commands = []
     checker = root/'tools/check_forbidden_eigensolvers.py'
@@ -95,7 +98,7 @@ def main():
         run([sys.executable, checker, '--object-tree', out])
         link[link.index('-o')+1] = str(worker)
         link = [str(out/'fast_hse_worker.o') if item == main_object else item for item in link]
-        link[1:1] = [str(out/'tddft_context.o'), str(out/'hse_checkpoint.o')]
+        link[1:1] = [str(out/(name+'.o')) for name in names if name!='fast_hse_worker']
         run(link, cwd=build/'src')
     receipt = {
         'schema': 'salmonpy.fast-hse-worker/1', 'status': 'built-and-audited',

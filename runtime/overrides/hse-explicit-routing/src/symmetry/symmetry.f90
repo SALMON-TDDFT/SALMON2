@@ -1,6 +1,10 @@
+#include "config.h"
 module sym_sub
 
-  use communication, only: comm_get_globalinfo, comm_is_root, comm_is_attached
+  use communication, only: comm_get_globalinfo, comm_is_root
+#ifdef USE_MPI
+  use communication, only: comm_is_attached
+#endif
 
   implicit none
 
@@ -82,7 +86,7 @@ contains
     real(8),allocatable :: work(:,:,:)
     integer :: ngid, npid, nprocs
     integer :: nsym, isym, n, j
-    logical :: ok(3)
+    logical :: ok(3),external_response
 
     if ( .not.use_symmetry ) return
 
@@ -160,7 +164,11 @@ contains
     if (is_hybrid(xc).and. &
         (theory=='tddft_pulse'.or.theory=='tddft_response'.or.theory=='tddft')) &
       then
-      if(theory=='tddft_response'.and.comm_is_attached().and.e_impulse==0d0)then
+      external_response=.false.
+#ifdef USE_MPI
+      external_response=theory=='tddft_response'.and.comm_is_attached().and.e_impulse==0d0
+#endif
+      if(external_response)then
         call symmetry_validate_field([0d0,0d0,0d0])
       else if(yn_spinorbit=='y')then
         call symmetry_validate_field(epdir_re1)

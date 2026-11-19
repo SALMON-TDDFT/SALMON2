@@ -12,7 +12,10 @@ module salmonpy_tddft_context
  use salmon_xc,only:finalize_xc
  use salmon_global
  use parallelization,only:nproc_size_global,nproc_group_global,nproc_id_global
- use communication,only:comm_summation,comm_bcast,comm_begin_children,comm_end_children,comm_release_children
+ use communication,only:comm_summation,comm_bcast
+#ifdef USE_MPI
+ use communication,only:comm_begin_children,comm_end_children,comm_release_children
+#endif
  use exx_native,only:exx_validate_vector_potential
  use sym_sub,only:use_symmetry,SymMatA,SymMatB,Amat,Bmat,Ainv,Binv
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
@@ -277,19 +280,30 @@ contains
  status=0
 900 call checkpoint_collective_status(status)
  if(status/=0)return
+ child_owner=0
+#ifdef USE_MPI
  call comm_begin_children(child_owner,status)
+#endif
  call checkpoint_collective_status(status)
  if(status/=0)then
+#ifdef USE_MPI
   call comm_end_children(child_owner)
+#endif
+#ifdef USE_MPI
   call comm_release_children(child_owner)
+#endif
   return
  endif
  allocate(ctx);ctx%mpi_child_owner=child_owner
  call exx_bind_system(ctx%system,ctx%hse,status)
  call checkpoint_collective_status(status)
  if(status/=0)then
+#ifdef USE_MPI
   call comm_end_children(child_owner)
+#endif
+#ifdef USE_MPI
   call comm_release_children(child_owner)
+#endif
   deallocate(ctx);return
  endif
  ! SYSname is a construction-only output label; no numerical setting is switched.
@@ -305,7 +319,9 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
                         ctx%V_local, ctx%Vbox, ctx%Vh, ctx%Vh_stock1, ctx%Vh_stock2, ctx%Vxc, ctx%Vpsl,&
                         ctx%pp, ctx%ppg, ctx%ppn, ctx%unfold, run_config=selected )
  sysname=saved_name
+#ifdef USE_MPI
  call comm_end_children(child_owner)
+#endif
  ctx%run_settings=selected
  ctx%settings=capture_settings()
  process_settings=ctx%settings;settings_pinned=.true.
@@ -444,7 +460,9 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  call finalize_xc(ctx%xc_func)
  call exx_unbind_system(ctx%system)
  call rt_state_clear(ctx%hse)
+#ifdef USE_MPI
  call comm_release_children(ctx%mpi_child_owner)
+#endif
  deallocate(ctx)
  nullify(ctx)
  end subroutine

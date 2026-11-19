@@ -26,6 +26,17 @@ def _agree(comm,error):
     if any(errors):raise InputError(str(errors))
 
 
+def _require_field_record(record):
+    """Admit the legacy field record or an explicitly declared fast field ABI."""
+    if record.get('schema')=='salmonpy.embedded-tddft/1':return
+    field=record.get('field_abi')
+    if (record.get('schema')=='salmonpy.fast-hse-mpi/1' and isinstance(field,dict)
+            and type(field.get('protocol')) is int and field['protocol']==1
+            and field.get('scheme')=='salmonpy.eh-centered-current/1'):
+        return
+    raise InputError('embedded host library record or explicit fast-runtime E/H ABI required')
+
+
 class NativeEHField:
     """Collective field-group context; points map IDs to zero-based grid indices.
 
@@ -64,7 +75,7 @@ class NativeEHField:
                 i,j,k=point
                 if np.any(ids[i-1:i+2,j-1:j+2,k-1:k+2]):raise InputError('coupled cells require a vacuum constitutive neighborhood')
             record=json.loads(Path(build_record).read_text())
-            if record.get('schema')!='salmonpy.embedded-tddft/1':raise InputError('embedded host library record required')
+            _require_field_record(record)
             library=Path(record['library']);sha=record['sha256']
             if _digest(library)!=sha:raise InputError('native library checksum mismatch')
             lib=c.CDLL(str(library))

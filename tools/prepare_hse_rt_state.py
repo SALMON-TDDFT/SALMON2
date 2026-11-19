@@ -38,6 +38,7 @@ def prepare(source,directory=None,*,reference_only=False,explicit_routing=False)
             if routing is not None:
                 store.replace_files(root/'runtime',routing,dest)
                 record['routing_overlay']=routing
+                store.check_shared_kernels(root,dest,routing.get('shared_kernels',{}))
         guard=dest/'cmakefiles/salmonpy_prohibition.cmake'
         subprocess.run([sys.executable,str(checker),'--source-root',str(dest/'src')],check=True)
         record.update(status='prepared-and-source-audited',checker_sha256=hashlib.sha256(checker.read_bytes()).hexdigest(),

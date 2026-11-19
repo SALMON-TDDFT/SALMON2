@@ -225,7 +225,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #endif
   call timer_end(LOG_CALC_TIME_PROPAGATION)
   if(rt%recover_errors)then
+#ifdef USE_HSE
     rt%step_error=max(rt%step_error,exx_recovery_status(system))
+#endif
     call recovery_wave(mg,info,spsi_out,rt%step_error)
     if(rt%step_error/=0)then
       call nvtxEndRange
@@ -289,7 +291,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   
   call timer_end(LOG_CALC_RHO)
   if(rt%recover_errors)then
+#ifdef USE_HSE
     rt%step_error=max(rt%step_error,exx_recovery_status(system))
+#endif
     call recovery_scalar(mg,info,rho,21,rt%step_error)
     if(rt%step_error/=0)then
       call nvtxEndRange
@@ -327,7 +331,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     end if
     call timer_end(LOG_CALC_HARTREE)
   if(rt%recover_errors)then
+#ifdef USE_HSE
     rt%step_error=max(rt%step_error,exx_recovery_status(system))
+#endif
     call recovery_scalar(mg,info,Vh,22,rt%step_error)
     if(rt%step_error/=0)then
       call nvtxEndRange
@@ -339,7 +345,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
   if(rt%recover_errors)then
+#ifdef USE_HSE
     rt%step_error=max(rt%step_error,exx_recovery_status(system))
+#endif
     call recovery_scalar(mg,info,Vxc(1),23,rt%step_error)
     if(rt%step_error/=0)then
       call nvtxEndRange
@@ -426,8 +434,10 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call nvtxEndRange
       return
     endif
+#ifdef USE_HSE
     call exx_factor_endpoint(system,info,itt)
     rt%step_error=max(rt%step_error,exx_recovery_status(system))
+#endif
     call recovery_agree(info,33,rt%step_error/=0,rt%step_error)
     if(rt%step_error/=0)then
       call nvtxEndRange
@@ -569,7 +579,9 @@ contains
     call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
     
     if(rt%recover_errors)then
+#ifdef USE_HSE
       rt%step_error=max(rt%step_error,exx_recovery_status(system))
+#endif
       call recovery_wave(mg,info,spsi_out,rt%step_error)
       if(rt%step_error/=0)then
         call nvtxEndRange
@@ -608,7 +620,9 @@ contains
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     end if
     if(rt%recover_errors)then
+#ifdef USE_HSE
       rt%step_error=max(rt%step_error,exx_recovery_status(system))
+#endif
       call recovery_scalar(mg,info,Vxc(1),23,rt%step_error)
       if(rt%step_error/=0)then
         call nvtxEndRange

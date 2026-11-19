@@ -1,6 +1,7 @@
 """Small retained-GS ownership demo; four SCF iterations, not converged material data.
 
 mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT
+For import-only fast GS: add --import-bundle GS [--second-bundle OTHER_GS].
 """
 import argparse
 import json
@@ -14,6 +15,8 @@ from salmonpy.native_gs import NativeGSBackend
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('build',type=Path);parser.add_argument('output',type=Path)
+    parser.add_argument('--import-bundle',type=Path,help='read existing compatible GS without SCF')
+    parser.add_argument('--second-bundle',type=Path)
     parser.add_argument('--export-archives',action='store_true',
                         help='explicitly save regular-mesh GS/2 arrays on subgroup root; not a full SCF checkpoint')
     args=parser.parse_args()
@@ -25,6 +28,24 @@ def main():
         except Exception as exc:error=str(exc)
     error=world.bcast(error,root=0)
     if error:raise ValueError(error)
+    if args.import_bundle:
+        context=SimpleNamespace(solver_comm=world,closed=False,_dependents=0)
+        backend=NativeGSBackend(args.build,args.output,decomposition=(world.size,1,1,1,1))
+        with backend.open(context) as session:
+            states=[session.load(bundle,material_id=name) for bundle,name in zip(
+                (args.import_bundle,args.second_bundle or args.import_bundle),('material-a','material-b'))]
+            before=states[1].array('density').values
+            reports=[{'material_id':state.material_id,**vars(state.info),
+                      'density_shape':list(state.array('density').values.shape)} for state in states]
+            if args.export_archives:
+                for state in states:state.export_archive(args.output/(state.material_id+'-gs2'))
+            states[0].close()
+            np.testing.assert_array_equal(before,states[1].array('density').values)
+            if world.rank==0:
+                (args.output/'result.json').write_text(json.dumps({'status':'pass','materials':reports,
+                    'SCF_calls':0,'scope':'existing GS import; convergence/energy not established'},indent=2)+'\n')
+        assert context._dependents==0
+        return
     pp=Pseudopotential.from_file(Path(__file__).with_name('si_intro_data')/'Si_rps.dat',atomic_number=14,local_channel=2)
     models=[DFT((14,),np.eye(3)*8,[[.3,.4,.45]],(pp,),4,2,(8,8,8),(2,1,1),xc='pz'),
             DFT((14,14),np.eye(3)*9,[[.3,.4,.45],[.7,.6,.55]],(pp,),8,4,(12,12,12),(1,2,1),xc='libxc_pbe')]

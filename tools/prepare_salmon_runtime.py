@@ -21,9 +21,7 @@ def prepare(source, directory=None):
     marker=dest/'salmonpy-runtime-source.json'
     try:
         store.copy_tree(root/'runtime',spec,dest)
-        for local,external in spec['shared_kernels'].items():
-            if (root/local).read_bytes()!=(dest/external).read_bytes():
-                raise ValueError('shared kernel differs from bundled runtime: '+local)
+        store.check_shared_kernels(root,dest,spec['shared_kernels'])
         subprocess.run([sys.executable,str(root/'tools/check_forbidden_eigensolvers.py'),'--source-root',str(dest/'src')],check=True)
         marker.write_text(json.dumps(spec,indent=2)+'\n')
         return dest

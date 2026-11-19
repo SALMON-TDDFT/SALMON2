@@ -52,6 +52,15 @@ class NativeGSTests(unittest.TestCase):
             with patch('salmonpy.native_gs.c.CDLL') as load:
                 backend=NativeGSBackend(receipt,root)
                 load.assert_not_called()
+            receipt.write_text(json.dumps({'schema':'salmonpy.fast-hse-mpi/1',
+                'library':str(library),'sha256':hashlib.sha256(library.read_bytes()).hexdigest(),
+                'gs_abi':{'protocol':1,'modes':['import'],'arrays':['density','occupations','orbitals']}}))
+            with patch('salmonpy.native_gs.c.CDLL') as load:
+                backend=NativeGSBackend(receipt,root)
+                load.assert_not_called()
+            malformed=json.loads(receipt.read_text());malformed.pop('gs_abi');receipt.write_text(json.dumps(malformed))
+            from salmonpy.errors import InputError
+            with self.assertRaises(InputError):NativeGSBackend(receipt,root)
             for name,value in [('decomposition',(1,2,1,1,1)),('library',Path('/tmp/other')),
                                ('work_root',Path('/tmp/other')),('sha256','different')]:
                 with self.assertRaises(AttributeError):setattr(backend,name,value)
@@ -98,6 +107,17 @@ class NativeGSTests(unittest.TestCase):
         for value in (np.inf,np.nan,-np.inf):
             expected.imag[0]=value
             with np.errstate(all='raise'),self.assertRaises(NumericalError):state.array('orbitals')
+
+        session.backend=SimpleNamespace(_fast=True)
+        with self.assertRaisesRegex(InputError,'eigenvalues were not computed'):state.array('eigenvalues')
+        def metadata(token,stats,values):
+            np.ctypeslib.as_array((c.c_int*4).from_address(stats))[:]=[0,-1,2,4]
+            np.ctypeslib.as_array((c.c_double*3).from_address(values))[:]=0
+            return 0
+        session.lib.sp_gs_info=metadata
+        self.assertIsNone(state.info.energy_hartree)
+        self.assertIsNone(state.info.residual)
+        self.assertIsNone(state.info.converged)
 
     @unittest.skipUnless(importlib.util.find_spec('f90nml'),'optional f90nml not installed')
     def test_declared_gs_metadata_normalization_and_independence(self):

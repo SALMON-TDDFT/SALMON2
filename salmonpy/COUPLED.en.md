@@ -1,15 +1,27 @@
 # MPI TDDFT coupled to Multiscale1D or native E/H FDTD (experimental)
 
-[日本語](COUPLED.md) · Topic: `coupled` · Paired revision: `2026-11-14.1`
+[日本語](COUPLED.md) · Topic: `coupled` · Paired revision: `2026-11-19.1`
 
-Split one Python MPI job into a field group and material groups, with **one material
-and one macro point per material group**. Every member of a material group participates
-in native TDDFT; k-point, orbital and real-space decomposition stays inside that group.
-There is no subprocess or nested MPI launch. Native FDTD retains many local LD states.
+Split one Python MPI job into a field group and material groups. The legacy/default
+selection uses one material and one macro point per material group; explicitly
+shared or registry routes described below can own multiple points/models per group.
+Every member participates in that group's native electronic calculation. k-point,
+orbital and real-space decomposition stays inside the group. There is no subprocess
+or nested MPI launch. Native FDTD retains many local LD states.
 
 The entries are `NativeTDDFTMaterialProvider`, `NativeTDDFTBackend`, `NativeEHField`
 and `CoupledStepper`; the latter two live in `salmonpy.coupled`. Existing serial-worker
 TDDFT and batch FDTD remain available with their own restrictions.
+
+## Field runtime records
+
+NativeEHField accepts the existing embedded-tddft/1 host-library record and new
+fast-hse-mpi/1 records declaring field_abi protocol1 with the same E/H timing
+scheme. A new build_fast_hse_mpi build can therefore supply both FIELD_BUILD and
+HSE_BUILD in the mixed_hse_models example; rank groups stay separate processes.
+Its executable-build.json is the separate batch MPI FDTD executable record.
+This does not add standard TDDFT/GS support to a fast library merely by changing
+the record schema, and import does not compile or acquire a runtime.
 
 ## Choosing dimension and response model
 
@@ -22,8 +34,8 @@ macro layout, not reducing the microscopic DFT/TDDFT electronic problem to 1D.
 user-written current solver.** Three-dimensional TDDFT is allowed, but choose it only
 after assessing the required physics, independent state count, memory and runtime.
 SBE/custom models must still satisfy their physical validity range, independent
-point-state ownership and A/c-to-charge-current-density contract. This recommendation
-does not imply an implemented SBE coupling adapter or automatic 1D reduction.
+point-state ownership and A/c-to-charge-current-density contract. The ordinary mixed
+sample connects SBE to native E/H; dimension selection remains explicit.
 Standalone three-dimensional LD FDTD is a separate workflow.
 
 The current 40³-grid/two-TDDFT-point sample is a connection regression, not a general

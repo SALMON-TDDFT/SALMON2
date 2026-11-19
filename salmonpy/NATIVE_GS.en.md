@@ -1,8 +1,8 @@
-# Retained standard ground states
+# Retained native ground states
 
 [日本語](NATIVE_GS.md) · Topic: `retained_native_gs`
 
-salmonpy.native_gs keeps several standard DFT ground states in one process.
+With a standard runtime, salmonpy.native_gs keeps several DFT ground states in one process.
 Each owns its input, orbitals, density, occupations, eigenvalues, forces, XC and
 MPI children. Creating a different cell/grid/k/electron/atom/XC calculation leaves
 previous owners readable. Ordinary DFT.run retains its separate-process behavior.
@@ -404,3 +404,38 @@ and RT checkpoint formats are unchanged. This is internal groundwork: no public
 SCF resume API or complete SCF checkpoint is available yet. The two previous-field
 arrays now remain live with the GS owner until reset/close. HSE source profiles
 are unchanged by this standard-only slice.
+
+## Fast-profile existing GS import
+
+The standard SCF example above remains supported by the standard runtime. A fast
+build declaring `gs_abi` protocol1 also supports existing-GS import, without SCF:
+
+```python
+context = SimpleNamespace(solver_comm=MPI.COMM_WORLD, closed=False, _dependents=0)
+backend = NativeGSBackend(fast_build_record, shared_work_root,
+                         decomposition=(MPI.COMM_WORLD.size, 1, 1, 1, 1))
+with backend.open(context) as session:
+    a = session.load(bundle_a, material_id="film-a")
+    b = session.load(bundle_b, material_id="film-b")
+    density = a.array("density")  # independent read-only copy
+    occupations = b.array("occupations")
+    a.close()                     # b remains readable
+```
+
+The runtime record's declaration is required; older fast libraries are not
+silently accepted or rebuilt. Inputs describe compatible existing wavefunctions;
+full/reduced k-point initialization keeps each model's symmetry scratch separate
+and copies the required sym.dat. Import disables unused RT factor-learning and
+pre-SCF controls, preserving XC and HSE screening. All calls remain subgroup
+collective on the main thread; one attachment lifetime/process as above.
+
+Fast imports expose density, occupations and orbitals. Their info energy_hartree,
+residual, tolerance and converged are None, not physical zero. Eigenvalues and
+forces were not computed. Fast session.run, export_archive and tddft_model are
+not connected; the standard profile retains its existing features. No convergence
+claim follows from importing a synthetic or unlabelled GS.
+
+The existing sample supports this path with no new sample file:
+`mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT --import-bundle GS_A --second-bundle GS_B`.
+Each state keeps its material_id; output JSON records unknowns as null. Testing
+uses synthetic inputs and validates state independence, not physical convergence.

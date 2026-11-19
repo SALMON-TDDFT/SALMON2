@@ -17,6 +17,72 @@ import sys
 
 INPUT = "&calculation\n theory='dft'\n/\n&control\n sysname='gs', base_directory='./', yn_restart='n', yn_self_checkpoint='n'\n/\n&units\n unit_system='au'\n/\n&system\n yn_periodic='y', spin='unpolarized', nelem=1, natom=1, nelec=4, nstate=2, al=8,8,8\n/\n&pseudo\n file_pseudo(1)='Si_rps.dat', izatom(1)=14, lloc_ps(1)=2\n/\n&functional\n xc='hse06', exx_pre_scf_threshold=1d8, exx_pre_scf_steps=2, yn_hse_wannier='n'\n/\n&rgrid\n num_rgrid=8,8,8\n/\n&kgrid\n num_kgrid=2,1,1\n/\n&scf\n nscf=8, convergence='rho_dne', threshold=1d8, nscf_init_mix_zero=1, iseed_number_change=0\n/\n&atomic_red_coor\n'Si' .3 .4 .45 1\n/\n"
 
+def import_existing(args):
+    """Read synthetic restart fixtures only; never invoke SCF or collect GS data."""
+    root=Path(__file__).resolve().parents[1]
+    record=json.loads(args.build.read_text());artifact=Path(record.get('library') or record['executable'])
+    if hashlib.sha256(artifact.read_bytes()).hexdigest()!=record['sha256']:
+        raise ValueError('build artifact checksum mismatch')
+    command=record.get('configure_command') or record['commands'][0]
+    build=Path(command[command.index('-B')+1]);out=args.output.resolve()
+    config=(build/'config.h').read_text()
+    mpi=bool(re.search(r'^#define USE_MPI\b',config,re.M))
+    hse=bool(re.search(r'^#define USE_HSE\b',config,re.M))
+    if not mpi and args.ranks!=1:raise ValueError('serial import probe uses --ranks 1')
+    out.mkdir(parents=True,exist_ok=False)
+    source=root/'tests/native/test_gs_lifecycle.f90';obj=out/'probe.o';exe=out/'probe'
+    checker=root/'tools/check_forbidden_eigensolvers.py'
+    subprocess.run(['mpifort','-cpp','-DSALMONPY_GS_IMPORT_PROBE','-I'+str(build),'-c',str(source),'-o',str(obj)],check=True)
+    subprocess.run([sys.executable,str(checker),'--object-tree',str(out)],check=True)
+    if 'library' in record:
+        subprocess.run(['mpifort',str(obj),str(artifact),'-o',str(exe)],check=True)
+    else:
+        subprocess.run([sys.executable,str(checker),'--object-tree',str(build)],check=True)
+        link=shlex.split((build/'src/CMakeFiles/salmon.dir/link.txt').read_text())
+        link[link.index('-o')+1]=str(exe)
+        link=[str(obj) if value=='CMakeFiles/salmon.dir/main.f90.o' else value for value in link]
+        subprocess.run(link,cwd=build/'src',check=True)
+
+    from salmonpy.bands import _input_groups
+    template=_input_groups((args.import_bundle/'rt.inp').read_text())
+    rows=[]
+    for first,second in ([('hse06','libxc_pbe'),('hse06','hse06')] if hse else [])+[('pz','libxc_pbe'),('tbmbj','libxc_pz')]:
+        case=out/(first+'-'+second);case.mkdir()
+        for name in ('data_for_restart','pseudo1_rps.dat'):
+            source=args.import_bundle/name
+            if source.is_dir():shutil.copytree(source,case/name)
+            else:shutil.copy2(source,case/name)
+        hashes={str(p.relative_to(case)):hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in (case/'data_for_restart').rglob('*') if p.is_file()}
+        for name,xc in [('a',first),('b',second)]:
+            groups=dict(template)
+            groups['calculation']="\n theory='dft'\n"
+            groups['control']="\n sysname='"+name+"',directory_read_data='./data_for_restart/',yn_restart='y',read_gs_restart_data='wfn'\n"
+            groups['functional']="\n xc='"+xc+"',exx_pre_scf_threshold=0,exx_factor_mode='off'\n"
+            if first==second=='hse06' and name=='b':
+                groups['functional']=groups['functional'].replace("exx_factor_mode='off'","exx_factor_mode='off',hse_omega=.19")
+            groups['propagation']="\n propagator='middlepoint',yn_predictor_corrector='n'\n"
+            groups['parallel']='\n nproc_k='+str(args.ranks)+',nproc_ob=1,nproc_rgrid=1,1,1\n'
+            if name=='b':groups['atomic_red_coor']="\n 'Si' .1 .2 .3 1\n"
+            text='\n'.join('&'+key+value+'/' for key,value in groups.items())+'\n'
+            (case/(name+'.inp')).write_text(text)
+        with (case/'a.inp').open() as inp,(out/(case.name+'.log')).open('w') as log:
+            launch=['mpiexec','-n',str(args.ranks),str(exe),'import'] if mpi else [str(exe),'import']
+            subprocess.run(launch,cwd=case,stdin=inp,
+                stdout=log,stderr=subprocess.STDOUT,check=True,timeout=180,
+                env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'})
+        if 'GS_IMPORT independent/seed/fresh/close PASS' not in (out/(case.name+'.log')).read_text():
+            raise AssertionError('GS import probe did not complete')
+        for name,h in hashes.items():
+            if hashlib.sha256((case/name).read_bytes()).hexdigest()!=h:
+                raise AssertionError('input restart mutated')
+        rows.append({'xc':[first,second],'status':'pass','independent':True,'detached_seed':True,
+                     'fresh_import_exact':True,'close_preserves_other_state':True,'SCF_calls':0})
+    (out/'result.json').write_text(json.dumps({'status':'pass','ranks':args.ranks,'cases':rows,
+        'scope':'synthetic import only; no SCF/physical convergence; reference positional unused'},indent=2)+'\n')
+    print('GS import-only ownership PASS',flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('build', type=Path)
@@ -28,7 +94,12 @@ def main():
     parser.add_argument('--distinct-mixing', action='store_true')
     parser.add_argument('--initial-no-mix-steps', type=int, default=1)
     parser.add_argument('--different-normalization', action='store_true')
+    parser.add_argument('--import-bundle',type=Path,help='read-only existing synthetic restart; no SCF; reference positional unused')
+    parser.add_argument('--ranks',type=int,default=2)
     args = parser.parse_args()
+    if args.import_bundle:
+        import_existing(args)
+        return
     if args.different_normalization and (args.convergence!='rho_dne' or args.distinct_mixing):
         parser.error('different normalization requires rho_dne and no distinct mixing')
     root = Path(__file__).resolve().parents[1]

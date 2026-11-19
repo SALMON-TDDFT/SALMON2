@@ -1449,3 +1449,172 @@ See docs/gs-reexport-validation-2026-11-19.md for final wheel/evidence.
   verified. Current Python module count68/private17 (was70/19).
   Evidence: calc2026/salmonpy-consolidation-first-batch-20261119, no GS collection
   or Actions. Native single-source migration/convergence execution still pending.
+
+
+## 2026-11-19 — fast-source SBE sharing and HSE-off build path
+
+- [x] Fast explicit routing references existing standard SBE types/kernel/wrappers
+  and CMake list; no new file copies. Native/solver byte equality checked by a
+  common preparation helper; history/reference-only trees unchanged.
+- [x] HSE-only Taylor/time-evolution recovery/history references guarded; ordinary
+  numerical checks preserved. HSE-preprocessed statements equal the previous
+  version except NVTX source-line labels; no-HSE preprocessor has no EXX calls.
+- [x] Same final source builds HSE ON and OFF. OFF omits HSE FFTW configuration
+  and linkage. Source/object prohibition audits retained.
+- [ ] Full maintained-source unification:18 standard-only paths/74 differing
+  effective paths remain; default GS/TDDFT/EH preparation is not switched.
+
+- Final shared-SBE slice: same-source HSE ON/OFF builds audited; no-HSE executable
+  has no FFTW linkage.16 SBE configurations in each of HSE/OMP1,HSE/OMP2,no-HSE
+  and HSE/MPI2 compare to the unchanged validated old executable and Python.
+  OMP1 files bit-exact; OMP2 within3e-13 relative/3e-15 absolute tolerance.
+  HSE Taylor/PT-CN learned full/reduced-k internal-MPI2 independent current/
+  energy/history and direct no-replay resume are exact to old controls.
+  Source628/installed628 methods (one skip each), installed preparation source
+  hashes/native MPI/SBE example, offline sdist→wheel and JP/EN/AI sync pass.
+  Evidence: calc2026/salmonpy-hse-shared-sbe-20261119 (no GS arrays/new SCF/CI).
+  Full source unification/convergence driver and other platforms remain open.
+
+
+## 2026-11-19 — fast-source FDTD/LD/EH sharing
+
+- [x] Six existing standard Maxwell paths now serve fast explicit routing too:
+  CMake,LD,EH kernel,EH calculation,main and embedded E/H. No extra source copy.
+- [x] Fast build publishes field_abi only after probing the compiled protocol;
+  NativeEHField accepts that record while retaining legacy embedded records.
+  Separate executable-build.json binds batch/MPI FDTD executable SHA.
+- [x] HSE ON/OFF builds;76 observation files across single/multiple LD/dielectric/
+  magnetic/ID/order/axis/impulse cases match the current standard reference bytes.
+  MPI4 multi-LD HSE/on-off,magnetic rank corners and native-EH MPI2 failure/retry
+  controls pass;A/E/H equal the standard library.
+- [x] Same library serves separate field/material groups in the ordinary mixed
+  sample:local LD,SBE,two full-k HSE model inputs,128 continuous steps versus
+  old standard field,and direct8→128 resume match with zero replay.
+- [ ] Standard GS/input/TDDFT source migration and remaining71 differing paths;
+  15 standard-only paths include five alternative HSE files NOT to migrate,
+  plus bridge/output/audit functions already present elsewhere. Counts are not
+  a list of15 missing physics features.
+
+
+## 2026-11-19 — shared IO prerequisites for GS/ordinary TDDFT
+
+- [x] Fast preparation shares the existing standard IO list, model-input value
+  storage and RT stream management. Remove identical adapter step_output source;
+  builders reuse solver object or compile the same source for compatible older
+  builds. Include each linked application object in the audit.
+- [x] Native model-input capture/activate/deep-copy/unallocated-array controls pass.
+  HSE's additional complete settings snapshot remains separate and unchanged.
+- [x] Same prepared source builds fast HSE with host MPI, standalone serial, and
+  MPI without HSE. Fix unconditional MPI-only symmetry/child-owner references in
+  serial paths without changing MPI numerical expressions or field validation.
+- [x] Two different full/reduced HSE model inputs under internal MPI2 match old
+  independent current/energy/history and direct resume; ordinary four-rank
+  LD/SBE/two-model mixed128 and direct8→128 controls match with zero replay.
+  Serial Taylor/PT-CN worker current/energy and direct restart match old controls.
+- [ ] Migrate parser workspace/GS owning handles/ordinary TDDFT into the fast
+  tree; sharing an input value record does not implement those lifecycles.
+  Current inventory587 same/70 differing/13 standard-only/75 fast-only; five
+  alternative standard HSE modules remain excluded from porting.
+
+No new SCF/GS collection or Actions; only synthetic regression fixtures used.
+
+Final IO slice: source628/installed628 (one skip each), sdist→wheel, installed
+source-hash reproduction and standalone worker linking checked. Validation:
+calc2026/salmonpy-hse-shared-io-20261119. No new Python module/test method.
+
+
+## 2026-11-19 — fast model-owned parser workspace
+
+- [x] Port standard workspace ownership to fast inputoutput: scratch units,
+  coordinate-source flags, namelist diagnostics, common defaults/value records.
+  Registered HSE models use an isolated parser; legacy batch keeps named files.
+- [x] Preserve complete fast defaults, unit initializer, KY spin resolution and
+  input validation; keep deprecated local MLWF aliases explicitly initialized.
+  Broadcast isolated parser metadata on all ranks; keep file handles root-local.
+- [x] Actual MPI2 A→B→A, reused workspace, split/interleaved scratch inputs,
+  omitted defaults, mixed units/coordinates and previous temporary-file controls
+  pass. All variables.log entries equal the unchanged old fast library; standard
+  parser regression still passes. HSE-specific inverse-length/GPU-batch inputs
+  survive reading and reset to native defaults when omitted.
+- [x] MPI2 heterogeneous HSE registry (six ranks total) current/energy/history,
+  direct resume and fresh independent state match old controls. LD/SBE/two-model
+  four-rank mixed128 and direct8→128 match with zero replay.
+- [x] Same source HSE-on MPI/serial and HSE-off MPI builds pass source/object
+  prohibition audits. Serial Taylor/PT-CN24 current/energy/direct resume match;
+  no-HSE SBE16 full-application configurations match byte-for-byte.
+- [ ] Retained GS numerical owners and ordinary embedded TDDFT lifecycle in the
+  fast tree. Common parser values do not replace the complete HSE input snapshot.
+  Global activation is still serialized; do not infer threaded native reentrancy.
+
+Source628 methods pass (one skip). No new Python module/test method or new GS/SCF.
+Validation records:calc2026/salmonpy-hse-owned-parser-20261119. No Actions used.
+
+Final parser slice: installed628 methods (one skip), offline sdist→wheel,
+installed source-hash reproduction, installed MPI2 parser and MPI6 registry
+controls pass. JP/EN/AI snapshots synchronized. Local result storage verified;
+OneDrive cloud synchronization and other platforms/compilers not confirmed.
+
+
+## 2026-11-19 — retained fast GS import and common seed
+
+- [x] Fast GS context import-only entry reads existing compatible wavefunction
+  restart without SCF/warmup/GS checkpoint output. Skip irrelevant SCF checks,
+  resolve unused initial-no-mix sentinel locally, keep buffer/mixing validation.
+- [x] Context-owned input snapshot, MPI child ownership, cache release and detached
+  common gs_seed export. No HSE plan/pointer exported; common seed is not a full
+  model/checkpoint. Share existing standard gs_seed source, no extra kernel copy.
+- [x] Internal MPI2/serial HSE four XC pairs, including two HSE states with
+  different screening/coordinates; no-HSE MPI2 two non-HSE pairs. Finite orbitals,
+  input/array independence, fresh import equality, close isolation, no child leaks.
+  Existing restart files remain unchanged. All tests use synthetic fixtures.
+- [x] Common real/complex seed redistribution with empty bands passes in MPI2.
+  Normal SCF iteration/output body byte-exact to preceding source; new SCF runs0.
+  HSE registry independent current/energy/history and four-rank mixed128/direct
+  save8→resume120 match old controls with zero replay. Source628 methods pass,
+  one skip; existing test methods/files extended rather than multiplied.
+- [ ] Python fast GS handles/NativeGSBackend connection; ordinary embedded TDDFT
+  initialization from the retained seed and complete model/resource lifecycle.
+  Native Fortran import alone does not implement those public workflows.
+
+Current inventory588 identical/70 different/12 standard-only/75 fast-only paths
+(fast733). Five alternative standard HSE modules are not migration targets.
+Evidence:calc2026/salmonpy-hse-gs-import-20261119. No new GS collection/SCF/Actions.
+
+Final GS-import distribution slice: installed628 methods pass (one skip),
+sdist→wheel/source inventory reproduction and installed MPI2 four-pair GS import
+controls pass. JP/EN/AI guide snapshots synchronized. Probe legacy compilation
+is retained for earlier builds; real/complex seed redistribution also passes.
+Normal fast GS omitted no-mixing sentinel resolution remains to audit with the
+public GS lifecycle migration; this import slice resolves that unused sentinel
+locally and does not run a new normal SCF. Local evidence only; cloud sync and
+other platforms/compilers unverified.
+
+
+## 2026-11-19 — Python fast GS import handles
+
+- [x] Existing GS Python API accepts fast host build records explicitly declaring
+  gs_abi/1 import mode. Compiled protocol probe required; no implicit build/load
+  during import or backend construction. Standard GS behavior retained.
+- [x] Native stable pointer slots and monotonic tokens: import/info/array/close/
+  resources. Density/occupations/orbitals are copied read-only; metadata not
+  established by import is None. Computed-only requests reject before native use.
+- [x] Registered GS reads switch/restore symmetry scratch, preserve sym.dat and
+  normalize unused RT-learning/pre-SCF controls without changing XC/screening.
+  Source GS and active retained owners remain unchanged.
+- [x] MPI6/internal2 full/full and full/reduced GS arrays match independent groups;
+  closing/fresh import, stale/mixed tokens and zero child-resource leaks pass.
+  Different HSE/Libxc-PBE and TB-mBJ/Libxc-PZ inputs pass the same controls.
+  Existing retained_gs sample import mode runs in MPI2 with preserved IDs/nulls.
+- [ ] Fast GS SCF creation, energy/force/eigenvalue computation and portable export;
+  complete GS→TDDFT model initialization remains to connect. Current fast GS
+  public path imports existing compatible scalar periodic wavefunctions only.
+
+No new Python module/test method/sample file, no new SCF or Actions. Evidence:
+calc2026/salmonpy-python-fast-gs-20261119. Remaining standard/fast source migration
+and approved convergence workflow are not completed by this handle connection.
+
+Final Python fast-GS slice: source628/installed628 methods (one skip each),
+installed MPI6 full/reduced ownership and MPI2 sample, source-hash reproduction,
+sdist→wheel and JP/EN/AI synchronization pass. Same-source no-HSE MPI and serial
+HSE builds also pass. New SCF0; no GS datasets or Actions. No extra Python module,
+sample file or test method. GS→TDDFT initialization remains the next connection.
