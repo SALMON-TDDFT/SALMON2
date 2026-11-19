@@ -28,11 +28,20 @@ retains results. Do not collect GS datasets or dispatch routine CI.
 - [x] Source/installed633 tests:632pass,1skip. Fresh source/object audits,
   sdist→wheel, installed examples, JP/EN/AI byte parity and guide sync verified.
 
+### User-directed execution order (2026-11-19)
+
+Active order:4→5→3. Groups1and2 are deferred at the user's request; do not
+prioritize fast-HSE norm wiring or a current-grid campaign now. Molecular work
+remains paused. Group6 follows separately with the existing CI budget constraint.
+First group4 step: retain SCF convergence history/progress in the owning mixing
+state without changing arithmetic, then complete numerical checkpoint and live
+continuation. No GS dataset collection is authorized.
+
 ### Remaining groups (not a count of individual implementation patches)
 
-1. [ ] Extend measured-norm diagnostics to fast PR HSE. Isolated E-drive norm
+1. [ ] DEFERRED by user: extend measured-norm diagnostics to fast PR HSE. Isolated E-drive norm
    wiring belongs to paused molecular work and is not the next active priority.
-2. [ ] Establish an actual current-grid campaign with two SCF-converged grids
+2. [ ] DEFERRED by user: establish an actual current-grid campaign with two SCF-converged grids
    passing5%, then separate k-point/response checks. Add unambiguous PP cutoff
    extraction; explicit species/channel radius is required until that exists.
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
@@ -1851,3 +1860,13 @@ Final measured-norm verification: source/installed632 tests (631pass,1skip), sdi
 - [ ] A physically converged current-grid campaign with two SCF-converged grids meeting5% is not established by the existing pair.
 
 Current-grid criterion verification: source/installed633 tests (632pass,1skip), sdist→wheel and JP/EN/AI/implementation byte parity. Error statistics use Fortran only. Existing Si12³/16³ waveforms differ by18.83%, provisional and not accepted at5%. No new GS data or CI. Evidence: calc2026/salmonpy-current-grid-criterion-20261119.
+
+### Group4 first step: shared-source SCF progress ownership
+
+- [x] Reproduce missing owned-progress type in current fast-source modules with the existing native ownership probe before implementation.
+- [x] Restore previous density/local potential, electron normalization, convergence/no-mix counts and iteration/residual/ion-update capture into s_mixing%scf_progress. Preserve existing mixing%scf_converged consumers.
+- [x] Entire iteration body identical after reversing ownership substitutions; scalar arithmetic/order unchanged. Synthetic MPI1/2×OMP1/2 convergence and copy-isolation probes pass.
+- [x] Computed PZ/PBE spatialMPI2 GS/independent arrays/16-step RT and direct resume equal the unchanged preceding runtime; no GS dataset collection.
+- [ ] Full active-SCF continuation, complete checkpoint payload/version and changed decomposition remain group4 work; no new public resume API claimed.
+
+Shared-source SCF progress validation: normal and fast-HSE builds source/object-audited; native progress/convergence MPI1/2×OMP1/2 and installed probes pass. PZ/PBE and fast-HSE computed GS→16-step independent/direct-resume controls exact; HSE learned/PT-CN history exact. Source/installed633 tests (632pass,1skip), sdist→wheel and JP/EN/AI byte parity. Full active-SCF continuation remains next. No GS datasets or CI. Evidence: calc2026/salmonpy-scf-progress-shared-source-20261119.

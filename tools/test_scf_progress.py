@@ -42,14 +42,14 @@ type(s_scalar) :: rho,V_local(spin)
 type(s_mixing) :: mixing
 type(s_dcdft) :: dc
 integer :: ix,iy,iz,nelec,nelec_spin(2)
-character(12) :: convergence
+character(32) :: convergence,scf_metric
 character :: yn_dc
 real(8) :: sum1
 {declarations}
 mg%is=[-1,2,0];mg%ie=mg%is+shape(oldrho)-1
 lg%num=shape(oldrho);system%nspin=spin;system%Hvol=.25d0
 info%icomm_r=MPI_COMM_WORLD
-nelec=electrons;nelec_spin=spin_electrons;yn_dc='n';convergence=mode
+nelec=electrons;nelec_spin=spin_electrons;yn_dc='n';convergence=mode;scf_metric=mode
 call allocate_scalar(mg,rho)
 call allocate_scalar(mg,V_local(1))
 rho%f=oldrho;V_local(1)%f=oldpot
@@ -78,11 +78,18 @@ def main():
     parser.add_argument('build',type=Path)
     parser.add_argument('reference',type=Path)
     parser.add_argument('output',type=Path)
+    parser.add_argument('--reference-build',type=Path,help='unchanged audited pre-refactor build binding the supplied source hash')
     args=parser.parse_args();root=Path(__file__).resolve().parents[1]
     record=json.loads(args.build.read_text());library=Path(record['library'])
     if record.get('schema')!='salmonpy.embedded-tddft/1' or hashlib.sha256(library.read_bytes()).hexdigest()!=record['sha256']:
         raise ValueError('unchanged explicit standard build required')
-    if hashlib.sha256(args.reference.read_bytes()).hexdigest()!=REFERENCE_SHA256:
+    reference_sha=REFERENCE_SHA256
+    if args.reference_build:
+        baseline=json.loads(args.reference_build.read_text())
+        if hashlib.sha256(Path(baseline['library']).read_bytes()).hexdigest()!=baseline['sha256']:
+            raise ValueError('reference runtime hash changed')
+        reference_sha=baseline['source_hashes']['src/gs/scf_iteration_dft.f90']
+    if hashlib.sha256(args.reference.read_bytes()).hexdigest()!=reference_sha:
         raise ValueError('pinned pre-refactor iteration source required')
     build=args.build.resolve().parent/'build'
     source=Path(record['configure_command'][record['configure_command'].index('-S')+1])
@@ -137,7 +144,7 @@ def main():
                 for name in ('ownership','convergence'):
                     run(['mpiexec','-n',ranks,out/name],cwd=out,env=env)
     result={'status':'pass','SCF_calls':0,'MPI_ranks':[1,2],'OMP_threads':[1,2],
-            'reference_source_sha256':REFERENCE_SHA256,'runtime_sha256':record['sha256'],
+            'reference_source_sha256':reference_sha,'runtime_sha256':record['sha256'],
             'ownership_independent':True,'convergence_bit_exact':True,'iteration_body_equivalent':True,
             'scope':'synthetic ownership and extracted convergence routines; not SCF continuation',
             'commands':commands}

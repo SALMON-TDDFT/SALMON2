@@ -623,3 +623,15 @@ validated NLCC-force capability records to an ASE Calculator runtime. Existing
 capability gates remain. No-NLCC workflows retain regression checks. Removing
 legacy sources and changing default preparation still require the remaining
 workflow/provenance validation; this migration alone does not complete unification.
+
+## Owned SCF progress before continuation (2026-11-19)
+
+The shared fast-source mixing state now owns previous density/local potential,
+electron normalization, convergence flag/count, iteration/residual and ion-update
+state. Assignment deep-copies its numerical arrays. Arithmetic and update order
+are unchanged. Existing fresh-SCF calls reset this progress. This establishes
+ownership for checkpointing, not a completed public no-reinitialization SCF
+continuation or complete portable checkpoint. Mixing/CG/potential/cache continuation
+remains next. Execution order is SCF persistence→shared ownership/recovery/native
+ABI→NLCC/units. Fast-HSE norm diagnostics and a physical grid campaign are deferred
+at the user's request. No GS datasets are collected by the validation probes.

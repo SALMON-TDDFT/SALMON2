@@ -610,7 +610,15 @@ module structures
     type(s_orbital) :: pre_gk,pk,hpk
   end type s_cg
 
+  type s_scf_iteration_progress
+    type(s_scalar) :: rho_old,Vlocal_old
+    real(8) :: electron_normalization=0d0,residual=1d9
+    integer :: iterations=0,no_mix_converged_count=0
+    logical :: converged=.false.,rion_update=.false.
+  end type s_scf_iteration_progress
+
   type s_mixing
+    type(s_scf_iteration_progress) :: scf_progress
     logical :: scf_converged=.false.
     type(s_mixing_config) :: input
     logical :: input_owned=.false.
