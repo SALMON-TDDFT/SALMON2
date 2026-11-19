@@ -615,6 +615,8 @@ module structures
     real(8) :: electron_normalization=0d0,residual=1d9
     integer :: iterations=0,no_mix_converged_count=0
     logical :: converged=.false.,rion_update=.false.
+    logical :: continuing=.false.,paused=.false.
+    integer :: stop_after=0
   end type s_scf_iteration_progress
 
   type s_mixing

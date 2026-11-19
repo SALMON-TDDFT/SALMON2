@@ -278,3 +278,5 @@ install(FILES "${ROOT}/tests/native/test_scf_progress.f90" "${ROOT}/tests/native
 
 install(FILES "${ROOT}/salmonpy/convergence.py" "${ROOT}/salmonpy/CONVERGENCE.md" "${ROOT}/salmonpy/CONVERGENCE.en.md" DESTINATION salmonpy)
 install(FILES "${ROOT}/salmonpy/convergence_kernel.f90" DESTINATION salmonpy/_runtime_source/salmonpy)
+
+install(FILES "${ROOT}/tools/test_scf_live_resume_mpi.py" DESTINATION salmonpy/_runtime_source/tools)

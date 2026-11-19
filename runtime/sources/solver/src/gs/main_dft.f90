@@ -40,11 +40,34 @@ public::gs_seed_from_handle
 #endif
 ! Internal retained GS storage. Actual contexts must have TARGET and a stable address.
 ! Never copy a live context; global inputs remain shared.
+! Numerical-only snapshots; static communicators/Libxc/FFT handles stay live.
+type s_scf_payload
+ type(s_model_inputs) :: continuation_inputs
+ type(s_dft_system) :: system
+ type(s_orbital) :: spsi,shpsi,sttpsi
+ type(s_cg) :: cg
+ type(s_mixing) :: mixing
+ type(s_scalar) :: rho,rho_jm,Vh,Vpsl
+ type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
+ type(s_poisson) :: poisson
+ type(s_reciprocal_grid) :: fg
+ type(s_dft_energy) :: energy
+ integer :: iterations=0
+ logical :: converged=.false.
+ real(8) :: residual=0d0,threshold=0d0,cval=0d0
+end type
+type s_scf_snapshot_slot
+ integer(c_int64_t) :: token=0
+ type(s_scf_payload),allocatable :: value
+end type
+integer(c_int64_t),save :: scf_snapshot_serial=0
 type s_gs_context
  private
- logical::active=.false.,imported=.false.
+ logical::active=.false.,imported=.false.,scf_capable=.false.
+ integer :: initializations=0,executed_iterations=0
+ type(s_scf_snapshot_slot),allocatable :: scf_snapshots(:)
  integer::mpi_child_owner=0
- type(s_model_inputs)::inputs
+ type(s_model_inputs)::inputs,continuation_inputs
  integer::iterations=0
  logical::converged=.false.
  real(8)::residual=0d0,threshold=0d0
@@ -258,6 +281,7 @@ if(ctx%hse_bound.and.comm_is_root(nproc_id_global))write(*,'(a)')'EXX_GS_OWNER e
 #endif
 allocate( ctx%rho_s(ctx%system%nspin),ctx%v_local(ctx%system%nspin),ctx%vxc(ctx%system%nspin) )
 
+ctx%initializations=ctx%initializations+1
 call initialization1_dft( ctx%system, ctx%energy, ctx%stencil, ctx%fg, ctx%poisson,  &
                           ctx%lg, ctx%mg,   &
                           ctx%info,  &
@@ -356,6 +380,19 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         ctx%pp,ctx%ppg,ctx%ppn,  &
                         ctx%band, ilevel_print, ctx%dc)
 ctx%converged=ctx%mixing%scf_converged
+call ctx%continuation_inputs%capture()
+ctx%executed_iterations=ctx%executed_iterations+Miter
+if(ctx%mixing%scf_progress%paused)then
+ ctx%iterations=Miter;ctx%residual=sum1;ctx%threshold=selected%threshold
+ call timer_end(LOG_GS_ITERATION)
+ call timer_disable_sub
+ call timer_end(LOG_TOTAL)
+#ifdef USE_MPI
+ if(ctx%mpi_child_owner>0)call comm_end_children(ctx%mpi_child_owner)
+#endif
+ status=0
+ return
+endif
 ! Scalar bridge reports mirror native values without changing SCF arithmetic.
 if(theory=='dft'.and.yn_opt=='n'.and.yn_md=='n'.and.yn_dc=='n')then
  if(comm_is_root(nproc_id_global))then
@@ -691,6 +728,221 @@ subroutine gs_seed_from_handle(token,seed,status)
  call gs_lookup(token,index,status)
  if(status==0)call gs_export_seed(gs_handles(index)%context,seed,status)
 end subroutine
+logical function scf_supported() result(ok)
+ use salmon_global,only:theory,yn_periodic,spin,yn_spinorbit,yn_dc,yn_opt,yn_md,yn_symmetry,xc,yn_jm,xname,cname
+ use density_matrix_and_energy_plusU_sub,only:PLUS_U_ON
+ ok=.false.
+#ifdef USE_OPENACC
+ return
+#endif
+ if(theory/='dft'.or.yn_periodic/='y'.or.spin/='unpolarized')return
+ if(yn_spinorbit/='n'.or.yn_dc/='n'.or.yn_opt/='n'.or.yn_md/='n')return
+ if(verify(trim(yn_symmetry),'n')/=0)return
+ if(PLUS_U_ON.or.yn_jm/='n'.or.xname/='none'.or.cname/='none')return
+ select case(trim(xc))
+ case('pz','libxc_pz','libxc_pbe')
+  ok=.true.
+ end select
+end function
+logical function scf_context_ok(ctx) result(ok)
+ type(s_gs_context),intent(in)::ctx
+ ok=.false.
+ if(.not.ctx%active.or.ctx%imported.or..not.ctx%scf_capable)return
+ if(associated(ctx%system%salmonpy_hse_owner))return
+ ok=.true.
+end function
+integer(c_int) function sp_gs_scf_protocol() bind(C)
+ sp_gs_scf_protocol=1
+end function
+integer(c_int) function sp_gs_start(path,steps,token) bind(C)
+ character(c_char),intent(in)::path(*)
+ integer(c_int),value::steps
+ integer(c_int64_t),intent(out)::token
+ sp_gs_start=create_gs(path,token,.false.,steps)
+end function
+integer(c_int) function sp_gs_scf_info(token,values) bind(C)
+ integer(c_int64_t),value::token
+ integer(c_int),intent(out)::values(6)
+ integer::i,index,status,ns
+ values=0
+ call gs_lookup(token,index,status);sp_gs_scf_info=status
+ if(status/=0)return
+ associate(ctx=>gs_handles(index)%context)
+  if(.not.scf_context_ok(ctx))then
+   sp_gs_scf_info=15;return
+  endif
+  ns=0
+  if(allocated(ctx%scf_snapshots))then
+   do i=1,size(ctx%scf_snapshots)
+    if(allocated(ctx%scf_snapshots(i)%value))ns=ns+1
+   enddo
+  endif
+  values=[merge(1,0,ctx%mixing%scf_progress%paused),ctx%iterations, &
+          ctx%system%gs_input%max_iterations,ctx%initializations,ctx%executed_iterations,ns]
+ end associate
+end function
+integer(c_int) function sp_gs_continue(token,steps) bind(C)
+ use salmon_global,only:calc_mode
+ use timer
+ use force_sub,only:calc_force
+ integer(c_int64_t),value::token
+ integer(c_int),value::steps
+ type(s_model_inputs)::previous
+ integer::index,status,old_iter,group,rank,nproc,reference_steps,restore_status
+ real(8)::residual
+ character(len(calc_mode))::old_mode
+ logical :: rion_update
+ call gs_lookup(token,index,status);sp_gs_continue=status
+ if(status/=0)return
+ call comm_get_globalinfo(group,rank,nproc)
+ reference_steps=steps;call comm_bcast(reference_steps,group)
+ status=0
+ if(steps<1.or.steps/=reference_steps)status=11
+ if(.not.scf_context_ok(gs_handles(index)%context))status=15
+ call comm_get_max(status,group)
+ sp_gs_continue=status
+ if(status/=0)return
+ associate(ctx=>gs_handles(index)%context)
+  if(ctx%converged.or.ctx%iterations>=ctx%system%gs_input%max_iterations)return
+  call previous%capture()
+  call ctx%continuation_inputs%activate(status)
+  call comm_get_max(status,group)
+  if(status/=0)then
+   call previous%activate(restore_status)
+   sp_gs_continue=status;return
+  endif
+  old_mode=calc_mode;calc_mode='GS'
+  old_iter=ctx%iterations
+  ctx%mixing%scf_progress%continuing=.true.
+  ! Avoid overflow; an oversized budget simply reaches the original total cap.
+  ctx%mixing%scf_progress%stop_after=ctx%iterations+min(steps, &
+    ctx%system%gs_input%max_iterations-ctx%iterations)
+  call timer_begin(LOG_TOTAL)
+  call timer_enable_sub
+  call timer_begin(LOG_GS_ITERATION)
+  rion_update=ctx%mixing%scf_progress%rion_update
+  call scf_iteration_dft(ctx%iterations,rion_update,residual, &
+    ctx%system,ctx%energy,ctx%ewald,ctx%lg,ctx%mg,ctx%info,ctx%poisson,ctx%fg, &
+    ctx%cg,ctx%mixing,ctx%stencil,ctx%srg,ctx%srg_scalar,ctx%spsi,ctx%shpsi,ctx%sttpsi, &
+    ctx%rho,ctx%rho_jm,ctx%rho_s,ctx%V_local,ctx%Vh,ctx%Vxc,ctx%Vpsl,ctx%xc_func, &
+    ctx%pp,ctx%ppg,ctx%ppn,ctx%band,3,ctx%dc)
+  ctx%residual=residual;ctx%converged=ctx%mixing%scf_converged
+  call ctx%continuation_inputs%capture()
+  ctx%executed_iterations=ctx%executed_iterations+ctx%iterations-old_iter
+  if(.not.ctx%mixing%scf_progress%paused)then
+   call calc_force(ctx%system,ctx%pp,ctx%fg,ctx%info,ctx%mg,ctx%stencil,ctx%poisson, &
+                   ctx%srg,ctx%ppg,ctx%spsi,ctx%ewald,ctx%Vxc)
+  endif
+  call timer_end(LOG_GS_ITERATION)
+  call timer_disable_sub
+  call timer_end(LOG_TOTAL)
+  calc_mode=old_mode
+  call previous%activate(restore_status)
+  call comm_get_max(restore_status,group)
+  sp_gs_continue=restore_status
+ end associate
+end function
+subroutine scf_copy(ctx,value,restore)
+ type(s_gs_context),intent(inout)::ctx
+ type(s_scf_payload),intent(inout)::value
+ logical,intent(in)::restore
+ if(restore)then
+  ctx%continuation_inputs=value%continuation_inputs
+  ctx%system=value%system;ctx%spsi=value%spsi;ctx%shpsi=value%shpsi;ctx%sttpsi=value%sttpsi
+  ctx%cg=value%cg;ctx%mixing=value%mixing;ctx%rho=value%rho;ctx%rho_jm=value%rho_jm
+  ctx%Vh=value%Vh;ctx%Vpsl=value%Vpsl;ctx%V_local=value%V_local;ctx%rho_s=value%rho_s;ctx%Vxc=value%Vxc
+  ctx%poisson=value%poisson;ctx%fg=value%fg;ctx%energy=value%energy
+  ctx%iterations=value%iterations;ctx%converged=value%converged
+  ctx%residual=value%residual;ctx%threshold=value%threshold;ctx%xc_func%cval=value%cval
+ else
+  value%continuation_inputs=ctx%continuation_inputs
+  value%system=ctx%system;value%spsi=ctx%spsi;value%shpsi=ctx%shpsi;value%sttpsi=ctx%sttpsi
+  value%cg=ctx%cg;value%mixing=ctx%mixing;value%rho=ctx%rho;value%rho_jm=ctx%rho_jm
+  value%Vh=ctx%Vh;value%Vpsl=ctx%Vpsl;value%V_local=ctx%V_local;value%rho_s=ctx%rho_s;value%Vxc=ctx%Vxc
+  value%poisson=ctx%poisson;value%fg=ctx%fg;value%energy=ctx%energy
+  value%iterations=ctx%iterations;value%converged=ctx%converged
+  value%residual=ctx%residual;value%threshold=ctx%threshold;value%cval=ctx%xc_func%cval
+ endif
+end subroutine
+integer(c_int) function sp_gs_scf_snapshot(token,snapshot) bind(C)
+ integer(c_int64_t),value::token
+ integer(c_int64_t),intent(out)::snapshot
+ type(s_scf_snapshot_slot),allocatable::larger(:)
+ integer::index,status,i,n,j
+ type(s_scf_payload),allocatable::saved
+ snapshot=0
+ call gs_lookup(token,index,status);sp_gs_scf_snapshot=status
+ if(status/=0)return
+ associate(ctx=>gs_handles(index)%context)
+  if(.not.scf_context_ok(ctx))then
+   sp_gs_scf_snapshot=15;return
+  endif
+  n=0;i=0
+  if(allocated(ctx%scf_snapshots))then
+   n=size(ctx%scf_snapshots)
+   do i=1,n
+    if(.not.allocated(ctx%scf_snapshots(i)%value))exit
+   enddo
+   if(i>n)i=0
+  endif
+  if(i==0)then
+   allocate(larger(n+1))
+   do j=1,n
+    larger(j)%token=ctx%scf_snapshots(j)%token
+    if(allocated(ctx%scf_snapshots(j)%value))call move_alloc(ctx%scf_snapshots(j)%value,larger(j)%value)
+   enddo
+   call move_alloc(larger,ctx%scf_snapshots)
+   i=n+1
+  endif
+  scf_snapshot_serial=scf_snapshot_serial+1
+  snapshot=scf_snapshot_serial
+  allocate(saved)
+  call scf_copy(ctx,saved,.false.)
+  ctx%scf_snapshots(i)%token=snapshot
+  call move_alloc(saved,ctx%scf_snapshots(i)%value)
+ end associate
+end function
+integer(c_int) function scf_snapshot_action(token,snapshot,restore) result(status)
+ integer(c_int64_t),intent(in)::token,snapshot
+ logical,intent(in)::restore
+ integer::index,i,group,rank,nproc,parts(2),expected(2),slot,local
+ type(s_scf_payload)::candidate
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ call comm_get_globalinfo(group,rank,nproc)
+ parts=transfer(snapshot,parts);expected=parts;call comm_bcast(expected,group)
+ slot=0;local=0
+ associate(ctx=>gs_handles(index)%context)
+  if(all(parts==expected).and.allocated(ctx%scf_snapshots))then
+   do i=1,size(ctx%scf_snapshots)
+    if(ctx%scf_snapshots(i)%token/=snapshot)cycle
+    if(.not.allocated(ctx%scf_snapshots(i)%value))cycle
+    slot=i;exit
+   enddo
+  endif
+  if(slot==0)local=11
+  call comm_get_max(local,group)
+  if(local/=0)then
+   status=local;return
+  endif
+  if(restore)then
+   ! Validate all selections before writes; allocations are not a general OOM recovery contract.
+   candidate=ctx%scf_snapshots(slot)%value
+   call scf_copy(ctx,candidate,.true.)
+  else
+   deallocate(ctx%scf_snapshots(slot)%value)
+   ctx%scf_snapshots(slot)%token=0
+  endif
+ end associate
+end function
+integer(c_int) function sp_gs_scf_restore(token,snapshot) bind(C)
+ integer(c_int64_t),value::token,snapshot
+ sp_gs_scf_restore=scf_snapshot_action(token,snapshot,.true.)
+end function
+integer(c_int) function sp_gs_scf_snapshot_close(token,snapshot) bind(C)
+ integer(c_int64_t),value::token,snapshot
+ sp_gs_scf_snapshot_close=scf_snapshot_action(token,snapshot,.false.)
+end function
 integer(c_int) function sp_gs_protocol() bind(C)
  sp_gs_protocol=1
 end function
@@ -727,7 +979,7 @@ integer(c_int) function sp_gs_import(path,token) bind(C)
  integer(c_int64_t),intent(out)::token
  sp_gs_import=create_gs(path,token,.true.)
 end function
-integer(c_int) function create_gs(path,token,reading_only)
+integer(c_int) function create_gs(path,token,reading_only,steps)
  use inputoutput,only:read_input,s_input_parser
  use salmon_global,only:yn_symmetry,calc_mode
  use plusU_global,only:read_Hubbard_parameters
@@ -737,6 +989,7 @@ integer(c_int) function create_gs(path,token,reading_only)
  use parallelization,only:setup_parallel
  use timer,only:timer_initialize
  logical,intent(in)::reading_only
+ integer,optional,intent(in)::steps
  character(c_char),intent(in)::path(*)
  integer(c_int64_t),intent(out)::token
  type(s_input_parser)::parser
@@ -746,7 +999,7 @@ integer(c_int) function create_gs(path,token,reading_only)
  type(gs_handle_slot),allocatable::enlarged(:)
  character(len(calc_mode))::previous_mode
  character(4096)::filename,expected
- integer::group,rank,nproc,i,index,status
+ integer::group,rank,nproc,i,index,status,selection(2),root_selection(2)
  token=0;create_gs=10
  if(.not.comm_is_attached())return
  call comm_get_globalinfo(group,rank,nproc)
@@ -758,6 +1011,13 @@ integer(c_int) function create_gs(path,token,reading_only)
  if(i>len(filename).or.len_trim(filename)==0)status=11
  expected=filename;call comm_bcast(expected,group)
  if(filename/=expected)status=11
+ selection=0
+ if(present(steps))selection=[1,steps]
+ root_selection=selection;call comm_bcast(root_selection,group)
+ if(any(selection/=root_selection))status=11
+ if(present(steps))then
+  if(steps<1)status=11
+ endif
  call comm_get_max(status,group)
  if(status/=0)then
   create_gs=status;return
@@ -771,10 +1031,20 @@ integer(c_int) function create_gs(path,token,reading_only)
  call read_input(trim(filename),parser)
  call read_Hubbard_parameters
  allocate(candidate)
+ candidate%scf_capable=scf_supported()
  call swap_hse_symmetry_workspace(old_symmetry)
  call swap_hse_density_workspace(old_density_symmetry)
  call read_sw_symmetry(yn_symmetry)
  previous_mode=calc_mode;calc_mode='GS'
+ if(present(steps))then
+  if(steps<1.or..not.scf_supported())then
+   calc_mode=previous_mode
+   call swap_hse_density_workspace(old_density_symmetry)
+   call swap_hse_symmetry_workspace(old_symmetry)
+   deallocate(candidate);create_gs=15;return
+  endif
+  candidate%mixing%scf_progress%stop_after=steps
+ endif
  call gs_run(candidate,status,import_only=reading_only)
  calc_mode=previous_mode
  call swap_hse_density_workspace(old_density_symmetry)
@@ -839,7 +1109,7 @@ subroutine array_layout(s,quantity,ndim,shape_out,lower,status)
     endif
     ndim=3;shape_out(:3)=shape(s%energy%esp,kind=c_int64_t);lower(:3)=lbound(s%energy%esp,kind=c_int64_t)
   case(4)
-    if(s%imported)then
+    if(s%imported.or.s%mixing%scf_progress%paused)then
       status=11;return
     endif
     ndim=2;shape_out(:2)=shape(s%system%Force,kind=c_int64_t)

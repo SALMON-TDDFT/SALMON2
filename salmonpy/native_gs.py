@@ -14,7 +14,7 @@ import numpy as np
 from .errors import InputError, InputTypeError, RuntimeFailure, NumericalError
 from .sbe import _integer
 
-__all__=['NativeGSBackend','NativeGSSession','NativeGSState','NativeGSArray','NativeGSInfo']
+__all__=['NativeGSBackend','NativeGSSession','NativeGSState','NativeGSArray','NativeGSInfo','NativeSCFSnapshot']
 
 
 def _agree(comm,error):
@@ -33,6 +33,38 @@ def _configure(lib):
         if fn is None:raise InputError('retained GS protocol missing; explicitly build a matching runtime')
         fn.argtypes=args;fn.restype=c.c_int
     if lib.sp_gs_protocol()!=1:raise InputError('unsupported retained GS protocol')
+
+
+def _configure_scf(lib):
+    specs={'scf_protocol':[],
+           'start':[c.c_char_p,c.c_int,c.POINTER(c.c_int64)],
+           'continue':[c.c_int64,c.c_int],
+           'scf_info':[c.c_int64,c.c_void_p],
+           'scf_snapshot':[c.c_int64,c.POINTER(c.c_int64)],
+           'scf_restore':[c.c_int64,c.c_int64],
+           'scf_snapshot_close':[c.c_int64,c.c_int64]}
+    for name,args in specs.items():
+        fn=getattr(lib,'sp_gs_'+name,None)
+        if fn is None:raise InputError('active SCF protocol unavailable; explicitly use/build a matching runtime')
+        fn.argtypes=args;fn.restype=c.c_int
+    if lib.sp_gs_scf_protocol()!=1:raise InputError('unsupported active SCF protocol')
+
+
+class NativeSCFSnapshot:
+    """Collective native in-memory numerical snapshot, tied to its live GS owner."""
+    def __init__(self,owner,token):
+        self._owner=owner;self._token=token;self.closed=False
+    def close(self):
+        if self.closed:return
+        if not self._owner.closed:
+            self._owner._live()
+            self._owner.session._check(self._owner.session.lib.sp_gs_scf_snapshot_close(
+                self._owner._token,self._token))
+        self.closed=True
+    def __reduce__(self):
+        raise TypeError('native SCF snapshots are live in-memory tokens, not portable files')
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()
 
 
 @dataclass(frozen=True)
@@ -145,7 +177,7 @@ class NativeGSSession:
         finally:
             if boundary is not None:self._check(boundary(1))
 
-    def run(self,calculation,*,scf=None,material_id='material'):
+    def run(self,calculation,*,scf=None,material_id='material',steps=None):
         from .dft import DFT,SCFSettings
         from .config import _identifier
         self._live();error=None
@@ -158,6 +190,11 @@ class NativeGSSession:
                     raise InputError('HSE06 GS requires a declared fast-PR HSE runtime')
                 if self.backend.decomposition!=(self.comm.size,1,1,1,1):
                     raise InputError('fast HSE GS requires k-only MPI decomposition')
+            if steps is not None:
+                steps=_integer(steps,'steps',1,2**31-2)
+                if calculation.xc not in ('pz','libxc_pz','libxc_pbe'):
+                    raise InputError('active SCF currently supports periodic scalar PZ/Libxc-PZ/PBE')
+                _configure_scf(self.lib)
             scf=SCFSettings() if scf is None else scf
             _identifier(material_id,'material_id')
             text=calculation.input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
@@ -166,7 +203,7 @@ class NativeGSSession:
             descriptor=(material_id,text,tuple(p.sha256 for p in calculation.pseudopotentials))
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
-        _agree(self.comm,'DFT inputs/material IDs differ' if any(v!=descriptor for v in self.comm.allgather(descriptor)) else None)
+        _agree(self.comm,'DFT inputs/material IDs differ' if any(v!=(descriptor,steps) for v in self.comm.allgather((descriptor,steps))) else None)
         work=None;error=None
         if self.comm.rank==0:
             try:
@@ -187,9 +224,13 @@ class NativeGSSession:
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
         token=c.c_int64()
-        code=self._gs_call(work,self.lib.sp_gs_create,b'gs.inp',c.byref(token))
+        if steps is None:
+            code=self._gs_call(work,self.lib.sp_gs_create,b'gs.inp',c.byref(token))
+        else:
+            code=self._gs_call(work,self.lib.sp_gs_start,b'gs.inp',steps,c.byref(token))
         self._check(code)
         state=NativeGSState(self,token.value,work,material_id,calculation)
+        state._scf_controlled=steps is not None
         state._input_text=text;state._input_origin='computed'
         state._electrons=calculation.electrons
         state._assets=tuple((calculation._pseudo_name(i),pp.data) for i,pp in enumerate(calculation.pseudopotentials))
@@ -200,7 +241,7 @@ class NativeGSSession:
         state._metadata_converged=info.converged
         state._identity='salmonpy.retained-gs/1/'+hashlib.sha256(json.dumps(
             [descriptor,self.backend.sha256,self.backend.decomposition,vars(info)],sort_keys=True).encode()).hexdigest()
-        if not info.converged:
+        if not info.converged and (steps is None or not state.scf_status['paused']):
             warnings.warn(f'SCF not converged after {info.iterations} iterations '
                           f'(residual={info.residual:g}, tolerance={info.tolerance:g}); retaining the last iterate',
                           RuntimeWarning,stacklevel=2)
@@ -376,6 +417,46 @@ class NativeGSState:
     def converged(self):return self.info.converged
     @property
     def iterations(self):return self.info.iterations
+    def _scf_ready(self):
+        self._live();error=None
+        try:
+            if self.calculation is None or self.calculation.xc not in ('pz','libxc_pz','libxc_pbe'):
+                raise InputError('active SCF requires a computed periodic scalar PZ/Libxc-PZ/PBE owner')
+            _configure_scf(self.session.lib)
+        except Exception as exc:error=str(exc)
+        _agree(self.session.comm,error)
+    @property
+    def scf_status(self):
+        self._scf_ready();values=np.zeros(6,dtype=np.int32)
+        self.session._check(self.session.lib.sp_gs_scf_info(self._token,values.ctypes.data))
+        result=dict(zip(('paused','iterations','max_iterations','initializations','executed_iterations','snapshots'),map(int,values)))
+        result['paused']=bool(result['paused'])
+        return result
+    def continue_scf(self,*,steps):
+        self._live();error=None
+        try:steps=_integer(steps,'steps',1,2**31-2)
+        except Exception as exc:error=str(exc)
+        _agree(self.session.comm,error)
+        _agree(self.session.comm,'SCF step budgets differ' if any(x!=steps for x in self.session.comm.allgather(steps)) else None)
+        self._scf_ready()
+        self.session._check(self.session._gs_call(self.directory,self.session.lib.sp_gs_continue,self._token,steps))
+        self._metadata_converged=self.info.converged
+        if not self.scf_status['paused'] and not self._metadata_converged:
+            warnings.warn('SCF iteration cap reached without convergence; retaining the last iterate',RuntimeWarning,stacklevel=2)
+        return self.info
+    def snapshot(self):
+        self._scf_ready();token=c.c_int64()
+        self.session._check(self.session.lib.sp_gs_scf_snapshot(self._token,c.byref(token)))
+        return NativeSCFSnapshot(self,token.value)
+    def restore(self,snapshot):
+        self._live();error=None
+        if not isinstance(snapshot,NativeSCFSnapshot) or snapshot._owner is not self or snapshot.closed:
+            error='SCF snapshot requires the same live GS owner'
+        _agree(self.session.comm,error)
+        self._scf_ready()
+        self.session._check(self.session._gs_call(self.directory,self.session.lib.sp_gs_scf_restore,self._token,snapshot._token))
+        self._metadata_converged=self.info.converged
+
     def tddft_model(self,*,dt,max_steps=1000):
         from ._gs_tddft import open_model
         return open_model(self,dt,max_steps)
@@ -401,6 +482,8 @@ class NativeGSState:
         quantities=self.session.comm.allgather(quantity)
         _agree(self.session.comm,'GS array quantities differ across ranks'
                if any(value!=quantity for value in quantities) else None)
+        if quantity=='forces' and getattr(self,'_scf_controlled',False) and self.scf_status['paused']:
+            raise InputError('forces are not evaluated at a paused SCF boundary')
         code,unit=_QUANTITIES[quantity];ndim=c.c_int()
         shape=np.ones(7,dtype=np.int64);lower=np.ones(7,dtype=np.int64)
         self.session._check(self.session.lib.sp_gs_array_info(self._token,code,c.byref(ndim),shape.ctypes.data,lower.ctypes.data))

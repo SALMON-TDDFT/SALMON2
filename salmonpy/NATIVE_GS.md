@@ -596,3 +596,52 @@ NLCCなしの既存計算は数値回帰で確認します。旧ソースの削�
 完成ではありません。混合履歴・CG・各ポテンシャル・SCFキャッシュを含む継続は次の作業です。
 開発順はSCF保存・再開→共有状態・異常復帰・native ABI→NLCC／単位整合性です。
 高速HSEのノルム診断と物理的な格子収束キャンペーンは、利用者の指示で保留しています。
+
+## SCFの途中停止・メモリ内保存／再開
+
+新しく明示ビルドした通常CPUランタイムでは、周期・非スピン分極・対称性なし・
+固定イオンのPZ／Libxc-PZ/PBEでSCF protocol1を利用できます。従来のrun()は
+変更せず、stepsを指定した場合だけ反復境界で止めます。
+
+```python
+from salmonpy.dft import SCFSettings
+with backend.open(context) as session:
+    with session.run(calculation, scf=SCFSettings(max_iterations=100),
+                     material_id="film-A", steps=5) as state:
+        with state.snapshot() as saved:
+            state.continue_scf(steps=10)
+            state.restore(saved)  # 初期化・過去反復の再実行なし
+            state.continue_scf(steps=20)
+        print(state.scf_status)
+```
+
+総反復上限・許容値・物質入力は固定し、stepsは呼ぶたびに指定する反復予算です。
+途中で収束すれば終了します。上限で未収束なら警告して結果を保持します。
+意図的な一時停止はSCF失敗ではありません。途中停止中の力は未評価であり、
+SCF区間の完了後に取得できます。
+
+NativeSCFSnapshotはFortranメモリに独立した数値コピーを保持します。対象は
+軌道・CG、占有、混合履歴と率・収束進捗、密度・スピン・各ポテンシャル、
+Poisson／逆格子／XC作業領域、初期化後の実効入力です。GS→TDDFT用の元の
+宣言入力とは分けて保持します。継続時には初期化・初期混合・収束作業領域の
+リセットを飛ばします。復元にHamiltonian計算やSCFの再実行はありません。
+scf_statusのinitializationsとexecuted_iterationsで回数を確認できます。
+復元後に意図的に分岐を再計算した分は、実行回数に加算されます。
+
+全操作は内部MPI群の全ランクが同じ順序でメインスレッドから呼びます。
+スナップショットは同じ生存GS状態・同じビルド・MPI分割に属します。
+使用後は明示的にcloseしてください。GS状態のcloseでも全コピーを解放します。
+コピー分のメモリを使います。今回はディスク保存・pickle・プロセス終了後の再開・
+MPI分割変更には対応していません。テキスト出力位置は巻き戻しません。
+不正／ランク不一致の選択は数値状態の変更前に拒否しますが、一般のOOM・
+初期化・プロセス故障まで原子的に回復する保証はありません。
+HSE・SOC・+U・DC・イオン運動のSCF継続はまだ対象外です。
+旧ランタイムで従来のrun/loadは使えます。新APIは対応する明示ビルドが必要で、
+不足時に自動コンパイルはしません。
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT
+```
+
+この小規模例はGS再開ファイルの出力を無効にし、数値配列をRAM内で比較して、
+スカラーの検証記録だけ保存します。GS波動関数・密度データセットは収集しません。

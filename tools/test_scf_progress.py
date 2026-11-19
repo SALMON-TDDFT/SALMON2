@@ -99,6 +99,21 @@ def main():
     # Compare the entire executable iteration body after reversing only the
     # ownership substitution and removing the new end-of-call scalar capture.
     before=args.reference.read_text();after=current.read_text()
+    # Compare the fresh-call path only. Exact known pause/resume control blocks
+    # are disabled in that path; live continuation is tested by the MPI driver.
+    if 'logical :: continuing_scf' in after:
+        replacements={
+            'if(.not.continuing_scf)call init_convergence_check':'call init_convergence_check',
+            'if(mixing%input%initial_no_mix_steps.gt.1.and..not.continuing_scf)then':
+                'if(mixing%input%initial_no_mix_steps.gt.1)then',
+            'if(continuing_scf)then\n sum1=mixing%scf_progress%residual\n rion_update=mixing%scf_progress%rion_update\nelse\n mixing%scf_progress%converged = .false.\n sum1=1d9\nendif':
+                'mixing%scf_progress%converged = .false.\nsum1=1d9',
+            '   if(requested_stop>0.and.Miter>=requested_stop.and.Miter<max_iterations)then\n     mixing%scf_progress%paused=.true.\n     exit DFT_Iteration\n   endif\n':'',
+            'if(mixing%scf_progress%paused)goto 9900\n':'',
+            '9900 continue\n':''}
+        for old,new in replacements.items():
+            if after.count(old)!=1:raise AssertionError('unrecognized SCF control flow; review fresh-path parity')
+            after=after.replace(old,new,1)
     for owned,local in [('rho_old','rho_old'),('Vlocal_old','Vlocal_old'),
                         ('electron_normalization','rNe'),('converged','flag_conv'),
                         ('no_mix_converged_count','icnt_conv_nomix')]:
@@ -145,7 +160,7 @@ def main():
                     run(['mpiexec','-n',ranks,out/name],cwd=out,env=env)
     result={'status':'pass','SCF_calls':0,'MPI_ranks':[1,2],'OMP_threads':[1,2],
             'reference_source_sha256':reference_sha,'runtime_sha256':record['sha256'],
-            'ownership_independent':True,'convergence_bit_exact':True,'iteration_body_equivalent':True,
+            'ownership_independent':True,'convergence_bit_exact':True,'iteration_body_equivalent':True,'comparison_path':'fresh SCF; exact disabled continuation controls normalized',
             'scope':'synthetic ownership and extracted convergence routines; not SCF continuation',
             'commands':commands}
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(out/'result.json')

@@ -10,6 +10,25 @@ int sp_gs_protocol(void);
  * Standard profile: create computes SCF; fast import-only profile returns2. Unconverged SCF still succeeds and retains the last iterate.
  * Handles retain numerical/XC/MPI owners, with unique tokens invalidated at close. */
 int sp_gs_create(const char *filename,int64_t *token);
+/* Additive active-SCF1: CPU periodic nonsymmetric scalar PZ/Libxc-PZ/PBE.
+ * Imports, HSE, SOC, +U, DC and ionic evolution are outside this entry.
+ * All calls are collective in the same order. Start reads/initializes once;
+ * continue skips initialization/no-mix warmup and retains the original total cap.
+ * Snapshot tokens retain complete numerical copies in this live GS owner only;
+ * no file/process/topology portability or allocation-failure atomicity claimed.
+ * scf_info: paused,iterations,total cap,initializations,executed main iterations,
+ * live snapshots. Restore changes no lifetime execution/init counters.
+ * Snapshots exclude live MPI/Libxc/output handles; text output is not rewound.
+ * Status11 rejects bad/mixed budgets/snapshot tokens before numerical writes;
+ * status15 denotes an unsupported SCF profile. Unconverged final results warn.
+ */
+int sp_gs_scf_protocol(void);
+int sp_gs_start(const char *filename,int steps,int64_t *token);
+int sp_gs_continue(int64_t token,int steps);
+int sp_gs_scf_info(int64_t token,int values[6]);
+int sp_gs_scf_snapshot(int64_t token,int64_t *snapshot);
+int sp_gs_scf_restore(int64_t token,int64_t snapshot);
+int sp_gs_scf_snapshot_close(int64_t token,int64_t snapshot);
 /* Import existing wfn with yn_restart=y/read_gs_restart_data=wfn; no SCF or GS writes.
  * Imported forces are unavailable (array_info/read return11). */
 int sp_gs_import(const char *filename,int64_t *token);

@@ -74,7 +74,8 @@ integer :: ilevel_print !=3:print-all
 integer :: iter,Miter,iob,p1,p2,p5
 complex(8),allocatable :: spin_density_before(:,:,:,:,:),spin_density_after(:,:,:,:,:)
 real(8) :: operator_residual
-integer :: mixing_age
+integer :: mixing_age,requested_stop
+logical :: continuing_scf
 real(8) :: sum1
 real(8) :: rNebox1,rNebox2
 
@@ -117,7 +118,11 @@ logical :: pre_scf_root,pre_scf_ready
 #endif
 
 ! A fresh SCF invocation resets only its owned progress, not mixing history.
-mixing%scf_progress=s_scf_iteration_progress()
+continuing_scf=mixing%scf_progress%continuing
+requested_stop=mixing%scf_progress%stop_after
+if(.not.continuing_scf)mixing%scf_progress=s_scf_iteration_progress()
+mixing%scf_progress%stop_after=requested_stop
+mixing%scf_progress%paused=.false.
 call get_occupation_input(system,occupation_input)
 max_iterations=nscf;scf_threshold=threshold;scf_metric=convergence
 if(system%gs_input_owned)then
@@ -146,14 +151,14 @@ if(adaptive_exchange)then
 endif
 #endif
 
-call init_convergence_check
+if(.not.continuing_scf)call init_convergence_check
 
 if(calc_mode=='DFT_BAND') then
    allocate( esp_old(system%no,system%nk,system%nspin) )
    esp_old=0d0
 endif
 
-if(mixing%input%initial_no_mix_steps.gt.1)then
+if(mixing%input%initial_no_mix_steps.gt.1.and..not.continuing_scf)then
    mixing%scf_progress%no_mix_converged_count = 0
    DFT_NoMix_Iteration : do iter=1,mixing%input%initial_no_mix_steps
 
@@ -195,8 +200,13 @@ if(mixing%input%initial_no_mix_steps.gt.1)then
    end do DFT_NoMix_Iteration
 endif
 
-mixing%scf_progress%converged = .false.
-sum1=1d9
+if(continuing_scf)then
+ sum1=mixing%scf_progress%residual
+ rion_update=mixing%scf_progress%rion_update
+else
+ mixing%scf_progress%converged = .false.
+ sum1=1d9
+endif
 
 !DFT_Iteration : do iter=1,max_iterations
 DFT_Iteration : do iter=Miter+1,max_iterations
@@ -568,7 +578,13 @@ DFT_Iteration : do iter=Miter+1,max_iterations
      endif
    endif
 
+   if(requested_stop>0.and.Miter>=requested_stop.and.Miter<max_iterations)then
+     mixing%scf_progress%paused=.true.
+     exit DFT_Iteration
+   endif
+
 end do DFT_Iteration
+if(mixing%scf_progress%paused)goto 9900
 #ifdef USE_HSE
 if(exx_pre_scf(system))error stop 'PBE pre-SCF unfinished; no hybrid ground state'
 if(system%pre_scf%threshold>0d0.and..not.(sum1<scf_threshold)) &
@@ -594,6 +610,7 @@ if(.not.mixing%scf_progress%converged) then
 endif
 endif
 
+9900 continue
 mixing%scf_converged=mixing%scf_progress%converged
 
 

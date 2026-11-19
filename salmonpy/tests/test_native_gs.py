@@ -408,3 +408,18 @@ class NativeGSLinkTests(unittest.TestCase):
             self.assertEqual(tool.mpi_link_command(original,shared=True),['mpifort','-shared','object.o','-lopenblas'])
             self.assertEqual(tool.mpi_link_command(original),original)
             probe.assert_not_called()
+
+    def test_scf_snapshot_owner_and_step_admission_precede_native_calls(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from salmonpy.native_gs import NativeGSState,NativeSCFSnapshot
+        from salmonpy.errors import InputError
+        comm=SimpleNamespace(allgather=lambda value:[value])
+        session=SimpleNamespace(comm=comm,_live=lambda:None,lib=Mock())
+        first=NativeGSState(session,1,None,'A',None)
+        second=NativeGSState(session,2,None,'B',None)
+        saved=NativeSCFSnapshot(first,7)
+        with self.assertRaises(InputError):second.restore(saved)
+        with self.assertRaises(InputError):first.continue_scf(steps=0)
+        session.lib.sp_gs_scf_restore.assert_not_called()
+        session.lib.sp_gs_continue.assert_not_called()

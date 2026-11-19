@@ -1867,6 +1867,18 @@ Current-grid criterion verification: source/installed633 tests (632pass,1skip), 
 - [x] Restore previous density/local potential, electron normalization, convergence/no-mix counts and iteration/residual/ion-update capture into s_mixing%scf_progress. Preserve existing mixing%scf_converged consumers.
 - [x] Entire iteration body identical after reversing ownership substitutions; scalar arithmetic/order unchanged. Synthetic MPI1/2×OMP1/2 convergence and copy-isolation probes pass.
 - [x] Computed PZ/PBE spatialMPI2 GS/independent arrays/16-step RT and direct resume equal the unchanged preceding runtime; no GS dataset collection.
-- [ ] Full active-SCF continuation, complete checkpoint payload/version and changed decomposition remain group4 work; no new public resume API claimed.
+- [ ] At this ownership-only checkpoint full active-SCF continuation was pending; the in-memory stage is implemented below. Portable checkpoint/version and changed decomposition remain open.
 
 Shared-source SCF progress validation: normal and fast-HSE builds source/object-audited; native progress/convergence MPI1/2×OMP1/2 and installed probes pass. PZ/PBE and fast-HSE computed GS→16-step independent/direct-resume controls exact; HSE learned/PT-CN history exact. Source/installed633 tests (632pass,1skip), sdist→wheel and JP/EN/AI byte parity. Full active-SCF continuation remains next. No GS datasets or CI. Evidence: calc2026/salmonpy-scf-progress-shared-source-20261119.
+
+### Group4: active SCF memory snapshot and continuation
+
+- [x] First commit/pushaba74f9b; no CI.
+- [x] Pause accepted SCF boundaries; preserve convergence/no-mix progress and mixing history; continue without init or replay.
+- [x] Native numerical payload: orbital/CG/occupations/mixing, density/spin/potentials, Poisson/reciprocal/XC and effective post-init inputs; static handles remain live.
+- [x] Distinguish declared GS→RT input from effective SCF continuation settings. Fix interleaved-model force mismatch from derived Ewald cutoff input restoration.
+- [x] Six PZ/Libxc-PZ/PBE MPI1/2 orbital/spatial/k controls, no-mix0/3, same-owner snapshot3/5 and mixed-token/budget rejection. Numeric arrays/info match continuous new and fixed previous runtime exactly.
+- [x] Linear8 steps: initialization1/executed8. Restore executes0 iterations; intentional future branches are counted.
+- [ ] HSE/SOC/+U/DC continuation and numerical resource coverage; portable disk/process/checkpoint version and changed-decomposition restore remain group4 work. No completed disk checkpoint claimed.
+
+Active SCF validation: source/installed634 tests (633pass,1skip). Six native ordinary-XC controls exact; PBE kMPI2 continued GS→16-step TDDFT currents equal both continuous new and fixed preceding runtime. Fresh-path arithmetic/copy probes pass. Fast-HSE computed GS→RT and learned/PT-CN history regression exact; this does not enable paused HSE SCF. Source and wheel example restore with initialization1/executed8 unchanged by restore. GS data not collected, CI not invoked. Evidence: calc2026/salmonpy-scf-live-resume-20261119.

@@ -624,7 +624,7 @@ capability gates remain. No-NLCC workflows retain regression checks. Removing
 legacy sources and changing default preparation still require the remaining
 workflow/provenance validation; this migration alone does not complete unification.
 
-## Owned SCF progress before continuation (2026-11-19)
+## Earlier ownership stage (superseded by the active SCF section below)
 
 The shared fast-source mixing state now owns previous density/local potential,
 electron normalization, convergence flag/count, iteration/residual and ion-update
@@ -635,3 +635,53 @@ continuation or complete portable checkpoint. Mixing/CG/potential/cache continua
 remains next. Execution order is SCF persistence→shared ownership/recovery/native
 ABI→NLCC/units. Fast-HSE norm diagnostics and a physical grid campaign are deferred
 at the user's request. No GS datasets are collected by the validation probes.
+
+## Active SCF pause and in-memory snapshots
+
+New explicitly built ordinary CPU runtimes expose SCF protocol1 for periodic,
+unpolarized, nonsymmetric fixed-ion PZ/Libxc-PZ/PBE. Existing run() remains a
+full SCF call. A steps budget pauses only at an accepted iteration boundary:
+
+```python
+from salmonpy.dft import SCFSettings
+with backend.open(context) as session:
+    with session.run(calculation, scf=SCFSettings(max_iterations=100),
+                     material_id="film-A", steps=5) as state:
+        with state.snapshot() as saved:
+            state.continue_scf(steps=10)
+            state.restore(saved)  # zero SCF iterations, no initialization/replay
+            state.continue_scf(steps=20)
+        print(state.scf_status)
+```
+
+The configured total cap/tolerance/model stay fixed; steps is a per-call budget.
+Convergence may finish earlier; reaching the total cap without convergence warns
+and retains results. A deliberate pause is not reported as failed SCF. Forces
+are available after the SCF segment finishes, not at an intermediate pause.
+
+NativeSCFSnapshot retains independent numerical copies in Fortran memory:
+orbitals/CG, occupations, mixing history/rates/progress, density/spin/potentials,
+Poisson/reciprocal/XC workspace and effective post-initialization inputs. Original
+declared model inputs remain separate for GS→TDDFT seeds. Continue bypasses
+initialization, initial no-mix work and convergence reset. Restoring performs no
+Hamiltonian solve or SCF replay. scf_status reports initializations and executed
+main iterations; explicit branch calculations after restore add their own work.
+
+All calls are collective, in identical order on the internal MPI group, on its
+main thread. A snapshot belongs to the same live GS owner/build/decomposition.
+Close snapshots explicitly while the owner is live; closing the owner frees all
+remaining numerical copies. Complete copies consume memory. This entry is not a
+disk checkpoint, pickle format or process-restart/repartitioning mechanism. Text
+logs/output positions are not rewound. Invalid/mixed snapshot selections reject
+before numerical writes; general OOM/initialization/process-failure atomicity is
+not established. HSE/SOC/+U/DC/ionic-motion continuation is not connected yet.
+Old runtimes remain usable for ordinary run/load; new APIs require a matching
+explicitly built runtime and never trigger an implicit build.
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT
+```
+
+The sample performs a small execution check with GS restart output disabled.
+It compares continued/restored numerical values in RAM and saves scalar evidence
+only; it does not collect GS wavefunction/density datasets.
