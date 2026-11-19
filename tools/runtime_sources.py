@@ -4,6 +4,7 @@ from importlib.util import source_from_cache
 import json
 from pathlib import Path,PurePosixPath
 import shutil
+import tarfile
 
 def digest(path):
     path=Path(path)
@@ -51,16 +52,44 @@ def check_tree(tree,files,*,extra=()):
     for name,expected in files.items():
         if digest(path_in(tree,name))!=expected:raise ValueError('source hash changed: '+name)
 
+def archive_members(source,files,expected):
+    """Historical local archives only; never extract paths or links from headers."""
+    if not expected or digest(source)!=expected:raise ValueError('source archive hash changed')
+    with tarfile.open(source,'r:gz') as archive:
+        members=archive.getmembers()
+        if len(members)!=len(files) or {m.name for m in members}!=set(files):
+            raise ValueError('source archive inventory differs')
+        for member in members:
+            path_in(source.parent,member.name)
+            if not member.isfile():raise ValueError('source archive links/special entries are not supported')
+            h=hashlib.sha256()
+            with archive.extractfile(member) as stream:
+                for block in iter(lambda:stream.read(1048576),b''):h.update(block)
+            if h.hexdigest()!=files[member.name]:raise ValueError('archived source hash changed: '+member.name)
+    return members
+
+
 def copy_tree(root,spec,dest):
     files=manifest(root,spec,'source_tree_manifest','source_tree_sha256','salmonpy.source-tree/1')
-    source=path_in(root,spec['source_tree']);check_tree(source,files)
+    source=path_in(root,spec['source_tree'])
+    archived=source.is_file()
+    members=archive_members(source,files,spec.get('source_archive_sha256')) if archived else None
+    if not archived:check_tree(source,files)
     dest=Path(dest).resolve()
     if dest.is_relative_to(source) or source.is_relative_to(dest):raise ValueError('overlapping source/destination')
     # Destination may contain only the caller's preparation marker.
     for name in files:
         target=path_in(dest,name)
         if target.exists():raise ValueError('destination source already exists: '+name)
-    copy_files(source,dest,files)
+    if archived:
+        with tarfile.open(source,'r:gz') as archive:
+            for member in members:
+                target=path_in(dest,member.name);target.parent.mkdir(parents=True,exist_ok=True)
+                with archive.extractfile(member) as stream,target.open('wb') as output:
+                    shutil.copyfileobj(stream,output)
+                target.chmod(member.mode & 0o777)
+    else:
+        copy_files(source,dest,files)
     for name,expected in files.items():
         if digest(path_in(dest,name))!=expected:raise ValueError('source changed while copying: '+name)
     return files
@@ -105,9 +134,14 @@ def effective_files(root,spec,*,overlays=()):
     """
     root=Path(root).resolve()
     files=manifest(root,spec,'source_tree_manifest','source_tree_sha256','salmonpy.source-tree/1')
-    tree=path_in(root,spec['source_tree']);check_tree(tree,files)
-    resolved={name:{'sha256':expected,'source':path_in(tree,name).relative_to(root).as_posix()}
-              for name,expected in files.items()}
+    tree=path_in(root,spec['source_tree'])
+    if tree.is_file():
+        archive_members(tree,files,spec.get('source_archive_sha256'))
+        resolved={name:{'sha256':value,'source':tree.relative_to(root).as_posix(),'member':name} for name,value in files.items()}
+    else:
+        check_tree(tree,files)
+        resolved={name:{'sha256':expected,'source':path_in(tree,name).relative_to(root).as_posix()}
+                  for name,expected in files.items()}
     for overlay in overlays:
         replacements=manifest(root,overlay,'replacements','replacements_sha256','salmonpy.source-replacements/1')
         for name,entry in replacements.items():
@@ -126,15 +160,17 @@ def effective_files(root,spec,*,overlays=()):
 def inventory(root):
     """Current standard and fast-PR effective source matrix, with provenance."""
     root=Path(root).resolve()
-    standard=json.loads((root/'source.json').read_text())
-    hse=json.loads((root/'hse-rt-state.json').read_text())
-    routing=json.loads((root/'hse-explicit-routing.json').read_text())
-    if routing['parent_patch_sha256']!=hse['patch_sha256'] or routing['base_commit']!=hse['upstream_commit']:
-        raise ValueError('fast HSE routing parent differs')
-    profiles={'standard':effective_files(root,standard),
-              'fast_hse_reference':effective_files(root,hse),
-              'fast_hse':effective_files(root,hse,overlays=(hse,routing))}
-    a=profiles['standard'];b=profiles['fast_hse'];common=set(a)&set(b)
+    current=json.loads((root/'source.json').read_text())
+    active=effective_files(root,current)
+    profiles={'solver':active,'fast_hse':active}
+    absent=[]
+    for label,name in [('standard','standard'),('fast_hse_reference','hse-fast-reference')]:
+        p=root/'source-history/20261119'/(name+'.json')
+        if p.is_file():
+            historical=json.loads(p.read_text())
+            if (root/historical['source_tree']).is_file():profiles[label]=effective_files(root,historical)
+            else:absent.append(name)
+    a=profiles.get('standard',{});b=active;common=set(a)&set(b)
     same=sorted(name for name in common if a[name]['sha256']==b[name]['sha256'])
     different=sorted(common-set(same))
     critical=('src/gs/embedded_gs.f90','src/gs/gs_model.f90','src/gs/gs_seed.f90',
@@ -144,6 +180,7 @@ def inventory(root):
               'src/parallel/communication.f90','src/xc/exx_native.f90','src/xc/exx_symmetry.f90')
     return {'schema':'salmonpy.source-inventory/1','scope':'source byte provenance, not execution/physics certification',
             'counts':{name:len(files) for name,files in profiles.items()},
+            'maintained_source_tree':current['source_tree'],'reference_archives_not_bundled':absent,
             'comparison':{'byte_identical':same,'different':different,
                           'standard_only':sorted(set(a)-set(b)),'fast_hse_only':sorted(set(b)-set(a))},
             'critical_paths':{name:{profile:files.get(name) for profile,files in profiles.items()} for name in critical},

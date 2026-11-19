@@ -20,10 +20,12 @@ out.mkdir(parents=True,exist_ok=False)
 lib=out/('libsalmonpy_parallel.dylib' if sys.platform=='darwin' else 'libsalmonpy_parallel.so')
 checker=Path(__file__).resolve().with_name('check_forbidden_eigensolvers.py')
 subprocess.run([sys.executable,str(checker),'--source-root',str(source)],check=True)
-cmd=[a.fc,'-cpp','-fPIC','-c','-O2','-fallow-argument-mismatch',*map(str,paths)]
+(out/'config.h').write_text('#define USE_MPI\n')
+cmd=[a.fc,'-I'+str(out),'-cpp','-fPIC','-c','-O2','-fallow-argument-mismatch',*map(str,paths)]
 with (out/'build.log').open('w') as log: subprocess.run(cmd,cwd=out,stdout=log,stderr=subprocess.STDOUT,check=True)
 subprocess.run([sys.executable,str(checker),'--object-tree',str(out)],check=True)
-subprocess.run([a.fc,'-shared',*map(str,sorted(out.glob('*.o'))),'-o',str(lib)],cwd=out,check=True)
+from build_embedded_tddft import mpi_link_command
+subprocess.run(mpi_link_command([a.fc,*map(str,sorted(out.glob('*.o'))),'-o',str(lib)],shared=True),cwd=out,check=True)
 record={'schema':'salmonpy.parallel-bridge/1','sha256':hashlib.sha256(lib.read_bytes()).hexdigest(),
         'library':str(lib),'command':cmd,'source':provenance,
         'source_hashes':{str(p.relative_to(source)):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}}

@@ -9,26 +9,32 @@ store=importlib.util.module_from_spec(spec);spec.loader.exec_module(store)
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 class RuntimeSources(unittest.TestCase):
  def test_bundled_trees_are_complete_and_byte_exact(self):
-  for name in ('source.json','hse-rt-state.json'):
-   profile=json.loads((root/'runtime'/name).read_text())
-   files=store.manifest(root/'runtime',profile,'source_tree_manifest','source_tree_sha256','salmonpy.source-tree/1')
-   store.check_tree(store.path_in(root/'runtime',profile['source_tree']),files)
+  profile=json.loads((root/'runtime/source.json').read_text())
+  self.assertEqual(profile['source_tree'],'sources/solver')
+  self.assertEqual(profile['source_profile'],'fast-pr')
+  for name in ('hse-rt-state.json','hse-explicit-routing.json'):
+   other=json.loads((root/'runtime'/name).read_text())
+   self.assertEqual(other['source_tree'],profile['source_tree'])
+   self.assertEqual(other['source_tree_sha256'],profile['source_tree_sha256'])
+  files=store.manifest(root/'runtime',profile,'source_tree_manifest','source_tree_sha256','salmonpy.source-tree/1')
+  store.check_tree(store.path_in(root/'runtime',profile['source_tree']),files)
   effective=store.inventory(root/'runtime')['profiles']['fast_hse']
+  self.assertEqual(set(effective),set(files))
   for kernel,external in [('sbe_types.f90','src/ssbe/sbe_types.f90'),
                           ('sbe_velocity_kernel.f90','src/ssbe/sbe_velocity_kernel.f90'),
                           ('lorentz_drude.f90','src/maxwell/lorentz_drude.f90')]:
    self.assertEqual(effective[external]['sha256'],sha(root/'native'/kernel))
-   self.assertEqual(effective[external]['source'],'sources/standard/'+external)
-  for name in ('CMakeLists.txt','fdtd_eh_kernel.f90','fdtd_eh.f90','main_maxwell.f90','embedded_eh.f90'):
-   external='src/maxwell/'+name
-   self.assertEqual(effective[external]['sha256'],sha(root/'runtime/sources/standard'/external))
-  for name in ('CMakeLists.txt','model_inputs.f90','step_output.f90'):
-   external='src/io/'+name
-   self.assertEqual(effective[external]['sha256'],sha(root/'runtime/sources/standard'/external))
-   self.assertEqual(effective[external]['source'],'sources/standard/'+external)
-  external='src/gs/gs_seed.f90'
-  self.assertEqual(effective[external]['sha256'],sha(root/'runtime/sources/standard'/external))
-  self.assertEqual(effective[external]['source'],'sources/standard/'+external)
+   self.assertEqual(effective[external]['source'],'sources/solver/'+external)
+  parser=(root/'runtime/sources/solver/src/io/inputoutput.f90').read_text()
+  self.assertIn('!SALMONPY_END_INPUT',parser)
+  self.assertIn('if(.not.worker_embedded) call worker_configure()',parser)
+  driver=(root/'runtime/sources/solver/src/rt/main_tddft.f90').read_text()
+  self.assertIn('worker_next_A(worker_A)',driver)
+  self.assertIn('worker_reply(itt,rt%curr(:,itt))',driver)
+  for name in ('src/maxwell/embedded_eh.f90','src/io/model_inputs.f90','src/io/step_output.f90',
+               'src/gs/gs_seed.f90','src/rt/embedded_tddft.f90'):
+   self.assertEqual(effective[name]['sha256'],sha(root/'runtime/sources/solver'/name))
+   self.assertEqual(effective[name]['source'],'sources/solver/'+name)
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
   self.root=Path(self.tmp.name);self.tree=self.root/'tree';self.tree.mkdir();(self.tree/'x.f90').write_text('old\n')
@@ -37,6 +43,22 @@ class RuntimeSources(unittest.TestCase):
  def test_copy_matches_and_source_unchanged(self):
   out=self.root/'out';store.copy_tree(self.root,self.spec,out)
   self.assertEqual((out/'x.f90').read_bytes(),(self.tree/'x.f90').read_bytes())
+  import tarfile,io
+  archive=self.root/'history.tar.gz'
+  with tarfile.open(archive,'w:gz') as stream:stream.add(self.tree/'x.f90',arcname='x.f90')
+  archived={**self.spec,'source_tree':archive.name,'source_archive_sha256':sha(archive)}
+  archive_out=self.root/'historical';store.copy_tree(self.root,archived,archive_out)
+  self.assertEqual((archive_out/'x.f90').read_bytes(),(self.tree/'x.f90').read_bytes())
+  self.assertEqual(store.effective_files(self.root,archived)['x.f90']['member'],'x.f90')
+  # Reference payloads may contain only known regular files; reject links before writes.
+  with tarfile.open(archive,'w:gz') as stream:
+   member=tarfile.TarInfo('x.f90');member.type=tarfile.SYMTYPE;member.linkname='../outside';stream.addfile(member)
+  archived['source_archive_sha256']=sha(archive)
+  with self.assertRaisesRegex(ValueError,'links/special'):store.copy_tree(self.root,archived,self.root/'bad-archive')
+  self.assertFalse((self.root/'bad-archive').exists())
+  archived['source_archive_sha256']='0'*64
+  with self.assertRaisesRegex(ValueError,'archive hash'):store.copy_tree(self.root,archived,self.root/'wrong-archive')
+
   store.check_shared_kernels(self.root,out,{'tree/x.f90':'x.f90'})
   (out/'x.f90').write_text('changed')
   with self.assertRaisesRegex(ValueError,'shared kernel'):

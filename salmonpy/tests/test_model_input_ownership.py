@@ -7,9 +7,9 @@ class ModelInputOwnershipTests(unittest.TestCase):
 
     def test_supported_initialization_sections_have_owned_fields(self):
         from importlib.resources import files
-        root=Path(__file__).resolve().parents[2]/'runtime/sources/standard/src/io'
+        root=Path(__file__).resolve().parents[2]/'runtime/sources/solver/src/io'
         if not root.is_dir():
-            root=Path(str(files('salmonpy').joinpath('_runtime_source/runtime/sources/standard/src/io')))
+            root=Path(str(files('salmonpy').joinpath('_runtime_source/runtime/sources/solver/src/io')))
         self.assertIn('type, public :: s_input_parser',(root/'inputoutput.f90').read_text())
         sections={'calculation','control','units','parallel','system','pseudo','functional',
                   'rgrid','kgrid','tgrid','propagation','scf','emfield','analysis','poisson',

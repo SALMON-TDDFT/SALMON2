@@ -1,0 +1,4070 @@
+!
+!  Copyright 2017-2020 SALMON developers
+!
+!  Licensed under the Apache License, Version 2.0 (the "License");
+!  you may not use this file except in compliance with the License.
+!  You may obtain a copy of the License at
+!
+!      http://www.apache.org/licenses/LICENSE-2.0
+!
+!  Unless required by applicable law or agreed to in writing, software
+!  distributed under the License is distributed on an "AS IS" BASIS,
+!  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+!  See the License for the specific language governing permissions and
+!  limitations under the License.
+!
+!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+#include "config.h"
+
+module inputoutput
+  use phys_constants
+  use salmon_global
+  use salmonpy_model_inputs, only: s_model_inputs
+  implicit none
+  private :: resolve_ky_spin_inputs
+!Physical constant
+  real(8),parameter :: au_time_fs = 0.02418884326505d0
+  real(8),parameter :: au_energy_ev = 27.21138505d0
+  real(8),parameter :: au_length_aa = 0.52917721067d0
+
+
+  ! Model-owned parser scratch/diagnostics. Legacy no-argument callers retain
+  ! their named temporary files, required by the later MD velocity reader.
+  type, public :: s_input_parser
+    logical :: isolated=.true.
+    character(4096) :: log_path='variables.log'
+    type(s_model_inputs) :: defaults,values
+    integer :: fh_variables_log=0
+    integer :: fh_namelist=0
+    integer :: fh_atomic_coor=0
+    integer :: fh_reentrance=0
+    integer :: fh_atomic_red_coor=0
+    logical :: if_nml_coor=.false.
+    logical :: if_nml_red_coor=.false.
+    integer :: inml_calculation=0
+    integer :: inml_control=0
+    integer :: inml_units=0
+    integer :: inml_parallel=0
+    integer :: inml_system=0
+    integer :: inml_pseudo=0
+    integer :: inml_functional=0
+    integer :: inml_rgrid=0
+    integer :: inml_kgrid=0
+    integer :: inml_tgrid=0
+    integer :: inml_propagation=0
+    integer :: inml_scf=0
+    integer :: inml_emfield=0
+    integer :: inml_singlescale=0
+    integer :: inml_multiscale=0
+    integer :: inml_maxwell=0
+    integer :: inml_analysis=0
+    integer :: inml_poisson=0
+    integer :: inml_ewald=0
+    integer :: inml_opt=0
+    integer :: inml_md=0
+    integer :: inml_jellium=0
+    integer :: inml_code=0
+    integer :: inml_band=0
+    integer :: inml_sbe=0
+    integer :: inml_dc=0
+    integer :: inml_unfolding=0
+  end type
+  type(s_input_parser),target,save,private :: legacy_parser
+
+!Input/Output units
+  integer :: iflag_unit_time
+  integer,parameter :: ntype_unit_time_au = 0
+  integer,parameter :: ntype_unit_time_fs = 1
+  real(8) :: utime_to_au, utime_from_au
+
+  integer :: iflag_unit_length
+  integer,parameter :: ntype_unit_length_au = 0
+  integer,parameter :: ntype_unit_length_aa = 1
+  real(8) :: ulength_to_au, ulength_from_au
+
+  integer :: iflag_unit_energy
+  integer,parameter :: ntype_unit_energy_au = 0
+  integer,parameter :: ntype_unit_energy_ev = 1
+  real(8) :: uenergy_to_au, uenergy_from_au
+
+  integer :: iflag_unit_charge
+  integer,parameter :: ntype_unit_charge_au = 0
+  real(8) :: ucharge_to_au, ucharge_from_au
+
+
+
+  type unit_t
+     character(32) :: name
+     real(8)       :: conv
+  end type unit_t
+
+  type(unit_t) :: t_unit_length
+  type(unit_t) :: t_unit_length_inv
+  type(unit_t) :: t_unit_energy
+  type(unit_t) :: t_unit_energy_inv
+  type(unit_t) :: t_unit_time
+  type(unit_t) :: t_unit_time_inv
+  type(unit_t) :: t_unit_spectrum_dipole
+  type(unit_t) :: t_unit_spectrum_dipole_square
+  type(unit_t) :: t_unit_current
+  type(unit_t) :: t_unit_spectrum_current
+  type(unit_t) :: t_unit_spectrum_current_square
+  type(unit_t) :: t_unit_ac
+  type(unit_t) :: t_unit_elec
+  type(unit_t) :: t_unit_spectrum_elec
+  type(unit_t) :: t_unit_spectrum_elec_square
+  type(unit_t) :: t_unit_polarizability
+  type(unit_t) :: t_unit_conductivity
+
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
+contains
+  subroutine read_input(input_path,workspace)
+    use tddft_worker, only: worker_configure,worker_embedded
+    implicit none
+    character(*),optional,intent(in) :: input_path
+    type(s_input_parser),optional,target,intent(inout) :: workspace
+    type(s_input_parser),pointer :: parser
+
+    if(present(workspace))then
+      parser=>workspace
+      parser%isolated=.true.
+    else
+      parser=>legacy_parser
+      parser%isolated=.false.
+    endif
+    call read_stdin(input_path,parser)
+    call read_input_common(parser)
+    if(.not.worker_embedded) call worker_configure()
+    call read_atomic_coordinates(parser)
+    call dump_input_common(parser)
+    call check_bad_input
+    if(parser%isolated)then
+      call parser%values%capture()
+      call close_parser_workspace(parser)
+    endif
+  end subroutine read_input
+
+
+  subroutine read_stdin(input_path,parser)
+    use tddft_worker, only: worker_requested
+    use parallelization, only: nproc_id_global
+    use communication, only: comm_is_root
+    use filesystem, only: get_filehandle
+    implicit none
+    character(*),optional,intent(in) :: input_path
+    type(s_input_parser),intent(inout) :: parser
+    integer :: input_fh
+    integer :: cur
+    integer :: ret
+    character(256) :: buff, text
+
+    parser%if_nml_coor=.false.
+    parser%if_nml_red_coor=.false.
+    parser%inml_calculation=0
+    parser%inml_control=0
+    parser%inml_units=0
+    parser%inml_parallel=0
+    parser%inml_system=0
+    parser%inml_pseudo=0
+    parser%inml_functional=0
+    parser%inml_rgrid=0
+    parser%inml_kgrid=0
+    parser%inml_tgrid=0
+    parser%inml_propagation=0
+    parser%inml_scf=0
+    parser%inml_emfield=0
+    parser%inml_singlescale=0
+    parser%inml_multiscale=0
+    parser%inml_maxwell=0
+    parser%inml_analysis=0
+    parser%inml_poisson=0
+    parser%inml_ewald=0
+    parser%inml_opt=0
+    parser%inml_md=0
+    parser%inml_jellium=0
+    parser%inml_code=0
+    parser%inml_band=0
+    parser%inml_sbe=0
+    parser%inml_dc=0
+    parser%inml_unfolding=0
+
+    if (comm_is_root(nproc_id_global)) then
+
+      if(parser%isolated)then
+        open(newunit=parser%fh_namelist,status='scratch',form='formatted',action='readwrite')
+      else
+        parser%fh_namelist = get_filehandle()
+        open(parser%fh_namelist, file='.namelist.tmp', status='replace')
+      endif
+     !open(fh_atomic_spiecies, file='.atomic_spiecies.tmp', status='replace')
+
+      parser%if_nml_coor =.false.
+      if(parser%isolated)then
+        open(newunit=parser%fh_atomic_coor,status='scratch',form='formatted',action='readwrite')
+      else
+        parser%fh_atomic_coor = get_filehandle()
+        open(parser%fh_atomic_coor, file='.atomic_coor.tmp', status='replace')
+      endif
+
+      parser%if_nml_red_coor = .false.
+      if(parser%isolated)then
+        open(newunit=parser%fh_atomic_red_coor,status='scratch',form='formatted',action='readwrite')
+      else
+        parser%fh_atomic_red_coor = get_filehandle()
+        open(parser%fh_atomic_red_coor, file='.atomic_red_coor.tmp', status='replace')
+      endif
+
+      if(parser%isolated)then
+        open(newunit=parser%fh_reentrance,status='scratch',form='formatted',action='readwrite')
+      else
+        parser%fh_reentrance = get_filehandle()
+        open(parser%fh_reentrance, file='.reenetrance.tmp', status='replace')
+      endif
+
+      input_fh=5
+      if(present(input_path)) open(newunit=input_fh,file=input_path,status="old",action="read")
+      cur = parser%fh_namelist
+      do while (.true.)
+        read(input_fh, '(a)', iostat=ret) buff
+        if (ret < 0) then
+          exit
+        else
+          text = trim(adjustl(buff))
+          if(worker_requested().and.text=="!SALMONPY_END_INPUT") exit
+          ! Comment lines
+          if (text(1:1) == '!') cycle
+         !! Beginning of 'atomic_species' part
+         !if (text == '&atomic_spiecies') then
+         !  cur = fh_atomic_spiecies
+         !  cycle
+         !end if
+          ! Beginning of 'atomic_positions' part
+          if (text == '&atomic_coor') then
+            cur = parser%fh_atomic_coor
+            parser%if_nml_coor =.true.
+            cycle
+          end if
+          if (text == '&atomic_red_coor') then
+            cur = parser%fh_atomic_red_coor
+            parser%if_nml_red_coor = .true.
+            cycle
+          end if
+          ! Beginning of 'atomic_species' part
+          if (text == '&reentrance') then
+            cur = parser%fh_reentrance
+            cycle
+          end if
+          ! End of 'atomic_(spiecies|positions)' part
+          if ((text == '/') .and. (cur /= parser%fh_namelist)) then
+            cur = parser%fh_namelist
+            cycle
+          end if
+
+          write(cur, '(a)') trim(text)
+        end if
+      end do
+
+      if(present(input_path)) close(input_fh)
+      if(.not.parser%isolated)then
+        close(parser%fh_namelist)
+        close(parser%fh_atomic_coor)
+        close(parser%fh_atomic_red_coor)
+      endif
+     !close(fh_atomic_spiecies)
+      if(.not.parser%isolated)close(parser%fh_reentrance)
+    end if
+
+   !call comm_sync_all()
+
+    return
+  end subroutine read_stdin
+
+  subroutine read_input_common(parser)
+    use parallelization
+    use communication
+    use filesystem, only: get_filehandle
+    use misc_routines, only: string_lowercase
+    use exx_functional, only: is_hybrid
+    use exx_k_selection, only: resolve_k_algorithm
+    implicit none
+    type(s_input_parser),intent(inout) :: parser
+    integer :: ii
+    real(8) :: norm
+    ! Read-only compatibility aliases; computational modules use EXX names.
+    integer :: hse_mlwf_interval,hse_mlwf_maxiter
+    real(8) :: hse_mlwf_tolerance
+
+    namelist/calculation/ &
+      & theory, &
+      & yn_md,  &
+      & yn_opt, &
+      & yn_dc, &
+      & yn_conventional_from_dcdft
+
+    namelist/control/ &
+      & sysname, &
+      & base_directory, &
+      & yn_restart, &
+      & directory_read_data, &
+      & yn_self_checkpoint,  &
+      & checkpoint_interval, &
+      & yn_reset_step_restart, &
+      & read_gs_restart_data,  &
+      & write_gs_restart_data, &
+      & time_shutdown,         &
+      & method_wf_distributor, &
+      & nblock_wf_distribute,  &
+      & write_gs_wfn_k,    &  !remove later (but this is used currently)
+      & write_rt_wfn_k        !remove later (but this is used currently)
+
+    namelist/units/ &
+      & unit_system
+
+    namelist/parallel/ &
+      & nproc_k, &
+      & nproc_ob, &
+      & nproc_rgrid, &
+      & yn_ffte, &
+      & yn_fftw, &
+      & yn_scalapack, &
+      & yn_gramschmidt_blas, &
+      & yn_eigenexa, &
+      & yn_diagonalization_red_mem, &
+      & yn_nccl_reduction, &
+      & process_allocation
+
+    namelist/system/ &
+      & yn_periodic, &
+      & spin, &
+      & al, &
+      & al_vec1,al_vec2,al_vec3, &
+      & nstate, &
+      & nelec, &
+      & nelec_spin, &
+      & temperature, &
+      & temperature_k, &
+      & nelem, &
+      & natom, &
+      & file_atom_coor, &
+      & file_atom_red_coor, &
+      & yn_spinorbit, &
+      & yn_symmetry, &
+      & absorbing_boundary, &
+      & imagnary_potential_w0, &
+      & imagnary_potential_dr
+
+    namelist/pseudo/ &
+      & file_pseudo, &
+      & lmax_ps, &
+      & lloc_ps, &
+      & izatom, &
+      & yn_psmask, &
+      & yn_pseudo_atomic_orbital, &
+      & alpha_mask, &
+      & gamma_mask, &
+      & eta_mask
+
+    namelist/functional/ &
+      & xc, &
+      & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, &
+      & exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
+      & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
+      & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
+      & exx_factor_mode,exx_k_algorithm,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft, &
+      & yn_hse_sr_pair_symmetry, &
+      & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
+      & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
+      & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
+      & hse_q_reduction, hse_block_rows, exx_worker_tile_divisor, exx_worker_rprime_groups, &
+      & hse_fft_layout, &
+      & xname, &
+#ifdef USE_LIBXC
+      & alibx, &
+      & alibc, &
+      & alibxc, &
+#endif
+      & cval
+
+    namelist/rgrid/ &
+      & dl, &
+      & num_rgrid
+
+    namelist/kgrid/ &
+      & num_kgrid, &
+      & file_kw, &
+      & dk_shift, &
+      & yn_gamma_centered
+
+    namelist/tgrid/ &
+      & nt, &
+      & dt, &
+      & gram_schmidt_interval
+
+    namelist/propagation/ &
+      & n_hamil, &
+      & propagator, &
+      & yn_fix_func, &
+      & yn_predictor_corrector
+
+    namelist/scf/ &
+      & method_init_wf, &
+      & iseed_number_change, &
+      & method_min, &
+      & ncg, &
+      & ncg_init, &
+      & method_mixing, &
+      & mixrate, &
+      & nmemory_mb, &
+      & alpha_mb, &
+      & nmemory_p, &
+      & beta_p, &
+      & yn_auto_mixing, &
+      & update_mixing_ratio, &
+      & nscf, &
+      & yn_subspace_diagonalization, &
+      & convergence, &
+      & threshold, &
+      & nscf_init_redistribution, &
+      & nscf_init_no_diagonal, &
+      & nscf_init_mix_zero, &
+      & conv_gap_mix_zero, &
+      & method_init_density, &
+      & magdir_atom, &
+      & yn_preconditioning, &
+      & alpha_pre
+
+    namelist/emfield/ &
+      & trans_longi, &
+      & ae_shape1, &
+      & file_input1, &
+      & e_impulse, &
+      & E_amplitude1, &
+      & I_wcm2_1, &
+      & tw1, &
+      & omega1, &
+      & epdir_re1, &
+      & epdir_im1, &
+      & phi_cep1, &
+      & ae_shape2, &
+      & E_amplitude2, &
+      & I_wcm2_2, &
+      & tw2, &
+      & omega2, &
+      & epdir_re2, &
+      & epdir_im2, &
+      & phi_cep2, &
+      & t1_t2, &
+      & t1_start, &
+      & num_dipole_source , &
+      & vec_dipole_source , &
+      & cood_dipole_source , &
+      & rad_dipole_source
+      
+    namelist/singlescale/ &
+      & method_singlescale, &
+      & cutoff_G2_emfield, &
+      & yn_symmetrized_stencil, &
+      & yn_put_wall_z_boundary, &
+      & wall_height, &
+      & wall_width
+
+    namelist/multiscale/ &
+      & fdtddim, &
+      & twod_shape, &
+      & nx_m, &
+      & ny_m, &
+      & nz_m, &
+      & hx_m, &
+      & hy_m, &
+      & hz_m, &
+      & nksplit, & 
+      & nxysplit, & 
+      & nxvacl_m, & 
+      & nxvacr_m, & 
+      & nxvac_m, &
+      & nyvac_m, &
+      & nzvac_m, &
+      & nx_origin_m, &
+      & ny_origin_m, &
+      & nz_origin_m, &
+      & out_ms_region_ix_m, &
+      & out_ms_region_iy_m, &
+      & out_ms_region_iz_m, &
+      & file_macropoint, &
+      & set_ini_coor_vel,&
+      & nmacro_write_group, &
+      & nmacro_chunk, &
+      & rmat_ms
+
+    namelist/maxwell/             &
+      & al_em,                    &
+      & dl_em,                    &
+      & num_rgrid_em,             &
+      & at_em,                    &
+      & dt_em,                    &
+      & nt_em,                    &
+      & boundary_em,              &
+      & shape_file,               &
+      & media_num,                &
+      & media_type,               &
+      & epsilon_em,               &
+      & mu_em,                    &
+      & sigma_em,                 &
+      & pole_num_ld,              &
+      & omega_p_ld,               &
+      & f_ld,                     &
+      & gamma_ld,                 &
+      & omega_ld,                 &
+      & wave_input,               &
+      & ek_dir1,                  &
+      & source_loc1,              &
+      & gbeam_sigma_plane1,       &
+      & gbeam_sigma_line1,        &
+      & ek_dir2,                  &
+      & source_loc2,              &
+      & gbeam_sigma_plane2,       &
+      & gbeam_sigma_line2,        &
+      & obs_num_em,               &
+      & obs_samp_em,              &
+      & obs_loc_em,               &
+      & obs_plane_ene_em,         &
+      & yn_obs_plane_em,          &
+      & yn_obs_plane_integral_em, &
+      & yn_wf_em,                 &
+      & film_thickness,           &
+      & media_id_pml,             &
+      & media_id_source1,         &
+      & media_id_source2,         &
+      & bloch_k_em,               &
+      & bloch_real_imag_em,       &
+      & ase_num_em,               &
+      & ase_ene_min_em,           &
+      & ase_ene_max_em,           &
+      & ase_wav_min_em,           &
+      & ase_wav_max_em,           &
+      & ase_smedia_id_em,         &
+      & ase_box_cent_em,          &
+      & ase_box_size_em,          &
+      & art_num_em,               &
+      & art_ene_min_em,           &
+      & art_ene_max_em,           &
+      & art_wav_min_em,           &
+      & art_wav_max_em,           &
+      & art_smedia_id_em,         &
+      & art_plane_top_em,         &
+      & art_plane_bot_em,         &
+      & yn_make_shape,            &
+      & yn_output_shape,          &
+      & yn_copy_x,                &
+      & yn_copy_y,                &
+      & yn_copy_z,                &
+      & rot_type,                 &
+      & n_s,                      &
+      & typ_s,                    &
+      & id_s,                     &
+      & inf_s,                    &
+      & ori_s,                    &
+      & rot_s
+
+    namelist/analysis/ &
+      & projection_option, &
+      & out_projection_step, &
+      & threshold_projection, &
+      & nenergy, &
+      & de, &
+      & out_rt_energy_step, &
+      & yn_out_psi, &
+      & yn_out_dos, &
+      & yn_out_dos_set_fe_origin, &
+      & out_dos_start, &
+      & out_dos_end, &
+      & out_dos_nenergy, &
+      & out_dos_width, &
+      & out_dos_function, &
+      & yn_out_pdos, &
+      & yn_out_dns, &
+      & yn_out_dns_rt, &
+      & yn_out_dns_ac_je, &
+      & yn_out_micro_je, &
+      & out_dns_rt_step, &
+      & out_dns_ac_je_step, &
+      & out_micro_je_step, &
+      & out_old_dns, &
+      & yn_out_dns_trans, &
+      & out_dns_trans_energy, &
+      & yn_out_elf, &
+      & yn_out_elf_rt, &
+      & out_elf_rt_step, &
+      & yn_out_estatic_rt, &
+      & out_estatic_rt_step, &
+      & yn_out_rvf_rt, &
+      & out_rvf_rt_step, &
+      & yn_out_tm, &
+      & yn_out_tm_bin, &
+      & yn_out_gs_sgm_eps, &
+      & out_gs_sgm_eps_mu_nu, &
+      & out_gs_sgm_eps_width, &
+      & out_ms_step, &
+      & format_voxel_data, &
+      & nsplit_voxel_data, &
+      & yn_lr_w0_correction, &
+      & yn_out_intraband_current, &
+      & yn_out_current_decomposed, &
+      & out_current_decomposed_step, &
+      & out_rt_spin_step, &
+      & yn_out_mag_decomposed_rt, &
+      & yn_out_mag_micro_rt, &
+      & yn_out_spin_current_decomposed, &
+      & yn_out_spin_current_micro, &
+      & yn_out_rt_energy_components, &
+      & yn_out_perflog, &
+      & format_perflog
+
+    namelist/poisson/ &
+      & layout_multipole, &
+      & num_multipole_xyz, &
+      & lmax_multipole, &
+      & threshold_cg, &
+      & method_poisson
+
+    namelist/ewald/ &
+      & newald, &
+      & aewald, &
+      & cutoff_r, &
+      & cutoff_r_buff, &
+      & cutoff_g
+
+    namelist/opt/ &
+      & nopt, &
+      & max_step_len_adjust, &
+      & convrg_opt_fmax, &
+      & method_opt, &
+      & step_steep, &
+      & step_fire
+
+    namelist/md/ &
+      & ensemble, &
+      & thermostat, &
+      & step_velocity_scaling, &
+      & step_update_ps, &
+      & temperature0_ion_k, &
+      & yn_set_ini_velocity, &
+      & file_ini_velocity, &
+      & thermostat_tau, &
+      & yn_stop_system_momt
+
+    namelist/jellium/         &
+      & yn_jm,                &
+      & yn_charge_neutral_jm, &
+      & yn_output_dns_jm,     &
+      & shape_file_jm,        &
+      & num_jm,               &
+      & rs_bohr_jm,           &
+      & sphere_nion_jm,       &
+      & sphere_loc_jm
+
+    namelist/code/ &
+      & yn_want_stencil_hand_vectorization, &
+      & yn_want_communication_overlapping, &
+      & stencil_openmp_mode, &
+      & current_openmp_mode, &
+      & force_openmp_mode
+
+    namelist/band/ &
+      & lattice, &
+      & nref_band, &
+      & tol_esp_diff, &
+      & num_of_segments, &
+      & ndiv_segment, &
+      & kpt, &
+      & kpt_label
+      
+    namelist/sbe/ &
+      & yn_vnl_correction, &
+      & num_sbe, &
+      & sysname_sbe, &
+      & nk_sbe, &
+      & nstate_sbe, &
+      & nelec_sbe, &
+      & al_sbe, &
+      & al_vec1_sbe,al_vec2_sbe,al_vec3_sbe, &
+      & norder_correction, &
+      & gauge_sbe, &
+      & t_2, &
+      & am_s
+      
+    namelist/dc/ &
+      & num_fragment, &
+      & num_rgrid_buffer, &
+      & nproc_rgrid_tot, &
+      & file_atom_coor_frag, &
+      & yn_out_dc_fragment_coor, &
+      & xi_dc, &
+      & yn_dc_lcfo, &
+      & yn_dc_lcfo_diag, &
+      & lcfo_eigensolver, &
+      & lcfo_diag_chefsi_filter_degree, &
+      & lcfo_diag_chefsi_filter_chunk_size, &
+      & lcfo_diag_chefsi_max_cycle, &
+      & lcfo_diag_chefsi_residual_tolerance, &
+      & nstate_frag, &
+      & energy_cut, &
+      & lambda_cut
+
+    namelist/unfolding/ &
+      & dm_unfold_option, &
+      & num_lkgrid, &
+      & num_skgrid, &
+      & no_pr, &
+      & out_dm_unfold_step, &
+      & yn_out_mom_distr_gs, &
+      & yn_out_mom_distr_rt, &
+      & out_mom_distr_rt_step, &
+      & nq_mom, &
+      & dq_mom
+
+!! == default for &unit ==
+    unit_system='au'
+!! =======================
+
+    if (comm_is_root(nproc_id_global)) then
+      if(parser%isolated)then
+        rewind(parser%fh_namelist)
+      else
+        open(parser%fh_namelist, file='.namelist.tmp', status='old')
+      endif
+      read(parser%fh_namelist, nml=units, iostat=parser%inml_units)
+      rewind(parser%fh_namelist)
+      if(.not.parser%isolated)close(parser%fh_namelist)
+    end if
+
+    call comm_bcast(unit_system,nproc_group_global)
+
+    select case(unit_system)
+    case('au','a.u.','A_eV_fs')
+      continue
+    case default
+      stop 'invalid unit_system'
+    end select
+
+    select case(unit_system)
+    case('au','a.u.')
+      unit_time='au'
+      unit_length='au'
+      unit_energy='au'
+      unit_charge='au'
+    case('A_eV_fs')
+      unit_time='fs'
+      unit_length='AA'
+      unit_energy='eV'
+      unit_charge='au'
+    end select
+
+    call initialize_inputoutput_units
+
+    call initialize_parser_defaults(parser,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance)
+
+    if (comm_is_root(nproc_id_global)) then
+      if(.not.parser%isolated)parser%fh_namelist = get_filehandle()
+      if(parser%isolated)then
+        rewind(parser%fh_namelist)
+      else
+        open(parser%fh_namelist, file='.namelist.tmp', status='old')
+      endif
+
+      read(parser%fh_namelist, nml=calculation, iostat=parser%inml_calculation)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=control, iostat=parser%inml_control)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=parallel, iostat=parser%inml_parallel)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=system, iostat=parser%inml_system)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=pseudo, iostat=parser%inml_pseudo)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=functional, iostat=parser%inml_functional)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=rgrid, iostat=parser%inml_rgrid)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=kgrid, iostat=parser%inml_kgrid)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=tgrid, iostat=parser%inml_tgrid)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=propagation, iostat=parser%inml_propagation)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=scf, iostat=parser%inml_scf)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=emfield, iostat=parser%inml_emfield)
+      rewind(parser%fh_namelist)
+      
+      read(parser%fh_namelist, nml=singlescale, iostat=parser%inml_singlescale)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=multiscale, iostat=parser%inml_multiscale)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=maxwell, iostat=parser%inml_maxwell)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=analysis, iostat=parser%inml_analysis)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=poisson, iostat=parser%inml_poisson)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=ewald, iostat=parser%inml_ewald)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=opt, iostat=parser%inml_opt)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=md, iostat=parser%inml_md)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=jellium, iostat=parser%inml_jellium)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=code, iostat=parser%inml_code)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=band, iostat=parser%inml_band)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=sbe, iostat=parser%inml_sbe)
+      rewind(parser%fh_namelist)
+      
+      read(parser%fh_namelist, nml=dc, iostat=parser%inml_dc)
+      rewind(parser%fh_namelist)
+
+      read(parser%fh_namelist, nml=unfolding, iostat=parser%inml_unfolding)
+      rewind(parser%fh_namelist)
+
+      if(.not.parser%isolated)close(parser%fh_namelist)
+    end if
+
+
+!! convert lowercase
+    call string_lowercase(theory)
+    call string_lowercase(spin)
+    call string_lowercase(yn_spinorbit)
+    if(comm_is_root(nproc_id_global)) &
+      call resolve_ky_spin_inputs(file_pseudo,nelem,spin,yn_spinorbit)
+    call string_lowercase(xc)
+    call string_lowercase(cname)
+    call string_lowercase(xname)
+#ifdef USE_LIBXC
+    call string_lowercase(alibxc)
+    call string_lowercase(alibx)
+    call string_lowercase(alibc)
+#endif
+    call string_lowercase(process_allocation)
+    call string_lowercase(propagator)
+    call string_lowercase(method_init_wf)
+    call string_lowercase(method_min)
+    call string_lowercase(method_mixing)
+    call string_lowercase(convergence)
+    call string_lowercase(method_init_density)
+    call string_lowercase(yn_pseudo_atomic_orbital)
+    call string_lowercase(trans_longi)
+    call string_lowercase(method_singlescale)
+    call string_lowercase(boundary_em(1,1))
+    call string_lowercase(boundary_em(1,2))
+    call string_lowercase(boundary_em(2,1))
+    call string_lowercase(boundary_em(2,2))
+    call string_lowercase(boundary_em(3,1))
+    call string_lowercase(boundary_em(3,2))
+    do ii = 0,media_num
+      call string_lowercase(media_type(ii))
+    end do
+    call string_lowercase(wave_input)
+    call string_lowercase(bloch_real_imag_em(1))
+    call string_lowercase(bloch_real_imag_em(2))
+    call string_lowercase(bloch_real_imag_em(3))
+    if(n_s>0) then
+      do ii = 1,n_s
+        call string_lowercase(typ_s(ii))
+      end do
+    end if
+    call string_lowercase(lattice)
+    call string_lowercase(dm_unfold_option)
+    call string_lowercase(lcfo_eigensolver)
+
+! Broad cast
+!! == bcast for &calculation
+    call comm_bcast(theory             ,nproc_group_global)
+    call comm_bcast(yn_md              ,nproc_group_global)
+    call comm_bcast(yn_opt             ,nproc_group_global)
+    call comm_bcast(yn_dc              ,nproc_group_global)
+    call comm_bcast(yn_conventional_from_dcdft,nproc_group_global)
+
+!! == bcast for &control
+    call comm_bcast(sysname         ,nproc_group_global)
+    call comm_bcast(base_directory  ,nproc_group_global)
+    ii = len_trim(base_directory)
+    if(base_directory(ii:ii).ne.'/') &
+       base_directory = trim(base_directory)//'/'
+    call comm_bcast(yn_restart            ,nproc_group_global)
+    call comm_bcast(directory_read_data   ,nproc_group_global)
+    ii = len_trim(directory_read_data)
+    if(directory_read_data(ii:ii).ne.'/') &
+       directory_read_data = trim(directory_read_data)//'/'
+    call comm_bcast(yn_self_checkpoint    ,nproc_group_global)
+    if(checkpoint_interval == 0) &
+      checkpoint_interval = -1 ! FIXME: workaround for zero-divide problem
+    call comm_bcast(checkpoint_interval   ,nproc_group_global)
+    call comm_bcast(yn_reset_step_restart ,nproc_group_global)
+    call comm_bcast(read_gs_restart_data  ,nproc_group_global)
+    call comm_bcast(write_gs_restart_data ,nproc_group_global)
+    call comm_bcast(time_shutdown         ,nproc_group_global)
+    call comm_bcast(method_wf_distributor ,nproc_group_global)
+    call comm_bcast(nblock_wf_distribute  ,nproc_group_global)
+    call comm_bcast(write_gs_wfn_k  ,nproc_group_global)
+    call comm_bcast(write_rt_wfn_k  ,nproc_group_global)
+
+!! == bcast for &parallel
+    call comm_bcast(nproc_k             ,nproc_group_global)
+    call comm_bcast(nproc_ob            ,nproc_group_global)
+    call comm_bcast(nproc_rgrid         ,nproc_group_global)
+    call comm_bcast(yn_ffte             ,nproc_group_global)
+    call comm_bcast(yn_fftw             ,nproc_group_global)
+    call comm_bcast(yn_scalapack        ,nproc_group_global)
+    call comm_bcast(yn_gramschmidt_blas ,nproc_group_global)
+    call comm_bcast(yn_eigenexa         ,nproc_group_global)
+    call comm_bcast(yn_diagonalization_red_mem,nproc_group_global)
+    call comm_bcast(yn_nccl_reduction   ,nproc_group_global)
+    call comm_bcast(process_allocation  ,nproc_group_global)
+!! == bcast for &system
+    call comm_bcast(yn_periodic,nproc_group_global)
+    if(yn_periodic=='y') iperiodic=3
+    if(yn_periodic=='n') iperiodic=0
+    call comm_bcast(spin       ,nproc_group_global)
+    call comm_bcast(al         ,nproc_group_global)
+    al = al * ulength_to_au
+    call comm_bcast(al_vec1            ,nproc_group_global)
+    call comm_bcast(al_vec2            ,nproc_group_global)
+    call comm_bcast(al_vec3            ,nproc_group_global)
+    al_vec1 = al_vec1 * ulength_to_au
+    al_vec2 = al_vec2 * ulength_to_au
+    al_vec3 = al_vec3 * ulength_to_au
+    call comm_bcast(nstate             ,nproc_group_global)
+    call comm_bcast(nelec              ,nproc_group_global)
+    call comm_bcast(nelec_spin         ,nproc_group_global)
+    call comm_bcast(temperature        ,nproc_group_global)
+    if(temperature>=0d0) temperature = temperature * uenergy_to_au
+    call comm_bcast(temperature_k      ,nproc_group_global)
+    if(temperature_k>=0d0) temperature = temperature_k * kB_au ! Kelvin --> atomic units
+    call comm_bcast(nelem              ,nproc_group_global)
+    call comm_bcast(natom              ,nproc_group_global)
+    call comm_bcast(file_atom_coor     ,nproc_group_global)
+    call comm_bcast(file_atom_red_coor ,nproc_group_global)
+    call comm_bcast(yn_spinorbit       ,nproc_group_global)
+    call comm_bcast(yn_symmetry        ,nproc_group_global)
+    call comm_bcast(absorbing_boundary    ,nproc_group_global)
+    call comm_bcast(imagnary_potential_w0 ,nproc_group_global)
+    call comm_bcast(imagnary_potential_dr ,nproc_group_global)
+    imagnary_potential_w0 = imagnary_potential_w0 * uenergy_to_au
+    imagnary_potential_dr = imagnary_potential_dr * ulength_to_au
+
+!! == bcast for &pseudo
+    call comm_bcast(file_pseudo  ,nproc_group_global)
+    call comm_bcast(lmax_ps      ,nproc_group_global)
+    call comm_bcast(lloc_ps      ,nproc_group_global)
+    call comm_bcast(izatom       ,nproc_group_global)
+    call comm_bcast(yn_psmask,nproc_group_global)
+    call comm_bcast(yn_pseudo_atomic_orbital,nproc_group_global)
+    call comm_bcast(alpha_mask   ,nproc_group_global)
+    call comm_bcast(gamma_mask   ,nproc_group_global)
+    call comm_bcast(eta_mask     ,nproc_group_global)
+!! == bcast for &functional
+
+#ifdef USE_LIBXC
+    if (alibxc .ne. 'none') xc =  trim(alibxc)
+    if (alibx .ne. 'none') xname =  trim(alibx)
+    if (alibc .ne. 'none') cname =  trim(alibc)
+#endif
+    call comm_bcast(xc           ,nproc_group_global)
+    call comm_bcast(cname        ,nproc_group_global)
+    call comm_bcast(yn_hse_wannier,nproc_group_global)
+    call comm_bcast(hse_mlwf_interval,nproc_group_global)
+    call comm_bcast(exx_mlwf_interval,nproc_group_global)
+    if(hse_mlwf_interval/=-huge(1))then
+      if(exx_mlwf_interval/=-huge(1).and.exx_mlwf_interval/=hse_mlwf_interval) &
+        error stop 'conflicting EXX/legacy MLWF interval'
+      exx_mlwf_interval=hse_mlwf_interval
+    endif
+    if(exx_mlwf_interval==-huge(1))exx_mlwf_interval=10
+    call comm_bcast(hse_mlwf_maxiter,nproc_group_global)
+    call comm_bcast(exx_mlwf_maxiter,nproc_group_global)
+    if(hse_mlwf_maxiter/=-huge(1))then
+      if(exx_mlwf_maxiter/=-huge(1).and.exx_mlwf_maxiter/=hse_mlwf_maxiter) &
+        error stop 'conflicting EXX/legacy MLWF maxiter'
+      exx_mlwf_maxiter=hse_mlwf_maxiter
+    endif
+    if(exx_mlwf_maxiter==-huge(1))exx_mlwf_maxiter=200
+    call comm_bcast(hse_mlwf_tolerance,nproc_group_global)
+    call comm_bcast(exx_mlwf_tolerance,nproc_group_global)
+    if(hse_mlwf_tolerance/=-huge(1d0))then
+      if(exx_mlwf_tolerance/=-huge(1d0).and.exx_mlwf_tolerance/=hse_mlwf_tolerance) &
+        error stop 'conflicting EXX/legacy MLWF tolerance'
+      exx_mlwf_tolerance=hse_mlwf_tolerance
+    endif
+    if(exx_mlwf_tolerance==-huge(1d0))exx_mlwf_tolerance=1d-6
+    call comm_bcast(yn_exx_dc_mlwf,nproc_group_global)
+    call string_lowercase(yn_exx_dc_mlwf)
+    call comm_bcast(exx_pre_scf_threshold,nproc_group_global)
+    call comm_bcast(exx_pre_scf_steps,nproc_group_global)
+    call comm_bcast(exx_ace_support,nproc_group_global)
+    call string_lowercase(exx_ace_support)
+    call comm_bcast(exx_pair_screening,nproc_group_global)
+    call string_lowercase(exx_pair_screening)
+    call comm_bcast(exx_factor_mode,nproc_group_global)
+    call string_lowercase(exx_factor_mode)
+    call comm_bcast(exx_k_algorithm,nproc_group_global)
+    call string_lowercase(exx_k_algorithm)
+    call comm_bcast(yn_exx_spinor_pair_fft,nproc_group_global)
+    call string_lowercase(yn_exx_spinor_pair_fft)
+    call comm_bcast(yn_exx_fft_orbits,nproc_group_global)
+    call string_lowercase(yn_exx_fft_orbits)
+    call comm_bcast(yn_exx_k_pair_symmetry,nproc_group_global)
+    call string_lowercase(yn_exx_k_pair_symmetry)
+    call comm_bcast(yn_hse_sr_pair_symmetry,nproc_group_global)
+    call string_lowercase(yn_hse_sr_pair_symmetry)
+    call comm_bcast(hse_sr_tolerance,nproc_group_global)
+    call comm_bcast(exx_pair_tolerance,nproc_group_global)
+    call comm_bcast(exx_kpoint_backend,nproc_group_global)
+    call string_lowercase(exx_kpoint_backend)
+    call comm_bcast(exx_local_backend,nproc_group_global)
+    call string_lowercase(exx_local_backend)
+    call comm_bcast(exx_gpu_batch_size,nproc_group_global)
+    call comm_bcast(exx_local_fft,nproc_group_global)
+    call string_lowercase(exx_local_fft)
+    call comm_bcast(exx_factor_n_teach,nproc_group_global)
+    call comm_bcast(exx_factor_history_frames,nproc_group_global)
+    call comm_bcast(exx_factor_exact_interval,nproc_group_global)
+    call comm_bcast(exx_factor_warmup_steps,nproc_group_global)
+    call comm_bcast(exx_mlwf_norm_fraction,nproc_group_global)
+    call comm_bcast(exx_mlwf_radius,nproc_group_global)
+    exx_mlwf_radius=exx_mlwf_radius*ulength_to_au
+    call comm_bcast(hse_q_reduction,nproc_group_global)
+    call comm_bcast(hse_block_rows,nproc_group_global)
+    call comm_bcast(exx_worker_tile_divisor,nproc_group_global)
+    call comm_bcast(exx_worker_rprime_groups,nproc_group_global)
+    call comm_bcast(hse_fft_layout,nproc_group_global)
+    call string_lowercase(hse_fft_layout)
+    call comm_bcast(pbeh_coulomb_radius,nproc_group_global)
+    pbeh_coulomb_radius=pbeh_coulomb_radius*ulength_to_au
+    call comm_bcast(rvv10_b,nproc_group_global)
+    call comm_bcast(rvv10_c,nproc_group_global)
+    call comm_bcast(rvv10_nq,nproc_group_global)
+    call comm_bcast(rvv10_fft,nproc_group_global)
+    call string_lowercase(rvv10_fft)
+    call comm_bcast(hse_omega    ,nproc_group_global)
+    hse_omega = hse_omega / ulength_to_au ! internal bohr^-1
+    call comm_bcast(xname        ,nproc_group_global)
+#ifdef USE_LIBXC
+    call comm_bcast(alibxc       ,nproc_group_global)
+    call comm_bcast(alibx        ,nproc_group_global)
+    call comm_bcast(alibc        ,nproc_group_global)
+#endif
+    call comm_bcast(cval         ,nproc_group_global)
+!! == bcast for &rgrid
+    call comm_bcast(dl,nproc_group_global)
+    dl = dl * ulength_to_au
+    call comm_bcast(num_rgrid,nproc_group_global)
+!! == bcast for &kgrid
+    call comm_bcast(num_kgrid,nproc_group_global)
+    call comm_bcast(file_kw  ,nproc_group_global)
+    call comm_bcast(dk_shift ,nproc_group_global)
+    call comm_bcast(yn_gamma_centered,nproc_group_global)
+!! == bcast for &tgrid
+    call comm_bcast(nt,nproc_group_global)
+    call comm_bcast(dt,nproc_group_global)
+    dt = dt * utime_to_au
+    call comm_bcast(gram_schmidt_interval,nproc_group_global)
+!! == bcast for &propagation
+    call comm_bcast(n_hamil    ,nproc_group_global)
+    call comm_bcast(propagator ,nproc_group_global)
+    call comm_bcast(yn_fix_func,nproc_group_global)
+    call comm_bcast(yn_predictor_corrector,nproc_group_global)
+    ! Resolve omitted options on every rank before validation and input logging.
+    ! Explicit developer propagators and incompatible user options remain visible
+    ! to validation rather than being silently overwritten.
+    if(propagator=='')then
+      propagator='middlepoint'
+      if((is_hybrid(xc)).and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
+        propagator='hse_taylor4'
+    endif
+    if(yn_predictor_corrector=='')then
+      yn_predictor_corrector='n'
+      if((is_hybrid(xc)).and.(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')) &
+        yn_predictor_corrector='y'
+    endif
+!! == bcast for &scf
+    call comm_bcast(method_init_wf          ,nproc_group_global)
+    call comm_bcast(iseed_number_change     ,nproc_group_global)
+    call comm_bcast(method_min              ,nproc_group_global)
+    call comm_bcast(ncg                     ,nproc_group_global)
+    call comm_bcast(ncg_init                ,nproc_group_global)
+    call comm_bcast(method_mixing           ,nproc_group_global)
+    call comm_bcast(mixrate                 ,nproc_group_global)
+    call comm_bcast(nmemory_mb              ,nproc_group_global)
+    call comm_bcast(alpha_mb                ,nproc_group_global)
+    call comm_bcast(nmemory_p               ,nproc_group_global)
+    call comm_bcast(beta_p                  ,nproc_group_global)
+    call comm_bcast(yn_auto_mixing          ,nproc_group_global)
+    call comm_bcast(update_mixing_ratio     ,nproc_group_global)
+    call comm_bcast(nscf                    ,nproc_group_global)
+    call comm_bcast(yn_subspace_diagonalization,nproc_group_global)
+    call comm_bcast(convergence             ,nproc_group_global)
+    call comm_bcast(threshold               ,nproc_group_global)
+    if(threshold.lt.-0.5d0) then !<-- when not input value
+      select case(convergence)
+      case('rho_dne')
+         threshold = 1d-17  !default (a.u.)
+      case('norm_rho','norm_rho_dng')
+         threshold = -1d0   !default (a.u.)
+      case('norm_pot','norm_pot_dng')
+         threshold = -1d0   !default (a.u.)
+      end select
+    else
+      select case(convergence)
+      case('rho_dne')
+         continue
+      case('norm_rho','norm_rho_dng')
+         threshold = threshold / (ulength_to_au)**6
+      case('norm_pot','norm_pot_dng')
+         threshold = threshold * (uenergy_to_au)**2 / (ulength_to_au)**6
+      end select
+    endif
+    call comm_bcast(nscf_init_redistribution  ,nproc_group_global)
+    call comm_bcast(nscf_init_no_diagonal ,nproc_group_global)
+    call comm_bcast(nscf_init_mix_zero    ,nproc_group_global)
+    call comm_bcast(conv_gap_mix_zero     ,nproc_group_global)
+    conv_gap_mix_zero = conv_gap_mix_zero * uenergy_to_au
+    call comm_bcast(method_init_density   ,nproc_group_global)
+    call comm_bcast(magdir_atom ,nproc_group_global)
+    call comm_bcast(yn_preconditioning    ,nproc_group_global)
+    call comm_bcast(alpha_pre             ,nproc_group_global)
+
+!! == bcast for &emfield
+    call comm_bcast(trans_longi,nproc_group_global)
+    call comm_bcast(ae_shape1  ,nproc_group_global)
+    call comm_bcast(file_input1,nproc_group_global)
+    call comm_bcast(e_impulse,nproc_group_global)
+    e_impulse = e_impulse *uenergy_to_au/ulength_to_au*utime_to_au
+    call comm_bcast(E_amplitude1 ,nproc_group_global)
+    E_amplitude1 = E_amplitude1*(uenergy_to_au/ulength_to_au/ucharge_to_au)
+    call comm_bcast(I_wcm2_1,nproc_group_global)
+    call comm_bcast(tw1  ,nproc_group_global)
+    tw1 = tw1 * utime_to_au
+    call comm_bcast(omega1,nproc_group_global)
+    omega1 = omega1 * uenergy_to_au
+    call comm_bcast(epdir_re1 ,nproc_group_global)
+    call comm_bcast(epdir_im1 ,nproc_group_global)
+    norm = sqrt(sum(epdir_re1(:)**2+epdir_im1(:)**2))
+    if ( norm > 0.0d0 ) then
+    epdir_re1 = epdir_re1 / norm
+    epdir_im1 = epdir_im1 / norm
+    end if
+    call comm_bcast(phi_cep1  ,nproc_group_global)
+    call comm_bcast(ae_shape2 ,nproc_group_global)
+    call comm_bcast(E_amplitude2,nproc_group_global)
+    E_amplitude2 = E_amplitude2*(uenergy_to_au/ulength_to_au/ucharge_to_au)
+    call comm_bcast(I_wcm2_2,nproc_group_global)
+    call comm_bcast(tw2  ,nproc_group_global)
+    tw2 = tw2 * utime_to_au
+    call comm_bcast(omega2,nproc_group_global)
+    omega2 = omega2 * uenergy_to_au
+    call comm_bcast(epdir_re2,nproc_group_global)
+    call comm_bcast(epdir_im2,nproc_group_global)
+    norm = sqrt(sum(epdir_re2(:)**2+epdir_im2(:)**2))
+    epdir_re2 = epdir_re2 / norm
+    epdir_im2 = epdir_im2 / norm
+    call comm_bcast(phi_cep2 ,nproc_group_global)
+    call comm_bcast(t1_t2    ,nproc_group_global)
+    t1_t2 = t1_t2 * utime_to_au
+    call comm_bcast(t1_start ,nproc_group_global)
+    t1_start = t1_start * utime_to_au
+    call comm_bcast(num_dipole_source,nproc_group_global)
+    call comm_bcast(vec_dipole_source,nproc_group_global)
+    vec_dipole_source = vec_dipole_source * ulength_to_au
+    call comm_bcast(cood_dipole_source,nproc_group_global)
+    cood_dipole_source = cood_dipole_source * ulength_to_au
+    call comm_bcast(rad_dipole_source,nproc_group_global)
+    rad_dipole_source = rad_dipole_source * ulength_to_au
+
+!! == bcast for &singlescale
+    call comm_bcast(method_singlescale,nproc_group_global)
+    call comm_bcast(cutoff_G2_emfield ,nproc_group_global)
+    cutoff_G2_emfield = cutoff_G2_emfield * uenergy_to_au
+    call comm_bcast(yn_symmetrized_stencil,nproc_group_global)
+    call comm_bcast(yn_put_wall_z_boundary,nproc_group_global)
+    call comm_bcast(wall_height           ,nproc_group_global)
+    call comm_bcast(wall_width            ,nproc_group_global)
+    wall_height = wall_height * uenergy_to_au
+    wall_width  = wall_width  * ulength_to_au
+
+!! == bcast for &multiscale
+    call comm_bcast(fdtddim   ,nproc_group_global)
+    call comm_bcast(twod_shape,nproc_group_global)
+    call comm_bcast(nx_m      ,nproc_group_global)
+    call comm_bcast(ny_m      ,nproc_group_global)
+    call comm_bcast(nz_m      ,nproc_group_global)
+    call comm_bcast(hx_m      ,nproc_group_global)
+    hx_m = hx_m * ulength_to_au
+    call comm_bcast(hy_m      ,nproc_group_global)
+    hy_m = hy_m * ulength_to_au
+    call comm_bcast(hz_m      ,nproc_group_global)
+    hz_m = hz_m * ulength_to_au
+    call comm_bcast(nksplit   ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxysplit  ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxvacl_m  ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxvacr_m  ,nproc_group_global) ! this parameter will be depricated in a future release
+    call comm_bcast(nxvac_m  ,nproc_group_global)
+    call comm_bcast(nyvac_m  ,nproc_group_global)
+    call comm_bcast(nzvac_m  ,nproc_group_global)
+    call comm_bcast(nx_origin_m,nproc_group_global)
+    call comm_bcast(ny_origin_m,nproc_group_global)
+    call comm_bcast(out_ms_region_ix_m,nproc_group_global)
+    call comm_bcast(out_ms_region_iy_m,nproc_group_global)
+    call comm_bcast(out_ms_region_iz_m,nproc_group_global)
+    call comm_bcast(nz_origin_m,nproc_group_global)
+    call comm_bcast(file_macropoint, nproc_group_global)
+    call comm_bcast(set_ini_coor_vel,nproc_group_global)
+    call comm_bcast(nmacro_write_group,nproc_group_global)
+    call comm_bcast(nmacro_chunk,nproc_group_global)
+    call comm_bcast(rmat_ms,nproc_group_global)
+
+!! == bcast for &maxwell
+    call comm_bcast(al_em                    ,nproc_group_global)
+    al_em = al_em * ulength_to_au
+    call comm_bcast(dl_em                    ,nproc_group_global)
+    dl_em = dl_em * ulength_to_au
+    call comm_bcast(num_rgrid_em             ,nproc_group_global)
+    call comm_bcast(at_em                    ,nproc_group_global)
+    at_em = at_em * utime_to_au
+    call comm_bcast(dt_em                    ,nproc_group_global)
+    dt_em = dt_em * utime_to_au
+    call comm_bcast(nt_em                    ,nproc_group_global)
+    call comm_bcast(boundary_em              ,nproc_group_global)
+    call comm_bcast(shape_file               ,nproc_group_global)
+    call comm_bcast(media_num                ,nproc_group_global)
+    call comm_bcast(media_type               ,nproc_group_global)
+    call comm_bcast(epsilon_em               ,nproc_group_global)
+    call comm_bcast(mu_em                    ,nproc_group_global)
+    call comm_bcast(sigma_em                 ,nproc_group_global)
+    call comm_bcast(pole_num_ld              ,nproc_group_global)
+    call comm_bcast(omega_p_ld               ,nproc_group_global)
+    omega_p_ld = omega_p_ld * uenergy_to_au
+    call comm_bcast(f_ld                     ,nproc_group_global)
+    call comm_bcast(gamma_ld                 ,nproc_group_global)
+    gamma_ld = gamma_ld * uenergy_to_au
+    call comm_bcast(omega_ld                 ,nproc_group_global)
+    omega_ld = omega_ld * uenergy_to_au
+    call comm_bcast(wave_input,nproc_group_global)
+    call comm_bcast(ek_dir1                  ,nproc_group_global)
+    call comm_bcast(source_loc1              ,nproc_group_global)
+    source_loc1 = source_loc1 * ulength_to_au
+    call comm_bcast(gbeam_sigma_plane1       ,nproc_group_global)
+    gbeam_sigma_plane1 = gbeam_sigma_plane1 * ulength_to_au
+    call comm_bcast(gbeam_sigma_line1        ,nproc_group_global)
+    gbeam_sigma_line1 = gbeam_sigma_line1 * ulength_to_au
+    call comm_bcast(ek_dir2                  ,nproc_group_global)
+    call comm_bcast(source_loc2              ,nproc_group_global)
+    source_loc2 = source_loc2 * ulength_to_au
+    call comm_bcast(gbeam_sigma_plane2       ,nproc_group_global)
+    gbeam_sigma_plane2 = gbeam_sigma_plane2 * ulength_to_au
+    call comm_bcast(gbeam_sigma_line2        ,nproc_group_global)
+    gbeam_sigma_line2 = gbeam_sigma_line2 * ulength_to_au
+    call comm_bcast(obs_num_em               ,nproc_group_global)
+    call comm_bcast(obs_samp_em              ,nproc_group_global)
+    call comm_bcast(obs_loc_em               ,nproc_group_global)
+    obs_loc_em = obs_loc_em * ulength_to_au
+    call comm_bcast(obs_plane_ene_em         ,nproc_group_global)
+    obs_plane_ene_em = obs_plane_ene_em * uenergy_to_au
+    call comm_bcast(yn_obs_plane_em          ,nproc_group_global)
+    call comm_bcast(yn_obs_plane_integral_em ,nproc_group_global)
+    call comm_bcast(yn_wf_em                 ,nproc_group_global)
+    call comm_bcast(film_thickness           ,nproc_group_global)
+    film_thickness = film_thickness * ulength_to_au
+    call comm_bcast(media_id_pml             ,nproc_group_global)
+    call comm_bcast(media_id_source1         ,nproc_group_global)
+    call comm_bcast(media_id_source2         ,nproc_group_global)
+    call comm_bcast(bloch_k_em               ,nproc_group_global)
+    bloch_k_em = bloch_k_em / ulength_to_au
+    call comm_bcast(bloch_real_imag_em       ,nproc_group_global)
+    call comm_bcast(ase_num_em               ,nproc_group_global)
+    call comm_bcast(ase_ene_min_em           ,nproc_group_global)
+    ase_ene_min_em = ase_ene_min_em * uenergy_to_au
+    call comm_bcast(ase_ene_max_em           ,nproc_group_global)
+    ase_ene_max_em = ase_ene_max_em * uenergy_to_au
+    call comm_bcast(ase_wav_min_em           ,nproc_group_global)
+    ase_wav_min_em = ase_wav_min_em * ulength_to_au
+    call comm_bcast(ase_wav_max_em           ,nproc_group_global)
+    ase_wav_max_em = ase_wav_max_em * ulength_to_au
+    call comm_bcast(ase_smedia_id_em         ,nproc_group_global)
+    call comm_bcast(ase_box_cent_em          ,nproc_group_global)
+    ase_box_cent_em = ase_box_cent_em * ulength_to_au
+    call comm_bcast(ase_box_size_em          ,nproc_group_global)
+    ase_box_size_em = ase_box_size_em * ulength_to_au
+    call comm_bcast(art_num_em               ,nproc_group_global)
+    call comm_bcast(art_ene_min_em           ,nproc_group_global)
+    art_ene_min_em = art_ene_min_em * uenergy_to_au
+    call comm_bcast(art_ene_max_em           ,nproc_group_global)
+    art_ene_max_em = art_ene_max_em * uenergy_to_au
+    call comm_bcast(art_wav_min_em           ,nproc_group_global)
+    art_wav_min_em = art_wav_min_em * ulength_to_au
+    call comm_bcast(art_wav_max_em           ,nproc_group_global)
+    art_wav_max_em = art_wav_max_em * ulength_to_au
+    call comm_bcast(art_smedia_id_em         ,nproc_group_global)
+    call comm_bcast(art_plane_bot_em         ,nproc_group_global)
+    art_plane_bot_em = art_plane_bot_em * ulength_to_au
+    call comm_bcast(art_plane_top_em         ,nproc_group_global)
+    art_plane_top_em = art_plane_top_em * ulength_to_au
+    call comm_bcast(yn_make_shape            ,nproc_group_global)
+    call comm_bcast(yn_output_shape          ,nproc_group_global)
+    call comm_bcast(yn_copy_x                ,nproc_group_global)
+    call comm_bcast(yn_copy_y                ,nproc_group_global)
+    call comm_bcast(yn_copy_z                ,nproc_group_global)
+    call comm_bcast(rot_type                 ,nproc_group_global)
+    call comm_bcast(n_s                      ,nproc_group_global)
+    call comm_bcast(typ_s                    ,nproc_group_global)
+    call comm_bcast(id_s                     ,nproc_group_global)
+    call comm_bcast(inf_s                    ,nproc_group_global)
+    inf_s = inf_s * ulength_to_au
+    call comm_bcast(ori_s                    ,nproc_group_global)
+    ori_s = ori_s * ulength_to_au
+    call comm_bcast(rot_s                    ,nproc_group_global)
+    
+!! == bcast for &analysis
+    call comm_bcast(projection_option   ,nproc_group_global)
+    call comm_bcast(out_projection_step ,nproc_group_global)
+    call comm_bcast(threshold_projection,nproc_group_global)
+    call comm_bcast(nenergy             ,nproc_group_global)
+    call comm_bcast(de                  ,nproc_group_global)
+    de = de * uenergy_to_au
+    call comm_bcast(out_rt_energy_step  ,nproc_group_global)
+    call comm_bcast(yn_out_psi          ,nproc_group_global)
+    call comm_bcast(yn_out_dos          ,nproc_group_global)
+    call comm_bcast(yn_out_dos_set_fe_origin ,nproc_group_global)
+    call comm_bcast(out_dos_start       ,nproc_group_global)
+    out_dos_start = out_dos_start * uenergy_to_au
+    call comm_bcast(out_dos_end         ,nproc_group_global)
+    out_dos_end = out_dos_end * uenergy_to_au
+    call comm_bcast(out_dos_nenergy     ,nproc_group_global)
+    call comm_bcast(out_dos_width       ,nproc_group_global)
+    out_dos_width = out_dos_width * uenergy_to_au
+    call comm_bcast(out_dos_function    ,nproc_group_global)
+    call comm_bcast(yn_out_pdos         ,nproc_group_global)
+    call comm_bcast(yn_out_dns          ,nproc_group_global)
+    call comm_bcast(yn_out_dns_rt       ,nproc_group_global)
+    call comm_bcast(yn_out_dns_ac_je    ,nproc_group_global)
+    call comm_bcast(yn_out_micro_je     ,nproc_group_global)
+    call comm_bcast(out_dns_rt_step     ,nproc_group_global)
+    call comm_bcast(out_dns_ac_je_step  ,nproc_group_global)
+    call comm_bcast(out_micro_je_step   ,nproc_group_global)
+    call comm_bcast(out_old_dns         ,nproc_group_global)
+    call comm_bcast(yn_out_dns_trans    ,nproc_group_global)
+    call comm_bcast(out_dns_trans_energy,nproc_group_global)
+    out_dns_trans_energy = out_dns_trans_energy * uenergy_to_au
+    call comm_bcast(yn_out_elf          ,nproc_group_global)
+    call comm_bcast(yn_out_elf_rt       ,nproc_group_global)
+    call comm_bcast(out_elf_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_estatic_rt   ,nproc_group_global)
+    call comm_bcast(out_estatic_rt_step ,nproc_group_global)
+    call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
+    call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_tm           ,nproc_group_global)
+    call comm_bcast(yn_out_tm_bin       ,nproc_group_global)
+    call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
+    call comm_bcast(out_gs_sgm_eps_mu_nu,nproc_group_global)
+    call comm_bcast(out_gs_sgm_eps_width,nproc_group_global)
+    out_gs_sgm_eps_width = out_gs_sgm_eps_width * uenergy_to_au
+    call comm_bcast(out_ms_step         ,nproc_group_global)
+    call comm_bcast(format_voxel_data   ,nproc_group_global)
+    call comm_bcast(nsplit_voxel_data   ,nproc_group_global)
+    call comm_bcast(yn_lr_w0_correction ,nproc_group_global)
+    call comm_bcast(yn_out_intraband_current   ,nproc_group_global)
+    call comm_bcast(yn_out_current_decomposed  ,nproc_group_global)
+    call comm_bcast(out_current_decomposed_step,nproc_group_global)
+    call comm_bcast(out_rt_spin_step ,nproc_group_global)
+    call comm_bcast(yn_out_mag_decomposed_rt   ,nproc_group_global)
+    call comm_bcast(yn_out_mag_micro_rt   ,nproc_group_global)
+    call comm_bcast(yn_out_spin_current_decomposed,nproc_group_global)
+    call comm_bcast(yn_out_spin_current_micro  ,nproc_group_global)
+    call comm_bcast(yn_out_rt_energy_components ,nproc_group_global)
+    call comm_bcast(yn_out_perflog      ,nproc_group_global)
+    call comm_bcast(format_perflog      ,nproc_group_global)
+
+!! == bcast for &poisson
+    call comm_bcast(layout_multipole  ,nproc_group_global)
+    call comm_bcast(num_multipole_xyz ,nproc_group_global)
+    call comm_bcast(lmax_multipole    ,nproc_group_global)
+    call comm_bcast(threshold_cg      ,nproc_group_global)
+    threshold_cg = threshold_cg * (uenergy_to_au)**2 * (ulength_to_au)**3
+    call comm_bcast(method_poisson    ,nproc_group_global)
+!! == bcast for &ewald
+    call comm_bcast(newald        ,nproc_group_global)
+    call comm_bcast(aewald        ,nproc_group_global)
+    call comm_bcast(cutoff_r      ,nproc_group_global)
+    call comm_bcast(cutoff_r_buff ,nproc_group_global)
+    call comm_bcast(cutoff_g      ,nproc_group_global)
+    cutoff_r      = cutoff_r * ulength_to_au
+    cutoff_r_buff = cutoff_r_buff * ulength_to_au
+    cutoff_g      = cutoff_g / ulength_to_au
+!! == bcast for &opt
+    call comm_bcast(nopt                ,nproc_group_global)
+    call comm_bcast(max_step_len_adjust ,nproc_group_global)
+    call comm_bcast(convrg_opt_fmax     ,nproc_group_global)
+    call comm_bcast(method_opt          ,nproc_group_global)
+    call comm_bcast(step_steep          ,nproc_group_global)
+    call comm_bcast(step_fire           ,nproc_group_global)
+    step_fire     = step_fire * utime_to_au
+!! == bcast for &md
+    call comm_bcast(ensemble               ,nproc_group_global)
+    call comm_bcast(thermostat             ,nproc_group_global)
+    call comm_bcast(step_velocity_scaling  ,nproc_group_global)
+    call comm_bcast(step_update_ps         ,nproc_group_global)
+    call comm_bcast(temperature0_ion_k     ,nproc_group_global)
+    call comm_bcast(yn_set_ini_velocity    ,nproc_group_global)
+    call comm_bcast(file_ini_velocity      ,nproc_group_global)
+    call comm_bcast(thermostat_tau         ,nproc_group_global)
+    thermostat_tau = thermostat_tau * utime_to_au
+    call comm_bcast(yn_stop_system_momt    ,nproc_group_global)
+!! == bcast for &jellium
+    call comm_bcast(yn_jm                ,nproc_group_global)
+    call comm_bcast(yn_charge_neutral_jm ,nproc_group_global)
+    call comm_bcast(yn_output_dns_jm     ,nproc_group_global)
+    call comm_bcast(shape_file_jm        ,nproc_group_global)
+    call comm_bcast(num_jm               ,nproc_group_global)
+    call comm_bcast(rs_bohr_jm           ,nproc_group_global)
+    call comm_bcast(sphere_nion_jm       ,nproc_group_global)
+    call comm_bcast(sphere_loc_jm        ,nproc_group_global)
+    sphere_loc_jm = sphere_loc_jm * ulength_to_au
+!! == bcast for code
+    call comm_bcast(yn_want_stencil_hand_vectorization     ,nproc_group_global)
+    call comm_bcast(yn_want_communication_overlapping      ,nproc_group_global)
+    call comm_bcast(stencil_openmp_mode                    ,nproc_group_global)
+    call comm_bcast(current_openmp_mode                    ,nproc_group_global)
+    call comm_bcast(force_openmp_mode                      ,nproc_group_global)
+!! == bcast for band
+    call comm_bcast(lattice         ,nproc_group_global)
+    call comm_bcast(nref_band       ,nproc_group_global)
+    call comm_bcast(num_of_segments ,nproc_group_global)
+    call comm_bcast(tol_esp_diff    ,nproc_group_global)
+    call comm_bcast(ndiv_segment    ,nproc_group_global)
+    call comm_bcast(kpt             ,nproc_group_global)
+    call comm_bcast(kpt_label       ,nproc_group_global)
+!! == bcast for sbe
+    call comm_bcast(yn_vnl_correction,nproc_group_global)
+    call comm_bcast(num_sbe          ,nproc_group_global)
+    call comm_bcast(sysname_sbe      ,nproc_group_global)
+    call comm_bcast(nk_sbe           ,nproc_group_global)
+    call comm_bcast(nstate_sbe       ,nproc_group_global)
+    call comm_bcast(nelec_sbe        ,nproc_group_global)
+    call comm_bcast(al_sbe           ,nproc_group_global)
+    al_sbe = al_sbe * ulength_to_au
+    call comm_bcast(al_vec1_sbe      ,nproc_group_global)
+    call comm_bcast(al_vec2_sbe      ,nproc_group_global)
+    call comm_bcast(al_vec3_sbe      ,nproc_group_global)
+    al_vec1_sbe = al_vec1_sbe * ulength_to_au
+    al_vec2_sbe = al_vec2_sbe * ulength_to_au
+    al_vec3_sbe = al_vec3_sbe * ulength_to_au
+    call comm_bcast(norder_correction,nproc_group_global)
+    call comm_bcast(gauge_sbe        ,nproc_group_global)
+    call comm_bcast(t_2              ,nproc_group_global)
+    t_2 = t_2 * utime_to_au
+    call comm_bcast(am_s             ,nproc_group_global)
+!! == bcast for dc
+    call comm_bcast(num_fragment ,nproc_group_global)
+    call comm_bcast(num_rgrid_buffer, nproc_group_global)
+    call comm_bcast(nproc_rgrid_tot, nproc_group_global)
+    call comm_bcast(file_atom_coor_frag, nproc_group_global)
+    call comm_bcast(yn_out_dc_fragment_coor, nproc_group_global)
+    call comm_bcast(xi_dc, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
+    call comm_bcast(lcfo_eigensolver, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_filter_degree, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_filter_chunk_size, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_max_cycle, nproc_group_global)
+    call comm_bcast(lcfo_diag_chefsi_residual_tolerance, nproc_group_global)
+    call comm_bcast(nstate_frag, nproc_group_global)
+    call comm_bcast(energy_cut, nproc_group_global)
+    energy_cut = energy_cut * uenergy_to_au
+    call comm_bcast(lambda_cut, nproc_group_global)
+!! == bcast for unfolding
+    call comm_bcast(dm_unfold_option, nproc_group_global)
+    call comm_bcast(num_lkgrid, nproc_group_global)
+    call comm_bcast(num_skgrid, nproc_group_global)
+    call comm_bcast(no_pr, nproc_group_global)
+    call comm_bcast(out_dm_unfold_step, nproc_group_global)
+    call comm_bcast(yn_out_mom_distr_gs, nproc_group_global)
+    call comm_bcast(yn_out_mom_distr_rt, nproc_group_global)
+    call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
+    call comm_bcast(nq_mom, nproc_group_global)
+    call comm_bcast(dq_mom, nproc_group_global)
+    ! Resolve normalized, broadcast input once; legacy flags are blank only when omitted.
+    call string_lowercase(yn_spinorbit)
+    call resolve_k_algorithm(exx_k_algorithm,yn_spinorbit=='y',yn_exx_fft_orbits, &
+      yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft,exx_k_algorithm_reason,ii, &
+      spinor_pair_supported=xc=='hse06'.and.yn_dc=='n'.and.exx_kpoint_backend=='cpu'.and. &
+        all(hse_q_reduction==1), &
+      crystal_reuse_supported=yn_spinorbit=='n'.and.is_hybrid(xc).and.yn_dc=='n'.and. &
+        product(num_kgrid)>1.and.index(yn_symmetry,'y')>0.and.exx_kpoint_backend=='cpu'.and. &
+        all(hse_q_reduction==1))
+    if(ii/=0)then
+      if(comm_is_root(nproc_id_global))write(*,'(a)')trim(exx_k_algorithm_reason)
+      error stop 'Invalid EXX k algorithm selection'
+    endif
+    ! Resolve the omitted pre-SCF input only for supported fresh static GS.
+    ! Explicit zero remains the opt-out, and explicit positive inputs retain
+    ! the compatibility checks in check_bad_input.
+    if(exx_pre_scf_threshold==-huge(1d0))then
+      exx_pre_scf_threshold=0d0
+      call string_lowercase(yn_restart)
+      call string_lowercase(yn_md)
+      call string_lowercase(yn_opt)
+      call string_lowercase(yn_dc)
+#ifdef USE_HSE
+      if(is_hybrid(xc).and.theory=='dft'.and.yn_restart=='n'.and.yn_md=='n'.and.yn_opt=='n'.and. &
+         (yn_dc=='n'.or.temperature>0d0).and.checkpoint_interval<=0.and.time_shutdown<=0d0.and. &
+         method_mixing/='simple_potential'.and. &
+         (convergence=='rho_dne'.or.convergence=='norm_rho'.or.convergence=='norm_rho_dng')) &
+        exx_pre_scf_threshold=1d-4
+#endif
+    endif
+    ! BEGIN automatic ACE warmup
+    ! H factors supply the first increment example at endpoint H; each later endpoint adds one.
+    if(exx_factor_history_frames/=3)error stop 'EXX factor history is fixed at 3 frames'
+    if(exx_factor_n_teach<1)error stop 'EXX factor teacher count must be positive'
+    if(exx_factor_exact_interval<1)error stop 'EXX factor exact interval must be positive'
+    if(exx_factor_n_teach>huge(exx_factor_n_teach)-(exx_factor_history_frames-1)) &
+      error stop 'EXX factor teacher count overflows warmup'
+    if(exx_factor_n_teach+exx_factor_history_frames-1> &
+      huge(exx_factor_warmup_steps)/exx_factor_exact_interval) &
+      error stop 'EXX factor warmup exceeds integer range'
+    exx_factor_warmup_steps=(exx_factor_history_frames+exx_factor_n_teach-1)*exx_factor_exact_interval
+    ! END automatic ACE warmup
+    if(parser%isolated)then
+      call comm_bcast(parser%if_nml_coor,nproc_group_global)
+      call comm_bcast(parser%if_nml_red_coor,nproc_group_global)
+      call comm_bcast(parser%inml_calculation,nproc_group_global)
+      call comm_bcast(parser%inml_control,nproc_group_global)
+      call comm_bcast(parser%inml_units,nproc_group_global)
+      call comm_bcast(parser%inml_parallel,nproc_group_global)
+      call comm_bcast(parser%inml_system,nproc_group_global)
+      call comm_bcast(parser%inml_pseudo,nproc_group_global)
+      call comm_bcast(parser%inml_functional,nproc_group_global)
+      call comm_bcast(parser%inml_rgrid,nproc_group_global)
+      call comm_bcast(parser%inml_kgrid,nproc_group_global)
+      call comm_bcast(parser%inml_tgrid,nproc_group_global)
+      call comm_bcast(parser%inml_propagation,nproc_group_global)
+      call comm_bcast(parser%inml_scf,nproc_group_global)
+      call comm_bcast(parser%inml_emfield,nproc_group_global)
+      call comm_bcast(parser%inml_singlescale,nproc_group_global)
+      call comm_bcast(parser%inml_multiscale,nproc_group_global)
+      call comm_bcast(parser%inml_maxwell,nproc_group_global)
+      call comm_bcast(parser%inml_analysis,nproc_group_global)
+      call comm_bcast(parser%inml_poisson,nproc_group_global)
+      call comm_bcast(parser%inml_ewald,nproc_group_global)
+      call comm_bcast(parser%inml_opt,nproc_group_global)
+      call comm_bcast(parser%inml_md,nproc_group_global)
+      call comm_bcast(parser%inml_jellium,nproc_group_global)
+      call comm_bcast(parser%inml_code,nproc_group_global)
+      call comm_bcast(parser%inml_band,nproc_group_global)
+      call comm_bcast(parser%inml_sbe,nproc_group_global)
+      call comm_bcast(parser%inml_dc,nproc_group_global)
+      call comm_bcast(parser%inml_unfolding,nproc_group_global)
+    endif
+  end subroutine read_input_common
+
+  ! Resolve omitted controls before broadcasts and compatibility checks.
+  ! Extended KY explicitly declares j-resolved data; legacy formats retain
+  ! their scalar default. Explicit user choices are never silently overridden.
+  subroutine initialize_parser_defaults(parser,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance)
+    implicit none
+    type(s_input_parser),intent(inout) :: parser
+    integer :: ii
+    integer,intent(out) :: hse_mlwf_interval,hse_mlwf_maxiter
+    real(8),intent(out) :: hse_mlwf_tolerance
+    if(parser%isolated)then
+      ! Parser views never borrow a preceding model's atom allocations.
+      if(allocated(Rion))deallocate(Rion)
+      if(allocated(Rion_red))deallocate(Rion_red)
+      if(allocated(kion))deallocate(kion)
+      if(allocated(flag_opt_atom))deallocate(flag_opt_atom)
+      if(allocated(atom_name))deallocate(atom_name)
+      iflag_atom_coor=ntype_atom_coor_none
+      iperiodic=0
+    endif
+!! == default for &calculation
+    theory              = 'tddft'
+    yn_md               = 'n'
+    yn_opt              = 'n'
+    yn_dc               = 'n'
+    yn_conventional_from_dcdft = 'n'
+!! == default for &control
+    sysname               = 'default'
+    base_directory        = './'
+    yn_restart            = 'n'
+    directory_read_data   = 'restart/'
+    yn_self_checkpoint    = 'n'
+    checkpoint_interval   = -1
+    yn_reset_step_restart = 'n'
+    read_gs_restart_data  = 'all'
+    write_gs_restart_data = 'all'
+    time_shutdown         = -1d0
+    method_wf_distributor = 'single'
+    nblock_wf_distribute = 16
+    !remove later
+    write_gs_wfn_k   = 'n'
+    write_rt_wfn_k   = 'n'
+!! == default for &parallel
+    nproc_k              = 0
+    nproc_ob             = 0
+    nproc_rgrid          = 0
+    yn_ffte              = 'n'
+    yn_fftw              = 'n'
+    yn_scalapack         = 'n'
+    yn_gramschmidt_blas  = 'y'
+    yn_eigenexa          = 'n'
+    yn_diagonalization_red_mem = 'n'
+    yn_nccl_reduction    = 'n'
+    process_allocation   = 'grid_sequential'
+!! == default for &system
+    yn_periodic        = 'n'
+    spin               = 'auto'
+    al                 = 0d0
+    al_vec1            = 0d0
+    al_vec2            = 0d0
+    al_vec3            = 0d0
+    nstate             = 0
+    nelec              = 0
+    nelec_spin (:)     = 0
+    temperature        = -1d0
+    temperature_k      = -1d0
+    nelem              = 0
+    natom              = 0
+    file_atom_coor     = 'none'
+    file_atom_red_coor = 'none'
+    yn_spinorbit       = 'a'
+    yn_symmetry        = 'n'
+    absorbing_boundary = 'none'
+    imagnary_potential_w0 = 0d0
+    imagnary_potential_dr = 0d0
+
+!! == default for &pseudo
+    file_pseudo = 'none'
+    lmax_ps     = -1
+    lloc_ps     = -1
+    izatom      = -1
+    yn_psmask   = 'n'
+    yn_pseudo_atomic_orbital = 'n'
+    alpha_mask  = 0.8d0
+    gamma_mask  = 1.8d0
+    eta_mask    = 15d0
+!! == default for &functional
+    xc    = 'none'
+    ! xcname = 'PZ'
+    xname = 'none'
+    cname = 'none'
+    pbeh_coulomb_radius=0d0
+    rvv10_fft='ffte'
+    rvv10_b=5.3d0;rvv10_c=.0093d0;rvv10_nq=32
+    hse_omega = .11d0 / ulength_from_au ! inverse input length
+    yn_hse_wannier = 'n'
+    exx_mlwf_interval = -huge(1)
+    hse_mlwf_interval = -huge(1)
+    exx_mlwf_maxiter = -huge(1)
+    hse_mlwf_maxiter = -huge(1)
+    exx_mlwf_tolerance = -huge(1d0)
+    hse_mlwf_tolerance = -huge(1d0)
+    exx_mlwf_radius = 0d0
+    exx_factor_mode = 'off'
+    exx_k_algorithm = 'auto'
+    yn_exx_spinor_pair_fft = ' '
+    yn_exx_fft_orbits = ' '
+    yn_exx_k_pair_symmetry = ' '
+    yn_hse_sr_pair_symmetry = 'y'
+    exx_factor_history_frames = 3
+    exx_factor_exact_interval = 8
+    exx_factor_n_teach = 8
+    exx_factor_warmup_steps = 0 ! Deprecated input; derived after reading the namelist.
+    exx_mlwf_norm_fraction = 0d0
+    exx_local_fft = 'auto'
+    exx_kpoint_backend = 'cpu'
+    exx_local_backend = 'cpu'
+    exx_gpu_batch_size = 8
+    yn_exx_dc_mlwf = 'n'
+    exx_pre_scf_threshold = -huge(1d0) ! Omitted input; resolve after all broadcasts.
+    exx_pre_scf_steps = 3
+    exx_pre_scf_active = .false.
+    exx_ace_support = 'occupied'
+    exx_pair_screening = 'off'
+    hse_sr_tolerance = 0d0
+    exx_pair_tolerance = 0d0
+    hse_q_reduction = 1
+    hse_block_rows = 0
+    exx_worker_tile_divisor = 0
+    exx_worker_rprime_groups = 0
+    hse_fft_layout = 'auto'
+    alibx = 'none'
+    alibc = 'none'
+    alibxc= 'none'
+    cval  = -1d0
+!! == default for &rgrid
+    dl        = 0d0
+    num_rgrid = 0
+!! == default for &kgrid
+    num_kgrid = 1
+    file_kw   = 'none'
+    dk_shift = 0d0
+    yn_gamma_centered = 'n'
+!! == default for &tgrid
+    nt = 0
+    dt = 0
+    gram_schmidt_interval = -1
+!! == default for &propagation
+    n_hamil     = 4
+    propagator  = '' ! resolved after functional and propagation input
+    yn_fix_func = 'n'
+    yn_predictor_corrector = '' ! functional-dependent default
+!! == default for &scf
+    method_init_wf = 'gauss'
+    iseed_number_change  =  0
+    method_min    = 'cg'
+    ncg           = 4
+    ncg_init      = 4
+    method_mixing = 'broyden'
+    mixrate       = 0.5d0
+    nmemory_mb    = 8
+    alpha_mb      = 0.75d0
+    nmemory_p     = 4
+    beta_p        = 0.75d0
+    yn_auto_mixing = 'n'
+    update_mixing_ratio = 3.d0
+    nscf          = 300
+    yn_subspace_diagonalization = 'y'
+    convergence   = 'rho_dne'
+    threshold     = -1d0  !a.u. (default value for 'rho_dne'is given later)
+    nscf_init_redistribution = 10
+    nscf_init_no_diagonal= 10
+    nscf_init_mix_zero   = -1
+    conv_gap_mix_zero    = 99999d0*uenergy_from_au
+    method_init_density  = 'wf'
+    magdir_atom          = 0d0
+    yn_preconditioning   = 'n'
+    alpha_pre            = 0.6d0
+
+!! == default for &emfield
+    trans_longi    = 'tr'
+    ae_shape1      = 'none'
+    file_input1    = ''
+    e_impulse      = 1d-2*uenergy_from_au/ulength_from_au*utime_from_au ! a.u.
+    E_amplitude1   = 0d0
+    I_wcm2_1       = -1d0
+    tw1            = 0d0
+    omega1         = 0d0
+    epdir_re1      = (/1d0,0d0,0d0/)
+    epdir_im1      = 0d0
+    phi_cep1       = 0d0
+    ae_shape2      = 'none'
+    E_amplitude2   = 0d0
+    I_wcm2_2       = -1d0
+    tw2            = 0d0
+    omega2         = 0d0
+    epdir_re2      = (/1d0,0d0,0d0/)
+    epdir_im2      = 0d0
+    phi_cep2       = 0d0
+    t1_t2          = 0d0
+    t1_start       = 0d0
+    num_dipole_source  = 0
+    vec_dipole_source  = 0d0
+    cood_dipole_source = 0d0
+    rad_dipole_source  = 2d0 ! a.u.
+
+!! == default for &singlescale
+    method_singlescale = '3d'
+    cutoff_G2_emfield  = -1d0
+    yn_symmetrized_stencil = 'n'
+    yn_put_wall_z_boundary = 'n'
+    wall_height        = 100.0d0 /au_energy_ev * uenergy_from_au !eV
+    wall_width         =   5.0d0 /au_length_aa * ulength_from_au !A
+
+!! == default for &multiscale
+    fdtddim    = '1d'
+    twod_shape = 'periodic'
+    nx_m       = 1
+    ny_m       = 1
+    nz_m       = 1
+    hx_m       = 0d0
+    hy_m       = 0d0
+    hz_m       = 0d0
+    nksplit    = 0
+    nxysplit   = 0
+    nxvacl_m     = 0
+    nxvacr_m     = 0
+    nxvac_m(1:2) = 0
+    nyvac_m(1:2) = 0
+    nzvac_m(1:2) = 0
+    nx_origin_m = 1
+    ny_origin_m = 1
+    nz_origin_m = 1
+    out_ms_region_ix_m(1) = -999999
+    out_ms_region_ix_m(2) = +999999
+    out_ms_region_iy_m(1) = -999999
+    out_ms_region_iy_m(2) = +999999
+    out_ms_region_iz_m(1) = -999999
+    out_ms_region_iz_m(2) = +999999
+    file_macropoint = ''
+    set_ini_coor_vel= 'n'
+    nmacro_write_group= -1
+    nmacro_chunk = 20
+    rmat_ms(1, 1:3) = (/ 1.0d0, 0.0d0, 0.0d0 /)
+    rmat_ms(2, 1:3) = (/ 0.0d0, 1.0d0, 0.0d0 /)
+    rmat_ms(3, 1:3) = (/ 0.0d0, 0.0d0, 1.0d0 /)
+
+!! == default for &maxwell
+    al_em(:)                    = 0d0
+    dl_em(:)                    = 0d0
+    num_rgrid_em(:)             = 0
+    at_em                       = 0d0
+    dt_em                       = 0d0
+    nt_em                       = 0
+    boundary_em(:,:)            = 'default'
+    shape_file                  = 'none'
+    media_num                   = 0
+    media_type(:)               = 'vacuum'
+    epsilon_em(:)               = 1d0
+    mu_em(:)                    = 1d0
+    sigma_em(:)                 = 0d0
+    pole_num_ld(:)              = 1
+    omega_p_ld(:)               = 0d0
+    f_ld(:,:)                   = 0d0
+    gamma_ld(:,:)               = 0d0
+    omega_ld(:,:)               = 0d0
+    wave_input                  = 'none'
+    ek_dir1(:)                  = 0d0
+    source_loc1(:)              = 0d0
+    gbeam_sigma_plane1(:)       =-1d0
+    gbeam_sigma_line1(:)        =-1d0
+    ek_dir2(:)                  = 0d0
+    source_loc2(:)              = 0d0
+    gbeam_sigma_plane2(:)       =-1d0
+    gbeam_sigma_line2(:)        =-1d0
+    obs_num_em                  = 0
+    obs_samp_em                 = 0
+    obs_loc_em(:,:)             = 0d0
+    obs_plane_ene_em(:,:)       = -1d0
+    yn_obs_plane_em(:)          = 'n'
+    yn_obs_plane_integral_em(:) = 'n'
+    yn_wf_em                    = 'y'
+    film_thickness              = 0d0
+    media_id_pml(:,:)           = 0
+    media_id_source1            = 0
+    media_id_source2            = 0
+    bloch_k_em(:)               = 0d0
+    bloch_real_imag_em(:)       = 'real'
+    ase_num_em                  = 0
+    ase_ene_min_em              = -1.0d0
+    ase_ene_max_em              = -1.0d0
+    ase_wav_min_em              = -1.0d0
+    ase_wav_max_em              = -1.0d0
+    ase_smedia_id_em            = 0
+    ase_box_cent_em(:)          = 0.0d0
+    ase_box_size_em(:)          = -1.0d0
+    art_num_em                  = 0
+    art_ene_min_em              = -1.0d0
+    art_ene_max_em              = -1.0d0
+    art_wav_min_em              = -1.0d0
+    art_wav_max_em              = -1.0d0
+    art_smedia_id_em            = 0
+    art_plane_bot_em(:)         = 0.0d0
+    art_plane_top_em(:)         = 0.0d0
+    yn_make_shape               = 'n'
+    yn_output_shape             = 'n'
+    yn_copy_x                   = 'n'
+    yn_copy_y                   = 'n'
+    yn_copy_z                   = 'n'
+    rot_type                    = 'radian'
+    n_s                         = 0
+    typ_s(:)                    = 'none'
+    id_s(:)                     = 0
+    inf_s(:,:)                  = 0d0
+    ori_s(:,:)                  = 0d0
+    rot_s(:,:)                  = 0d0
+
+!! == default for &analysis
+    projection_option   = 'no'
+    out_projection_step = 100
+    threshold_projection = 1d-6
+    nenergy             = 1000
+    de                  = (0.01d0/au_energy_ev)*uenergy_from_au  ! eV
+    out_rt_energy_step  = 10
+    yn_out_psi          = 'n'
+    yn_out_dos          = 'n'
+    yn_out_dos_set_fe_origin = 'n'
+    out_dos_start       = -1.d10 / au_energy_ev * uenergy_from_au
+    out_dos_end         = +1.d10 / au_energy_ev * uenergy_from_au
+    out_dos_nenergy     = 601
+    out_dos_width       = 0.1d0 / au_energy_ev * uenergy_from_au
+    out_dos_function    = 'gaussian'
+    yn_out_pdos         = 'n'
+    yn_out_dns          = 'n'
+    yn_out_dns_rt       = 'n'
+    yn_out_dns_ac_je    = 'n'
+    yn_out_micro_je     = 'n'
+    out_dns_rt_step     = 50
+    out_dns_ac_je_step  = 50
+    out_micro_je_step   = 50
+    out_old_dns         = 'n'
+    yn_out_dns_trans    = 'n'
+    out_dns_trans_energy= 1.55d0 / au_energy_ev * uenergy_from_au  ! eV
+
+    yn_out_elf          = 'n'
+    yn_out_elf_rt       = 'n'
+    out_elf_rt_step     = 50
+    yn_out_estatic_rt   = 'n'
+    out_estatic_rt_step = 50
+    yn_out_rvf_rt       = 'n'
+    out_rvf_rt_step     = 10
+    yn_out_tm           = 'n'
+    yn_out_tm_bin       = 'n'
+    yn_out_gs_sgm_eps   = 'n'
+    out_gs_sgm_eps_mu_nu(1) = 3
+    out_gs_sgm_eps_mu_nu(2) = 3
+    out_gs_sgm_eps_width    = 0.015d0/ au_energy_ev * uenergy_from_au
+    out_ms_step         = 100
+    format_voxel_data   = 'cube'
+    nsplit_voxel_data   = 1
+    yn_lr_w0_correction = 'n'
+    yn_out_intraband_current = 'n'
+    yn_out_current_decomposed = 'n'
+    out_current_decomposed_step = 100
+    out_rt_spin_step = 100
+    yn_out_mag_decomposed_rt = 'n'
+    yn_out_mag_micro_rt = 'n'
+    yn_out_spin_current_decomposed = 'n'
+    yn_out_spin_current_micro = 'n'
+    yn_out_rt_energy_components = 'n'
+
+    yn_out_perflog      = 'y'
+    format_perflog      = 'stdout'
+
+!! == default for &poisson
+    layout_multipole  = 3
+    num_multipole_xyz = 0
+    lmax_multipole    = 4
+    threshold_cg      = 1.d-15*uenergy_from_au**2*ulength_from_au**3 ! a.u., 1.d-15 a.u. = ! 1.10d-13 eV**2*AA**3
+    method_poisson    = 'cg'
+!! == default for &ewald
+    newald = 4
+    aewald = 0.5d0
+    cutoff_r = -1d0
+    cutoff_r_buff =  2.0d0
+    cutoff_g = -1d0
+!! == default for &opt
+    nopt                = 100
+    max_step_len_adjust =  -1d0 ![au] (no adjust if negative number)
+    convrg_opt_fmax     =  1d-3
+    method_opt          =  'bfgs'
+    step_steep          =  0.5d0
+    step_fire           =  4.134d0/utime_to_au  !=0.1[fs]
+!! == default for &md
+    ensemble              = 'nve'
+    thermostat            = 'nose-hoover'
+    step_velocity_scaling = -1
+    step_update_ps        = 10
+    temperature0_ion_k    = 298.15d0
+    yn_set_ini_velocity   = 'n'
+    file_ini_velocity     = 'none'
+    thermostat_tau        =  41.34d0/utime_to_au  !=1[fs]: test value
+    yn_stop_system_momt   = 'n'
+!! == default for &jellium
+    yn_jm                = 'n'
+    yn_charge_neutral_jm = 'y'
+    yn_output_dns_jm     = 'yf'
+    shape_file_jm        = 'none'
+    num_jm               = 0
+    rs_bohr_jm(:)        = 0d0
+    sphere_nion_jm(:)    = 0
+    sphere_loc_jm(:,:)   = 0d0
+!! == default for code
+    yn_want_stencil_hand_vectorization = 'y'
+    yn_want_communication_overlapping  = 'n'
+    stencil_openmp_mode = 'auto'
+    current_openmp_mode = 'auto'
+    force_openmp_mode   = 'auto'
+!! == default for &band
+    lattice =''
+    nref_band = 0
+    tol_esp_diff = 1.0d-5
+    num_of_segments = 0
+    ndiv_segment(:) = 0
+    kpt(:,:) = 0.0d0
+    kpt_label(:) = ''
+!! == default for &sbe
+    yn_vnl_correction = 'n'
+    num_sbe = 1
+    sysname_sbe(:) = 'default'
+    nk_sbe(:) = -1
+    nstate_sbe(:) = -1
+    nelec_sbe(:) = -1
+    al_sbe(:,:) = 0.d0
+    al_vec1_sbe(:,:) = 0.d0
+    al_vec2_sbe(:,:) = 0.d0
+    al_vec3_sbe(:,:) = 0.d0
+    norder_correction = 0
+    gauge_sbe = 'velocity_gauge'
+    t_2 = -1.d0
+    am_s = 4
+!! == default for &dc
+    num_fragment = 0
+    num_rgrid_buffer = 0
+    nproc_rgrid_tot = 1
+    file_atom_coor_frag = 'none'
+    yn_out_dc_fragment_coor = 'n'
+    xi_dc = -1d0
+    yn_dc_lcfo = 'y'
+    yn_dc_lcfo_diag = 'y'
+#ifdef USE_EIGENEXA
+    lcfo_eigensolver = 'eigenexa'
+#else
+    lcfo_eigensolver = 'lapack'
+#endif
+    lcfo_diag_chefsi_filter_degree = 60
+    lcfo_diag_chefsi_filter_chunk_size = 0
+    lcfo_diag_chefsi_max_cycle = 200
+    lcfo_diag_chefsi_residual_tolerance = 1d-7
+    nstate_frag = 0
+    energy_cut = 0d0
+    lambda_cut = 1d-3
+!! == default for &unfolding
+    dm_unfold_option = 'no'
+    num_lkgrid = 1
+    num_skgrid = 1
+    no_pr = 0
+    out_dm_unfold_step = 100
+    yn_out_mom_distr_gs = 'n'
+    yn_out_mom_distr_rt = 'n'
+    out_mom_distr_rt_step = 100
+    nq_mom = 0
+    dq_mom = 0.0d0
+
+    if(parser%isolated)call parser%defaults%capture()
+  end subroutine initialize_parser_defaults
+
+  subroutine close_parser_workspace(parser)
+    implicit none
+    type(s_input_parser),intent(inout) :: parser
+    integer :: units(4),i
+    logical :: opened
+    if(.not.parser%isolated)return
+    units=[parser%fh_namelist,parser%fh_atomic_coor,parser%fh_atomic_red_coor,parser%fh_reentrance]
+    do i=1,size(units)
+      if(units(i)==0)cycle
+      inquire(unit=units(i),opened=opened)
+      if(opened)close(units(i))
+    enddo
+    parser%fh_namelist=0;parser%fh_atomic_coor=0
+    parser%fh_atomic_red_coor=0;parser%fh_reentrance=0
+    parser%fh_variables_log=0
+  end subroutine close_parser_workspace
+
+  subroutine resolve_ky_spin_inputs(files,n,spin_mode,soc_mode)
+    implicit none
+    character(*),intent(in) :: files(:)
+    integer,intent(in) :: n
+    character(*),intent(inout) :: spin_mode,soc_mode
+    character(512) :: line
+    integer :: i,unit,ios,length
+    logical :: has_ky_soc,automatic
+    if(n<0.or.n>size(files))error stop 'Automatic KY spin: invalid element count'
+    has_ky_soc=.false.
+    automatic=spin_mode=='auto'.or.soc_mode=='a'
+    if(.not.automatic)return
+    do i=1,n
+      length=len_trim(files(i))
+      if(length<8)cycle
+      if(files(i)(length-7:length)/='_rps.dat')cycle
+      open(newunit=unit,file=trim(files(i)),status='old',action='read',iostat=ios)
+      if(ios/=0)error stop 'Automatic KY spin: cannot open pseudopotential'
+      read(unit,'(a)',iostat=ios)line
+      if(ios==0)read(unit,'(a)',iostat=ios)line
+      close(unit)
+      if(ios/=0)error stop 'Automatic KY spin: cannot read pseudopotential header'
+      if(trim(line)=='KY_SOC_NLCC_V1'.or.trim(line)=='KY_SOC_NLCC_V2')has_ky_soc=.true.
+    enddo
+    if(soc_mode=='a')then
+      soc_mode='n'
+      if(has_ky_soc.or.spin_mode=='noncollinear')soc_mode='y'
+    endif
+    if(spin_mode=='auto')then
+      spin_mode='unpolarized'
+      if(soc_mode=='y')spin_mode='noncollinear'
+    endif
+    if(has_ky_soc.and.soc_mode=='n')error stop 'KY_SOC_NLCC conflicts with explicit yn_spinorbit=n'
+    if(soc_mode=='y'.and.spin_mode/='noncollinear') &
+      error stop 'SOC conflicts with explicit spin; noncollinear required'
+    write(*,'(a,a,a,a)')'Automatic KY spin: spin=',trim(spin_mode),', yn_spinorbit=',trim(soc_mode)
+  end subroutine resolve_ky_spin_inputs
+
+  subroutine read_atomic_coordinates(parser)
+    use parallelization
+    use communication
+    use filesystem, only: get_filehandle
+    use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
+    use checkpoint_restart_sub, only: generate_restart_directory_name
+    character(256) :: filename_tmp,char_atom, gdir,wdir
+    type(s_input_parser),intent(inout) :: parser
+    integer :: icount,i,coordinate_unit
+    logical :: scratch_coordinates
+    logical :: if_error, if_cartesian, iself
+
+    scratch_coordinates=.false.
+    if (comm_is_root(nproc_id_global)) then
+
+      if_error     = .false.
+      if_cartesian = .true.
+      iflag_atom_coor = ntype_atom_coor_none
+      icount = 0
+      if(file_atom_coor /= 'none')then
+        icount = icount + 1
+        if_cartesian = .true.
+        filename_tmp = trim(file_atom_coor)
+        iflag_atom_coor = ntype_atom_coor_cartesian
+      end if
+
+      if(file_atom_red_coor /= 'none')then
+        icount = icount + 1
+        if_cartesian = .false.
+        filename_tmp = trim(file_atom_red_coor)
+        iflag_atom_coor = ntype_atom_coor_reduced
+      end if
+
+      if(parser%if_nml_coor)then
+        icount = icount + 1
+        if_cartesian = .true.
+        filename_tmp = '.atomic_coor.tmp'
+        if(parser%isolated)then
+          coordinate_unit=parser%fh_atomic_coor;scratch_coordinates=.true.
+        endif
+        iflag_atom_coor = ntype_atom_coor_cartesian
+      end if
+
+      if(parser%if_nml_red_coor)then
+        icount = icount + 1
+        if_cartesian = .false.
+        filename_tmp = '.atomic_red_coor.tmp'
+        if(parser%isolated)then
+          coordinate_unit=parser%fh_atomic_red_coor;scratch_coordinates=.true.
+        endif
+        iflag_atom_coor = ntype_atom_coor_reduced
+      end if
+
+      if_error = yn_restart == 'y' .and. &
+                 (yn_md == 'y' .or. theory == 'dft_md') .and. icount > 0
+
+      if(icount==0 .and. (yn_restart == 'y' .or. &
+         index(theory,'tddft_')/=0 .or. index(theory,'_tddft')/=0 ) .and. yn_jm == 'n' ) then
+
+        if (comm_is_root(nproc_id_global))then
+           write(*,"(A)") '  Atomic coordinate is read from restart directory'
+        end if
+
+        call generate_restart_directory_name(directory_read_data,gdir,wdir)
+
+        icount = icount + 1
+        if_cartesian = .true.
+        iself = yn_restart =='y' .and. yn_self_checkpoint == 'y'   !refer restart_rt
+        if(iself) then
+           filename_tmp = trim(gdir)//"rank_000000/atomic_coor.txt"
+        else
+           filename_tmp = trim(gdir)//"atomic_coor.txt"
+        endif
+        iflag_atom_coor = ntype_atom_coor_cartesian
+      end if
+
+    end if
+
+    call comm_bcast(icount,nproc_group_global)
+    call comm_bcast(if_cartesian,nproc_group_global)
+    call comm_bcast(iflag_atom_coor,nproc_group_global)
+    call comm_bcast(if_error,nproc_group_global)
+
+    if(if_error)then
+       if (comm_is_root(nproc_id_global))then
+         write(*,"(A)") 'Error in input: Explicit atomic coordinates cannot be specified when restarting an MD calculation.'
+         write(*,"(A)") 'Remove the following input(s); atomic coordinates are read from the restart data:'
+         if(file_atom_coor /= 'none') write(*,"(A)") '  file_atom_coor'
+         if(file_atom_red_coor /= 'none') write(*,"(A)") '  file_atom_red_coor'
+         if(parser%if_nml_coor) write(*,"(A)") '  &atomic_coor'
+         if(parser%if_nml_red_coor) write(*,"(A)") '  &atomic_red_coor'
+       end if
+       call end_parallel
+       stop
+    end if
+
+    if(0 < natom .and. icount/=1 .and. yn_jm == 'n')then
+       if (comm_is_root(nproc_id_global))then
+         write(*,"(A)")'Error in input: The following inputs are incompatible.'
+         write(*,"(A)")'file_atom_coor, file_atom_red_coor, &atomic_coor, and &atomic_red_coor.'
+       end if
+       call end_parallel
+       stop
+    end if
+
+    if( (.not.if_cartesian) .and. iperiodic == 0)then
+       if (comm_is_root(nproc_id_global))then
+         write(*,"(A)")'Error in input: Reduced coordinate is invalid for isolated systems.'
+       end if
+       call end_parallel
+       stop
+    end if
+
+    if(allocated(atom_name))deallocate(atom_name)
+    if(allocated(Rion))deallocate(Rion)
+    if(allocated(Rion_red))deallocate(Rion_red)
+    if(allocated(kion))deallocate(kion)
+    if(allocated(flag_opt_atom))deallocate(flag_opt_atom)
+    allocate(atom_name(natom))
+    allocate(Rion(3,natom), Rion_red(3,natom),kion(natom), flag_opt_atom(natom))
+    Rion     = 0d0
+    Rion_red = 0d0
+    kion = 0
+    flag_opt_atom = 'n'
+
+    if (0 < natom .and. yn_jm == 'n') then
+
+      if (comm_is_root(nproc_id_global))then
+        if(scratch_coordinates)then
+          rewind(coordinate_unit)
+        else
+          coordinate_unit = get_filehandle()
+          open(coordinate_unit, file=filename_tmp, status='old')
+        endif
+        select case(iflag_atom_coor)
+        case(ntype_atom_coor_cartesian)
+           do i=1,natom
+              if(yn_opt == 'y')then
+                 read(coordinate_unit, *) char_atom, Rion(:,i), kion(i), flag_opt_atom(i)
+              else
+                 read(coordinate_unit, *) char_atom, Rion(:,i), kion(i)
+              end if
+              atom_name(i) = char_atom
+           end do
+           Rion = Rion*ulength_to_au
+
+        case(ntype_atom_coor_reduced)
+           do i=1,natom
+              if(yn_opt == 'y')then
+                 read(coordinate_unit, *) char_atom, Rion_red(:,i), kion(i), flag_opt_atom(i)
+              else
+                 read(coordinate_unit, *) char_atom, Rion_red(:,i), kion(i)
+              end if
+              atom_name(i) = char_atom
+           end do
+
+        end select
+        if(.not.scratch_coordinates)close(coordinate_unit)
+
+      end if
+
+      call comm_bcast(Rion,nproc_group_global)
+      call comm_bcast(Rion_red,nproc_group_global)
+      call comm_bcast(kion,nproc_group_global)
+      call comm_bcast(flag_opt_atom,nproc_group_global)
+      call comm_bcast(atom_name,nproc_group_global)
+    end if ! if 0 < natom
+
+
+  end subroutine read_atomic_coordinates
+
+  subroutine initialize_inputoutput_units
+    implicit none
+
+
+! Unit for time
+    select case(unit_time)
+    case('au','a.u.')
+      utime_to_au   = 1d0
+      utime_from_au = 1d0
+      iflag_unit_time = ntype_unit_time_au
+    case('fs','femtosecond')
+      utime_to_au   = 1d0/au_time_fs
+      utime_from_au = au_time_fs
+      iflag_unit_time = ntype_unit_time_fs
+    case default
+      stop "Invalid unit for time."
+    end select
+
+! Unit for length
+    select case(unit_length)
+    case('au','a.u.')
+      ulength_to_au   = 1d0
+      ulength_from_au = 1d0
+      iflag_unit_length = ntype_unit_length_au
+    case('AA','angstrom','Angstrom')
+      ulength_to_au   = 1d0/au_length_aa
+      ulength_from_au = au_length_aa
+      iflag_unit_length = ntype_unit_length_aa
+    case default
+      stop "Invalid unit for length."
+    end select
+
+! Unit for energy
+    select case(unit_energy)
+    case('au','a.u.')
+      uenergy_to_au   = 1d0
+      uenergy_from_au = 1d0
+      iflag_unit_energy = ntype_unit_energy_au
+    case('ev','eV')
+      uenergy_to_au   = 1d0/au_energy_ev
+      uenergy_from_au = au_energy_ev
+      iflag_unit_energy = ntype_unit_energy_ev
+    case default
+      stop "Invalid unit for energy."
+    end select
+
+! Unit for charge
+    select case(unit_charge)
+    case('au','a.u.')
+      ucharge_to_au   = 1d0
+      ucharge_from_au = 1d0
+      iflag_unit_charge = ntype_unit_charge_au
+    case default
+      stop "Invalid unit for charge."
+    end select
+
+!! prepare type(unit_t) :: t_unit_length,t_unit_length_inv
+    t_unit_length%conv = ulength_from_au
+    t_unit_length_inv%conv = 1d0/ulength_from_au
+    if(iflag_unit_length == ntype_unit_length_aa)then
+      t_unit_length%name     = 'Angstrom'
+      t_unit_length_inv%name = '1/Angstrom'
+    else
+      t_unit_length%name     = 'a.u.'
+      t_unit_length_inv%name = 'a.u.'
+      t_unit_length%conv = 1d0
+      t_unit_length_inv%conv = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_energy,t_unit_energy_inv
+    t_unit_energy%conv = uenergy_from_au
+    t_unit_energy_inv%conv = 1d0/uenergy_from_au
+    if(iflag_unit_energy == ntype_unit_energy_ev)then
+      t_unit_energy%name     = 'eV'
+      t_unit_energy_inv%name = '1/eV'
+    else
+      t_unit_energy%name     = 'a.u.'
+      t_unit_energy_inv%name = 'a.u.'
+      t_unit_energy%conv = 1d0
+      t_unit_energy_inv%conv = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_time,t_unit_time_inv
+    t_unit_time%conv = utime_from_au
+    t_unit_time_inv%conv = 1d0/utime_from_au
+    if(iflag_unit_time == ntype_unit_time_fs)then
+      t_unit_time%name     = 'fs'
+      t_unit_time_inv%name = '1/fs'
+    else
+      t_unit_time%name     = 'a.u.'
+      t_unit_time_inv%name = 'a.u.'
+      t_unit_time%conv = 1d0
+      t_unit_time_inv%conv = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_dipole
+    t_unit_spectrum_dipole%conv = utime_from_au*ulength_from_au
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole%name  = 'fs*Angstrom'
+    else
+      t_unit_spectrum_dipole%name  = 'a.u.'
+      t_unit_spectrum_dipole%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_dipole_square
+    t_unit_spectrum_dipole_square%conv = utime_from_au**2*ulength_from_au**2
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole_square%name  = 'fs^2*Angstrom^2'
+    else
+      t_unit_spectrum_dipole_square%name  = 'a.u.'
+      t_unit_spectrum_dipole_square%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_current
+    t_unit_current%conv = (ulength_from_au/utime_from_au)/ulength_from_au**3
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_current%name  = '1/fs*Angstrom^2'
+    else
+      t_unit_current%name  = 'a.u.'
+      t_unit_current%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_current
+    t_unit_spectrum_current%conv = 1d0/ulength_from_au**2
+    if(iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_current%name  = '1/Angstrom^2'
+    else
+      t_unit_spectrum_current%name  = 'a.u.'
+      t_unit_spectrum_current%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_current_square
+    t_unit_spectrum_current_square%conv = 1d0/ulength_from_au**4
+    if(iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_current_square%name  = '1/Angstrom^4'
+    else
+      t_unit_spectrum_current_square%name  = 'a.u.'
+      t_unit_spectrum_current_square%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_ac
+    t_unit_ac%conv = utime_from_au*uenergy_from_au/ulength_from_au/ucharge_from_au
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_ac%name     = 'fs*V/Angstrom'
+    else
+      t_unit_ac%name     = 'a.u.'
+      t_unit_ac%conv     = 1d0
+    end if
+
+    !! prepare type(unit_t) :: t_unit_elec
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_elec%name     = 'V/Angstrom'
+      t_unit_elec%conv     = 51.42206707d0
+    else
+      t_unit_elec%name     = 'a.u.'
+      t_unit_elec%conv     = 1d0
+    end if
+
+    !! prepare type(unit_t) :: t_unit_spectrum_elec
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_spectrum_elec%name     = 'fs*V/Angstrom'
+      t_unit_spectrum_elec%conv     = utime_from_au*51.42206707d0
+    else
+      t_unit_spectrum_elec%name     = 'a.u.'
+      t_unit_spectrum_elec%conv     = 1d0
+    end if
+
+    !! prepare type(unit_t) :: t_unit_spectrum_elec_square
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_spectrum_elec_square%name     = 'fs^2*V^2/Angstrom^2'
+      t_unit_spectrum_elec_square%conv     = utime_from_au**2*51.42206707d0**2
+    else
+      t_unit_spectrum_elec_square%name     = 'a.u.'
+      t_unit_spectrum_elec_square%conv     = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_polarizability
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_polarizability%name  = 'Augstrom^2/V'
+      t_unit_polarizability%conv = ulength_from_au**2/51.42206707d0
+    else
+      t_unit_polarizability%name  = 'a.u.'
+      t_unit_polarizability%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_conductivity
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_conductivity%name  = '1/fs*V*Angstrom'
+      t_unit_conductivity%conv = 1.d0/utime_from_au/51.42206707d0/ulength_from_au
+    else
+      t_unit_conductivity%name  = 'a.u.'
+      t_unit_conductivity%conv  = 1d0
+    end if
+
+  end subroutine initialize_inputoutput_units
+
+  subroutine dump_input_common(parser)
+    use parallelization
+    use communication
+    use filesystem, only: get_filehandle
+    use filesystem, only: atomic_create_directory
+    implicit none
+    type(s_input_parser),intent(inout) :: parser
+    integer :: i,j,ierr_nml
+    ierr_nml = 0
+
+    if (comm_is_root(nproc_id_global)) then
+
+      parser%fh_variables_log = get_filehandle()
+      open(parser%fh_variables_log,file=trim(parser%log_path))
+
+      if(parser%inml_calculation >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'calculation', parser%inml_calculation
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'theory', theory
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_md', yn_md
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_opt', yn_opt
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_dc', yn_dc
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_conventional_from_dcdft', yn_conventional_from_dcdft
+
+      if(parser%inml_control >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'control', parser%inml_control
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'sysname', trim(sysname)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'base_directory', trim(base_directory)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_restart', yn_restart
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'directory_read_data', trim(directory_read_data)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'checkpoint_interval', checkpoint_interval
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_reset_step_restart', yn_reset_step_restart
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_restart_data', trim(read_gs_restart_data)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_restart_data', trim(write_gs_restart_data)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_wf_distributor', method_wf_distributor
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nblock_wf_distribute', nblock_wf_distribute
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_wfn_k', trim(write_gs_wfn_k)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'write_rt_wfn_k', trim(write_rt_wfn_k)
+
+
+      if(parser%inml_units >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'units', parser%inml_units
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'unit_system', unit_system
+
+      if(parser%inml_parallel >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'parallel', parser%inml_parallel
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_k', nproc_k
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_ob', nproc_ob
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(1)', nproc_rgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(2)', nproc_rgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nproc_rgrid(3)', nproc_rgrid(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_ffte', yn_ffte
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_fftw', yn_fftw
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_scalapack', yn_scalapack
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_gramschmidt_blas', yn_gramschmidt_blas
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_diagonalization_red_mem', yn_diagonalization_red_mem
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_nccl_reduction', yn_nccl_reduction
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
+
+      if(parser%inml_system >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'system', parser%inml_system
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_periodic', yn_periodic
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'spin', spin
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(1)', al(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(2)', al(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al(3)', al(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec1(1:3)', al_vec1(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec2(1:3)', al_vec2(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec3(1:3)', al_vec3(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nstate', nstate
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nelec', nelec
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4,2x,I4)') 'nelec_spin(1:2)', nelec_spin
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature', temperature
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature_k', temperature_k
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nelem', nelem
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'natom', natom
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_coor', trim(file_atom_coor)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_atom_red_coor', trim(file_atom_red_coor)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_spinorbit', yn_spinorbit
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetry', yn_symmetry
+
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'absorbing_boundary', trim(absorbing_boundary)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_w0', imagnary_potential_w0
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'imagnary_potential_dr', imagnary_potential_dr
+
+
+
+      if(parser%inml_pseudo >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'pseudo', parser%inml_pseudo
+
+      do i = 1,nelem
+        write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",A)') 'file_pseudo(',i,')', trim(file_pseudo(i))
+        write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'lmax_ps(',i,')', lmax_ps(i)
+        write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'lloc_ps(',i,')', lloc_ps(i)
+        write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'izatom(',i,')', izatom(i)
+      end do
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_psmask', yn_psmask
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_pseudo_atomic_orbital', yn_pseudo_atomic_orbital
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mask', alpha_mask
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gamma_mask', gamma_mask
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_mask', eta_mask
+
+      if(parser%inml_functional >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'functional', parser%inml_functional
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'xc', trim(xc)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
+      write(parser%fh_variables_log, *) "# pbeh_coulomb_radius (bohr; 0=auto)=",pbeh_coulomb_radius
+      write(parser%fh_variables_log, *) "# rvv10_fft=",rvv10_fft
+      write(parser%fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
+      write(parser%fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
+      write(parser%fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
+      write(parser%fh_variables_log, *) "# yn_exx_dc_mlwf=",yn_exx_dc_mlwf
+      write(parser%fh_variables_log, *) "# exx_pre_scf_threshold=",exx_pre_scf_threshold
+      write(parser%fh_variables_log, *) "# exx_pre_scf_steps=",exx_pre_scf_steps
+      write(parser%fh_variables_log, *) "# exx_ace_support=",exx_ace_support
+      write(parser%fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
+      write(parser%fh_variables_log, *) "# exx_factor_mode=",exx_factor_mode
+      write(parser%fh_variables_log, *) "# exx_k_algorithm=",exx_k_algorithm
+      write(parser%fh_variables_log, *) "# exx_k_algorithm_reason=",trim(exx_k_algorithm_reason)
+      write(parser%fh_variables_log, *) "# yn_exx_spinor_pair_fft=",yn_exx_spinor_pair_fft
+      write(parser%fh_variables_log, *) "# yn_exx_fft_orbits=",yn_exx_fft_orbits
+      write(parser%fh_variables_log, *) "# yn_exx_k_pair_symmetry=",yn_exx_k_pair_symmetry
+      write(parser%fh_variables_log, *) "# yn_hse_sr_pair_symmetry=",yn_hse_sr_pair_symmetry
+      write(parser%fh_variables_log, *) "# hse_sr_tolerance=",hse_sr_tolerance
+      write(parser%fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
+      write(parser%fh_variables_log, *) "# exx_kpoint_backend=",exx_kpoint_backend
+      write(parser%fh_variables_log, *) "# exx_local_backend=",exx_local_backend
+      write(parser%fh_variables_log, *) "# exx_gpu_batch_size=",exx_gpu_batch_size
+      write(parser%fh_variables_log, *) "# exx_local_fft=",exx_local_fft
+      write(parser%fh_variables_log, *) "# exx_factor_n_teach=",exx_factor_n_teach
+      write(parser%fh_variables_log, *) "# exx_factor_history_frames=",exx_factor_history_frames
+      write(parser%fh_variables_log, *) "# exx_factor_exact_interval=",exx_factor_exact_interval
+      write(parser%fh_variables_log, *) "# exx_factor_warmup_steps=",exx_factor_warmup_steps
+      write(parser%fh_variables_log, *) "# exx_mlwf_norm_fraction=",exx_mlwf_norm_fraction
+      write(parser%fh_variables_log, *) "# exx_mlwf_radius (bohr; 0=full)=",exx_mlwf_radius
+      write(parser%fh_variables_log, *) "# exx_mlwf_interval=",exx_mlwf_interval
+      write(parser%fh_variables_log, *) "# exx_mlwf_maxiter=",exx_mlwf_maxiter
+      write(parser%fh_variables_log, *) "# exx_mlwf_tolerance=",exx_mlwf_tolerance
+      write(parser%fh_variables_log, *) "# hse_q_reduction=",hse_q_reduction
+      write(parser%fh_variables_log, *) "# hse_block_rows=",hse_block_rows
+      write(parser%fh_variables_log, *) "# exx_worker_tile_divisor=",exx_worker_tile_divisor
+      write(parser%fh_variables_log, *) "# exx_worker_rprime_groups=",exx_worker_rprime_groups
+      write(parser%fh_variables_log, *) "# hse_fft_layout=",hse_fft_layout
+#ifdef USE_LIBXC
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'alibc', trim(alibc)
+#endif
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cval', cval
+
+      if(parser%inml_rgrid >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'rgrid', parser%inml_rgrid
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(1)', dl(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(2)', dl(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(3)', dl(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_rgrid(1)', num_rgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_rgrid(2)', num_rgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_rgrid(3)', num_rgrid(3)
+
+      if(parser%inml_kgrid >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'kgrid', parser%inml_kgrid
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(1)', num_kgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(2)', num_kgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_kgrid(3)', num_kgrid(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_kw', trim(file_kw)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(1)', dk_shift(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(2)', dk_shift(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dk_shift(3)', dk_shift(3)
+      write(parser%fh_variables_log, '("#",4x,A,"=",A)') 'yn_gamma_centered', yn_gamma_centered
+
+      if(parser%inml_tgrid >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'tgrid', parser%inml_tgrid
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'nt', nt
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt', dt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'gram_schmidt_interval', gram_schmidt_interval
+
+      if(parser%inml_propagation >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'propagation', parser%inml_propagation
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'n_hamil', n_hamil
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
+
+      if(parser%inml_scf >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', parser%inml_scf
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_init_wf', method_init_wf
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'iseed_number_change', iseed_number_change
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_min', method_min
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'ncg', ncg
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'ncg_init', ncg_init
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_mixing', method_mixing
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'mixrate', mixrate
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_mb', nmemory_mb
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mb', alpha_mb
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nmemory_p', nmemory_p
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'beta_p', beta_p
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_auto_mixing', yn_auto_mixing
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'update_mixing_ratio', update_mixing_ratio
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nscf', nscf
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_subspace_diagonalization', yn_subspace_diagonalization
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'convergence', convergence
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold', threshold
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_redistribution', nscf_init_redistribution
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_no_diagonal', nscf_init_no_diagonal
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nscf_init_mix_zero', nscf_init_mix_zero
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'conv_gap_mix_zero', conv_gap_mix_zero
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_init_density', method_init_density
+      if(method_init_density == 'pp_magdir') then
+        write(parser%fh_variables_log, '("#",4X,A,"=",99ES12.5)') 'magdir_atom', magdir_atom(1:min(natom,99))
+      end if
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_preconditioning', yn_preconditioning
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_pre', alpha_pre
+
+      if(parser%inml_emfield >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'emfield', parser%inml_emfield
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'trans_longi', trans_longi
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape1', ae_shape1
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_input1', trim(file_input1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'e_impulse', e_impulse
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude1', E_amplitude1
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_1', I_wcm2_1
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tw1', tw1
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega1', omega1
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(1)', epdir_re1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(2)', epdir_re1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re1(3)', epdir_re1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(1)', epdir_im1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(2)', epdir_im1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im1(3)', epdir_im1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep1', phi_cep1
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'ae_shape2', ae_shape2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'E_amplitude2', E_amplitude2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'I_wcm2_2', I_wcm2_2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tw2', tw2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'omega2', omega2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(1)', epdir_re2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(2)', epdir_re2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_re2(3)', epdir_re2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(1)', epdir_im2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(2)', epdir_im2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'epdir_im2(3)', epdir_im2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'phi_cep2', phi_cep2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_t2', t1_t2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 't1_start', t1_start
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_dipole_source', num_dipole_source
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,1)', vec_dipole_source(1,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,1)', vec_dipole_source(2,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(3,1)', vec_dipole_source(3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(1,2)', vec_dipole_source(1,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(2,2)', vec_dipole_source(2,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'vec_dipole_source(3,2)', vec_dipole_source(3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(1,1)', cood_dipole_source(1,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,1)', cood_dipole_source(2,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,1)', cood_dipole_source(3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(1,2)', cood_dipole_source(1,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(2,2)', cood_dipole_source(2,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cood_dipole_source(3,2)', cood_dipole_source(3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'rad_dipole_source', rad_dipole_source
+      
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'singlescale', parser%inml_singlescale
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_singlescale', method_singlescale
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_G2_emfield', cutoff_G2_emfield
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_symmetrized_stencil', yn_symmetrized_stencil
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_put_wall_z_boundary', yn_put_wall_z_boundary
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_height', wall_height
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_width', wall_width
+
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', parser%inml_multiscale
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'twod_shape', twod_shape
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nx_m', nx_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'ny_m', ny_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nz_m', nz_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hx_m', hx_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hy_m', hy_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'hz_m', hz_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nksplit', nksplit
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nxysplit', nxysplit
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacl_m', nxvacl_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nxvacr_m', nxvacr_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'nxvac_m', nxvac_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'nyvac_m', nyvac_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'nzvac_m', nzvac_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nx_origin_m', nx_origin_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'ny_origin_m', ny_origin_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nz_origin_m', nz_origin_m
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_ix_m', out_ms_region_ix_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iy_m', out_ms_region_iy_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",2I5)') 'out_ms_region_iz_m', out_ms_region_iz_m(1:2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_macropoint', trim(file_macropoint)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'set_ini_coor_vel', set_ini_coor_vel
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_write_group', nmacro_write_group
+      write(parser%fh_variables_log, '("#",4X,A,"=",I5)') 'nmacro_chunk', nmacro_chunk
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,1)', rmat_ms(1:3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,2)', rmat_ms(1:3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'rmat_ms(1:3,3)', rmat_ms(1:3,3)
+
+      if(parser%inml_maxwell >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'maxwell', parser%inml_maxwell
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(1)', al_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(2)', al_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_em(3)', al_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(1)', dl_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(2)', dl_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl_em(3)', dl_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(1)', num_rgrid_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(2)', num_rgrid_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'num_rgrid_em(3)', num_rgrid_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'at_em', at_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dt_em', dt_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'nt_em', nt_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,1)', boundary_em(1,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(1,2)', boundary_em(1,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(2,1)', boundary_em(2,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(2,2)', boundary_em(2,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,1)', boundary_em(3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'boundary_em(3,2)', boundary_em(3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'shape_file', trim(shape_file)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_num', media_num
+      do i = 0,media_num
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)')      'media_type(',i,')', media_type(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'epsilon_em(',i,')', epsilon_em(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'mu_em(',i,')', mu_em(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'sigma_em(',i,')', sigma_em(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)')     'pole_num_ld(',i,')', pole_num_ld(i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'omega_p_ld(',i,')', omega_p_ld(i)
+        do j = 1,pole_num_ld(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'f_ld(',i,',',j,')', f_ld(i,j)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'gamma_ld(',i,',',j,')', gamma_ld(i,j)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES12.5)') 'omega_ld(',i,',',j,')', omega_ld(i,j)
+        end do
+      end do
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'wave_input', wave_input
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(1)', ek_dir1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(2)', ek_dir1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir1(3)', ek_dir1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(1)', source_loc1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(2)', source_loc1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc1(3)', source_loc1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(1)', gbeam_sigma_plane1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(2)', gbeam_sigma_plane1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane1(3)', gbeam_sigma_plane1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(1)', gbeam_sigma_line1(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(2)', gbeam_sigma_line1(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line1(3)', gbeam_sigma_line1(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(1)', ek_dir2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(2)', ek_dir2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ek_dir2(3)', ek_dir2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(1)', source_loc2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(2)', source_loc2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'source_loc2(3)', source_loc2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(1)', gbeam_sigma_plane2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(2)', gbeam_sigma_plane2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_plane2(3)', gbeam_sigma_plane2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(1)', gbeam_sigma_line2(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(2)', gbeam_sigma_line2(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gbeam_sigma_line2(3)', gbeam_sigma_line2(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'obs_num_em', obs_num_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'obs_samp_em', obs_samp_em
+      if(obs_num_em==0) then
+        write(parser%fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'obs_loc_em', obs_loc_em(1,1),obs_loc_em(1,2),obs_loc_em(1,3)
+        write(parser%fh_variables_log, '("#",4X,A,"=",ES14.5)')  'obs_plane_ene_em', obs_plane_ene_em(1,1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_em', yn_obs_plane_em(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",A)')       'yn_obs_plane_integral_em', yn_obs_plane_integral_em(1)
+      else
+        do i = 1,obs_num_em
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') &
+                                  'obs_loc_em(',i,',:)', obs_loc_em(i,:)
+          do j = 1,size(obs_plane_ene_em,2)
+            if( (j==1) .or. (obs_plane_ene_em(i,j)>=0.0d0) ) then
+              write(parser%fh_variables_log, '("#",4X,A,I3,A,I3,A,"=",ES14.5)') &
+                                  'obs_plane_ene_em(',i,',',j,')', obs_plane_ene_em(i,j)
+            end if
+          end do
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
+                                  'yn_obs_plane_em(',i,')', yn_obs_plane_em(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)')       &
+                                  'yn_obs_plane_integral_em(',i,')', yn_obs_plane_integral_em(i)
+        end do
+      end if
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_wf_em', yn_wf_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'film_thickness', film_thickness
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,1)', media_id_pml(1,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(1,2)', media_id_pml(1,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(2,1)', media_id_pml(2,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(2,2)', media_id_pml(2,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,1)', media_id_pml(3,1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_pml(3,2)', media_id_pml(3,2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source1', media_id_source1
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'media_id_source2', media_id_source2
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(1)', bloch_k_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(2)', bloch_k_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'bloch_k_em(3)', bloch_k_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(1)', bloch_real_imag_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(2)', bloch_real_imag_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'bloch_real_imag_em(3)', bloch_real_imag_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'ase_num_em', ase_num_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_min_em', ase_ene_min_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_ene_max_em', ase_ene_max_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_min_em', ase_wav_min_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_wav_max_em', ase_wav_max_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'ase_smedia_id_em', ase_smedia_id_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(1)', ase_box_cent_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(2)', ase_box_cent_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_cent_em(3)', ase_box_cent_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(1)', ase_box_size_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(2)', ase_box_size_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'ase_box_size_em(3)', ase_box_size_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'art_num_em', art_num_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_min_em', art_ene_min_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_ene_max_em', art_ene_max_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_min_em', art_wav_min_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_wav_max_em', art_wav_max_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'art_smedia_id_em', art_smedia_id_em
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(1)', art_plane_bot_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(2)', art_plane_bot_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_bot_em(3)', art_plane_bot_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(1)', art_plane_top_em(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(2)', art_plane_top_em(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'art_plane_top_em(3)', art_plane_top_em(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_make_shape', yn_make_shape
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_output_shape', yn_output_shape
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_x', yn_copy_x
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_y', yn_copy_y
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'yn_copy_z', yn_copy_z
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')      'rot_type', rot_type
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)')     'n_s', n_s
+      if(n_s==0) then
+        write(parser%fh_variables_log, '("#",4X,A,"=",A)')       'typ_s', typ_s(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",I6)')      'id_s', id_s(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",10ES14.5)')'inf_s', inf_s(1,:)
+        write(parser%fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'ori_s', ori_s(1,:)
+        write(parser%fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'rot_s', rot_s(1,:)
+      else
+        do i = 1,n_s
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)')       'typ_s(',i,')', typ_s(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'id_s(',i,')', id_s(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",10ES14.5)')'inf_s(',i,',:)', inf_s(i,:)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'ori_s(',i,',:)', ori_s(i,:)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'rot_s(',i,',:)', rot_s(i,:)
+        end do
+      end if
+      
+      if(parser%inml_analysis >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'analysis', parser%inml_analysis
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'projection_option', projection_option
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_projection_step', out_projection_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_projection', threshold_projection
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'nenergy', nenergy
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'de', de
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_energy_step', out_rt_energy_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_psi', yn_out_psi
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos', yn_out_dos
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dos_set_fe_origin', yn_out_dos_set_fe_origin
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_start', out_dos_start
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_end', out_dos_end
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_dos_nenergy', out_dos_nenergy
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dos_width', out_dos_width
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'out_dos_function', out_dos_function
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_pdos', yn_out_pdos
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns', yn_out_dns
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_rt', yn_out_dns_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_ac_je', yn_out_dns_ac_je
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_micro_je', yn_out_micro_je
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_rt_step', out_dns_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_dns_ac_je_step', out_dns_ac_je_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_micro_je_step', out_micro_je_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'out_old_dns', out_old_dns
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dns_trans', yn_out_dns_trans
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_dns_trans_energy', out_dns_trans_energy
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_elf', yn_out_elf
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_elf_rt', yn_out_elf_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_elf_rt_step', out_elf_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_estatic_rt', yn_out_estatic_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_estatic_rt_step', out_estatic_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm_bin', yn_out_tm_bin
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(1)', out_gs_sgm_eps_mu_nu(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_gs_sgm_eps_mu_nu(2)', out_gs_sgm_eps_mu_nu(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'out_gs_sgm_eps_width', out_gs_sgm_eps_width
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_ms_step', out_ms_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'format_voxel_data', format_voxel_data
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'nsplit_voxel_data', nsplit_voxel_data
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_lr_w0_correction', yn_lr_w0_correction
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_intraband_current', yn_out_intraband_current
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_out_current_decomposed', yn_out_current_decomposed
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_current_decomposed_step', out_current_decomposed_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_rt_spin_step', out_rt_spin_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_decomposed_rt',yn_out_mag_decomposed_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mag_micro_rt',yn_out_mag_micro_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_decomposed', yn_out_spin_current_decomposed
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_spin_current_micro',yn_out_spin_current_micro
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rt_energy_components',yn_out_rt_energy_components
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_perflog', yn_out_perflog
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'format_perflog', format_perflog
+
+      if(parser%inml_poisson >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'poisson', parser%inml_poisson
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'layout_multipole', layout_multipole
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(1)', num_multipole_xyz(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(2)', num_multipole_xyz(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_multipole_xyz(3)', num_multipole_xyz(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'lmax_multipole', lmax_multipole
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'threshold_cg', threshold_cg
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_poisson', method_poisson
+
+      if(parser%inml_ewald >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'ewald', parser%inml_ewald
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'newald', newald
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'aewald', aewald
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_r', cutoff_r
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_r_buff', cutoff_r_buff
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cutoff_g', cutoff_g
+
+      if(parser%inml_opt >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'opt', parser%inml_opt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I3)') 'nopt', nopt
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'max_step_len_adjust', max_step_len_adjust
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'convrg_opt_fmax',convrg_opt_fmax
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'method_opt', method_opt
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_steep', step_steep
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'step_fire', step_fire
+
+      if(parser%inml_md >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'md', parser%inml_md
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'ensemble', ensemble
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'thermostat', thermostat
+      write(parser%fh_variables_log, '("#",4X,A,"=",I8)') 'step_velocity_scaling', step_velocity_scaling
+      write(parser%fh_variables_log, '("#",4X,A,"=",I8)') 'step_update_ps', step_update_ps
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'temperature0_ion_k', temperature0_ion_k
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_set_ini_velocity', yn_set_ini_velocity
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'file_ini_velocity', trim(file_ini_velocity)
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'thermostat_tau', thermostat_tau
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_stop_system_momt', yn_stop_system_momt
+
+      if(parser%inml_jellium >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'jellium', parser%inml_jellium
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_jm', yn_jm
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_charge_neutral_jm', yn_charge_neutral_jm
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'yn_output_dns_jm', yn_output_dns_jm
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)')  'shape_file', trim(shape_file_jm)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'num_jm', num_jm
+      if(num_jm==0) then
+        write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)')  'rs_bohr_jm', rs_bohr_jm(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",I6)')      'sphere_nion_jm', sphere_nion_jm(1)
+        write(parser%fh_variables_log, '("#",4X,A,"=",3ES14.5)') 'sphere_loc_jm', &
+                                                          sphere_loc_jm(1,1),sphere_loc_jm(1,2),sphere_loc_jm(1,3)
+      else
+        do i = 1,num_jm
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)')  'rs_bohr_jm(',i,')', rs_bohr_jm(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)')      'sphere_nion_jm(',i,')', sphere_nion_jm(i)
+          write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES14.5)') 'sphere_loc_jm(',i,',:)', sphere_loc_jm(i,:)
+        end do
+      end if
+
+      select case(iflag_atom_coor)
+      case(ntype_atom_coor_cartesian)
+        write(parser%fh_variables_log, '("#namelist: ",A)') 'atomic_coor'
+        do i = 1,natom
+          write(parser%fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion(',i,')', Rion(1:3,i)
+        end do
+      case(ntype_atom_coor_reduced)
+        write(parser%fh_variables_log, '("#namelist: ",A)') 'atomic_red_coor'
+        do i = 1,natom
+          write(parser%fh_variables_log, '("#",4X,A,I4,A,"=",3ES14.5)') 'Rion_red(',i,')', Rion_red(1:3,i)
+        end do
+      case default
+      end select
+
+      if(parser%inml_code >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'code', parser%inml_code
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_stencil_hand_vectorization', yn_want_stencil_hand_vectorization
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_want_communication_overlapping', yn_want_communication_overlapping
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'stencil_openmp_mode', stencil_openmp_mode
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'current_openmp_mode', current_openmp_mode
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'force_openmp_mode',   force_openmp_mode
+
+      if(parser%inml_band >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'band', parser%inml_band
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'lattice', lattice
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'nref_band', nref_band
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES14.5)') 'tol_esp_diff', tol_esp_diff
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'num_of_segments', num_of_segments
+      write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",10I4)') 'ndiv_segment(',num_of_segments,')', &
+        & ndiv_segment(1:num_of_segments)
+      do i = 1, num_of_segments+1
+        write(parser%fh_variables_log, '("#",4X,A,I1,I2,A,"=",3ES14.5)') 'kpt(',3,i,')', kpt(1:3,i)
+      end do 
+      write(parser%fh_variables_log, '("#",4X,A,I2,A,"=",10(A,1X))') 'kpt_label(',num_of_segments,')', kpt_label(1:num_of_segments)
+      
+      if(parser%inml_sbe >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'sbe', parser%inml_sbe
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_vnl_correction', yn_vnl_correction
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'num_sbe', num_sbe
+      do i = 1,num_sbe
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",A)') 'sysname_sbe(',i,')', sysname_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nk_sbe(',i,')', nk_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nstate_sbe(',i,')', nstate_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",I6)') 'nelec_sbe(',i,')', nelec_sbe(i)
+      end do
+      do i = 1,num_sbe
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(1',i,')', al_sbe(1,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(2',i,')', al_sbe(2,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",ES12.5)') 'al_sbe(3',i,')', al_sbe(3,i)
+      end do
+      do i = 1,num_sbe
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec1_sbe(1:3',i,')', al_vec1_sbe(1:3,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec2_sbe(1:3',i,')', al_vec2_sbe(1:3,i)
+        write(parser%fh_variables_log, '("#",4X,A,I3,A,"=",3ES12.5)') 'al_vec3_sbe(1:3',i,')', al_vec3_sbe(1:3,i)
+      end do
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'norder_correction', norder_correction
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'gauge_sbe', gauge_sbe
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 't_2', t_2
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'am_s', am_s
+      
+      if(parser%inml_dc >0)ierr_nml = ierr_nml +1
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'dc', parser%inml_dc
+      write(parser%fh_variables_log, '("#",4X,A,"=",3I4)') 'num_fragment',num_fragment(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3I4)') "num_rgrid_buffer", num_rgrid_buffer(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",3I4)') "nproc_rgrid_tot",nproc_rgrid_tot(1:3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "file_atom_coor_frag", file_atom_coor_frag
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "yn_out_dc_fragment_coor", yn_out_dc_fragment_coor
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') &
+      & "lcfo_diag_chefsi_filter_degree",lcfo_diag_chefsi_filter_degree
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') &
+      & "lcfo_diag_chefsi_filter_chunk_size", &
+      & lcfo_diag_chefsi_filter_chunk_size
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') &
+      & "lcfo_diag_chefsi_max_cycle",lcfo_diag_chefsi_max_cycle
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+      & "lcfo_diag_chefsi_residual_tolerance", &
+      & lcfo_diag_chefsi_residual_tolerance
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
+
+      write(parser%fh_variables_log, '("#namelist: ",A,", status=",I3)') 'unfolding', parser%inml_unfolding
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'dm_unfold_option', dm_unfold_option
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(1)', num_lkgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(2)', num_lkgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_lkgrid(3)', num_lkgrid(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(1)', num_skgrid(1)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(2)', num_skgrid(2)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'no_pr', no_pr
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_gs', yn_out_mom_distr_gs
+      write(parser%fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_rt', yn_out_mom_distr_rt
+      write(parser%fh_variables_log, '("#",4X,A,"=",I6)') 'out_mom_distr_rt_step', out_mom_distr_rt_step
+      write(parser%fh_variables_log, '("#",4X,A,"=",I4)') 'nq_mom', nq_mom
+      write(parser%fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dq_mom', dq_mom
+      
+      close(parser%fh_variables_log)
+    end if
+
+    call comm_bcast(ierr_nml,nproc_group_global)
+    if(ierr_nml > 0)then
+      if (comm_is_root(nproc_id_global)) write(*,"(I4,2x,A)")ierr_nml,'error(s) in input.'
+      call end_parallel
+      stop
+    end if
+
+    !(create output directory)
+    if(base_directory(1:3).ne."./ ") then
+      call atomic_create_directory(base_directory &
+                                  ,nproc_group_global,nproc_id_global)
+    endif
+
+  end subroutine dump_input_common
+
+  subroutine check_bad_input
+    use ieee_finite_check, only: ieee_is_finite => is_finite
+    use parallelization
+    use communication
+    use exx_functional, only: is_global_hybrid,is_hybrid
+    implicit none
+    integer :: i,round_phi,exx_grid(3)
+    real(8) :: udp_phi  ! udp: under dicimal point
+    logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf
+    logical :: global_symmetry_route,global_native_k_route
+
+    ! The giant-Gamma source/SR algorithms remain on the development branches.
+    ! Reject their inputs before any restart or pseudopotential data is loaded.
+    if(exx_ace_support=='source')error stop 'source-support ACE is deferred'
+    if(.not.ieee_is_finite(hse_sr_tolerance).or.hse_sr_tolerance/=0d0) &
+      error stop 'Finite-range Gamma exchange is deferred; hse_sr_tolerance must be zero'
+
+    select case(propagator)
+    case('middlepoint','aetrs','hse_ptcn','hse_taylor4','hse_taylor4_full')
+    case default
+      error stop 'Unsupported propagator'
+    end select
+
+    !! Add wrong input keyword or wrong/unavailable input combinations here
+    !! (now only a few)
+
+    ! to correct 'Y' and 'N' to be 'y' and 'n', also error check too
+    call yn_argument_check(yn_md)
+    call yn_argument_check(yn_opt)
+    call yn_argument_check(yn_dc)
+    call yn_argument_check(yn_conventional_from_dcdft)
+    call yn_argument_check(yn_restart)
+    call yn_argument_check(yn_self_checkpoint)
+    call yn_argument_check(yn_reset_step_restart)
+    call yn_argument_check(yn_ffte)
+    call yn_argument_check(yn_fftw)
+    call yn_argument_check(yn_scalapack)
+    call yn_argument_check(yn_gramschmidt_blas)
+    call yn_argument_check(yn_eigenexa)
+    call yn_argument_check(yn_diagonalization_red_mem)
+    call yn_argument_check(yn_nccl_reduction)
+    call yn_argument_check(yn_periodic)
+    call yn_argument_check(yn_psmask)
+    call yn_argument_check(yn_pseudo_atomic_orbital)
+    call yn_argument_check(yn_fix_func)
+    call yn_argument_check(yn_predictor_corrector)
+    call yn_argument_check(yn_auto_mixing)
+    call yn_argument_check(yn_subspace_diagonalization)
+    call yn_argument_check(yn_out_psi)
+    call yn_argument_check(yn_out_dos)
+    call yn_argument_check(yn_out_dos_set_fe_origin)
+    call yn_argument_check(yn_out_pdos)
+    call yn_argument_check(yn_out_dns)
+    call yn_argument_check(yn_out_dns_rt)
+    call yn_argument_check(yn_out_dns_ac_je)
+    call yn_argument_check(yn_out_micro_je)
+    call yn_argument_check(yn_out_dns_trans)
+    call yn_argument_check(yn_out_elf)
+    call yn_argument_check(yn_out_elf_rt)
+    call yn_argument_check(yn_out_estatic_rt)
+    call yn_argument_check(yn_out_rvf_rt)
+    call yn_argument_check(yn_out_tm)
+    call yn_argument_check(yn_out_tm_bin)
+    call yn_argument_check(yn_out_intraband_current)
+    call yn_argument_check(yn_out_current_decomposed)
+    call yn_argument_check(yn_out_spin_current_decomposed)
+    call yn_argument_check(yn_out_mag_decomposed_rt)
+    call yn_argument_check(yn_out_mag_micro_rt)
+    call yn_argument_check(yn_out_spin_current_micro)
+    call yn_argument_check(yn_out_rt_energy_components)
+    call yn_argument_check(yn_out_gs_sgm_eps)
+    call yn_argument_check(yn_set_ini_velocity)
+    call yn_argument_check(yn_jm)
+    call yn_argument_check(yn_charge_neutral_jm)
+    call yn_argument_check(yn_output_dns_jm)
+    call yn_argument_check(yn_stop_system_momt)
+    call yn_argument_check(yn_want_stencil_hand_vectorization)
+    call yn_argument_check(yn_want_communication_overlapping)
+    if(obs_num_em>0) then
+      do i = 1,obs_num_em
+        call yn_argument_check(yn_obs_plane_em(i))
+        call yn_argument_check(yn_obs_plane_integral_em(i))
+      end do
+    end if
+    call yn_argument_check(yn_wf_em)
+    call yn_argument_check(yn_make_shape)
+    call yn_argument_check(yn_output_shape)
+    call yn_argument_check(yn_copy_x)
+    call yn_argument_check(yn_copy_y)
+    call yn_argument_check(yn_copy_z)
+    call yn_argument_check(yn_symmetrized_stencil)
+    call yn_argument_check(yn_put_wall_z_boundary)
+    call yn_argument_check(yn_spinorbit)
+    call yn_argument_check(yn_out_mom_distr_gs)
+    call yn_argument_check(yn_out_mom_distr_rt)
+    call yyynnn_argument_check(yn_symmetry)
+    call yn_argument_check(yn_out_dc_fragment_coor)
+    call yn_argument_check(yn_exx_dc_mlwf)
+    call yn_argument_check(yn_hse_wannier)
+    if(exx_k_algorithm=='pair'.or.exx_k_algorithm=='orbits')then
+      if(theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse') &
+        error stop 'Manual EXX k algorithm requires dft or fixed-ion RT'
+      if(.not.is_hybrid(xc).or.yn_dc/='n'.or.yn_md/='n'.or.yn_opt/='n'.or. &
+         exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1).or. &
+         any(nproc_rgrid/=1).or.nproc_ob/=1.or.(temperature>=0d0.and.yn_spinorbit/='y').or. &
+         exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
+         (exx_factor_mode/='off'.and..not.(yn_spinorbit=='y'.and.temperature>=0d0.and. &
+          exx_factor_mode=='learned'))) &
+        error stop 'Manual EXX k algorithm requires fixed-ion full-support CPU k-only native exchange'
+      if(yn_spinorbit=='n'.and.(product(num_kgrid)<2.or.2*nstate/=nelec)) &
+        error stop 'Manual scalar EXX k algorithm requires dense k mesh and occupied spin pairs'
+      if(exx_k_algorithm=='pair'.and.yn_spinorbit=='n'.and.index(yn_symmetry,'y')/=0) &
+        error stop 'Manual scalar pair algorithm requires crystal symmetry off'
+    endif
+    call yn_argument_check(yn_exx_spinor_pair_fft)
+    if(yn_exx_spinor_pair_fft=='y')then
+      if(xc/='hse06'.or.yn_spinorbit/='y'.or.yn_dc/='n'.or. &
+         exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1)) &
+        error stop 'Spinor pair FFT requires native CPU SOC HSE06 with all q points'
+    endif
+    call yn_argument_check(yn_exx_fft_orbits)
+    call yn_argument_check(yn_exx_k_pair_symmetry)
+    call yn_argument_check(yn_hse_sr_pair_symmetry)
+    call yn_argument_check(yn_dc_lcfo)
+    call yn_argument_check(yn_dc_lcfo_diag)
+
+#ifndef USE_MPI
+    if(trim(dm_unfold_option)/='no') then
+      stop 'dm_unfold_option requires a build with MPI support.'
+    end if
+    if(yn_out_tm_bin=='y') then
+      stop "yn_out_tm_bin='y' requires a build with MPI support."
+    end if
+#endif
+
+    select case(trim(lcfo_eigensolver))
+    case('lapack')
+      continue
+    case('eigenexa')
+#ifdef USE_EIGENEXA
+      continue
+#else
+      stop 'lcfo_eigensolver=eigenexa requires a build with EigenExa support.'
+#endif
+    case('scalapack')
+#ifndef USE_SCALAPACK
+      error stop 'lcfo_eigensolver=scalapack requires a build with ScaLAPACK support.'
+#endif
+    case('chefsi')
+#ifdef USE_SCALAPACK
+      if(lcfo_diag_chefsi_filter_degree<1) then
+        stop 'lcfo_diag_chefsi_filter_degree must be a positive integer.'
+      end if
+      if(lcfo_diag_chefsi_filter_chunk_size<0) then
+        stop 'lcfo_diag_chefsi_filter_chunk_size must be nonnegative.'
+      end if
+      if(lcfo_diag_chefsi_max_cycle<1) then
+        stop 'lcfo_diag_chefsi_max_cycle must be a positive integer.'
+      end if
+      if(lcfo_diag_chefsi_residual_tolerance<=0d0 .or. &
+      & lcfo_diag_chefsi_residual_tolerance>=1d0) then
+        stop 'lcfo_diag_chefsi_residual_tolerance must be between zero and one.'
+      end if
+#else
+      stop 'lcfo_eigensolver=chefsi requires a build with ScaLAPACK support.'
+#endif
+    case default
+      stop "lcfo_eigensolver must be 'lapack', 'eigenexa', 'scalapack', or 'chefsi'."
+    end select
+    
+    if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
+      stop "Nk must be 1 when yn_periodic=='n'"
+    end if
+
+    if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
+       al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+       if_orthogonal_tmp = .true.
+    else
+       if_orthogonal_tmp = .false.
+    endif
+
+    select case(method_wf_distributor)
+    case ('single','slice') ; continue
+    case default            ; stop 'method_wf_distributor must be single or slice'
+    end select
+
+    select case(method_init_wf)
+    case ('gauss','random') ; continue
+    case ('gauss2','gauss3','gauss4','gauss5','gauss10') ; continue
+    case ('pp') ; continue
+    case default            ; stop 'method_init_wf must be gauss, random or pp'
+    end select
+
+    select case(convergence)
+    case('rho_dne')
+      continue
+    case('norm_rho','norm_rho_dng')
+      if(threshold<-1.d-12)then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) 'set threshold when convergence is norm_rho or norm_rho_dng.'
+        endif
+        call end_parallel
+      end if
+    case('norm_pot','norm_pot_dng')
+      if(threshold<-1.d-12)then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) 'set threshold when convergence is norm_pot or norm_rho_pot.'
+        endif
+        call end_parallel
+      end if
+    case default
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'check a keyword of convergence.'
+      endif
+      call end_parallel
+    end select
+
+    select case(method_init_density)
+    case ('wf','pp') ; continue
+    case ('read_dns_cube')
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'SALMON will read dns.cube (method_init_density=read_dns_cube)'
+        if(yn_out_dns=='y' .and. format_voxel_data=='cube') then
+          write(*,*) '!!! Warning: SALMON will rewrite dns.cube (yn_out_dns=y)'
+        endif
+      end if
+    case('pp_magdir')
+      if(natom > 99) stop '# of atoms is too large (method_init_density=pp_magdir)'
+      if(spin/='polarized') stop 'spin must be polarized (method_init_density=pp_magdir)'
+    case default     ; stop 'method_init_density must be wf, pp, or read_dns_cube'
+    end select
+
+    if(yn_out_dos=='y'.or.yn_out_pdos=='y')then
+      select case(out_dos_function)
+      case("gaussian","lorentzian")
+        continue
+      case default
+        stop 'set out_dos_function to "gaussian" or "lorentzian"'
+      end select
+    end if
+
+    if (yn_eigenexa == 'y') then
+#ifdef USE_EIGENEXA
+#else
+      stop 'EigenExa does not supported, please reconfiguration and rebuild it.'
+#endif
+    end if
+
+    if (yn_scalapack == 'y') then
+#ifdef USE_SCALAPACK
+#else
+      stop 'ScaLAPACK does not supported, please reconfiguration and rebuild it.'
+#endif
+    end if
+
+    if (yn_eigenexa == 'y' .and. yn_scalapack == 'y') then
+      stop "both yn_scalapack and yn_eigenexa is specified 'y'"
+    end if
+
+    if (yn_nccl_reduction == 'y') then
+#ifdef USE_NCCL
+#else
+      stop 'NCCL is not supported, please reconfiguration and rebuild it.'
+#endif
+    end if
+    
+    select case(spin)
+    case('unpolarized','polarized')
+      continue
+    case('noncollinear')
+      if(yn_spinorbit=='n') stop "spin=noncollinear with yn_spinorbit=n is not supported"
+#ifdef USE_OPENACC
+      if (comm_is_root(nproc_id_global)) then
+        write(*,*) 'CAUTION: noncollinear spin with OpenACC is under development'
+      endif
+#endif
+    case default
+      stop "set spin to 'unpolarized', 'polarized', or 'noncollinear'"
+    end select
+
+  ! for main_tddft
+    select case(theory)
+    case('tddft_response','tddft_pulse','single_scale_maxwell_tddft')
+
+      round_phi=int((phi_cep1-0.25d0)*2.d0)
+      udp_phi=(phi_cep1-0.25d0)*2.d0-round_phi
+      if(ae_shape1=="Ecos2".and.abs(udp_phi)>=1.d-12)then
+        stop "phi_cep1 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape1."
+      end if
+
+      round_phi=int((phi_cep2-0.25d0)*2.d0)
+      udp_phi=(phi_cep2-0.25d0)*2.d0-round_phi
+      if(ae_shape2=="Ecos2".and.abs(udp_phi)>=1.d-12)then
+        stop "phi_cep2 must be equal to 0.25+0.5*i when Ecos2 is specified for ae_shape2."
+      end if
+
+      !select case(ae_shape1)
+      !case("impulse","Ecos2","Acos2","input")
+      !  continue
+      !case default
+      !  stop 'set ae_shape1 to "impulse", "Ecos2", or "Acos2"'
+      !end select
+
+      !select case(ae_shape2)
+      !case("none","impulse","Ecos2","Acos2")
+      !  continue
+      !case default
+      !  stop 'set ae_shape2 to "none", "impulse", "Ecos2", or "Acos2"'
+      !end select
+    end select
+
+    if( yn_spinorbit == 'y' )then
+       if( spin /= 'noncollinear' ) then
+          stop "spin = 'noncollinear' is necessary when spin-orbit calculation is performed"
+       end if
+    end if
+        
+    if( spin /= 'noncollinear' ) then
+      if(yn_out_spin_current_decomposed=='y' .or. yn_out_spin_current_micro=='y' &
+      & .or. yn_out_mag_decomposed_rt=='y' .or. yn_out_mag_micro_rt=='y') then
+        stop "Specify spin = 'noncollinear'"
+      end if
+    end if
+
+    if(theory=='single_scale_maxwell_tddft') then
+      select case(method_singlescale)
+      case('3d', '1d', '1d_fourier')
+        if(method_singlescale=='1d_fourier') then
+          if(yn_ffte=='n') stop "yn_ffte must be 'y' when method_singlescale=='1d_fourier'"
+        end if
+      case default
+        stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
+      end select
+    end if
+
+    if(theory=='multi_scale_maxwell_tddft') then
+       if( propagator == 'aetrs' )then
+          stop 'propagator = "aetrs" is not supported in multi-scale calculation'
+       end if
+    endif
+
+    if(absorbing_boundary/='none') then
+       if( absorbing_boundary /= 'z' )then
+          stop 'Only absorbing_boundary = "z" is supported currently'
+       end if
+       if(.not.if_orthogonal_tmp)then
+          stop 'absorbing_boundary is supported for orthogonal cell only'
+       endif
+    endif
+
+    if(yn_lr_w0_correction=='y') then
+       if( yn_periodic=='n' )then
+          stop 'yn_lr_w0_correction="y" is currently for yn_periodic="y"'
+       end if
+    endif
+
+    select case(method_opt)
+    case ('bfgs','steep','fire') ; continue
+    case default            ; stop 'method_opt must be "bfgs", "steep" or "fire"'
+    end select
+
+    select case(method_poisson)
+    case ('cg','ft','dirichlet') ; continue
+    case default                 ; stop "method_poisson must be 'cg', 'ft' or 'dirichlet'"
+    end select
+
+    select case(projection_option)
+    case ('no','gs','td') ; continue
+    case default          ; stop "projection_option must be 'no','gs', or 'td'"
+    end select
+
+    if(yn_ffte=='y'.and. yn_fftw=='y') then
+      stop "either yn_ffte or yn_fftw can be specified"
+    end if
+
+    if(any(hse_q_reduction<1))error stop 'HSE: q reduction factors must be positive'
+    if(any(modulo(num_kgrid,hse_q_reduction)/=0)) &
+      error stop 'HSE: q reduction factors must divide the k mesh'
+    if(any(hse_q_reduction/=1))then
+      if(xc/='hse06'.or.yn_dc/='n'.or.temperature>=0d0.or. &
+         yn_hse_wannier/='n'.or.exx_mlwf_norm_fraction/=0d0.or.exx_mlwf_radius/=0d0.or. &
+         hse_sr_tolerance/=0d0.or.exx_kpoint_backend/='cpu') &
+        error stop 'HSE: q reduction requires non-DC integer full-k CPU exchange without spatial localization'
+    endif
+    if(hse_block_rows<0)error stop 'HSE: hse_block_rows must be nonnegative'
+    if(exx_worker_tile_divisor<0)error stop 'HSE: exx_worker_tile_divisor must be nonnegative (0=automatic)'
+    if(exx_worker_rprime_groups<0)error stop 'HSE: exx_worker_rprime_groups must be nonnegative (0=automatic)'
+    if(hse_fft_layout/='auto'.and.hse_fft_layout/='strided'.and.hse_fft_layout/='contiguous') &
+      error stop 'HSE: hse_fft_layout must be auto, strided or contiguous'
+    if(rvv10_fft/='ffte'.and.rvv10_fft/='fftw')error stop 'rvv10_fft must be ffte or fftw'
+
+    if(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')then
+      if(exx_mlwf_radius>0d0.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0).or. &
+         exx_pair_screening/='off') &
+        error stop 'DC canonical exchange requires full support; opt into yn_exx_dc_mlwf=y for localization'
+    endif
+    if(.not.ieee_is_finite(exx_pre_scf_threshold).or.exx_pre_scf_threshold<0d0) &
+      error stop 'exx_pre_scf_threshold must be finite and nonnegative'
+    if(exx_pre_scf_steps<1)error stop 'exx_pre_scf_steps must be positive'
+    if(exx_pre_scf_threshold>0d0)then
+      if(theory/='dft'.or.yn_restart/='n'.or.yn_md/='n'.or.yn_opt/='n'.or. &
+         (.not.is_hybrid(xc))) &
+        error stop 'PBE pre-SCF requires fresh static hybrid SCF'
+      if(yn_dc=='y'.and.temperature<=0d0) &
+        error stop 'PBE pre-SCF in DC requires positive electronic temperature (e.g. temperature_k=300)'
+      if(checkpoint_interval>0.or.time_shutdown>0d0) &
+        error stop 'PBE pre-SCF stage is not supported by checkpoints or diagnostic snapshots'
+      if(method_mixing=='simple_potential'.or. &
+         (convergence/='rho_dne'.and.convergence/='norm_rho'.and.convergence/='norm_rho_dng')) &
+        error stop 'PBE pre-SCF requires density mixing and a density convergence metric'
+    endif
+    if(exx_ace_support/='occupied')error stop 'exx_ace_support must be occupied'
+    if(exx_pair_screening/='off'.and.exx_pair_screening/='diagnose'.and.exx_pair_screening/='on') &
+      error stop 'exx_pair_screening must be off, diagnose or on'
+    if(.not.ieee_is_finite(exx_pair_tolerance).or.exx_pair_tolerance<0d0) &
+      error stop 'exx_pair_tolerance must be finite and nonnegative'
+    if(exx_pair_screening/='off')then
+      if(.not.is_hybrid(xc)) &
+        error stop 'pair screening requires HSE06 or PBEh'
+      if(xc=='hse06'.and.hse_omega<=0d0)error stop 'HSE pair screening requires positive omega'
+      if(exx_mlwf_norm_fraction<=0d0)error stop 'pair screening requires exx_mlwf_norm_fraction > 0'
+      if(exx_mlwf_radius>0d0)error stop 'pair screening with fixed EXX radius is not yet supported'
+    endif
+    if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
+    if(exx_kpoint_backend/='cpu'.and.exx_kpoint_backend/='cufft') &
+      error stop 'exx_kpoint_backend must be cpu or cufft'
+    if(exx_kpoint_backend=='cufft')then
+#ifndef USE_EXX_CUFFT
+      error stop 'exx_kpoint_backend=cufft requires USE_EXX_CUFFT=ON'
+#endif
+      if(.not.is_hybrid(xc).or.yn_dc/='n') &
+        error stop 'k-point cuFFT requires native hybrid exchange without DC'
+      if(temperature>=0d0.or.(nstate>0.and.nstate*2/=nelec)) &
+        error stop 'k-point cuFFT requires occupied spin pairs without Wannier snapshots'
+      if(any(num_kgrid<1).or.product(num_kgrid)<2.or. &
+         index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none') &
+        error stop 'k-point cuFFT requires a full uniform mesh with more than one k point'
+      if(nproc_ob/=1.or.any(nproc_rgrid/=1).or.nproc_k<1) &
+        error stop 'k-point cuFFT requires k-only MPI distribution'
+      if(exx_local_backend/='cpu'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0) &
+        error stop 'k-point cuFFT is incompatible with localized exchange support'
+      if(yn_md/='n'.or.yn_opt/='n'.or. &
+         (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'k-point cuFFT supports static SCF and fixed-ion native RT'
+    endif
+    if(exx_local_backend/='cpu'.and.exx_local_backend/='cufft') &
+      error stop 'exx_local_backend must be cpu or cufft'
+    if(exx_gpu_batch_size<1)error stop 'exx_gpu_batch_size must be positive'
+    if(exx_local_backend=='cufft')then
+#ifndef USE_EXX_CUFFT
+      error stop 'exx_local_backend=cufft requires USE_EXX_CUFFT=ON'
+#endif
+      if(.not.is_hybrid(xc))error stop 'cuFFT EXX requires native hybrid orbitals'
+      if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12).or.nproc_k/=1) &
+        error stop 'cuFFT EXX requires unshifted Gamma and nproc_k=1'
+      if(exx_local_fft/='auto'.or.exx_mlwf_radius/=0d0.or. &
+        .not.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0)) &
+        error stop 'cuFFT EXX requires auto local FFT and adaptive support fraction in (0,1)'
+      if(yn_md/='n'.or.yn_opt/='n'.or. &
+        (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'cuFFT EXX supports static SCF and fixed-ion native RT'
+    endif
+
+    if(exx_factor_mode/='off'.and.exx_factor_mode/='strict'.and.exx_factor_mode/='learned') &
+      error stop 'exx_factor_mode must be off, strict or learned'
+    if(yn_exx_fft_orbits=='y')then
+      if(.not.is_hybrid(xc).or.product(num_kgrid)<2.or.index(yn_symmetry,'y')==0.or. &
+         any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or.yn_dc/='n') &
+        error stop 'FFT orbits require native CPU dense-k hybrid symmetry with all q points'
+    endif
+    if(exx_factor_mode/='off')then
+      if(propagator=='hse_ptcn')then
+        if(xc/='hse06'.or.exx_factor_mode/='learned'.or.exx_factor_exact_interval/=1.or. &
+          yn_dc/='n'.or.yn_md/='n'.or. &
+          yn_predictor_corrector/='n'.or.yn_restart/='n'.or.yn_spinorbit/='n'.or. &
+          product(num_kgrid)<=1.or.nproc_ob/=1.or.any(nproc_rgrid/=1).or. &
+          temperature>=0d0.or.yn_hse_wannier=='y'.or.exx_mlwf_radius/=0d0.or. &
+          exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied'.or. &
+          exx_pair_screening/='off'.or.hse_sr_tolerance/=0d0.or.any(hse_q_reduction/=1).or. &
+          exx_kpoint_backend/='cpu'.or.(theory/='tddft_response'.and.theory/='tddft_pulse')) &
+          error stop 'Learned CN requires fresh static integer native CPU dense-k HSE with full support'
+      else
+        if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
+           propagator/='hse_taylor4') &
+          error stop 'Factor history requires native static HSE Taylor4 or certified learned CN'
+      endif
+    endif
+    if(exx_factor_history_frames/=3) &
+      error stop 'EXX factor history is fixed at 3 frames'
+    if(exx_factor_exact_interval<1)error stop 'EXX factor exact interval must be positive'
+    if(exx_factor_warmup_steps<0)error stop 'EXX factor warmup steps must be nonnegative'
+    if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
+      error stop 'exx_mlwf_radius must be finite and nonnegative'
+    if(.not.ieee_is_finite(exx_mlwf_norm_fraction).or.exx_mlwf_norm_fraction<0d0.or.exx_mlwf_norm_fraction>1d0) &
+      error stop 'exx_mlwf_norm_fraction must be in [0,1]'
+    if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.exx_mlwf_radius==0d0)then
+      if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12)) &
+        error stop 'adaptive EXX support requires unshifted Gamma'
+    endif
+    if(exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction>0d0)then
+      if(yn_md=='y'.or.yn_opt=='y'.or. &
+        (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'finite EXX support requires static SCF or fixed-ion native RT'
+      if(theory/='dft')then
+        if(yn_dc=='y'.or.(yn_conventional_from_dcdft/='y'.and..not.is_global_hybrid(xc))) &
+          error stop 'finite EXX RT requires DC or conventional hybrid mesh orbitals'
+        if(any(abs(dk_shift)>1d-12)) &
+          error stop 'EXX RT requires unshifted native mesh orbitals'
+        if(exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction<1d0)then
+          if(any(num_kgrid/=1))error stop 'finite EXX RT requires Gamma'
+        endif
+      endif
+      if(.not.is_hybrid(xc)) &
+        error stop 'EXX MLWF radius requires HSE06 or PBEh40'
+      if(yn_restart=='y') &
+        error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
+      yn_hse_wannier='y'
+    endif
+    global_symmetry_route=is_global_hybrid(xc).and.product(num_kgrid)>1.and.index(yn_symmetry,'y')/=0
+    if(global_symmetry_route)then
+      ! Both the reference and FFT-reuse paths use the same representative orbitals.
+      ! The scalar Coulomb cutoff is invariant under the retained space group.
+      if(yn_md/='n'.or.theory=='dft_md')error stop 'Global hybrid symmetry requires fixed ions'
+      if(yn_dc/='n'.or.yn_conventional_from_dcdft/='n'.or.yn_hse_wannier/='n'.or. &
+         temperature>=0d0.or.nproc_ob/=1.or.any(nproc_rgrid/=1).or. &
+         any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or. &
+         exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied') &
+        error stop 'Global hybrid symmetry requires native full-support CPU k-only exchange with all q points'
+    endif
+    ! Full-support CPU k-only exchange also admits Hermitian pairs without sym.dat.
+    ! Keep the same native representation when pair reuse is explicitly disabled.
+    global_native_k_route=global_symmetry_route.or.(is_global_hybrid(xc).and.product(num_kgrid)>1.and. &
+      index(yn_symmetry,'y')==0.and.yn_dc=='n'.and.yn_conventional_from_dcdft=='n'.and. &
+      (theory=='dft'.or.theory=='tddft_response'.or.theory=='tddft_pulse').and. &
+      yn_hse_wannier=='n'.and.yn_md=='n'.and.temperature<0d0.and.nproc_ob==1.and.all(nproc_rgrid==1).and. &
+      all(hse_q_reduction==1).and.exx_kpoint_backend=='cpu'.and.exx_mlwf_radius==0d0.and. &
+      exx_mlwf_norm_fraction==0d0.and.exx_ace_support=='occupied')
+    pbeh_mesh_rt=(is_global_hybrid(xc)) &
+      .and.(theory=='tddft_response'.or.theory=='tddft_pulse') &
+      .and.yn_dc=='n'
+    hybrid_mesh_rt=pbeh_mesh_rt.or.(xc=='hse06'.and. &
+      (yn_hse_wannier=='y'.or.product(nproc_rgrid)>1.or.nproc_ob>1).and. &
+      (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
+      yn_conventional_from_dcdft=='y')
+    hybrid_spatial_scf=(is_hybrid(xc)).and.theory=='dft'.and. &
+      (product(nproc_rgrid)>1.or.nproc_ob>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))
+    if(hybrid_spatial_scf)then
+      yn_hse_wannier='y'
+      if(yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)) &
+        error stop 'Spatial hybrid SCF: occupied spin pairs required'
+      if(yn_restart=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
+        error stop 'Spatial hybrid SCF: restart/snapshot/checkpoint unsupported'
+      if(yn_self_checkpoint=='y')error stop 'Spatial hybrid SCF: use yn_self_checkpoint=n'
+      if(write_gs_restart_data/='no')then
+        if(.not.is_global_hybrid(xc).or.yn_dc/='n'.or.write_gs_restart_data/='wfn') &
+          error stop 'Spatial hybrid SCF: use write_gs_restart_data=no; conventional global hybrids also allow wfn'
+      endif
+
+    endif
+    if(pbeh_mesh_rt.and.yn_conventional_from_dcdft=='n')then
+      if(yn_md/='n'.or.yn_opt/='n') &
+        error stop 'Conventional hybrid RT: fixed ions required'
+      if(temperature>=0d0.or.nstate*2/=nelec) &
+        error stop 'Conventional hybrid RT: occupied spin pairs and fixed occupations required'
+    endif
+    if(hybrid_mesh_rt)then
+      if(.not.global_native_k_route)yn_hse_wannier='y'
+      if(yn_restart=='y') &
+        error stop 'Hybrid mesh RT: restart/snapshot unsupported'
+      if((ae_shape1/='impulse'.and.ae_shape1/='Acos2').or.ae_shape2/='none') &
+        error stop 'Hybrid mesh RT: impulse or Acos2 without a second field required'
+      if(.not.ieee_is_finite(dt).or.dt<=0d0.or.nt<1) &
+        error stop 'Hybrid mesh RT: positive finite dt and nt required'
+      if(ae_shape1=='Acos2')then
+        if(.not.salmon_all_finite([omega1,tw1,t1_start,E_amplitude1,I_wcm2_1,phi_CEP1])) &
+          error stop 'Hybrid mesh RT: finite pulse parameters required'
+        if(omega1<=0d0.or.tw1<=0d0.or.t1_start<0d0) &
+          error stop 'Hybrid mesh RT: positive frequency/width and nonnegative pulse start required'
+      endif
+      if(checkpoint_interval>0.or.time_shutdown>0d0.or.write_rt_wfn_k=='y') &
+        error stop 'Hybrid mesh RT: checkpoint output not supported'
+      if(yn_md=='y')then
+        if(ensemble/='NVE'.or.step_velocity_scaling>=1.or.yn_stop_system_momt=='y') &
+          error stop 'PBEh40 mesh Ehrenfest: unmodified NVE velocities required'
+        if(step_update_ps/=1.or.out_rt_energy_step/=1) &
+          error stop 'PBEh40 mesh Ehrenfest: update pseudopotentials and energy every step'
+      endif
+    endif
+    if(is_global_hybrid(xc))then
+#ifndef USE_HSE
+      error stop 'PBEh40 requires USE_HSE=ON'
+#endif
+#ifdef USE_OPENACC
+      error stop 'PBEh40: OpenACC force/potential path not yet supported'
+#endif
+      if(.not.global_native_k_route)yn_hse_wannier='y'
+      if(theory/='dft'.and.theory/='dft_md'.and..not.pbeh_mesh_rt) &
+        error stop 'Global hybrid: requires DFT, fixed-cell BOMD or supported real-space RT'
+      if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_opt/='n') &
+        error stop 'PBEh40: periodic unpolarized fixed-cell calculation required'
+
+      if(yn_restart=='y')error stop 'PBEh40: checkpoint parameter validation not yet supported'
+      if(yn_dc=='y'.and.theory=='dft_md') &
+        error stop 'PBEh40: DC MD is not yet supported'
+      if(yn_conventional_from_dcdft=='y'.and..not.pbeh_mesh_rt) &
+        error stop 'PBEh40: reconstruction requires supported real-space response'
+      if(xname/='none'.or.cname/='none')error stop 'PBEh40: extra xname/cname unsupported'
+      if(.not.ieee_is_finite(pbeh_coulomb_radius).or.pbeh_coulomb_radius<0d0) &
+        error stop 'PBEh40: invalid Coulomb radius'
+      if(.not.ieee_is_finite(rvv10_b).or.rvv10_b<=0d0.or. &
+         .not.ieee_is_finite(rvv10_c).or.rvv10_c<0d0.or.rvv10_nq<8.or.rvv10_nq>128) &
+        error stop 'PBEh40: invalid rVV10 parameters'
+    endif
+    if(is_hybrid(xc))then
+      if(.not.ieee_is_finite(hse_omega).or.hse_omega<=0d0) &
+        error stop 'HSE: hse_omega must be finite and positive (bohr^-1)'
+      if(xname/='none'.or.cname/='none')error stop 'HSE06 must not be combined with extra xname/cname'
+#ifndef USE_HSE
+      error stop 'HSE06 requires USE_HSE=ON'
+#endif
+      if(xc=='hse06'.and.(yn_periodic/='y'.or.(spin/='unpolarized'.and.spin/='noncollinear').or.yn_md/='n'.or.yn_opt/='n')) &
+        error stop 'HSE06 requires fixed-ion unpolarized periodic system'
+      if(yn_spinorbit=='y')then
+        if(xc/='hse06'.or.spin/='noncollinear'.or.yn_dc/='n'.or. &
+           nproc_ob/=1.or.any(nproc_rgrid/=1).or. &
+           (temperature<0d0.and.nstate/=nelec).or.(temperature>=0d0.and.nstate<nelec).or. &
+           yn_hse_wannier/='n'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
+           hse_sr_tolerance/=0d0.or.trim(file_kw)/='none'.or. &
+           yn_gamma_centered/='n'.or.any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or. &
+           yn_conventional_from_dcdft/='n'.or. &
+           exx_ace_support/='occupied'.or.exx_pair_screening/='off') &
+          error stop 'SOC HSE06: occupied spinors, native CPU k-only mesh and no approximations required'
+        if(exx_factor_mode/='off')then
+          if(exx_factor_mode/='learned'.or.temperature<0d0.or.product(num_kgrid)<2.or. &
+             yn_restart/='n')error stop 'SOC learned ACE requires thermal fixed occupations and no history restart'
+        endif
+        if(theory/='dft'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
+          error stop 'SOC HSE06 RT: Taylor4 required'
+        ! A wavefunction-only GS seed resets the iteration and rebuilds all HSE
+        ! state. This does not enable checkpoint continuation or RT restart.
+        if(yn_restart=='y')then
+          if(theory/='dft'.or.read_gs_restart_data/='wfn'.or.yn_reset_step_restart/='y'.or. &
+             exx_pre_scf_threshold/=0d0) &
+            error stop 'SOC HSE06: restart requires a reset wavefunction-only GS seed'
+          ! The wfn reader also restores initial occupations. Re-equilibrate
+          ! them from the target hybrid spectrum in the first thermal SCF step.
+          if(temperature>=0d0.and.nscf_init_redistribution/=0) &
+            error stop 'Thermal SOC HSE seed requires immediate occupation redistribution'
+        endif
+        if(checkpoint_interval>0.or.time_shutdown>0d0) &
+          error stop 'SOC HSE06: checkpoint continuation and diagnostics not certified'
+      endif
+      if(yn_dc=='y')yn_hse_wannier='y'
+      ! Fixed thermal occupations use the existing weighted canonical source.
+      if(xc=='hse06'.and.yn_dc=='n'.and.temperature>=0d0.and.yn_spinorbit=='n')then
+        if(nstate*2<nelec.or.nstate<1.or.mod(nelec,2)/=0.or. &
+           nproc_ob/=1.or.any(nproc_rgrid/=1).or.exx_kpoint_backend/='cpu'.or. &
+           index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none'.or. &
+           exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or.hse_sr_tolerance/=0d0.or. &
+           yn_conventional_from_dcdft=='y') &
+          error stop 'Thermal HSE: full-support CPU k-only exchange required'
+        if(theory/='dft'.and.propagator/='hse_taylor4') &
+          error stop 'Thermal HSE RT: Taylor4 ACE required'
+        yn_hse_wannier='y'
+      endif
+      if(yn_hse_wannier=='y')then
+        if(exx_mlwf_interval<1.or.exx_mlwf_maxiter<1.or. &
+          .not.ieee_is_finite(exx_mlwf_tolerance).or.exx_mlwf_tolerance<=0d0) &
+          error stop 'HSE Wannier: invalid localization controls'
+      endif
+      if(yn_hse_wannier=='y')then
+        if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
+          error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
+        if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1.or. &
+          (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.exx_mlwf_radius==0d0)))then
+          if(nproc_ob<1.or.nproc_k/=1.or.any(num_kgrid/=1)) &
+            error stop 'Spatial EXX: Gamma spatial domains required'
+          if(yn_dc=='n'.and.nstate>0.and.nproc_ob>nstate) &
+            error stop 'Spatial EXX: each orbital group must own at least one state'
+          if(yn_dc=='y'.and.nstate_frag>0.and.nproc_ob>nstate_frag) &
+            error stop 'Spatial EXX: each orbital group must own at least one state'
+          exx_grid=num_rgrid
+          if(yn_dc=='y')then
+            if(any(num_fragment<1))error stop 'Spatial EXX: positive fragment counts required'
+            exx_grid=num_rgrid/num_fragment+2*num_rgrid_buffer
+          endif
+          if(any(nproc_rgrid<1))error stop 'Spatial EXX: positive Cartesian process counts required'
+          if(any(modulo(exx_grid,nproc_rgrid)/=0)) &
+            error stop 'Spatial EXX: incompatible Cartesian grid'
+        else
+          if(nproc_ob/=1.or.product(nproc_rgrid)/=1) &
+            error stop 'HSE Wannier: only k parallelism within each fragment is supported'
+        endif
+        if(propagator=='hse_taylor4_full'.or.propagator=='hse_ptcn') &
+          error stop 'HSE Wannier RT: use the default Taylor4+ACE propagator'
+        if(yn_dc=='y'.and.temperature<0d0) &
+          error stop 'DC HSE: a nonnegative electronic temperature is required'
+      endif
+      if(yn_spinorbit=='n'.and.yn_dc/='y'.and..not.(xc=='hse06'.and.temperature>=0d0).and. &
+         (yn_hse_wannier/='y'.or.(theory/='dft'.and.theory/='dft_md')))then
+        if(nstate*2<nelec.or.mod(nelec,2)/=0.or.temperature>=0d0.or. &
+           (product(num_kgrid)==1.and.nstate*2/=nelec)) &
+          error stop 'HSE06 native support requires integer occupied states and fixed occupations'
+      endif
+      if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')then
+        if(propagator/='hse_ptcn'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
+          error stop 'HSE06: omit propagator to use Taylor4 + ACE'
+        if(yn_out_rvf_rt=='y'.and..not.pbeh_mesh_rt)error stop 'HSE06: RT force output not yet certified'
+        if(yn_fix_func/='n')error stop 'HSE06 requires self-consistent functional updates'
+        if(trans_longi/='tr')error stop 'HSE06 native RT requires transverse fields'
+        if(yn_reset_step_restart=='y')error stop 'HSE06: resetting restart time unsupported'
+        if(ae_shape1=='Acos2')then
+          if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full'.and.propagator/='hse_ptcn') &
+            error stop 'HSE06 laser requires Taylor4 or endpoint-checked PT-CN'
+          if(propagator=='hse_ptcn'.and.(ae_shape2/='none'.or.yn_restart=='y'.or. &
+             yn_spinorbit/='n'.or.temperature>=0d0.or.nproc_ob/=1.or.any(nproc_rgrid/=1))) &
+            error stop 'HSE06 laser PT-CN requires fresh scalar full-local k-only single pulse'
+          if(ae_shape2/='none'.and.ae_shape2/='impulse')error stop 'HSE06 laser: unsupported probe'
+          ! A z-polarized pulse may use its field-preserving spatial group.
+          ! init_sym_sub validates every retained operation against that field.
+          if(index(yn_symmetry,'y')/=0.and.trim(yn_symmetry)/='yyn') &
+            error stop 'HSE06 laser symmetry requires the z-field subgroup yyn'
+          ! Pulse parameters are not covered by the legacy impulse restart metadata.
+          if(yn_restart=='y'.and.((propagator/='hse_taylor4_full'.and.propagator/='hse_taylor4').or.ae_shape2/='none')) &
+            error stop 'HSE laser restart requires direct Taylor4 and a single pulse'
+          if(maxval(abs(epdir_im1))>1d-12)error stop 'HSE06 laser: linear polarization required'
+        else
+          if(ae_shape1/='impulse'.or.ae_shape2/='none')error stop 'HSE06: unsupported field shape'
+        endif
+        if(yn_spinorbit=='n'.and.index(yn_symmetry,'y')/=0.and.maxval(abs(epdir_re1(1:2)))>1d-12) &
+          error stop 'HSE symmetry: impulse must be z polarized'
+        if(gram_schmidt_interval>0)error stop 'HSE06 requires no Gram-Schmidt rescaling'
+        if(propagator=='hse_ptcn')then
+          if(yn_predictor_corrector=='y')error stop 'HSE06 PT-CN requires no external predictor-corrector'
+        else
+          if(n_hamil/=4) &
+            error stop 'HSE Taylor4 requires n_hamil=4'
+        endif
+      else if(theory/='dft'.and..not.(theory=='dft_md'.and.xc/='hse06'))then
+        error stop 'Hybrid: unsupported calculation theory'
+      endif
+    else if(propagator=='hse_ptcn'.or.propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')then
+      error stop 'HSE propagation modes require xc=hse06'
+    endif
+
+    if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
+      stop "yn_out_rt_energy_components=y is supported for periodic systems only"
+    end if
+    
+    if(yn_dc=='y') then
+      if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
+      if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
+      if(iflag_atom_coor/=ntype_atom_coor_cartesian) stop "DC method (yn_dc=y): use cartesian coordinate."
+      !if(temperature < 0d0) stop "DC method (yn_dc=y): temperature must be specified."
+      if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
+      & stop "DC method (yn_dc=y): num_fragment must be specified."
+      if(yn_periodic=='n') stop "DC method (yn_dc=y): yn_periodic=y must be specified."
+      if(.not.if_orthogonal_tmp) stop "DC method (yn_dc=y): use orthogonal coordinate."
+      if(trim(file_kw) /= 'none') stop "DC method (yn_dc=y): file_kw must be 'none' for the common standard k-point grid."
+      if(any((num_fragment > 1) .and. (num_kgrid /= 1))) &
+      & stop "DC method (yn_dc=y): num_kgrid must be one on partitioned directions."
+      if(any((num_fragment > 1) .and. (abs(dk_shift) > 1d-12))) &
+      & stop "DC method (yn_dc=y): dk_shift must be zero on partitioned directions."
+      if(any((num_fragment == 1) .and. (num_rgrid_buffer /= 0))) &
+      & stop "DC method (yn_dc=y): num_rgrid_buffer must be zero on non-partitioned directions."
+      if(product(num_kgrid) == 1 .and. any(abs(dk_shift) > 1d-12)) &
+      & stop "DC method (yn_dc=y): a single non-Gamma k point is unsupported."
+      if(index(yn_symmetry,'y') > 0) &
+      & stop "DC method (yn_dc=y): symmetry-reduced k-point lists are unsupported."
+      if(product(num_kgrid) > 1) then
+        if(temperature < 0d0) stop "DC complex k-point path: temperature must be non-negative."
+        if(any(nelec_spin /= 0)) stop "DC complex k-point path: fixed spin electron counts are unsupported."
+        if(yn_spinorbit == 'y') stop "DC complex k-point path: spin-orbit and noncollinear calculations are unsupported."
+        if(yn_opt == 'y') stop "DC complex k-point path: structure optimization is unsupported."
+        if(dm_unfold_option /= 'no') stop "DC complex k-point path: dm_unfold_option must be 'no'."
+      end if
+      if(dl(1)*dl(2)*dl(3)/=0) stop "DC method (yn_dc=y): use al & num_rgrid."
+      if(yn_restart=='y') stop "DC method (yn_dc=y): yn_restart=y is not supported."
+      if(nscf_init_mix_zero.gt.1) stop "DC method (yn_dc=y): nscf_init_mix_zero is not supported."
+      if(yn_jm=='y') stop "DC method (yn_dc=y): yn_jm=y is not supported."
+      if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
+      if(write_gs_restart_data /= 'no') then
+        if (comm_is_root(nproc_id_global)) then
+          write(*,*) "WARNING(yn_dc=y): write_gs_restart_data is internally set to 'no'"
+        end if
+        write_gs_restart_data = 'no'
+      end if
+    end if
+
+#ifdef USE_FFTW
+#else
+    if(yn_fftw=='y') then
+      stop "yn_fftw='y': Recompile with --enable-fftw"
+    end if
+#endif
+
+  end subroutine check_bad_input
+
+  subroutine stop_by_bad_input2(inp1,inp2,inp3)
+    use parallelization
+    use communication
+    implicit none
+    character(*) :: inp1
+    character(*) :: inp2
+    character(*),optional :: inp3
+    if (comm_is_root(nproc_id_global)) then
+      write(*,*) ' Bad input combination: '
+      if(present(inp3))then
+        write(*,*) ' check keywords of ',trim(inp1),' and ',trim(inp2),' and ',trim(inp3)
+      else
+        write(*,*) ' check keywords of ',trim(inp1),' and ',trim(inp2)
+      end if
+    endif
+    call end_parallel
+    stop
+  end subroutine stop_by_bad_input2
+
+  subroutine yn_argument_check(str)
+    use misc_routines, only: string_lowercase
+    use parallelization, only: end_parallel
+    implicit none
+    character(*), intent(inout) :: str
+
+    call string_lowercase(str)
+
+    if (str /= 'y' .and. str /= 'n') then
+      write (*,*) "Bad input: yn_* option only accepts 'y' or 'n'."
+      call end_parallel
+      stop
+    end if
+  end subroutine yn_argument_check
+
+  subroutine yyynnn_argument_check(str)
+    implicit none
+    character(*), intent(inout) :: str
+    integer :: i,n
+    n = len(trim(str))
+    do i = 1, n
+      call yn_argument_check( str(i:i) )
+    end do
+  end subroutine yyynnn_argument_check
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+end module inputoutput

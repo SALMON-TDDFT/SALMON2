@@ -1,5 +1,9 @@
 # メモリ上に保持するGS
 
+> 現行ビルド配置（2026-11-19）：通常XCと高速PR版HSEは同じ
+> runtime/sources/solverからビルドします。以下のstandard／通常版はAPIの
+> 能力プロファイルを指し、別の保守ソースではありません。既定はHSE無効です。
+
 [English](NATIVE_GS.en.md) · Topic: `retained_native_gs`
 
 通常版ランタイムでは、`salmonpy.native_gs` はDFTのGSを同じプロセス内に複数保持します。

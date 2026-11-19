@@ -1,202 +1,39 @@
-# Bundled SALMON solver sources / 同梱ソルバーソース
-
-The repository and wheel contain complete standard and fast-PR solver snapshots
-under `sources/`, with original licenses and acknowledgements. The only supported
-HSE implementation is the fast PR profile. HSE development prioritizes symmetry
-and this optimized profile; see [current symmetry scope](../salmonpy/FAST_HSE_SYMMETRY.en.md). `overrides/` holds completed source
-files for experimental stages. All copies are bound to inventories in
-`source-trees/`; there are no compatibility patch files or git-apply steps.
-
-```sh
-python tools/prepare_salmon_runtime.py NEW_SOURCE
-python -m salmonpy.runtime build NEW_BUILD --jobs 2 --cmake-arg=-DBLA_VENDOR=OpenBLAS
-python tools/prepare_hse_rt_state.py NEW_HSE_SOURCE --explicit-routing
-```
-
-Choose explicit compiler/library flags using [the runtime guide](../salmonpy/RUNTIME.en.md).
-Preparation does not download, compile, change an external checkout or overwrite
-a destination. Build output must be outside this checkout. The historical
-UPSTREAM OUTPUT form is accepted but the repository-owned source is used.
-The HSE reference-only profile is for numerical comparison, not an alternative
-supported implementation. Standard USE_HSE=ON is rejected.
-
-Update source files and inventory digests together. Compare shared LD/SBE kernels
-against native/, run source/object prohibition audits and relevant regressions.
-The upstream commit and legacy patch_sha256 preserve provenance and existing
-binary receipt compatibility; current files are bound by source_tree_sha256 and
-replacements_sha256. Numerical changes require renewed capability validation.
-No source is compiled on import, and full solver compilation is not part of
-ordinary wheel installation. Prefer compatible prebuilt runtimes for users.
-
-## Source unification: shared SBE, FDTD and LD stage
-
-Current explicit-routing fast-PR preparations reuse the standard SBE type/velocity
-kernels/wrappers and the FDTD/LD/EH files through complete-file inventories.
-Native/solver kernels are byte-checked before approval; no third source copy or
-patch is added. Reference-only snapshots remain unchanged.
-
-The same source builds with HSE ON/OFF. OFF needs no HSE FFTW specification or
-linkage. `build_fast_hse_mpi.py` now emits two distinct records:
-
-| Record | Use |
-|---|---|
-| build.json | Host library for HSE material groups and, when field_abi is declared, NativeEHField field groups |
-| executable-build.json | Audited executable for SalmonExecutable.from_mpi_build and batch MPI FDTD |
-
-field_abi protocol1 declares salmonpy.eh-centered-current/1 and is checked against
-the compiled checkpoint protocol during explicit build. Legacy embedded field
-records remain accepted. Existing prebuilt runtimes do not acquire the capability
-from a Python upgrade. Same-build field/material groups still run in separate
-processes; this adds no concurrent same-process field/electronic guarantee.
-
-The default standard GS/TDDFT preparation remains. Current counts include15
-standard-only paths and71 differing paths. The five standard alternative-HSE
-files are not migration targets:only fast-PR HSE is supported. Shared bridge/output
-code and equivalent audit guards should be organized, not counted as missing
-physics features. Retained GS/input/standard TDDFT initialization still needs porting.
+# Solver source / 計算本体ソース
 
 ## 日本語
 
-HSEは高速PR版を本筋とし、対称性を中心に開発・検証します。対応範囲は[対称性ガイド](../salmonpy/FAST_HSE_SYMMETRY.md)を参照してください。
+現行ソースは `runtime/sources/solver` の一系統です。高速PR版を基盤として、
+通常XC・高速HSE・SALMONpyの状態分離と出力処理を統合しています。
+共有LD/SBEカーネルはnative側とのバイト一致を検査します。
+`source.json` と `source-trees/solver.json` が出典と全ファイルのSHA256を保持します。
 
-本体ソースをリポジトリとwheelに同梱し、SALMONpyと同じ版で更新・検証します。
-固定した本体を検証して外部の新規ディレクトリへコピーし、段階別の完成形を配置します。
-外部Gitチェックアウトと互換パッチ適用は不要です。HSEは高速PR版だけを保守します。
-旧patch_sha256は由来情報であり、現在のファイルの識別には別のハッシュを使います。
-ライセンス・元コミットを保持し、import時にはコンパイルしません。
+通常の入口は `python -m salmonpy.runtime build NEW_BUILD --jobs N` です。
+既定はUSE_HSE=OFF。高速HSEは必要なFFTW等を準備して明示的に有効化します。
+`tools/prepare_salmon_runtime.py NEW_SOURCE` と旧HSE準備入口は同じファイルを
+新しい外部ディレクトリへ検証コピーします。import時にはビルドしません。
+禁止固有値ソルバーのソース・object監査を維持します。
 
-### SBE・FDTD・LD共有化の段階
+旧standard・高速版基準ソース・overridesは `source-history/20261119` の
+ハッシュ付きアーカイブとGit履歴に保存しました。現行ビルドは参照しません。
+大きな履歴アーカイブはwheel/sdistに含めません。`--reference-only` は
+開発チェックアウトでの明示的比較用です。過去の失敗バイナリは使用しません。
+既存ランタイムの検証記録やNLCC力の認証は、この配置変更では更新されません。
 
-現在のexplicit-routing高速PR版は、通常版・wheelと同じSBEカーネル、およびFDTD／LD／
-E/Hの既存ファイルを使います。完成形の一覧から参照し、第三のソース複製やパッチは
-追加しません。参照専用ソースは保持し、import時のコンパイルも増やしません。
+## English
 
-`build_fast_hse_mpi.py` が出す `build.json` はHSEと、field_abi宣言がある場合の
-NativeEHFieldに使います。別の `executable-build.json` はMPIバッチFDTDの
-SalmonExecutable.from_mpi_buildへ渡します。ライブラリと実行ファイルは別のハッシュです。
-同じビルドを場・物質の別MPI群で使えますが、同一プロセスでの同時利用を保証するもの
-ではありません。旧embedded記録も使え、配布済みバイナリは自動更新しません。
+The single maintained tree is `runtime/sources/solver`, based on fast PR HSE,
+with ordinary XC, state ownership and output changes integrated directly.
+Shared LD/SBE kernels are checked byte-for-byte against native sources.
+`source.json` and `source-trees/solver.json` retain provenance and file hashes.
 
-同じソースのHSE有効／無効ビルドを検証しました。無効側はHSE用FFTW指定・リンクが
-不要です。標準GS／TDDFTの既定入口はまだ切り替えません。固有15パスのうち標準側の
-代替HSE5ファイルは移植対象外で、HSEは高速PR版に限定します。残るGS／入力／通常TDDFT
-の初期化・所有権と、通信・出力・監査コードの整理を進めます。
+Use `python -m salmonpy.runtime build NEW_BUILD --jobs N` for explicit builds.
+The default is USE_HSE=OFF; fast HSE is explicitly enabled with FFTW dependencies.
+`tools/prepare_salmon_runtime.py NEW_SOURCE` and the legacy HSE preparation entry
+copy the same verified inventory to a fresh external directory. Import never builds.
+Source and application-object prohibition audits remain mandatory.
 
-## NLCC consistency patch (CPU, unpolarized NC)
-
-The current bundled source aligns Libxc's NLCC energy weighting and GGA
-core-density gradients, and adds the explicit force from the sampled core-density
-interpolant. Atoms are the outer OpenMP work items. The core force is reduced
-over spatial ranks only, before force symmetry, without k/orbital multiplicity.
-Invalid scalar/table values and arithmetic overflow are rejected collectively.
-
-Validation tools are `tools/run_nlcc_native_tests.py` with the prescribed-density
-programs in `tests/runtime/`, and scalar-only Si probes in
-`tools/measure_nlcc_force_work.py`, `tools/test_nlcc_mpi_scf.py` and
-`tools/test_nlcc_no_core_regression.py`. Each newly linked test executable audits
-all application objects. Solver probes discard temporary eigen/k/info outputs;
-only requested scalar reports are exported.
-
-Piecewise-linear radial knots and the existing hard core cutoff need not be
-differentiable; tests distinguish interior derivatives from boundary crossings.
-Spin-polarized Libxc-NLCC remains unsupported. Meta-GGA force validation is not
-claimed, and an OpenACC NLCC-force path explicitly fails as unvalidated.
-Existing binary bundles are not changed by this source update. The Calculator
-enables NLCC forces only when a matching validation receipt is loaded with
-`load_validated_build` or `load_runtime`. The receipt binds the executable and
-patch hashes to native checks and a whole-application regression; relocation
-requires repeating the latter. Source/object audit alone does not authorize an
-old binary's NLCC forces. This capability does not certify physical convergence.
-
-### Shared initialization input and output infrastructure
-
-Fast preparation also compiles the existing standard `io/model_inputs.f90` and
-`io/step_output.f90` through the shared IO CMake list. The duplicate output helper
-in `salmonpy/native_adapters` is removed. MPI/serial host builders reuse the solver
-object; when linking an older prepared build without that object, they compile
-this same maintained source explicitly and include it in the object audit.
-
-The ordinary input record is a value-only prerequisite for retained GS/TDDFT
-migration. It does **not** replace fast HSE's larger `hse_model_inputs` snapshot,
-and does not make ordinary embedded GS/TDDFT available in the fast build yet.
-No public lifecycle or numerical update order changes in this stage.
-
-### Fast model-owned parser
-
-Fast inputoutput now provides the standard s_input_parser workspace contract.
-Explicit model registration reads through a local isolated parser, and captures
-its full fast settings separately as before. Existing batch reads retain named
-scratch files for the MD reader. Root-owned scratch units stay local; coordinate
-flags and diagnostics are broadcast so all ranks see the same parser metadata.
-The complete fast default block, unit initialization, KY resolution and input
-validation are preserved (only trailing whitespace normalized in moved defaults).
-Do not replace the complete HSE model snapshot with the common parser value view.
-
-Validation entry: tools/test_parser_ownership.py BUILD OUTPUT --fast-hse
---reference-build AUDITED_OLD_BUILD; it compares every variables.log entry with
-fresh legacy parses from an unchanged library as well as owned/interleaved reads.
-No new GS/SCF calculation is needed for this input-only test.
-
-### Internal retained fast GS import
-
-The fast GS context can import compatible existing wavefunction restarts without
-entering SCF/warmup/output loops. gs_export_seed makes value-only detached copies
-through the standard gs_seed module now shared in the fast CMake list. The common
-seed does not export HSE plans/owners or complete fast model settings. Internal
-GS import retains target-HSE phase, context-owned communicators and cache cleanup;
-its probe omits unconverged energy/force/residual fields. Legacy SCF iteration and
-output body is unchanged. This is not yet a Python NativeGSBackend fast profile.
-The no-SCF extension to tools/test_gs_lifecycle.py reuses the existing native probe
-under a compile flag, retaining older builds' legacy probe compilation.
-
-### Python fast GS handles
-
-A compiled sp_gs_protocol probe now advertises gs_abi protocol1/import mode and
-its three arrays in the fast host build record. NativeGSBackend.load reuses the
-existing GS Python API, preserves material IDs and returns density/occupations/
-orbitals. Per-import symmetry and density-symmetry scratch are switched/restored;
-sym.dat assets are carried for reduced meshes. Native monotonic tokens invalidate
-closed owners, and matching calls are collective within the host subgroup.
-
-Fast imported metadata has None for energy/residual/tolerance/convergence; native
-placeholder values are not physical zeros. SCF creation, computed eigenvalues/
-forces, portable export and GS→TDDFT initialization remain standard-profile
-features, not fast GS features yet. The retained_gs sample has an import-only
-mode rather than a new sample file. See NATIVE_GS guides for the Python example.
-
-### NLCC migration before solver-source consolidation
-
-The fast source now carries the standard profile's NLCC Libxc energy weighting
-and core-force correction. The valence-plus-core density supplied to Libxc also
-weights its energy density. Core forces differentiate the actually sampled core
-table using each material's species, boundary configuration and XC potential.
-Fast HSE projector derivatives, owned state and existing spin handling are retained.
-
-V1 cutoff behavior and V2 full support remain distinct. V2 uses the same table
-interpolation and periodic-image extent for orthogonal/skew cells and long cores;
-its cancellation-sensitive force integral uses compensated summation. IEEE
-inquiries remain scalar and only used V2 table entries are inspected, not padding.
-
-Prescribed-density energy/force variation and OMP/MPI partition checks are
-implementation tests, not material convergence certification. They do not attach
-validated NLCC-force capability records to an ASE Calculator runtime. Existing
-capability gates remain. No-NLCC workflows retain regression checks. Removing
-legacy sources and changing default preparation still require the remaining
-workflow/provenance validation; this migration alone does not complete unification.
-
-### 一本化に向けた高速版NLCCの移植
-
-高速ソースに、通常版で検証していたNLCC付きLibxcのエネルギー重み付けと内殻の力を移しました。
-Libxcが使う価電子＋内殻密度と、エネルギー密度の重みを一致させます。力は各物質が持つ
-原子種・境界条件・XCポテンシャルと、実際にサンプルした内殻表の微分から計算します。
-HSE用のプロジェクター微分、状態所有、既存のスピン処理は保持します。
-
-V1の打切りとV2の全サポートを分け、V2は斜交セル・セルをまたぐ長い内殻・周期像を
-同じ補間規約で扱います。広いV2内殻の力積分には補償和を使います。IEEE検査はスカラーで、
-使用する表の範囲を検査し、V2の未使用パディングは参照しません。
-
-検証は与えた密度のエネルギー微分と力、OMPおよびMPIの分割比較です。
-実材料の収束を保証せず、ASE CalculatorのNLCC力に必要なランタイム検証記録を
-自動的に付与するものでもありません。従来ランタイムの保護は維持します。
-NLCCなしの既存計算は数値回帰で確認します。旧ソースの削除・既定ビルドの切替は
-残る経路の確認後に行い、この移植だけで一本化完了とはしません。
+Frozen standard, fast reference and overrides are preserved as hash-checked archives
+in `source-history/20261119` and Git history. Current builds do not use them.
+History archives are excluded from wheel/sdist; reference-only preparation is an
+explicit developer-checkout comparison. Failed binaries remain evidence only.
+Existing runtime validation receipts and NLCC force certification are unchanged.

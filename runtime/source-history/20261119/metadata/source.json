@@ -1,0 +1,16 @@
+{
+  "upstream_repository": "https://github.com/SALMON-TDDFT/SALMON2.git",
+  "upstream_commit": "3322d0561c0cad5180679136b3eddbe8b909487c",
+  "patch_sha256": "62817e02b40eb7db00132a8affcdb179b15b9c5445598c2ea371105bb46f6c7a",
+  "integration_commit": "d0b80d397a0fba8bffb3b189c4a47632dbc75522",
+  "shared_kernels": {
+    "native/lorentz_drude.f90": "src/maxwell/lorentz_drude.f90",
+    "native/sbe_types.f90": "src/ssbe/sbe_types.f90",
+    "native/sbe_velocity_kernel.f90": "src/ssbe/sbe_velocity_kernel.f90"
+  },
+  "interface_revision": "salmonpy-runtime/2",
+  "source_tree": "sources/standard",
+  "source_tree_manifest": "source-trees/standard.json",
+  "source_tree_sha256": "73123ab6d879fcc03470547771eee58289ab10b2f373cee8d5839f603647af9c",
+  "patch_sha256_role": "historical equivalent-source migration identity for existing binary receipts; no patch is applied"
+}

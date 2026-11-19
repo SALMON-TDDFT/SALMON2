@@ -16,11 +16,77 @@ program test_model_inputs
   if(natom/=2.or.nelec/=1.or.xc/="a".or.dt/=1d0.or.iflag_atom_coor/=1)error stop "first scalar ownership"
   if(any(shape(Rion)/=[3,2]).or.any(Rion/=1d0).or.any(kion/=1))error stop "first array ownership"
   if(any(num_kgrid/=1).or.any(dl/=1d0).or.any(file_pseudo/="a"))error stop "first model input"
+#ifdef SALMONPY_FAST_CORE
+  if(exx_ace_support/='a')error stop 'fast input exx_ace_support'
+  if(exx_factor_exact_interval/=1)error stop 'fast input exx_factor_exact_interval'
+  if(exx_factor_history_frames/=1)error stop 'fast input exx_factor_history_frames'
+  if(exx_factor_n_teach/=1)error stop 'fast input exx_factor_n_teach'
+  if(exx_factor_warmup_steps/=1)error stop 'fast input exx_factor_warmup_steps'
+  if(exx_gpu_batch_size/=1)error stop 'fast input exx_gpu_batch_size'
+  if(exx_kpoint_backend/='a')error stop 'fast input exx_kpoint_backend'
+  if(exx_local_backend/='a')error stop 'fast input exx_local_backend'
+  if(exx_local_fft/='a')error stop 'fast input exx_local_fft'
+  if(exx_mlwf_interval/=1)error stop 'fast input exx_mlwf_interval'
+  if(exx_mlwf_maxiter/=1)error stop 'fast input exx_mlwf_maxiter'
+  if(exx_mlwf_norm_fraction/=1d0)error stop 'fast input exx_mlwf_norm_fraction'
+  if(exx_mlwf_radius/=1d0)error stop 'fast input exx_mlwf_radius'
+  if(exx_mlwf_tolerance/=1d0)error stop 'fast input exx_mlwf_tolerance'
+  if(exx_pair_screening/='a')error stop 'fast input exx_pair_screening'
+  if(exx_pair_tolerance/=1d0)error stop 'fast input exx_pair_tolerance'
+  if(exx_pre_scf_steps/=1)error stop 'fast input exx_pre_scf_steps'
+  if(exx_pre_scf_threshold/=1d0)error stop 'fast input exx_pre_scf_threshold'
+  if(exx_worker_rprime_groups/=1)error stop 'fast input exx_worker_rprime_groups'
+  if(exx_worker_tile_divisor/=1)error stop 'fast input exx_worker_tile_divisor'
+  if(hse_block_rows/=1)error stop 'fast input hse_block_rows'
+  if(hse_fft_layout/='a')error stop 'fast input hse_fft_layout'
+  if(any(hse_q_reduction/=1))error stop 'fast input hse_q_reduction'
+  if(hse_sr_tolerance/=1d0)error stop 'fast input hse_sr_tolerance'
+  if(pbeh_coulomb_radius/=1d0)error stop 'fast input pbeh_coulomb_radius'
+  if(rvv10_b/=1d0)error stop 'fast input rvv10_b'
+  if(rvv10_c/=1d0)error stop 'fast input rvv10_c'
+  if(rvv10_fft/='a')error stop 'fast input rvv10_fft'
+  if(rvv10_nq/=1)error stop 'fast input rvv10_nq'
+  if(yn_exx_dc_mlwf/='a')error stop 'fast input yn_exx_dc_mlwf'
+  if(yn_hse_wannier/='a')error stop 'fast input yn_hse_wannier'
+#endif
   Rion=9d0;kion=9;xc="changed";dt=9d0
   call second%activate(status)
   if(status/=0)error stop "activate second failed"
   if(natom/=3.or.nelec/=2.or.xc/="b".or.dt/=2d0)error stop "second scalar ownership"
   if(any(shape(Rion)/=[3,3]).or.any(Rion/=2d0).or.any(kion/=2))error stop "second array ownership"
+#ifdef SALMONPY_FAST_CORE
+  if(exx_ace_support/='b')error stop 'fast input exx_ace_support'
+  if(exx_factor_exact_interval/=2)error stop 'fast input exx_factor_exact_interval'
+  if(exx_factor_history_frames/=2)error stop 'fast input exx_factor_history_frames'
+  if(exx_factor_n_teach/=2)error stop 'fast input exx_factor_n_teach'
+  if(exx_factor_warmup_steps/=2)error stop 'fast input exx_factor_warmup_steps'
+  if(exx_gpu_batch_size/=2)error stop 'fast input exx_gpu_batch_size'
+  if(exx_kpoint_backend/='b')error stop 'fast input exx_kpoint_backend'
+  if(exx_local_backend/='b')error stop 'fast input exx_local_backend'
+  if(exx_local_fft/='b')error stop 'fast input exx_local_fft'
+  if(exx_mlwf_interval/=2)error stop 'fast input exx_mlwf_interval'
+  if(exx_mlwf_maxiter/=2)error stop 'fast input exx_mlwf_maxiter'
+  if(exx_mlwf_norm_fraction/=2d0)error stop 'fast input exx_mlwf_norm_fraction'
+  if(exx_mlwf_radius/=2d0)error stop 'fast input exx_mlwf_radius'
+  if(exx_mlwf_tolerance/=2d0)error stop 'fast input exx_mlwf_tolerance'
+  if(exx_pair_screening/='b')error stop 'fast input exx_pair_screening'
+  if(exx_pair_tolerance/=2d0)error stop 'fast input exx_pair_tolerance'
+  if(exx_pre_scf_steps/=2)error stop 'fast input exx_pre_scf_steps'
+  if(exx_pre_scf_threshold/=2d0)error stop 'fast input exx_pre_scf_threshold'
+  if(exx_worker_rprime_groups/=2)error stop 'fast input exx_worker_rprime_groups'
+  if(exx_worker_tile_divisor/=2)error stop 'fast input exx_worker_tile_divisor'
+  if(hse_block_rows/=2)error stop 'fast input hse_block_rows'
+  if(hse_fft_layout/='b')error stop 'fast input hse_fft_layout'
+  if(any(hse_q_reduction/=2))error stop 'fast input hse_q_reduction'
+  if(hse_sr_tolerance/=2d0)error stop 'fast input hse_sr_tolerance'
+  if(pbeh_coulomb_radius/=2d0)error stop 'fast input pbeh_coulomb_radius'
+  if(rvv10_b/=2d0)error stop 'fast input rvv10_b'
+  if(rvv10_c/=2d0)error stop 'fast input rvv10_c'
+  if(rvv10_fft/='b')error stop 'fast input rvv10_fft'
+  if(rvv10_nq/=2)error stop 'fast input rvv10_nq'
+  if(yn_exx_dc_mlwf/='b')error stop 'fast input yn_exx_dc_mlwf'
+  if(yn_hse_wannier/='b')error stop 'fast input yn_hse_wannier'
+#endif
   call clone%activate(status)
   if(status/=0.or.any(Rion/=1d0).or.natom/=2)error stop "deep assignment alias"
   deallocate(Rion,Rion_red,kion,flag_opt_atom,atom_name)
@@ -34,6 +100,39 @@ program test_model_inputs
 contains
   subroutine fill(value,atoms)
     integer,intent(in) :: value,atoms
+#ifdef SALMONPY_FAST_CORE
+    exx_ace_support=merge('a','b',value==1)
+    exx_factor_exact_interval=value
+    exx_factor_history_frames=value
+    exx_factor_n_teach=value
+    exx_factor_warmup_steps=value
+    exx_gpu_batch_size=value
+    exx_kpoint_backend=merge('a','b',value==1)
+    exx_local_backend=merge('a','b',value==1)
+    exx_local_fft=merge('a','b',value==1)
+    exx_mlwf_interval=value
+    exx_mlwf_maxiter=value
+    exx_mlwf_norm_fraction=real(value,8)
+    exx_mlwf_radius=real(value,8)
+    exx_mlwf_tolerance=real(value,8)
+    exx_pair_screening=merge('a','b',value==1)
+    exx_pair_tolerance=real(value,8)
+    exx_pre_scf_steps=value
+    exx_pre_scf_threshold=real(value,8)
+    exx_worker_rprime_groups=value
+    exx_worker_tile_divisor=value
+    hse_block_rows=value
+    hse_fft_layout=merge('a','b',value==1)
+    hse_q_reduction=value
+    hse_sr_tolerance=real(value,8)
+    pbeh_coulomb_radius=real(value,8)
+    rvv10_b=real(value,8)
+    rvv10_c=real(value,8)
+    rvv10_fft=merge('a','b',value==1)
+    rvv10_nq=value
+    yn_exx_dc_mlwf=merge('a','b',value==1)
+    yn_hse_wannier=merge('a','b',value==1)
+#endif
     theory=merge('a','b',value==1)
     yn_md=merge('a','b',value==1)
     yn_opt=merge('a','b',value==1)

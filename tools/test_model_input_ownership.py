@@ -18,10 +18,12 @@ def main():
     subprocess.run([sys.executable,str(checker),'--source-root',str(source/'src')],check=True)
     out.mkdir(parents=True,exist_ok=False)
     files=[source/'src/io/salmon_global.f90',source/'src/io/model_inputs.f90',root/'tests/native/test_model_inputs.f90']
+    options=['-cpp']
+    if 'SALMONPY_FAST_CORE' in (source/'src/config.h.in').read_text():options.append('-DSALMONPY_FAST_CORE')
     objects=[]
     for i,path in enumerate(files):
         obj=out/('part-'+str(i)+'.o')
-        subprocess.run([args.fc,'-J'+str(out),'-I'+str(out),'-c',str(path),'-o',str(obj)],check=True)
+        subprocess.run([args.fc,*options,'-J'+str(out),'-I'+str(out),'-c',str(path),'-o',str(obj)],check=True)
         objects.append(str(obj))
     subprocess.run([sys.executable,str(checker),'--object-tree',str(out)],check=True)
     executable=out/'test-model-inputs'

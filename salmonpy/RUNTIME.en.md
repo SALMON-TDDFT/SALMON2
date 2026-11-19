@@ -221,7 +221,7 @@ use the full-build probes above for the integrated profile.
 `salmonpy/native_adapters/hse_resource_context.f90` is SALMONpy-owned source,
 shipped in this repository and wheel. It links to the preceding pinned fast-PR
 kernel modules; the full solver sources are also bundled, and compilation remains explicit.
-Stage-specific completed files are maintained under runtime/overrides.
+Completed changes are integrated in runtime/sources/solver.
 
 `hse_context` owns its FFT kernel and accepted RT/ACE data. `hse_open` fixes the
 orthogonal rectangular grid, uniform full k mesh, spacings, screening and hybrid
@@ -256,14 +256,14 @@ and optimized routing remain outside this stage. FDTD still requires common dt.
 
 ## Source ownership and updates
 
-The repository and wheel carry the standard solver and the fast-PR HSE baseline,
-including original licenses and provenance. Preparation verifies complete file
-inventories, copies sources, and installs stage-specific completed files after
-checking both their old and new hashes. It does not use Git or apply patches.
-The old UPSTREAM OUTPUT preparation/build arguments remain accepted, but the
-bundled pinned source is used and the supplied checkout is never modified.
-HSE is supported only through the fast profile; USE_HSE=ON in the standard
-profile fails explicitly. Reference-only fast sources are comparison fixtures.
+The repository and wheel carry one maintained fast-PR solver in
+`runtime/sources/solver`, including ordinary XC and all integrated changes.
+Default preparation and the HSE preparation alias verify and copy the same file
+inventory into a new external directory. No replacement files or patches are applied.
+The default runtime build sets USE_HSE=OFF; explicitly enabling fast HSE requires
+its FFTW dependencies. Historical comparison archives remain in the developer
+checkout under runtime/source-history and are excluded from wheel/sdist payloads.
+Reference-only preparation is explicitly a developer comparison operation.
 
 `source_tree_sha256` identifies the bundled tree inventory; `replacements_sha256`
 identifies completed stage files. Historical `patch_sha256` values remain solely
@@ -288,9 +288,10 @@ for batch MPI FDTD. Both records bind different binaries by their own SHA256.
 Existing embedded field records remain supported; only new capable builds carry
 the new declaration. Import never builds or downloads anything.
 
-Field and material groups remain separate processes with host-owned MPI. Full
-standard GS/TDDFT source migration and concurrent same-process field/electronic
-ownership are unfinished; default preparation commands and old binaries stay valid.
+Field and material groups remain separate processes with host-owned MPI.
+Ordinary GS/TDDFT source migration is complete in the maintained solver tree.
+Concurrent same-process field/electronic ownership remains outside this contract;
+existing binaries retain their original capabilities.
 
 ## Experimental full TDDFT contexts with a fixed timestep per state
 
@@ -639,3 +640,11 @@ state does not certify convergence, energy or forces. MD/DC/optimization import
 and real-material convergence validation are outside this measured path.
 
 The fast source also builds an ordinary-XC host library via build_embedded_tddft.py with USE_HSE=OFF. It declares source_profile=fast-pr, ordinary_rt_abi=1 and import-only gs_abi/1. Shared embedded RT/worker/parallel-bridge sources preserve normal APIs; fast numerical states already own stencil/XC scratch. PZ/TB-mBJ/Libxc-PZ/PBE memory GS handoff, independent states and direct RT restart are supported as described in NATIVE_GS.en.md. Computed GS and export migration remain pending.
+
+## Unified source and default builds (2026-11-19)
+
+One maintained tree, `runtime/sources/solver`, serves ordinary XC and fast PR HSE.
+Default preparation uses this tree and default builds disable HSE; explicit HSE
+builds use the same inventory. Historical archives are developer-only and are not
+shipped in wheel/sdist. No numerical kernel was changed by this layout migration.
+Fast-specific initialization settings are captured per model.

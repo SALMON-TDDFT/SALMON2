@@ -89,4 +89,4 @@ class NativeStepTests(unittest.TestCase):
         package=Path(salmonpy.__file__).resolve().parent
         root=package/'_runtime_source' if (package/'_runtime_source').is_dir() else package.parent
         self.assertFalse((package/'native_adapters/step_output.f90').exists())
-        self.assertTrue((root/'runtime/sources/standard/src/io/step_output.f90').is_file())
+        self.assertTrue((root/'runtime/sources/solver/src/io/step_output.f90').is_file())

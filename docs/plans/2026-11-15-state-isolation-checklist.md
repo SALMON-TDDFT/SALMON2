@@ -1709,7 +1709,7 @@ folded into existing unittest/MPI tests; test-method count remains628.
 - [x] Computed GS to ordinary RT lifecycle regression.
 - [x] Installed-wheel validation: sdist→wheel; source/installed628 (627 pass,1 skip); computed GS→current sample and spatial MPI6 direct resume exact.
 - [x] HSE-enabled computed GS (new declared run capability, full-k/k-only native profile).
-- [ ] Final source-tree consolidation.
+- [x] Final source-tree consolidation (2026-11-19 unified-source stage).
 
 ### Computed GS→ordinary RT continuation
 
@@ -1727,7 +1727,7 @@ folded into existing unittest/MPI tests; test-method count remains628.
 - [x] HSE GS info/eigen text output matches prior fixed fast standalone executable byte-for-byte. No GS restart/array dataset collected.
 - [x] HSE computed sample --xc hse06 --current-steps16 passes MPI2. Ordinary Libxc-PZ/PBE spatialMPI6 remains exact.
 - [x] Installed wheel/sampleMPI2/HSE MPI6 direct restart, source/installed628 (627 pass,1 skip), JP/EN/AI/tool byte parity; old-HSE RT with matched linking is exact.
-- [ ] Final current source-tree consolidation and batch-report migration.
+- [x] Final current source-tree consolidation and batch-report migration (2026-11-19).
 
 ### Fast GS batch reports and optional restart output (2026-11-19)
 
@@ -1737,7 +1737,7 @@ folded into existing unittest/MPI tests; test-method count remains628.
 - [x] Existing lifecycle --batch controls and dft_si --no-restart/--max-iterations sample; source/installed8-atom4-iteration execution, no GS datasets collected.
 - [x] Fresh fast serial/no-HSE and MPI/HSE builds, source/object audits, HSE CLI report comparison, MPI6 retained GS→RT/direct restart and full/reduced learned-history regression.
 - [x] Source/installed628 tests (627pass,1skip), sdist→wheel, JP/EN/AI synchronization; no new unittest methods.
-- [ ] Batch HSE fast-PR provenance connection and final maintained source-tree consolidation.
+- [x] Batch HSE fast-PR provenance connection and final maintained source-tree consolidation.
 - [ ] Audit legacy SALMON eV/Hartree versus modern Python CODATA conventions without silently changing existing calculations.
 
 ### NLCC parity gate before solver-source retirement (2026-11-19)
@@ -1749,4 +1749,21 @@ folded into existing unittest/MPI tests; test-method count remains628.
 - [x] No-NLCC PZ/PBE/HSE parity, independent GS/RT/direct restart, full/reduced learned/PT-CN history regression; fresh HSE-off/on source/object-audited builds.
 - [x] Builder adapter sources select prepared-tree files, not a hard-coded standard checkout. Preparation-level shared-file references remain.
 - [x] Source/installed628 (627pass,1skip), sdist→wheel, installed HSE MPI6, installed preparation736-file byte parity and JP/EN/AI synchronization.
-- [ ] Default fast-source preparation/provenance migration, remaining archive and runtime NLCC capability certification, canonical source placement and retirement of duplicate current trees.
+- [x] Default fast-source preparation/provenance, canonical source placement and retirement of duplicate current trees; synthetic archive converter gate passes.
+- [ ] New-source runtime NLCC capability certification remains a separate gate.
+
+### Unified maintained source and default build (2026-11-19)
+
+- [x] One current736-file solver tree; historical sources/overrides preserved as checked archives, excluded from distributions.
+- [x] Default and HSE preparation share verified copies; default public build disables HSE.
+- [x] Fast-specific31 initialization inputs captured/activated per model; native ownership probe passes.
+- [x] Fresh default serial, ordinary MPI and fast HSE MPI builds; source/all-object audits retained.
+- [x] Six ordinary-XC MPI cases exact against prior fast build; HSE full/reduced learned Taylor/PT-CN exact, direct resume no replay.
+- [x] HSE computed GS independent ownership and16-step direct resume exact; public GS batch scalar comparison passes.
+- [ ] Broader converged-material validation, new-source NLCC runtime certification and other-platform execution remain separate gates.
+
+- [x] Installed default-source preparation,736-file byte parity; wheel excludes duplicate historical archives.
+- [x] Source/installed628 tests (627pass,1skip), prescribed NLCC OMP/MPI2/4, archive converter synthetic I/O and host-MPI bridge regressions.
+- [x] Restore existing process-worker parser/endpoint wiring in the unified source; keep fast HSE numerical paths.
+
+Final closure: source/installed628 (627pass,1skip), installed736-file and JP/EN/AI byte parity; default serial and ordinary/HSE MPI audits/builds; ordinary six-case currents and HSE learned/history/direct restart exact. Installed mixed128-step serial control and direct63→128 A/E/j resume match exactly without replay. No GS dataset collection or CI. Evidence: calc2026/salmonpy-unified-source-20261119.

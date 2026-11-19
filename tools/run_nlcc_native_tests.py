@@ -44,7 +44,7 @@ record={'test':a.test,'source_root':source,'executable_sha256':hashlib.sha256(ex
         'runtime_executable_sha256':hashlib.sha256((build/'salmon').read_bytes()).hexdigest(),
         'runtime_source_patch_sha256':source_spec['patch_sha256'],
         'runtime_source_marker_sha256':hashlib.sha256(source_marker.read_bytes()).hexdigest(),
-        'runtime_source_profile':'fast-pr' if source_marker.name=='salmonpy-hse-rt-state.json' else 'standard'}
+        'runtime_source_profile':source_spec.get('source_profile','fast-pr' if source_marker.name=='salmonpy-hse-rt-state.json' else 'standard')}
 results=[]
 for ranks in a.ranks:
  for threads in (1,2):

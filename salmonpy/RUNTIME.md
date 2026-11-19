@@ -174,7 +174,7 @@ python tools/test_hse_rt_state_runtime.py HSE_BUILD_RECORD REFERENCE_RECORD FIXT
 `salmonpy/native_adapters/hse_resource_context.f90` はSALMONpy固有のソースとして、
 このリポジトリとwheelに同梱します。前節の固定した高速PR版のkernelモジュールへ
 リンクします。本体ソース一式も同梱し、コンパイルは明示的に行います。
-段階別の変更ファイルの完成形は runtime/overrides に保持します。
+変更済みの完成形は runtime/sources/solver に統合しています。
 
 `hse_context` はFFT kernelと受理済みRT/ACEデータを所有します。`hse_open` で
 直交した直方体格子、均一な全k点メッシュ、格子間隔、遮蔽・混合率を固定し、
@@ -587,3 +587,10 @@ Noneとして返します。通常版のSCF経路は維持します。高速版�
 高速版の追加機能 `gs_abi.memory_rt=1` は、ビルド時にコンパイル済みプロトコルを照合して宣言します。保持GSから高速PR版HSEへ、GS再開ファイル・SCF・時間発展の再実行なしで接続できます。NATIVE_GS.md参照。高速版session.run・固有値／力・アーカイブ書き出しは未接続です。通常XCのRTは下記のHSE無効プロファイルで利用できます。タイマー初期化は通常版と共有し、GS／RT逐次接続で二重確保しません。
 
 高速版ソースもbuild_embedded_tddft.py・USE_HSE=OFFで通常XC用ホストライブラリを構築できます。source_profile=fast-pr、ordinary_rt_abi=1、読み込み専用gs_abi/1を宣言します。接続コード・worker・MPI bridgeは標準版と共有し、差分格子・XC作業領域は高速版の状態所有を使います。PZ／TB-mBJ／Libxc-PZ／PBEの保持GS接続・独立状態・直接RT再開はNATIVE_GS.md参照。GS計算と出力の移植は残っています。
+
+## ソース配置と既定ビルドの統合（2026-11-19）
+
+通常XCと高速PR版HSEは同じ `runtime/sources/solver` を使用します。
+既定ビルドはHSE無効、高速HSEは同じソースから明示的に有効化します。
+旧ソースは開発用履歴アーカイブに保存し、wheel/sdistには含めません。
+配置変更で数値kernelは変更せず、高速版固有の初期化設定はモデルごとに保持します。

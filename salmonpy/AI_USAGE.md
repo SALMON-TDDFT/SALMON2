@@ -130,7 +130,7 @@ manual.jsonの `beginner_intake` を必ず適用します。新しい計算を�
 `manual.search` は常に `getting_started` と `task_catalog` を返します。一致しない検索語では
 目的別一覧を示して目的を確認し、対応不能とは即断しません。
 
-本リポジトリはSALMONpy専用です。同梱本体ソースはruntime/sources、段階別完成形はruntime/overridesです。ビルド用srcは `runtime/README.md` の手順でリポジトリ外に準備します。
+本リポジトリはSALMONpy専用です。同梱本体ソースはruntime/sources/solverの一系統です。ビルド用srcは `runtime/README.md` の手順でリポジトリ外に準備します。
 
 ## 並列経路を選ぶ
 
@@ -247,7 +247,7 @@ GS書き出しは新しいexporter付きGammaRestartConverterを明示指定し�
 
 ## 本体ソースの管理（2026-11-15）
 
-本体ソースはruntime/sourcesに同梱し、段階別完成形はruntime/overridesで管理します。外部SALMONのcloneや互換パッチ適用を案内せず、`python -m salmonpy.runtime build NEW_BUILD --jobs N`を明示的ビルド入口にします。HSEは高速PR版のみ。標準版でUSE_HSEを有効にして代替しません。元コミット・ライセンス・全ファイルのハッシュを保持し、import時はビルドしません。旧patch_sha256は由来と過去記録の互換用識別子で、新しいソースの認証ではありません。新規数値変更はsource-tree/replacementsのハッシュと対応する検証を更新します。
+本体ソースと変更済みの完成形はruntime/sources/solverに統合しています。外部SALMONのcloneや互換パッチ適用を案内せず、`python -m salmonpy.runtime build NEW_BUILD --jobs N`を明示的ビルド入口にします。HSEは高速PR版のみ。標準版でUSE_HSEを有効にして代替しません。元コミット・ライセンス・全ファイルのハッシュを保持し、import時はビルドしません。旧patch_sha256は由来と過去記録の互換用識別子で、新しいソースの認証ではありません。新規数値変更はsource-tree/replacementsのハッシュと対応する検証を更新します。
 
 ## 高速HSEの本体接続（開発用）
 

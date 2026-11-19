@@ -55,7 +55,7 @@ install(FILES "${ROOT}/salmonpy/runtime.py" "${ROOT}/salmonpy/runtime_catalog.js
 install(FILES "${ROOT}/tools/prepare_salmon_runtime.py" "${ROOT}/tools/check_forbidden_eigensolvers.py"
   DESTINATION salmonpy/_runtime_source/tools)
 install(DIRECTORY "${ROOT}/runtime/" DESTINATION salmonpy/_runtime_source/runtime
-  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.tar.gz" EXCLUDE)
 install(DIRECTORY "${ROOT}/native/" DESTINATION salmonpy/_runtime_source/native
   FILES_MATCHING PATTERN "*.f90")
 

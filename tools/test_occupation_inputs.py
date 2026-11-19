@@ -14,7 +14,10 @@ def main():
     if any(out.is_relative_to(p.resolve()) for p in (root,build,Path(record['source_root']))):raise ValueError('new external output required')
     if re.search(r'^#define (USE_MPI|USE_OPENACC)\b',(build/'config.h').read_text(),re.M):raise ValueError('serial CPU build required')
     target='rt/dip.f90' if a.dip else 'gs/occupation.f90'
-    original=root/'runtime/sources/hse-fast-reference/src'/target
+    from runtime_sources import copy_tree
+    reference_tree=out.parent/(out.name+'-historical-source')
+    copy_tree(root/'runtime',json.loads((root/'runtime/source-history/20261119/hse-fast-reference.json').read_text()),reference_tree)
+    original=reference_tree/'src'/target
     manifest=json.loads((root/'runtime/source-trees/hse-explicit-routing-replacements.json').read_text())
     original_hash=hashlib.sha256(original.read_bytes()).hexdigest()
     if original_hash!=manifest['files']['src/'+target]['before_sha256']:raise ValueError('original source hash mismatch')

@@ -15,35 +15,25 @@ store=importlib.util.module_from_spec(_store_spec);_store_spec.loader.exec_modul
 
 def prepare(source,directory=None,*,reference_only=False,explicit_routing=False):
     if directory is None:directory=source;source=None
-    root=Path(__file__).resolve().parents[1];spec=json.loads((root/'runtime/hse-rt-state.json').read_text())
-    checker=Path(__file__).with_name('check_forbidden_eigensolvers.py')
-    routing=None
-    if explicit_routing:
-        if reference_only:raise ValueError('explicit routing cannot use reference-only preparation')
-        routing=json.loads((root/'runtime/hse-explicit-routing.json').read_text())
-        if routing['parent_patch_sha256']!=spec['patch_sha256'] or routing['base_commit']!=spec['upstream_commit']:
-            raise ValueError('explicit routing requires its pinned parent overlay')
+    root=Path(__file__).resolve().parents[1]
+    if not reference_only:
+        entry=importlib.util.spec_from_file_location('salmonpy_current_prepare',Path(__file__).with_name('prepare_salmon_runtime.py'))
+        module=importlib.util.module_from_spec(entry);entry.loader.exec_module(module)
+        module.store=store  # Shared preparation boundary, including failure injection/audits.
+        return module.prepare(source,directory)
+    if explicit_routing:raise ValueError('explicit routing cannot use reference-only preparation')
+    spec=json.loads((root/'runtime/source-history/20261119/hse-fast-reference.json').read_text())
+    if not (root/'runtime'/spec['source_tree']).is_file():
+        raise FileNotFoundError('historical reference archive is not bundled; use the source checkout for developer comparisons')
     dest=Path(directory).resolve()
-    if (source is not None and dest.is_relative_to(Path(source).resolve())) or dest.is_relative_to(root):raise ValueError('new external directory required')
+    if dest.is_relative_to(root) or (source is not None and dest.is_relative_to(Path(source).resolve())):
+        raise ValueError('new external directory required')
     dest.mkdir(parents=True,exist_ok=False);marker=dest/'salmonpy-hse-rt-state.json'
-    record={**spec,'status':'preparing','overlay_applied':not reference_only,'explicit_rt_routing':explicit_routing}
-    marker.write_text(json.dumps(record,indent=2)+'\n')
+    record={**spec,'status':'preparing','overlay_applied':False,'explicit_rt_routing':False}
     try:
         store.copy_tree(root/'runtime',spec,dest)
-        subprocess.run([sys.executable,str(checker),'--source-root',str(dest/'src')],check=True)
-        for name,expected in spec['reference_source_hashes'].items():
-            if hashlib.sha256((dest/name).read_bytes()).hexdigest()!=expected:raise ValueError('pinned source changed: '+name)
-        if not reference_only:
-            store.replace_files(root/'runtime',spec,dest)
-            if routing is not None:
-                store.replace_files(root/'runtime',routing,dest)
-                record['routing_overlay']=routing
-                store.check_shared_kernels(root,dest,routing.get('shared_kernels',{}))
-        guard=dest/'cmakefiles/salmonpy_prohibition.cmake'
-        subprocess.run([sys.executable,str(checker),'--source-root',str(dest/'src')],check=True)
-        record.update(status='prepared-and-source-audited',checker_sha256=hashlib.sha256(checker.read_bytes()).hexdigest(),
-            modified_source_hashes={name:hashlib.sha256((dest/name).read_bytes()).hexdigest() for name in spec['modified_sources'] if (dest/name).is_file()},
-            cmake_guard_sha256=hashlib.sha256(guard.read_bytes()).hexdigest())
+        subprocess.run([sys.executable,str(Path(__file__).with_name('check_forbidden_eigensolvers.py')),'--source-root',str(dest/'src')],check=True)
+        record['status']='prepared-and-source-audited'
         marker.write_text(json.dumps(record,indent=2)+'\n');return dest
     except BaseException:
         record['status']='failed-not-approved';marker.write_text(json.dumps(record,indent=2)+'\n');raise

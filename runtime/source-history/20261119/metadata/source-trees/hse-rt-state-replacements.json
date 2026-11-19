@@ -1,0 +1,20 @@
+{
+  "schema": "salmonpy.source-replacements/1",
+  "files": {
+    "src/xc/CMakeLists.txt": {
+      "before_sha256": "89db100734a32c2e0e77827ff0f3d9cbeddd695763cf81cbb31c81a1d2e0ff69",
+      "after_sha256": "d48b9a82373acd3cf8c0cf888086d926c87beec8a3502b353e4b76adc5b4c695",
+      "source": "overrides/hse-rt-state/src/xc/CMakeLists.txt"
+    },
+    "src/xc/exx_native.f90": {
+      "before_sha256": "2d71c6ef30f1513ace9e0e09dea6eb44c3bb1123aa419704cef93761a311b55d",
+      "after_sha256": "2d9375f186815bb62c34405237b77fa70ac80b58a53ef704ea137014c96c68ae",
+      "source": "overrides/hse-rt-state/src/xc/exx_native.f90"
+    },
+    "src/xc/exx_rt_state.f90": {
+      "before_sha256": null,
+      "after_sha256": "e89744ccbacb48935437a81ae3178ea3039d8c746ddcf131b7cb82722d30714d",
+      "source": "overrides/hse-rt-state/src/xc/exx_rt_state.f90"
+    }
+  }
+}

@@ -1,4 +1,0 @@
-create_mpi_test()
-set_tests_properties(run_420_bulk_Si_hse_gs PROPERTIES FIXTURES_SETUP run_420_bulk_Si_hse_gs)
-set_tests_properties(verify_420_bulk_Si_hse_gs PROPERTIES FIXTURES_SETUP hse_k4_gs_verified)
-set_tests_properties(run_420_bulk_Si_hse_gs PROPERTIES TIMEOUT 1200 PROCESSORS 4 LABELS "hse;k4")

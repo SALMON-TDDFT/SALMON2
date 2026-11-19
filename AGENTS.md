@@ -7,11 +7,11 @@ Read salmonpy/AGENTS.md and salmonpy/AI_USAGE.md before changing public APIs.
 This repository is for independent SALMONpy distribution. Do not merge it into
 SALMON upstream. The project lead authorized bundled solver sources on 2026-11-15.
 
-Bundled solver sources live in runtime/sources; stage-specific complete files live
-in runtime/overrides. Runtime preparation verifies manifests and copies to a NEW
+The single maintained solver source lives in runtime/sources/solver; completed
+changes are integrated there. Frozen prior sources live in runtime/source-history. Runtime preparation verifies manifests and copies to a NEW
 external directory; do not apply compatibility patches or modify fixed binaries.
 HSE support is the fast PR profile only; comparison baselines are not supported engines.
-Preserve shared-kernel byte equality between native/ and the standard solver.
+Preserve shared-kernel byte equality between native/ and the maintained solver.
 Retain original commits, file inventories, licensing and provenance.
 
 Build kernels explicitly; never compile on import. Use new output directories

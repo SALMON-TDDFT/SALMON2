@@ -48,3 +48,5 @@ Moved from `SALMON-TDDFT/SALMON2:salmonpy-field-components` on 2026-11-14 at
 The Si starter milestones include `78e06940` and `811bbe1c`; see [NOTICE](NOTICE).
 A shallow clone hides earlier history. `runtime/source.json` deliberately retains
 the pinned upstream SALMON source URL; it is not a distribution link.
+
+現行計算ソースは `runtime/sources/solver` に統合しています（通常XC・高速PR版HSE）。[配置とビルド手順](runtime/README.md)を参照してください。

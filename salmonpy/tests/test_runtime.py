@@ -106,6 +106,8 @@ class RuntimeTests(unittest.TestCase):
                 runtime.build_runtime(self.root/'upstream', self.root/'build', jobs=1)
         record = json.loads((self.root/'build/build.json').read_text())
         self.assertEqual(record['status'], 'failed')
+        configure=next(command for command in record['commands'] if command[0]=='cmake')
+        self.assertIn('-DUSE_HSE=OFF',configure)
         self.assertTrue((self.root/'build/build.log').exists())
 
     def test_no_implicit_build(self):

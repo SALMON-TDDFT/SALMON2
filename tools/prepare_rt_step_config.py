@@ -29,7 +29,7 @@ def prepare(source,directory):
     if pinned['source_tree_sha256']!=spec['base_source_tree_sha256']:
         raise ValueError('step configuration pinned base source tree differs')
     files=store.manifest(root/'runtime',pinned,'source_tree_manifest','source_tree_sha256','salmonpy.source-tree/1')
-    store.check_tree(source,files,extra=('salmonpy-runtime-source.json',))
+    store.check_tree(source,files,extra=('salmonpy-runtime-source.json','salmonpy-hse-rt-state.json'))
     checker=Path(__file__).with_name('check_forbidden_eigensolvers.py')
     subprocess.run([sys.executable,str(checker),'--source-root',str(source/'src')],check=True)
     # Claim only a new output; record failure even if copying is interrupted.
@@ -40,7 +40,9 @@ def prepare(source,directory):
     try:
         store.copy_files(source,dest,files)
         shutil.copy2(source/'salmonpy-runtime-source.json',dest/'salmonpy-runtime-source.json')
-        store.replace_files(root/'runtime',spec,dest)
+        fast_marker=source/'salmonpy-hse-rt-state.json'
+        if fast_marker.is_file():shutil.copy2(fast_marker,dest/fast_marker.name)
+        status['copy_only_integrated_source']=True
         subprocess.run([sys.executable,str(checker),'--source-root',str(dest/'src')],check=True)
         status['status']='prepared-and-source-audited'
         status['modified_source_hashes']={name:hashlib.sha256((dest/name).read_bytes()).hexdigest() for name in spec['modified_sources']}

@@ -1,5 +1,9 @@
 # Retained native ground states
 
+> Current build layout (2026-11-19): ordinary XC and fast PR HSE both build
+> from runtime/sources/solver. Below, standard/ordinary identifies the API
+> capability profile, not a second maintained source tree. Default builds disable HSE.
+
 [日本語](NATIVE_GS.md) · Topic: `retained_native_gs`
 
 With a standard runtime, salmonpy.native_gs keeps several DFT ground states in one process.

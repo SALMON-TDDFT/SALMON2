@@ -32,7 +32,7 @@ def run(executable, directory):
     executable = Path(executable).resolve(strict=True)
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=False)
-    samples = Path(__file__).resolve().parents[1] / 'runtime/sources/standard/samples'
+    samples = Path(__file__).resolve().parents[1] / 'runtime/sources/solver/samples'
     source = samples / 'exercise_01_C2H2_gs'
     gs = root / 'gs'
     gs.mkdir()

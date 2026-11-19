@@ -89,7 +89,7 @@ def main():
     # for both languages without replacing caller optimization/toolchain flags.
     pic_options=out/'embedded-pic.cmake'
     pic_options.write_text('add_compile_options(-fPIC)\n')
-    command=['cmake','-G','Unix Makefiles','-S',str(source),'-B',str(build),*a.cmake_arg,
+    command=['cmake','-G','Unix Makefiles','-S',str(source),'-B',str(build),'-DUSE_HSE=OFF',*a.cmake_arg,
              '-DCMAKE_PROJECT_SALMON_INCLUDE='+str(pic_options),
              '-DUSE_MPI=ON','-DCMAKE_POSITION_INDEPENDENT_CODE=ON']
     with (out/'build.log').open('w') as log:

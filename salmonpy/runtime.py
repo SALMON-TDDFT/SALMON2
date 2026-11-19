@@ -288,10 +288,11 @@ def build_runtime(upstream=None, directory=None, *, jobs, cmake_args=()):
     work.mkdir(parents=True, exist_ok=False)
     commands = [
         [sys.executable, str(prepare), str(work/'source')],
-        ['cmake', '-S', str(work/'source'), '-B', str(work/'build'), *cmake_args,
+        [sys.executable, str(checker), '--source-root', str(work/'source/src')],
+        ['cmake', '-S', str(work/'source'), '-B', str(work/'build'), '-DUSE_HSE=OFF', *cmake_args,
          '-DCMAKE_REQUIRE_FIND_PACKAGE_LAPACK=TRUE', '-DCMAKE_REQUIRE_FIND_PACKAGE_LIBXCF90=TRUE'],
         ['cmake', '--build', str(work/'build'), '--target', 'salmon', '--parallel', str(jobs)],
-        [sys.executable, str(checker), '--object-tree', str(work/'build/src')],
+        [sys.executable, str(checker), '--object-tree', str(work/'build')],
     ]
     record = {'schema': 'salmonpy.runtime-build/1', 'status': 'started', 'commands': commands,
               'platform': host_platform(), 'validation': 'source/object audit only; run workflow-specific tests before production'}
@@ -303,7 +304,8 @@ def build_runtime(upstream=None, directory=None, *, jobs, cmake_args=()):
                 subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
         executable = work/'build'/('salmon.exe' if os.name == 'nt' else 'salmon')
         config=(work/'build/config.h').read_text()
-        record['build_configuration']={'mpi_enabled':bool(re.search(r'^\s*#define\s+USE_MPI(?:\s|$)',config,re.M)),
+        record['build_configuration']={'hse_enabled':bool(re.search(r'^\s*#define\s+USE_HSE(?:\s|$)',config,re.M)),
+                                       'mpi_enabled':bool(re.search(r'^\s*#define\s+USE_MPI(?:\s|$)',config,re.M)),
                                        'config_sha256':_hash(work/'build/config.h')}
         record.update(status='built-and-audited', executable=str(executable), sha256=_hash(executable))
         record['source'] = json.loads((work/'source/salmonpy-runtime-source.json').read_text())

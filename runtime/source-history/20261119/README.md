@@ -1,0 +1,1 @@
+Frozen pre-unification source and stage files. Original member bytes, inventories, licenses and origin commits are retained. Archives are developer comparison evidence, excluded from normal wheel/sdist builds; never execute failed/reference artifacts as production engines. Current source is runtime/sources/solver.
