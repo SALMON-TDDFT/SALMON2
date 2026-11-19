@@ -60,7 +60,12 @@
     "src/io/model_inputs.f90",
     "src/io/step_output.f90",
     "src/gs/gs_seed.f90",
-    "src/gs/CMakeLists.txt"
+    "src/gs/CMakeLists.txt",
+    "src/misc/timer.f90",
+    "src/rt/embedded_tddft.f90",
+    "src/rt/tddft_worker.f90",
+    "src/salmonpy/parallel_bridge.f90",
+    "src/config.h.in"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -90,7 +95,7 @@
   ],
   "scope": "explicit full-support fast HSE native ownership; serial and experimental k-only host-MPI CPU contexts, common immutable per-group configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "e2c37acc4a94f008f4bd943cca67779e1dda6c83b9fe1b97be183e05b78f18e9",
+  "replacements_sha256": "267a71e7a21b301d4a9e1f51d5f292d89e223230b112c3c0394394e1904af8fc",
   "patch_sha256_role": "historical migration identity; no patch is applied",
   "shared_kernels": {
     "native/sbe_types.f90": "src/ssbe/sbe_types.f90",

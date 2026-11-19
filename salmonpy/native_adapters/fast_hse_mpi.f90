@@ -13,6 +13,8 @@ module salmonpy_fast_hse_mpi
  use parallelization,only:setup_parallel,nproc_group_global,nproc_size_global
  use salmonpy_tddft_context,only:tddft_context,rt_open,rt_step,rt_close,rt_input_config, &
    rt_history_info,rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_vector_potential,rt_model_settings
+ use salmonpy_gs_seed,only:s_gs_seed
+ use salmonpy_gs_context,only:gs_seed_from_handle
  use structures,only:s_rt_run_config
  implicit none
  private
@@ -36,6 +38,7 @@ module salmonpy_fast_hse_mpi
  logical,save::handle_mode=.false.,model_symmetry=.false.
  integer,save::handle_group=0
  type model_slot
+   type(s_gs_seed),allocatable::memory_gs
    type(s_hse_model_inputs),allocatable::values
    type(s_hse_symmetry_workspace)::symmetry
    type(s_hse_density_workspace)::density_symmetry
@@ -45,6 +48,7 @@ module salmonpy_fast_hse_mpi
  end type
  type(model_slot),allocatable,save::models(:)
  integer,save::active_model=0
+ integer,save::gs_parked_model=-1
  logical,save::registry_mode=.false.
 
 
@@ -135,7 +139,7 @@ end function
  real(c_double),intent(out)::J(3)
  sp_fast_hse_init_symmetry=initialize(path,timestep,capacity,J,.true.)
  end function
- integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry,registered,output_name)
+ integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry,registered,output_name,memory_gs)
  use inputoutput,only:read_input,s_input_parser
  use math_constants,only:set_math_constants
  use plusU_global,only:read_Hubbard_parameters
@@ -145,6 +149,7 @@ end function
 #ifdef USE_MPI
  use exx_worker_service,only:service_enabled
 #endif
+ type(s_gs_seed),optional,intent(in)::memory_gs
  logical,intent(in)::allow_symmetry
  character(*),optional,intent(in)::output_name
  character(80)::selected_name
@@ -204,7 +209,7 @@ end function
  config%delta_t=timestep;config%max_steps=capacity
  selected_name='native_fast_hse'
  if(present(output_name))selected_name=output_name
- call rt_open(state,trim(selected_name),status,config=config,allow_symmetry=allow_symmetry)
+ call rt_open(state,trim(selected_name),status,config=config,allow_symmetry=allow_symmetry,memory_gs=memory_gs)
  call agree(status)
  if(status/=0)then
   failed=.true.;return
@@ -536,7 +541,16 @@ integer(c_int) function create_model_state(timestep,capacity,token,J)
  endif
  write(handles(index)%label,'(a,i0,a,i0)')'native_hse_h',index,'_g',handles(index)%generation
  call rt_input_config(config);config%delta_t=timestep;config%max_steps=capacity
- call rt_open(fresh,trim(handles(index)%label),status,config=config,allow_symmetry=model_symmetry)
+ if(active_model>0)then
+  if(allocated(models(active_model)%memory_gs))then
+   call rt_open(fresh,trim(handles(index)%label),status,config=config, &
+     allow_symmetry=model_symmetry,memory_gs=models(active_model)%memory_gs)
+  else
+   call rt_open(fresh,trim(handles(index)%label),status,config=config,allow_symmetry=model_symmetry)
+  endif
+ else
+  call rt_open(fresh,trim(handles(index)%label),status,config=config,allow_symmetry=model_symmetry)
+ endif
  call agree(status)
  if(status==0)call rt_current(fresh,J,status)
  call agree(status)
@@ -671,6 +685,7 @@ subroutine release_model(index)
  if(.not.models(index)%closed.or.models(index)%children/=0)return
  if(index==active_model)call park_model()
  if(allocated(models(index)%values))deallocate(models(index)%values)
+ if(allocated(models(index)%memory_gs))deallocate(models(index)%memory_gs)
  models(index)%symmetry=empty
  models(index)%density_symmetry=empty_density
 end subroutine
@@ -697,19 +712,78 @@ end subroutine
 integer(c_int) function sp_fast_hse_registry_protocol() bind(C)
  sp_fast_hse_registry_protocol=1
 end function
+integer(c_int) function sp_fast_hse_memory_gs_protocol() bind(C)
+ sp_fast_hse_memory_gs_protocol=1
+end function
+integer(c_int) function sp_fast_hse_gs_boundary(mode) bind(C)
+ integer(c_int),value::mode
+ integer::status,reference
+ sp_fast_hse_gs_boundary=12
+ if(.not.attached_main_thread())return
+ status=0;reference=mode
+ call comm_bcast(reference,nproc_group_global)
+ if(reference/=mode)status=11
+ if(mode==0)then
+  if(gs_parked_model/=-1.or.associated(state))status=12
+ else if(mode==1)then
+  if(gs_parked_model<0)status=12
+ else
+  status=11
+ endif
+ call agree(status)
+ if(status/=0)then
+  sp_fast_hse_gs_boundary=status;return
+ endif
+ if(mode==0)then
+  gs_parked_model=active_model
+  call park_model()
+ else
+  if(gs_parked_model>0)call select_model(gs_parked_model)
+  gs_parked_model=-1
+ endif
+ sp_fast_hse_gs_boundary=0
+end function
 integer(c_int) function sp_fast_hse_model_register(path,timestep,capacity,symmetry,model_token,state_token,J) bind(C)
  character(c_char),intent(in)::path(*)
  real(c_double),value::timestep
  integer(c_int),value::capacity,symmetry
  integer(c_int64_t),intent(out)::model_token,state_token
  real(c_double),intent(out)::J(3)
+ sp_fast_hse_model_register=register_model(path,timestep,capacity,symmetry,model_token,state_token,J)
+end function
+integer(c_int) function sp_fast_hse_model_from_gs(gs_token,path,timestep,capacity,symmetry,model_token,state_token,J) bind(C)
+ integer(c_int64_t),value::gs_token
+ character(c_char),intent(in)::path(*)
+ real(c_double),value::timestep
+ integer(c_int),value::capacity,symmetry
+ integer(c_int64_t),intent(out)::model_token,state_token
+ real(c_double),intent(out)::J(3)
+ type(s_gs_seed)::seed
+ integer::status
+ model_token=0;state_token=0;J=0d0
+ call gs_seed_from_handle(gs_token,seed,status)
+ if(status==0)then
+  if(any(seed%decomposition/=[nproc_size_global,1,1,1,1]))status=11
+ endif
+ call agree(status)
+ sp_fast_hse_model_from_gs=status
+ if(status/=0)return
+ sp_fast_hse_model_from_gs=register_model(path,timestep,capacity,symmetry,model_token,state_token,J,seed)
+end function
+integer(c_int) function register_model(path,timestep,capacity,symmetry,model_token,state_token,J,memory_gs)
+ character(c_char),intent(in)::path(*)
+ real(c_double),value::timestep
+ integer(c_int),value::capacity,symmetry
+ integer(c_int64_t),intent(out)::model_token,state_token
+ real(c_double),intent(out)::J(3)
+ type(s_gs_seed),optional,intent(in)::memory_gs
  type(model_slot),allocatable::grown(:)
  character(4096)::filename,reference_path
  integer::status,index,slot,i,group,rank,n,previous,ref_int(2)
  real(8)::ref_dt
  integer(c_int64_t)::candidate
  logical::exists
- model_token=0;state_token=0;J=0d0;sp_fast_hse_model_register=12
+ model_token=0;state_token=0;J=0d0;register_model=12
  if(.not.attached_main_thread())return
  call comm_get_globalinfo(group,rank,n)
  call c_path(path,filename,status)
@@ -722,7 +796,7 @@ integer(c_int) function sp_fast_hse_model_register(path,timestep,capacity,symmet
  call comm_bcast(reference_path,group);call comm_bcast(ref_int,group);call comm_bcast(ref_dt,group)
  if(reference_path/=filename.or.any(ref_int/=[capacity,symmetry]).or.ref_dt/=timestep)status=11
  call agree(status)
- sp_fast_hse_model_register=status
+ register_model=status
  if(status/=0)return
  if(.not.allocated(models))allocate(models(4))
  index=0
@@ -740,12 +814,16 @@ integer(c_int) function sp_fast_hse_model_register(path,timestep,capacity,symmet
  call park_model()
  allocate(models(index)%values)
  models(index)%generation=models(index)%generation+1
+ if(present(memory_gs))then
+  allocate(models(index)%memory_gs)
+  models(index)%memory_gs=memory_gs
+ endif
  models(index)%children=0;models(index)%closed=.false.;models(index)%symmetric=symmetry==1
  call rt_model_settings(.true.)
  call handle_reserve(slot,candidate,status)
  if(status==0)then
   write(handles(slot)%label,'(a,i0,a,i0)')'native_hse_m',index,'_g',models(index)%generation
-  status=initialize(path,timestep,capacity,J,symmetry==1,.true.,trim(handles(slot)%label))
+  status=initialize(path,timestep,capacity,J,symmetry==1,.true.,trim(handles(slot)%label),memory_gs)
  endif
  call agree(status)
  if(status==0)then
@@ -764,7 +842,7 @@ integer(c_int) function sp_fast_hse_model_register(path,timestep,capacity,symmet
   call release_model(index)
   if(previous>0)call select_model(previous)
  endif
- sp_fast_hse_model_register=status
+ register_model=status
 end function
 integer(c_int) function sp_fast_hse_model_spawn(model,timestep,capacity,token,J) bind(C)
  integer(c_int64_t),value::model

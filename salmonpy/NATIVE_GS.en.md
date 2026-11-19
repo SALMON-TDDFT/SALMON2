@@ -431,11 +431,107 @@ collective on the main thread; one attachment lifetime/process as above.
 
 Fast imports expose density, occupations and orbitals. Their info energy_hartree,
 residual, tolerance and converged are None, not physical zero. Eigenvalues and
-forces were not computed. Fast session.run, export_archive and tddft_model are
-not connected; the standard profile retains its existing features. No convergence
+forces were not computed. Fast session.run and export_archive remain unconnected; tddft_model
+requires the additional memory-RT capability described below; the standard profile retains its existing features. No convergence
 claim follows from importing a synthetic or unlabelled GS.
 
 The existing sample supports this path with no new sample file:
 `mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT --import-bundle GS_A --second-bundle GS_B`.
 Each state keeps its material_id; output JSON records unknowns as null. Testing
 uses synthetic inputs and validates state independence, not physical convergence.
+
+
+### Retained GS to fast-PR HSE response
+
+A newly built fast runtime with `gs_abi.memory_rt == 1` and
+`sp_fast_hse_memory_gs_protocol() == 1` connects `gs.tddft_model(dt=..., max_steps=...)`
+to the fast-PR HSE registry. This slice requires HSE06, atomic units, a compatible
+periodic scalar GS and k-only one/two-rank groups. Existing standard GS→TDDFT
+support is unchanged; ordinary PZ/TB-mBJ/Libxc RT is available in the HSE-disabled fast profile below.
+
+```python
+with backend.open(context) as session:
+    gs = session.load(bundle_a, material_id="film-a")
+    model = gs.tddft_model(dt=0.001, max_steps=32)
+    gs.close()  # The RT model owns a detached value copy of initial orbitals.
+    a = model.new_state("point-a")
+    b = model.new_state("point-b")
+    try:
+        j_a = a.step([0.0, 0.0, 1.e-5])
+        j_b = b.step([0.0, 0.0, -1.e-5])
+    finally:
+        a.close()
+        b.close()
+        model.close()
+```
+
+No SCF, GS restart copy/output, or accepted-step replay is used for this handoff.
+Static potentials/symmetry and RT resources are initialized normally. Each model
+retains its own initial orbitals/occupations, so this costs memory; it is not a
+zero-copy interface. Later source GS close/removal and sequential GS imports do
+not replace existing RT model settings. Keep the session/host communicator alive
+until every RT state closes. Model close prevents creation while live children
+remain usable. Calls are collective, main-thread and sequential.
+
+A is Cartesian A/c; returned j is charge-current density. Full-k inputs allow
+x/y/z and rotating drives. Reduced symmetry must preserve the actual drive; the
+example uses z for the tested C2z fixture, not a universal polarization limit.
+Direct rank-local checkpoints use the existing same-runtime/topology contract.
+The entry initializes from GS arrays, not an arbitrary RT/SCF checkpoint.
+
+The existing sample adds `--current-steps 16` to its `--import-bundle` mode.
+`tools/test_memory_gs_mpi.py BUILD FIXTURE NEW_OUTPUT --size 2 --fast-hse`
+uses four ranks to compare memory and existing-file initialization. Synthetic
+Taylor/learned PT-CN full/reduced controls test currents/energy, sibling ownership,
+GS close, new states after source removal, interleaved GS import and direct
+restart without replay. These are implementation checks, not physical convergence.
+
+
+### Ordinary XC on the fast source profile (HSE disabled)
+
+The same prepared fast-PR source can now build a normal CPU host-MPI library:
+
+```sh
+python tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing
+python tools/build_embedded_tddft.py NEW_SOURCE NEW_BUILD --jobs 4 \
+  --cmake-arg=-DUSE_HSE=OFF --cmake-arg=-DUSE_LIBXC=ON
+```
+
+Supply the MPI/compiler/BLAS/Libxc locations for your environment explicitly.
+This profile does not require HSE/FFTW dependencies. Its build record keeps
+`salmonpy.embedded-tddft/1`, declares `source_profile="fast-pr"`, `ordinary_rt_abi=1`
+and `gs_abi/1`. New HSE-disabled builds also declare the run mode. Use the existing NativeGSBackend session.load and
+gs.tddft_model APIs or NativeTDDFTBackend file/registry APIs. PZ, TB-mBJ, Libxc-PZ
+and Libxc-PBE, periodic full-k scalar fixed-ion middlepoint A/c response are
+supported. Material IDs persist; returned current is electric charge current j.
+
+HSE-disabled builds expose session.run for SCF, energy, forces and eigenvalues.
+Nonconvergence warns and retains the last iterate. Imported metadata remains None.
+Computed GS owners connect to explicit export_archive; this validation inspected
+assembled export arrays in RAM without writing a GS archive. Source GS close, new independent states and direct
+RT restart do not require GS-file copying or step replay. Model seed copies
+consume memory; keep the session and communicator alive for all RT children.
+Sequential subsequent GS imports suspend/resume RT inputs/timers. Main-thread,
+collective and one attachment-lifetime constraints remain.
+
+The ordinary registry reuses the standard embedded-TDDFT source, with compile-time
+selection of the fast GS seed provider. Fast stencil and XC scratch already belong
+to numerical states, so legacy global-workspace switching is omitted there.
+For file initialization, parser snapshots capture API dt/capacity/MPI decomposition
+after worker configuration, matching the standard reader's order. The existing
+fast HSE ABI and standard runtime behavior are preserved. This does not yet
+unify ordinary XC and HSE registries in one GS session or remove the old source
+tree. HSE-enabled computed-GS support and final tree consolidation remain.
+
+The retained_gs sample's import mode also accepts these records with
+--current-steps 16. Native k/orbital/spatial MPI2 response, direct restart and
+different-XC GS interleaving are tested with synthetic fixtures. Old-runtime
+comparisons distinguish exact PZ/TB-mBJ agreement from tiny Libxc differences
+(max5.5e-20au in the measured controls). Resume/fresh-state comparisons remain
+exact. This is execution/numerical parity, not physical convergence.
+
+Computed PZ/Libxc-PZ/PBE controls used orbital and spatial MPI2: independent
+owners matched exactly. PZ/PBE energy and text reports matched the previous fast
+executable. Four-iteration unconverged PBE still differs from the old standard
+profile by about 3.4e-7 Hartree; no standard-profile identity or physical
+convergence claim is made.

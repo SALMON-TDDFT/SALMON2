@@ -4,6 +4,7 @@
 #include "config.h"
 module salmonpy_tddft_context
  use structures
+ use salmonpy_gs_seed,only:s_gs_seed
  use salmonpy_step_output
  use hse_checkpoint,only:numeric_payload,hse_checkpoint_install,hse_checkpoint_capture
  use exx_rt_state,only:s_exx_rt_state,rt_state_clear
@@ -209,13 +210,14 @@ contains
  if(any(Binv/=transpose(ctx%system%primitive_a)/(2d0*acos(-1d0))))return
  ok=.true.
  end function
- subroutine rt_open(ctx,name,status,delta_t,openmp_mode,config,allow_symmetry)
+ subroutine rt_open(ctx,name,status,delta_t,openmp_mode,config,allow_symmetry,memory_gs)
  type(tddft_context),pointer,intent(inout)::ctx
  character(*),intent(in)::name
  integer,intent(out)::status
  character(*),optional,intent(in)::openmp_mode
  real(8),optional,intent(in)::delta_t
  type(s_rt_run_config),optional,intent(in)::config
+ type(s_gs_seed),optional,intent(in)::memory_gs
  logical,optional,intent(in)::allow_symmetry
  type(s_rt_run_config)::selected
  character(len(sysname))::saved_name
@@ -317,7 +319,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
                         ctx%srg, ctx%srg_scalar,  &
                         ctx%spsi_in, ctx%spsi_out, ctx%tpsi, ctx%rho, ctx%rho_jm, ctx%rho_s,  &
                         ctx%V_local, ctx%Vbox, ctx%Vh, ctx%Vh_stock1, ctx%Vh_stock2, ctx%Vxc, ctx%Vpsl,&
-                        ctx%pp, ctx%ppg, ctx%ppn, ctx%unfold, run_config=selected )
+                        ctx%pp, ctx%ppg, ctx%ppn, ctx%unfold, run_config=selected, memory_gs=memory_gs )
  sysname=saved_name
 #ifdef USE_MPI
  call comm_end_children(child_owner)

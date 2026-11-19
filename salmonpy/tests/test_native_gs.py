@@ -215,6 +215,13 @@ class NativeGSTests(unittest.TestCase):
             self.assertIn(('tables/k!.dat',table.read_bytes()),state._assets)
             self.assertEqual(state.material_id,'silicon')
             self.assertEqual(fn.call_count,1)
+            session.backend._ordinary_rt=True
+            bad=source/'unsupported.inp'
+            bad.write_text((source/'rt.inp').read_text()+"&functional\n xc='hse06'\n/\n")
+            with self.assertRaisesRegex(InputError,'HSE-disabled'):
+                session.load(source,'unsupported.inp')
+            self.assertEqual(fn.call_count,1)  # unsupported hybrid never reaches native initialization
+            self.assertEqual(len(session._states),1)
             if importlib.util.find_spec('f90nml'):
                 description=state.input_metadata()
                 self.assertEqual(description.settings['k_sampling']['mode'],'file')

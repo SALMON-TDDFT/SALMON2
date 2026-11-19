@@ -18,12 +18,20 @@
 
 ! SALMONpy one-point embedded TDDFT. Native physics uses existing RT kernels.
 #include "config.h"
+#ifdef SALMONPY_FAST_CORE
+module salmonpy_standard_tddft_context
+#else
 module salmonpy_tddft_context
+#endif
 use tddft_worker
 use salmonpy_gs_seed, only: s_gs_seed
+#ifdef SALMONPY_FAST_CORE
+use salmonpy_gs_context, only: gs_seed_from_handle
+#else
 use salmonpy_embedded_gs, only: borrow_gs
 use salmonpy_gs_storage, only: s_gs_storage
 use salmonpy_gs_model, only: s_gs_model
+#endif
 use density_matrix, only: calc_current
 use hamiltonian, only: update_kvector_nonlocalpt
 use math_constants, only: pi
@@ -31,12 +39,17 @@ use salmon_global
 use structures
 use inputoutput, only: s_input_parser
 use salmonpy_model_inputs, only: s_model_inputs
+#ifndef SALMONPY_FAST_CORE
 use code_optimization, only: s_model_optimization,park_model_optimization,activate_model_optimization
+#endif
 use salmonpy_step_output
 use parallelization, only: adjust_elapse_time, nproc_group_global
 use communication, only: comm_is_root, comm_sync_all, comm_bcast,comm_get_globalinfo, &
   comm_begin_children,comm_end_children,comm_release_children,comm_child_counts
+use salmon_xc, only: finalize_xc
+#ifndef SALMONPY_FAST_CORE
 use salmon_xc, only: finalize_xc,s_model_xc_workspace,park_model_xc_workspace,activate_model_xc_workspace
+#endif
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
 use initialization_rt_sub
@@ -66,8 +79,10 @@ type :: rt_model
   type(s_input_parser) :: parser
   type(s_gs_seed),allocatable :: seed
   type(s_model_inputs) :: runtime_inputs
+#ifndef SALMONPY_FAST_CORE
   type(s_model_optimization) :: optimization
   type(s_model_xc_workspace) :: xc_workspace
+#endif
   logical :: runtime_ready=.false.,closed=.false.
   integer :: references=0
   integer(c_int64_t) :: token=0_c_int64_t
@@ -149,8 +164,10 @@ integer function live_contexts() result(n)
 end function
 subroutine park_active_model()
   if(.not.associated(active_model))return
+#ifndef SALMONPY_FAST_CORE
   call park_model_optimization(active_model%optimization)
   call park_model_xc_workspace(active_model%xc_workspace)
+#endif
   nullify(active_model)
 end subroutine
 subroutine select_model(owner,initializing,status)
@@ -178,8 +195,10 @@ subroutine select_model(owner,initializing,status)
   embedded_dt=dt;embedded_steps=nt
   embedded_decomposition=[nproc_k,nproc_ob,nproc_rgrid]
   call read_sw_symmetry(yn_symmetry)
+#ifndef SALMONPY_FAST_CORE
   call activate_model_optimization(owner%optimization)
   call activate_model_xc_workspace(owner%xc_workspace)
+#endif
   active_model=>owner
 end subroutine
 subroutine release_model(owner)
@@ -226,11 +245,23 @@ integer(c_int) function sp_tddft_model_from_gs(gs_token,timestep,capacity,decomp
   integer(c_int),intent(in) :: decomposition(5)
   integer(c_int64_t),intent(out) :: model_token,state_token
   real(c_double),intent(out) :: J(3)
+#ifndef SALMONPY_FAST_CORE
   type(s_gs_storage),pointer :: gs
   type(s_gs_model),pointer :: gs_model
+#endif
   type(s_gs_seed),target :: seed
   integer :: status
   model_token=0;state_token=0;J=0d0
+#ifdef SALMONPY_FAST_CORE
+  call gs_seed_from_handle(gs_token,seed,status)
+  if(status==0)then
+    if(any(decomposition/=seed%decomposition))status=11
+    if(associated(pending_gs))status=12
+  endif
+  call handle_agree(status)
+  sp_tddft_model_from_gs=status
+  if(status/=0)return
+#else
   call borrow_gs(gs_token,gs,gs_model,status)
   if(status==0)then
     seed%decomposition=[gs%info%npk,gs%info%nporbital,gs%info%nprgrid]
@@ -246,6 +277,7 @@ integer(c_int) function sp_tddft_model_from_gs(gs_token,timestep,capacity,decomp
   seed%grid=gs%lg%num;seed%core_start=gs%mg%is;seed%core_end=gs%mg%ie
   seed%orbital_start=gs%info%io_s;seed%orbital_end=gs%info%io_e
   seed%k_start=gs%info%ik_s;seed%k_end=gs%info%ik_e
+#endif
   pending_gs=>seed
   sp_tddft_model_from_gs=sp_tddft_model_register('memory-gs'//c_null_char,timestep,capacity, &
       [0d0,0d0,0d0],decomposition,model_token,state_token,J)
@@ -823,6 +855,10 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
     call model%parser%values%capture()
   else
     call read_input(trim(filename),model%parser)
+#ifdef SALMONPY_FAST_CORE
+    call worker_configure()
+    call model%parser%values%capture()
+#endif
   endif
   calc_mode='RT'
   call read_sw_symmetry(yn_symmetry)
@@ -884,7 +920,7 @@ call initialization_rt( state%Mit, state%system, state%energy, state%ewald, stat
                         state%srg, state%srg_scalar,  &
                         state%spsi_in, state%spsi_out, state%tpsi, state%rho, state%rho_jm, state%rho_s,  &
                         state%V_local, state%Vbox, state%Vh, state%Vh_stock1, state%Vh_stock2, state%Vxc, state%Vpsl,&
-                        state%pp, state%ppg, state%ppn, state%unfold, owner%seed )
+                        state%pp, state%ppg, state%ppn, state%unfold, memory_gs=owner%seed )
 
 if(worker_requested()) then
   state%system%vec_Ac=worker_initial_A

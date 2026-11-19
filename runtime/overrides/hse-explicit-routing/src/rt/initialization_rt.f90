@@ -30,8 +30,10 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      srg, srg_scalar,  &
                      spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
-                     pp, ppg, ppn, unfold, delta_t, openmp_mode, run_config  )
+                     pp, ppg, ppn, unfold, delta_t, openmp_mode, run_config, memory_gs )
   use inputoutput
+  use tddft_worker,only:worker_embedded,worker_initial_A
+  use salmonpy_gs_seed,only:s_gs_seed,load_gs_seed
   use math_constants, only: pi, zi
   use structures
   use parallelization, only: nproc_id_global, nproc_group_global
@@ -65,6 +67,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use lcfo, only: init_conventional_from_dcdft
   use exx_functional, only: is_global_hybrid,is_hybrid
   implicit none
+  type(s_gs_seed),optional,intent(in)::memory_gs
   type(s_rt_run_config),optional,intent(in)::run_config
   character(*),optional,intent(in)::openmp_mode
   real(8),optional,intent(in) :: delta_t
@@ -199,6 +202,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   rt%Ac_tot = 0d0
   
   call calc_Ac_ext_t(0d0, rt%time_step, 0, rt%max_steps+1, rt%Ac_ext(:, 0:rt%max_steps+1))
+  if(worker_embedded)then
+    do itt=0,rt%max_steps+1
+      rt%Ac_ext(:,itt)=worker_initial_A
+    enddo
+  endif
 
   do itt = 0, rt%max_steps
     rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / rt%time_step
@@ -274,7 +282,10 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  if(yn_conventional_from_dcdft=='n'.or.yn_restart=='y') then
+  if(present(memory_gs))then
+    call load_gs_seed(memory_gs,system,mg,info,spsi_in)
+    Mit=0
+  else if(yn_conventional_from_dcdft=='n'.or.yn_restart=='y') then
     call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   else
   ! conventional TDDFT but wavefunctions are reconstructed from DC-LCFO data

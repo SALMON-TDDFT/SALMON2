@@ -35,6 +35,9 @@ use exx_native,only:exx_unbind_system
 implicit none
 private
 public::s_gs_context,gs_run,gs_close,gs_probe_write,gs_input_config,gs_export_seed
+#ifdef USE_MPI
+public::gs_seed_from_handle
+#endif
 ! Internal retained GS storage. Actual contexts must have TARGET and a stable address.
 ! Never copy a live context; global inputs remain shared.
 type s_gs_context
@@ -43,6 +46,8 @@ type s_gs_context
  integer::mpi_child_owner=0
  type(s_model_inputs)::inputs
  integer::iterations=0
+ logical::converged=.false.
+ real(8)::residual=0d0,threshold=0d0
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_parallel_info) :: info
@@ -170,6 +175,8 @@ if(present(config))then
 else
  call gs_input_config(selected)
 endif
+! Legacy -1 skips the >1 no-mixing loop, just as zero does.
+if(selected%mixing%initial_no_mix_steps==-1)selected%mixing%initial_no_mix_steps=0
 ! Imported orbitals do not run convergence iterations or PBE warmup.
 if(reading_only)then
  if(selected%mixing%initial_no_mix_steps==-1)selected%mixing%initial_no_mix_steps=0
@@ -203,7 +210,7 @@ endif
 endif
 if(theory=='dft_band'.and.iperiodic/=3) return
 #ifdef USE_MPI
-if(reading_only)then
+if(comm_is_attached())then
  call comm_begin_children(ctx%mpi_child_owner,status)
  if(status/=0)return
 endif
@@ -348,6 +355,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         ctx%v_local,ctx%vh,ctx%vxc,ctx%vpsl,ctx%xc_func,  &
                         ctx%pp,ctx%ppg,ctx%ppn,  &
                         ctx%band, ilevel_print, ctx%dc)
+ctx%converged=ctx%mixing%scf_converged
 
 
 if(theory=='dft_band')then
@@ -537,7 +545,10 @@ end if
 call timer_end(LOG_TOTAL)
 
 
-ctx%iterations=Miter
+ctx%iterations=Miter;ctx%residual=sum1;ctx%threshold=selected%threshold
+#ifdef USE_MPI
+if(ctx%mpi_child_owner>0)call comm_end_children(ctx%mpi_child_owner)
+#endif
 status=0
 end subroutine gs_run
 
@@ -652,13 +663,30 @@ subroutine gs_probe_write(ctx,unit)
 #endif
 end subroutine
 #ifdef USE_MPI
+subroutine gs_seed_from_handle(token,seed,status)
+ integer(c_int64_t),intent(in)::token
+ type(s_gs_seed),intent(out)::seed
+ integer,intent(out)::status
+ integer::index
+ call gs_lookup(token,index,status)
+ if(status==0)call gs_export_seed(gs_handles(index)%context,seed,status)
+end subroutine
 integer(c_int) function sp_gs_protocol() bind(C)
  sp_gs_protocol=1
+end function
+integer(c_int) function sp_gs_compute_protocol() bind(C)
+#ifdef USE_HSE
+ sp_gs_compute_protocol=0 ! HSE creation remains a separately validated step.
+#else
+ sp_gs_compute_protocol=1
+#endif
 end function
 integer(c_int) function sp_gs_create(path,token) bind(C)
  character(c_char),intent(in)::path(*)
  integer(c_int64_t),intent(out)::token
- token=0;sp_gs_create=2 ! Import-only profile: never start SCF implicitly.
+ token=0;sp_gs_create=2
+ if(sp_gs_compute_protocol()/=1)return
+ sp_gs_create=create_gs(path,token,.false.)
 end function
 subroutine gs_lookup(token,index,status)
  integer(c_int64_t),intent(in)::token
@@ -679,6 +707,11 @@ subroutine gs_lookup(token,index,status)
  if(status/=0)index=0
 end subroutine
 integer(c_int) function sp_gs_import(path,token) bind(C)
+ character(c_char),intent(in)::path(*)
+ integer(c_int64_t),intent(out)::token
+ sp_gs_import=create_gs(path,token,.true.)
+end function
+integer(c_int) function create_gs(path,token,reading_only)
  use inputoutput,only:read_input,s_input_parser
  use salmon_global,only:yn_symmetry,calc_mode
  use plusU_global,only:read_Hubbard_parameters
@@ -687,6 +720,7 @@ integer(c_int) function sp_gs_import(path,token) bind(C)
  use math_constants,only:set_math_constants
  use parallelization,only:setup_parallel
  use timer,only:timer_initialize
+ logical,intent(in)::reading_only
  character(c_char),intent(in)::path(*)
  integer(c_int64_t),intent(out)::token
  type(s_input_parser)::parser
@@ -697,7 +731,7 @@ integer(c_int) function sp_gs_import(path,token) bind(C)
  character(len(calc_mode))::previous_mode
  character(4096)::filename,expected
  integer::group,rank,nproc,i,index,status
- token=0;sp_gs_import=10
+ token=0;create_gs=10
  if(.not.comm_is_attached())return
  call comm_get_globalinfo(group,rank,nproc)
  filename='';status=0
@@ -710,7 +744,7 @@ integer(c_int) function sp_gs_import(path,token) bind(C)
  if(filename/=expected)status=11
  call comm_get_max(status,group)
  if(status/=0)then
-  sp_gs_import=status;return
+  create_gs=status;return
  endif
  if(.not.gs_host_initialized)then
   call setup_parallel
@@ -725,14 +759,14 @@ integer(c_int) function sp_gs_import(path,token) bind(C)
  call swap_hse_density_workspace(old_density_symmetry)
  call read_sw_symmetry(yn_symmetry)
  previous_mode=calc_mode;calc_mode='GS'
- call gs_run(candidate,status,import_only=.true.)
+ call gs_run(candidate,status,import_only=reading_only)
  calc_mode=previous_mode
  call swap_hse_density_workspace(old_density_symmetry)
  call swap_hse_symmetry_workspace(old_symmetry)
  call comm_get_max(status,group)
  if(status/=0)then
   call gs_close(candidate);deallocate(candidate)
-  sp_gs_import=status;return
+  create_gs=status;return
  endif
  index=0
  if(allocated(gs_handles))then
@@ -754,7 +788,7 @@ integer(c_int) function sp_gs_import(path,token) bind(C)
  token=gs_handle_prefix+gs_handle_serial
  gs_handles(index)%context=>candidate
  gs_handles(index)%token=token
- sp_gs_import=0
+ create_gs=0
 end function
 integer(c_int) function sp_gs_info(token,stats,values) bind(C)
  integer(c_int64_t),value::token
@@ -766,7 +800,9 @@ integer(c_int) function sp_gs_info(token,stats,values) bind(C)
  sp_gs_info=status
  if(status/=0)return
  associate(s=>gs_handles(index)%context)
-  stats=[s%iterations,-1,s%system%nion,s%system%no]
+  stats=[s%iterations,merge(1,0,s%converged),s%system%nion,s%system%no]
+  if(s%imported)stats(2)=-1
+  if(.not.s%imported)values=[s%energy%E_tot,s%residual,s%threshold]
  end associate
 end function
 subroutine array_layout(s,quantity,ndim,shape_out,lower,status)
@@ -781,8 +817,16 @@ subroutine array_layout(s,quantity,ndim,shape_out,lower,status)
     ndim=3;shape_out(:3)=shape(s%rho%f,kind=c_int64_t);lower(:3)=lbound(s%rho%f,kind=c_int64_t)
   case(2)
     ndim=3;shape_out(:3)=shape(s%system%rocc,kind=c_int64_t);lower(:3)=lbound(s%system%rocc,kind=c_int64_t)
-  case(3,4)
-    status=11;return ! Eigenvalues/forces were not calculated by import.
+  case(3)
+    if(s%imported)then
+      status=11;return
+    endif
+    ndim=3;shape_out(:3)=shape(s%energy%esp,kind=c_int64_t);lower(:3)=lbound(s%energy%esp,kind=c_int64_t)
+  case(4)
+    if(s%imported)then
+      status=11;return
+    endif
+    ndim=2;shape_out(:2)=shape(s%system%Force,kind=c_int64_t)
   case(5)
     ndim=7
     if(allocated(s%spsi%rwf))then

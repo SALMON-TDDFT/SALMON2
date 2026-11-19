@@ -1,4 +1,5 @@
 set(SOURCES
+    tddft_worker.f90
     dip.f90
     em_field.f90
     initialization_rt.f90
@@ -19,6 +20,10 @@ if(USE_HSE OR USE_SCALAPACK)
 endif()
 if(USE_SCALAPACK)
   list(APPEND SOURCES ptcn_distributed_matrix.f90 ptcn_native_matrix.f90)
+endif()
+
+if(USE_MPI)
+  list(APPEND SOURCES embedded_tddft.f90 ../salmonpy/parallel_bridge.f90)
 endif()
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

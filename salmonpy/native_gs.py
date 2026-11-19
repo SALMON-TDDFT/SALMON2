@@ -57,7 +57,8 @@ class NativeGSArray:
 class NativeGSBackend:
     def __init__(self,build_record,work_root,*,decomposition=(1,1,1,1,1)):
         record=json.loads(Path(build_record).read_text())
-        self._fast=record.get('schema')=='salmonpy.fast-hse-mpi/1'
+        self._ordinary_rt=type(record.get('ordinary_rt_abi')) is int and record['ordinary_rt_abi']==1
+        self._fast=record.get('schema')=='salmonpy.fast-hse-mpi/1' or record.get('source_profile')=='fast-pr'
         if self._fast:
             abi=record.get('gs_abi')
             if (not isinstance(abi,dict) or type(abi.get('protocol')) is not int or abi['protocol']!=1
@@ -67,6 +68,7 @@ class NativeGSBackend:
                 raise InputError('explicit fast GS import ABI declaration required')
         elif record.get('schema')!='salmonpy.embedded-tddft/1':
             raise InputError('verified embedded or declared fast GS build record required')
+        self._supports_compute=not self._fast or 'run' in record.get('gs_abi',{}).get('modes',[])
         from ._gs_archive import record_profile
         self._io_profile=record_profile(record)
         self._library=Path(record['library']).resolve();self._sha256=record['sha256']
@@ -126,12 +128,29 @@ class NativeGSSession:
         codes=self.comm.allgather(code)
         if any(codes):raise RuntimeFailure('retained GS native call failed: '+str(codes))
 
+    def _gs_call(self,work,fn,*args):
+        boundary=None
+        if getattr(self.backend,'_fast',False) and self._td_registry is not None:
+            if self.backend._ordinary_rt:
+                pause=self.lib.sp_tddft_park_for_gs;pause.argtypes=[];pause.restype=c.c_int
+                resume=self.lib.sp_tddft_resume_after_gs;resume.argtypes=[];resume.restype=None
+                self._check(pause())
+                boundary=lambda mode: (resume() or 0)
+            else:
+                boundary=self.lib.sp_fast_hse_gs_boundary
+                self._check(boundary(0))
+        try:
+            return self._call(work,fn,*args)
+        finally:
+            if boundary is not None:self._check(boundary(1))
+
     def run(self,calculation,*,scf=None,material_id='material'):
         from .dft import DFT,SCFSettings
         from .config import _identifier
         self._live();error=None
         try:
-            if getattr(self.backend,'_fast',False):raise InputError('fast GS profile currently imports existing states; SCF connection is not implemented')
+            if not getattr(self.backend,'_supports_compute',not getattr(self.backend,'_fast',False)):
+                raise InputError('this fast GS profile imports existing states; a declared compute-capable runtime is required')
             if not isinstance(calculation,DFT):raise InputTypeError('immutable DFT calculation required')
             scf=SCFSettings() if scf is None else scf
             _identifier(material_id,'material_id')
@@ -162,7 +181,7 @@ class NativeGSSession:
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
         token=c.c_int64()
-        code=self._call(work,self.lib.sp_gs_create,b'gs.inp',c.byref(token))
+        code=self._gs_call(work,self.lib.sp_gs_create,b'gs.inp',c.byref(token))
         self._check(code)
         state=NativeGSState(self,token.value,work,material_id,calculation)
         state._input_text=text;state._input_origin='computed'
@@ -198,6 +217,9 @@ class NativeGSSession:
             initial=provider.prepare(None)
             source_input=(initial.directory/initial.input_file).read_text()
             groups=_input_groups(source_input)
+            if (getattr(self.backend,'_ordinary_rt',False)
+                    and _scalar(groups.get('functional',''),'xc','pz').lower()=='hse06'):
+                raise InputError('HSE06 requires the fast-HSE runtime, not the HSE-disabled ordinary profile')
             electrons=int(_scalar(groups['system'],'nelec'))
             if electrons<2:raise InputError('positive occupied electronic state required')
             allowed={'calculation','control','units','system','pseudo','functional','rgrid','kgrid',
@@ -254,7 +276,7 @@ class NativeGSSession:
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
         token=c.c_int64()
-        self._check(self._call(work,fn,b'gs.inp',c.byref(token)))
+        self._check(self._gs_call(work,fn,b'gs.inp',c.byref(token)))
         state=NativeGSState(self,token.value,work,material_id,None)
         state._input_text=source_input;state._input_origin='imported'
         state._electrons=electrons;state._assets=tuple(assets)
@@ -339,7 +361,7 @@ class NativeGSState:
         self.session._check(self.session.lib.sp_gs_info(self._token,stats.ctypes.data,values.ctypes.data))
         if any(self.session.comm.allgather(not bool(np.isfinite(values).all()))):
             raise NumericalError('nonfinite retained GS metadata')
-        if getattr(getattr(self.session,'backend',None),'_fast',False):
+        if getattr(getattr(self.session,'backend',None),'_fast',False) and stats[1]<0:
             return NativeGSInfo(None,None,None,int(stats[0]),None,int(stats[2]),int(stats[3]))
         return NativeGSInfo(*map(float,values),int(stats[0]),None if stats[1]<0 else bool(stats[1]),int(stats[2]),int(stats[3]))
     @property
@@ -349,8 +371,6 @@ class NativeGSState:
     @property
     def iterations(self):return self.info.iterations
     def tddft_model(self,*,dt,max_steps=1000):
-        if getattr(getattr(self.session,'backend',None),'_fast',False):
-            raise InputError('fast retained GS to TDDFT connection is not implemented yet')
         from ._gs_tddft import open_model
         return open_model(self,dt,max_steps)
     def export_archive(self,directory,*,orbital_block=16):
@@ -358,8 +378,8 @@ class NativeGSState:
 
         Workers return None. This is not a complete SCF/native-handle checkpoint.
         """
-        if getattr(getattr(self.session,'backend',None),'_fast',False):
-            raise InputError('fast imported GS archive export is not implemented yet')
+        if getattr(getattr(self.session,'backend',None),'_fast',False) and self.calculation is None:
+            raise InputError('fast imported GS archive export requires explicit model metadata')
         from ._gs_archive import export_retained
         return export_retained(self,directory,orbital_block)
 
@@ -367,7 +387,7 @@ class NativeGSState:
         self._live();error=None
         if not isinstance(quantity,str) or quantity not in _QUANTITIES:
             error='unknown GS array quantity; supported quantity string required'
-        elif getattr(getattr(self.session,'backend',None),'_fast',False) and quantity=='eigenvalues':
+        elif getattr(getattr(self.session,'backend',None),'_fast',False) and self.calculation is None and quantity=='eigenvalues':
             error='eigenvalues were not computed by fast GS import'
         elif quantity=='forces' and self._calculation is None:
             error='forces were not computed by existing-GS import'

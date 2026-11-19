@@ -611,6 +611,7 @@ module structures
   end type s_cg
 
   type s_mixing
+    logical :: scf_converged=.false.
     type(s_mixing_config) :: input
     logical :: input_owned=.false.
     logical :: flag_mix_zero

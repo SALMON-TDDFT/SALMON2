@@ -53,10 +53,21 @@ def link_library(build,output,source):
                    for p in sorted((source/'src').rglob('*')) if p.is_file()}
     record={'schema':'salmonpy.embedded-tddft/1','library':str(library),
             'sha256':hashlib.sha256(library.read_bytes()).hexdigest(),
-            'source':json.loads((source/'salmonpy-runtime-source.json').read_text()),
+            'source':json.loads((source/('salmonpy-hse-rt-state.json' if (source/'salmonpy-hse-rt-state.json').is_file() else 'salmonpy-runtime-source.json')).read_text()),
             'source_hashes':source_hashes,'link_command':command,
             'scope':{'one_point_per_group':True,'one_lifetime_per_process':True,
                      'host_mpi':True,'eh_coupling_scheme':'salmonpy.eh-centered-current/1'}}
+    if '#define SALMONPY_FAST_CORE' in config:
+        record['source_profile']='fast-pr'
+        record['ordinary_rt_abi']=1
+        record['gs_abi']={'protocol':1,'modes':['import'],'arrays':['density','occupations','orbitals']}
+        import ctypes as c
+        probe=c.CDLL(str(library));compute=getattr(probe,'sp_gs_compute_protocol',None)
+        if compute is not None:
+            compute.argtypes=[];compute.restype=c.c_int
+            if compute()==1:
+                record['gs_abi']['modes'].append('run')
+                record['gs_abi']['arrays']+=['eigenvalues','forces']
     (output/'build.json').write_text(json.dumps(record,indent=2)+'\n')
     return record
 

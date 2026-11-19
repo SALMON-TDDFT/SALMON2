@@ -1606,7 +1606,8 @@ other platforms/compilers unverified.
   Different HSE/Libxc-PBE and TB-mBJ/Libxc-PZ inputs pass the same controls.
   Existing retained_gs sample import mode runs in MPI2 with preserved IDs/nulls.
 - [ ] Fast GS SCF creation, energy/force/eigenvalue computation and portable export;
-  complete GS→TDDFT model initialization remains to connect. Current fast GS
+  ordinary-XC GS→TDDFT initialization remains to connect; HSE06 memory initialization
+  is completed in the following slice. Current fast GS
   public path imports existing compatible scalar periodic wavefunctions only.
 
 No new Python module/test method/sample file, no new SCF or Actions. Evidence:
@@ -1617,4 +1618,93 @@ Final Python fast-GS slice: source628/installed628 methods (one skip each),
 installed MPI6 full/reduced ownership and MPI2 sample, source-hash reproduction,
 sdist→wheel and JP/EN/AI synchronization pass. Same-source no-HSE MPI and serial
 HSE builds also pass. New SCF0; no GS datasets or Actions. No extra Python module,
-sample file or test method. GS→TDDFT initialization remains the next connection.
+sample file or test method. The subsequent HSE06 GS→TDDFT connection is recorded
+below; ordinary-XC RT and computed GS lifecycle migration remain pending.
+
+
+## 2026-11-19 — retained GS to fast-PR HSE memory initialization
+
+- [x] Optional value seed through RT initialization; HSE models retain independent
+  orbitals/occupations for later states, without GS restart files, SCF or RT replay.
+  Static potential/XC/exchange initialization retains the existing update order.
+- [x] Existing NativeGSState.tddft_model connects HSE06/atomic-unit scalar periodic
+  imports to the fast host registry; k-only internal MPI1/2. Initial bootstrap
+  cleanup, alternate dt/capacity and source-close lifetimes are explicit.
+- [x] Sequential subsequent GS import parks/restores active RT settings and
+  symmetry workspaces. Common timer initialization now shares standard's existing
+  once-only allocation guard; old normal initialization behavior is preserved.
+- [x] Synthetic full/reduced learned Taylor/PT-CN memory/file current and energy
+  comparison; source GS close/removal, independent sibling/fresh states and exact
+  direct resume after8 with no replay. Normal HSE registry current/energy/history
+  remains exact against the preceding fixed runtime in internalMPI2 controls.
+- [x] Existing retained_gs sample gains optional --current-steps; JP/EN and AI task
+  catalog document scope. No new Python module, test method or sample file.
+- [x] Ordinary PZ/TB-mBJ/Libxc RT migrated in the HSE-disabled fast profile below.
+- [ ] Fast computed GS SCF/energy/forces/eigenvalues/export and final source-tree merge.
+  Existing standard-runtime features remain supported. This HSE bridge alone does
+  not complete the single-tree migration or approved convergence workflow.
+
+Evidence: ../fast-gs-memory-rt-validation-2026-11-19.md. No fresh GS/SCF collection
+or GitHub Actions. Same-source comparison inventory is now589 identical,
+69 different,12 standard-only,75 fast-only (standard670/effectivefast733).
+
+
+Final memory-RT slice: source/installed628 (one skip), installed MPI4 controls,
+MPI2 existing sample, MPI6 old-runtime registry/GS-import comparisons pass.
+Same-source HSE-MPI/no-HSE-serial builds/audits and sdist→wheel/source reproduction
+pass. Installed mixed128 matches the fixed prior baseline exactly; save8→resume120
+also matches continuous128 with replay0. These are local synthetic controls.
+
+
+## 2026-11-19 — ordinary XC on the fast source profile
+
+- [x] Share embedded TDDFT, endpoint worker and MPI bridge source with the fast
+  prepared tree; no copied second TDDFT adapter. Compile-time source-profile branch
+  consumes fast value-owned GS seeds and omits obsolete global scratch switching.
+- [x] USE_HSE=OFF host build advertises source_profile=fast-pr, ordinary_rt_abi=1
+  and import-only gs_abi/1. Existing NativeGSBackend.load/tddft_model and ordinary
+  NativeTDDFTBackend/registry APIs are connected. No SCF or GS-file output.
+- [x] PZ/TB-mBJ/Libxc-PZ/PBE, k/orbital/spatial innerMPI2: current parity against
+  fixed preceding standard runtime, exact sibling/fresh/direct-resume checks.
+  PZ/TB-mBJ current difference0; Libxc at most5.421010862427522e-20au in these controls.
+- [x] Different-XC GS import preserves active RT; explicit external k assets,
+  missing-asset admission and optional input metadata pass. File-registry tests
+  cover different XC/dt/capacity/MPI partitions and56 accepted steps, exact against
+  independent owners, with direct restart and stale/mixed-handle rejection.
+- [x] File initialization captures API dt/capacity/MPI values after worker_configure;
+  the first mixed-input file test reproduced old parser-snapshot order failure.
+- [x] Same-source fast-HSE MPI build and fixed prior HSE registry comparison retain
+  exact current/energy/history/restart. Standard MPI build/memory connection also
+  remains exact against its prior fixed binary. JP/EN/AI and existing sample updated.
+- [ ] Computed GS (SCF/energy/eigenvalues/forces/export) migration and final tree
+  consolidation. One-session ordinary/HSE registry mixing remains separate; normal
+  mixtures can still use separate material MPI groups. Physical convergence remains
+  to validate; no new GS dataset collection or Actions is part of this slice.
+
+Current source comparison:592 identical,69 different,9 standard-only,75 fast-only;
+standard670, effectivefast736. These are source-provenance counts, not physics claims.
+See ../ordinary-fast-rt-validation-2026-11-19.md for controls and measured limits.
+
+
+Final ordinary-RT slice: source/installed628 (627 pass,1 skip); sdist→wheel and
+installed-source261-file parity; installed GS/PBE current and spatialMPI2 resume
+controls pass. FDTD/LD/SBE/PZ128 vs independent serial control passes; direct
+63→65 restarts match all128 A/E/j frames exactly. Serial communication cleanup
+and MPI-only GS compilation are corrected without enabling serial host-MPI APIs.
+Different cell/XC model registry ownership remains exact. No new SCF or Actions.
+
+Final admission check: HSE06 on the HSE-disabled frontend rejects collectively
+before native initialization and preserves GS/RT resources/current. Ordinary RT
+XC checks precede the worker call; valid GS arrays remain usable. Coverage is
+folded into existing unittest/MPI tests; test-method count remains628.
+
+### Computed ordinary GS on the fast source (2026-11-19)
+
+- [x] HSE-disabled run capability, native convergence metadata and five array kinds.
+- [x] Orbital/spatial MPI2 retained A+B versus independent A/B: exact arrays; close/reuse isolation.
+- [x] Nonconvergence warns; large-threshold control reports native convergence.
+- [x] Export assembly checked in RAM; no GS archive/restart dataset collected.
+- [x] Previous fast executable PZ/PBE scalar/text regression matches. Old standard unconverged PBE differs by 3.4e-7 Ha; do not relax its comparison.
+- [ ] Fresh HSE-enabled build regression after the GS mixing metadata addition.
+- [ ] Computed GS to ordinary RT lifecycle regression; installed-wheel validation for this slice.
+- [ ] HSE-enabled computed GS and final source-tree consolidation.

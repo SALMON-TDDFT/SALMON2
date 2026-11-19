@@ -47,6 +47,14 @@ int sp_fast_hse_model_register(const char *path,double dt,int capacity,int symme
                               int64_t *model,int64_t *state,double j[3]);
 int sp_fast_hse_model_spawn(int64_t model,double dt,int capacity,int64_t *state,double j[3]);
 int sp_fast_hse_model_close(int64_t model);
+/* Optional retained-GS bridge: copies a value seed; later source GS close is safe.
+ * path describes the same GS material; no GS restart file is read or generated.
+ * GS boundary 0 parks RT settings, 1 restores them around a subsequent GS import. */
+int sp_fast_hse_memory_gs_protocol(void);
+int sp_fast_hse_model_from_gs(int64_t gs,const char *path,double dt,int capacity,int symmetry,
+                            int64_t *model,int64_t *state,double j[3]);
+int sp_fast_hse_gs_boundary(int mode);
+
 
 int sp_fast_hse_handle_new(int64_t model, double dt, int capacity,
                          int64_t *handle, double j[3]);

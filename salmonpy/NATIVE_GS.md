@@ -407,10 +407,96 @@ RT因数学習と予備SCFだけを無効にし、XC・HSE遮蔽係数は保持�
 
 高速版では密度・占有数・軌道を取得できます。infoのenergy_hartree・residual・
 tolerance・convergedは未計算を示すNoneで、物理的なゼロではありません。
-固有値・力は計算していません。高速版のsession.run・export_archive・tddft_modelは
-未接続です。通常版の既存機能は維持します。読み込みだけで収束を保証しません。
+固有値・力は計算していません。高速版のsession.run・export_archiveは未接続です。tddft_modelは
+下記の追加機能を持つランタイムで利用できます。通常版の既存機能は維持します。読み込みだけで収束を保証しません。
 
 既存サンプルに読み込みモードを追加しました。
 `mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT --import-bundle GS_A --second-bundle GS_B`
 各状態のmaterial_idを保持し、出力JSONの未計算値はnullとします。合成入力での
 独立性検証であり、実物質の物理精度の検証ではありません。
+
+
+### 保持GSから高速PR版HSEの応答へ
+
+新しくビルドした高速版で `gs_abi.memory_rt == 1` と
+`sp_fast_hse_memory_gs_protocol() == 1` を確認できれば、
+`gs.tddft_model(dt=..., max_steps=...)` を使えます。HSE06・原子単位・
+周期スカラー系の互換GS、k点のみの内部MPI 1／2ランクが対象です。
+通常版の既存GS→TDDFTは維持し、PZ／TB-mBJ／Libxcの通常RTは、下記のHSE無効プロファイルで利用できます。
+
+```python
+with backend.open(context) as session:
+    gs = session.load(bundle_a, material_id="film-a")
+    model = gs.tddft_model(dt=0.001, max_steps=32)
+    gs.close()  # RTモデルが初期軌道・占有数を独立に所有する
+    a = model.new_state("point-a")
+    b = model.new_state("point-b")
+    try:
+        j_a = a.step([0.0, 0.0, 1.e-5])
+        j_b = b.step([0.0, 0.0, -1.e-5])
+    finally:
+        a.close()
+        b.close()
+        model.close()
+```
+
+接続時にSCF、GS再開ファイルの複製・出力、時間発展の再実行はしません。
+静的ポテンシャル・対称性・RT資源は従来どおり初期化します。初期軌道と占有数は
+モデルが値として所有するため、その分のメモリは必要です。ゼロコピーではありません。
+元のGSを閉じて元データを削除した後も新しい状態を作れます。別GSの逐次読み込みでも
+既存RTの設定を維持します。全RT状態を閉じるまでsessionとホストMPI群を保持します。
+モデルを閉じると新規作成は停止し、既存の子状態は利用できます。主スレッド・全ランク
+一致・逐次呼び出しの契約は変わりません。
+
+AはCartesian A/c、戻り値は電荷電流密度jです。全k点ではx／y／z・回転する外場を
+使えます。縮約時は実際の外場が保持対称性に適合する必要があり、例のz方向は
+検証したC2z入力に合わせたものです。直接保存／復元は既存の同一ランタイム・MPI分割の
+契約に従います。任意のRT／SCF途中状態を初期化する入口ではありません。
+
+既存サンプルの `--import-bundle` に `--current-steps 16` を追加できます。
+`tools/test_memory_gs_mpi.py BUILD FIXTURE NEW_OUTPUT --size 2 --fast-hse` は
+4ランクで従来ファイル経路と比較します。合成入力のTaylor／学習付きPT-CN・全k／縮約kで
+電流・エネルギー、状態独立性、GS終了・元データ削除後の新規作成、GS逐次読み込み、
+再実行なしの直接再開を検査します。実装の検証であり、物理的収束の保証ではありません。
+
+
+### 高速版ソースの通常XC接続（HSE無効）
+
+同じ高速PR版の準備ソースから、通常XC用のCPUホストMPIライブラリを構築できます。
+
+```sh
+python tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing
+python tools/build_embedded_tddft.py NEW_SOURCE NEW_BUILD --jobs 4 \
+  --cmake-arg=-DUSE_HSE=OFF --cmake-arg=-DUSE_LIBXC=ON
+```
+
+MPI・コンパイラ・BLAS・Libxcの場所は環境に合わせて明示します。HSE用のFFTW依存は不要です。
+ビルド記録はsalmonpy.embedded-tddft/1を維持し、source_profile="fast-pr"、
+ordinary_rt_abi=1、gs_abi/1を宣言します。新しいHSE無効ビルドではmodesにrunも含みます。既存のNativeGSBackendの
+session.load→gs.tddft_model、またはNativeTDDFTBackendのファイル／レジストリ経路を使います。
+PZ・TB-mBJ・Libxc-PZ／PBE、周期全k点・スカラー・固定イオン・middlepoint・A/c駆動が対象です。
+物質IDを継承し、電荷電流密度jを返します。
+
+HSE無効構成ではsession.runでSCFを実行し、エネルギー・固有値・力を取得できます。
+SCF未収束は警告とし、最終反復の状態を保持します。session.loadしたGSの未計算メタデータはNoneです。
+計算済みGSは明示的なexport_archiveに接続します。今回の検証は出力配列の組立てまでを
+メモリ上で確認し、GSアーカイブ自体は保存していません。GS終了後の独立状態作成と
+直接RT再開にGSファイルの複製・時間発展の再実行は不要です。初期配列のコピー分は
+メモリを使います。全RT状態を閉じるまでsessionとMPI群を保持します。別GSの逐次読込みでは
+RTの入力・タイマーを退避／再開します。主スレッド・全ランク一致・一接続寿命の条件は維持します。
+
+通常TDDFTの接続コードは標準版と共有し、コンパイル時に高速版GSの値所有シードへ接続します。
+高速版では差分格子とXCの作業領域が状態所有なので、旧来の共有領域切替は行いません。
+ファイル入力ではAPIが指定したdt・最大ステップ・MPI分割を反映してから入力スナップショットを
+確定し、標準版と同じ順序にします。高速HSEと標準版の既存経路は維持します。
+通常XCとHSEを同じGS session内のレジストリに混在させる入口と、旧ソースツリーの削除は
+未実装です。HSE有効構成のGS計算入口と最終的なソース統合は残っています。
+
+retained_gsサンプルの--import-bundle／--current-steps 16も利用できます。
+合成入力でk点・軌道・空間の内部MPI2、直接再開、異なるXCのGS逐次読込みを検証します。
+従来バイナリとの比較ではPZ・TB-mBJの完全一致と、Libxcの微小差（今回最大約5.5e-20au）を
+区別します。再開・独立状態の比較は完全一致です。実物質の収束を保証する検査ではありません。
+
+通常XCのGS接続検証では、PZ／Libxc-PZ／PBE、軌道・空間MPI2で独立実行と配列が完全一致しました。
+変更前の高速版とのPZ／PBEエネルギー・テキスト出力も一致しました。4反復の未収束PBEで
+旧標準版との差は約3.4e-7 Hartree残り、標準版との同一性や物理的収束を保証しません。

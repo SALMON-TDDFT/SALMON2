@@ -64,7 +64,8 @@ class NativeFastHSERegistry:
         if self.closed:return
         self._live();errors=[]
         for model in sorted(tuple(self._models),key=lambda m:m._registry_id):
-            try:model.close()
+            try:
+                if not model.closed:model.close()
             except Exception as exc:errors.append(str(exc))
         if errors:raise RuntimeFailure('HSE registry model cleanup failed: '+str(errors))
         self.closed=True;self._detach_if_unused()

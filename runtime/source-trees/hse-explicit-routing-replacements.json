@@ -14,7 +14,7 @@
     "src/common/structures.f90": {
       "before_sha256": "8e4043f129a0e80deee56b50ab629b540d126a13c7455df8979c872b18414d8c",
       "source": "overrides/hse-explicit-routing/src/common/structures.f90",
-      "after_sha256": "fba0a85759a9b1537f2df8a7f50ece5662c1097ecd4d021b5d0ea915348642a8"
+      "after_sha256": "52f756a33d2c25eed0096dfac0635c3a929ee5364ce4548e7addf2560085dadc"
     },
     "src/common/total_energy.f90": {
       "before_sha256": "728942434e850be1dfe2833b42ed50d9d516d946343947a01b6f6ae3c49626c2",
@@ -54,7 +54,7 @@
     "src/rt/initialization_rt.f90": {
       "before_sha256": "44cf0482e6950f595960e8474c19bd5a2da0d3df1ef77b95a45d993552c227b4",
       "source": "overrides/hse-explicit-routing/src/rt/initialization_rt.f90",
-      "after_sha256": "77fdda637a2af4bacda1800d1164fc8749b3a1a4edf4d6ca14e5a544cabc684c"
+      "after_sha256": "e5de8e3f0d5272dab9d2d0e4190fc68dbb2d2cf8ec40a76555190fa993f7b860"
     },
     "src/rt/dip.f90": {
       "before_sha256": "2cc509cd69807d697da7b1e481913b2db9b9a2ede387a6353b92901c19f512b5",
@@ -124,7 +124,7 @@
     "src/gs/scf_iteration_dft.f90": {
       "before_sha256": "5ae736b113ff779e1488fdffd6c62ed8232b11c028b1ed38d8f37e6781f84888",
       "source": "overrides/hse-explicit-routing/src/gs/scf_iteration_dft.f90",
-      "after_sha256": "c7c99af89ebb774c405365fad6959e95ed7f6e1cdc21928b9a015415b789ba73"
+      "after_sha256": "7ee19c62c80e0b49f597969dbadb19bafd4e557d5bda4f2dbab9cf7672aa28a4"
     },
     "src/gs/scf_iteration.f90": {
       "before_sha256": "dd2b28fc4ab7772559d854edf522a7cb0776be9d8526c775e7a715b80c35c041",
@@ -134,7 +134,7 @@
     "src/gs/main_dft.f90": {
       "before_sha256": "bc6856c1e9f105c35a8ea8bfc815320c060c9854596871c4498ba4df3907f4ba",
       "source": "overrides/hse-explicit-routing/src/gs/main_dft.f90",
-      "after_sha256": "55829757809cc5726697cf649026e039a05f6e48066d88b6cbc2fec499ada12b"
+      "after_sha256": "77a9427855237455d5fdf143650ecbccee89c306e2aecb157789653ab8af9b7d"
     },
     "src/xc/exx_gs_metadata.f90": {
       "before_sha256": "2baba09fe7a1efed27f1ddefd66ddf5b15c8a7039bca7c1b8991b7f5e2d73aba",
@@ -178,7 +178,7 @@
     },
     "src/rt/CMakeLists.txt": {
       "before_sha256": "e1bcb34e8a4c0d3059d240c29d6c0ae7f3354c72e4fd2051aba3b102288f0834",
-      "after_sha256": "afbc7e613fbc054e0db4a492afe08f5f6eaf960a4ef8be01b1ba0088874b016b",
+      "after_sha256": "7e3362e7b4e3b3461b8878a9beaf0917eba77e31701948a8658501c19b433e47",
       "source": "overrides/hse-explicit-routing/src/rt/CMakeLists.txt"
     },
     "src/xc/exx_symmetry.f90": {
@@ -285,6 +285,31 @@
       "source": "overrides/hse-explicit-routing/src/gs/CMakeLists.txt",
       "before_sha256": "0132c94eae5892f7ed9273a769b9940b21558b3d3c62aa37808483f033bcf6f2",
       "after_sha256": "43b9cc7a550f8bde2dec6b79302ef100fbf9e44d80672c9b4b25e91b9773c044"
+    },
+    "src/misc/timer.f90": {
+      "before_sha256": "b25abe0a503977d81fe3cdd8182fec59c2d82832b5568a6272674130a37a2285",
+      "source": "sources/standard/src/misc/timer.f90",
+      "after_sha256": "231c98bc5ad71f351495bf7dafe400fd5fc5db20de512b58d0bd3ed660c809d0"
+    },
+    "src/rt/embedded_tddft.f90": {
+      "before_sha256": null,
+      "source": "sources/standard/src/rt/embedded_tddft.f90",
+      "after_sha256": "275b7c374dc720a1cf23a273ab5497ed7382f0617941635ffc76b44c7e3130da"
+    },
+    "src/rt/tddft_worker.f90": {
+      "before_sha256": null,
+      "source": "sources/standard/src/rt/tddft_worker.f90",
+      "after_sha256": "45d16d3711884dc58c0cbe96de31254dd9f8d733d3a45a9a500f6e3dbdc25976"
+    },
+    "src/salmonpy/parallel_bridge.f90": {
+      "before_sha256": null,
+      "source": "sources/standard/src/salmonpy/parallel_bridge.f90",
+      "after_sha256": "89955befe4b3d555d3069b13ebe482141340cc0e7c18a0c0386632207172673e"
+    },
+    "src/config.h.in": {
+      "before_sha256": "e0218d853a1dba3e880e381dfb155c7103dd22375e28c0fa97b9a74df70d4695",
+      "source": "overrides/hse-explicit-routing/src/config.h.in",
+      "after_sha256": "a8f8b67d6f4740c90dc3f87d711cc494eb37537e6dd23bf8ee9e2216b7f711b9"
     }
   }
 }

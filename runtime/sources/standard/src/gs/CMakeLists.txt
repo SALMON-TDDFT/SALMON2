@@ -23,6 +23,10 @@ set(SOURCES
     occupation.f90
    )
    
+if(NOT USE_MPI)
+  list(REMOVE_ITEM SOURCES embedded_gs.f90)
+endif()
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/dc)
 
 if (USE_SCALAPACK)

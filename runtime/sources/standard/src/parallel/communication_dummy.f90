@@ -280,6 +280,25 @@ module communication
 #define UNUSED_VARIABLE(VAR)      if(.false.) call salmon_unusedvar(VAR)
 
 contains
+
+  ! Serial cleanup can share GS storage types, but has no host-MPI attachment.
+  logical function comm_is_attached()
+    comm_is_attached=.false.
+  end function
+  subroutine comm_begin_children(owner,status)
+    integer,intent(out)::owner,status
+    owner=0;status=1
+  end subroutine
+  subroutine comm_end_children(owner)
+    integer,intent(in)::owner
+  end subroutine
+  subroutine comm_release_children(owner)
+    integer,intent(in)::owner
+  end subroutine
+  subroutine comm_child_counts(live,slots)
+    integer,intent(out)::live,slots
+    live=0;slots=0
+  end subroutine
   subroutine comm_init
     implicit none
     ! no operation

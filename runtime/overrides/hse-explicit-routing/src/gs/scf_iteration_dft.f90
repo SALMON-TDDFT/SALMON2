@@ -594,6 +594,8 @@ if(.not.flag_conv) then
 endif
 endif
 
+mixing%scf_converged=flag_conv
+
 
 contains
 

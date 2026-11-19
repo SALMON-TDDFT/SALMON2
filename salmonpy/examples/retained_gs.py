@@ -1,7 +1,8 @@
 """Small retained-GS ownership demo; four SCF iterations, not converged material data.
 
 mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT
-For import-only fast GS: add --import-bundle GS [--second-bundle OTHER_GS].
+For fast GS: add --import-bundle GS [--second-bundle OTHER_GS].
+Optional --current-steps 16 uses retained GS→RT without GS files/SCF (declared fast profile).
 """
 import argparse
 import json
@@ -17,9 +18,12 @@ def main():
     parser.add_argument('build',type=Path);parser.add_argument('output',type=Path)
     parser.add_argument('--import-bundle',type=Path,help='read existing compatible GS without SCF')
     parser.add_argument('--second-bundle',type=Path)
+    parser.add_argument('--current-steps',type=int,default=0,help='optional current steps; requires a declared retained-GS RT profile')
     parser.add_argument('--export-archives',action='store_true',
                         help='explicitly save regular-mesh GS/2 arrays on subgroup root; not a full SCF checkpoint')
     args=parser.parse_args()
+    if args.current_steps<0 or (args.current_steps and not args.import_bundle):
+        parser.error('--current-steps requires --import-bundle and a nonnegative count')
     from mpi4py import MPI
     world=MPI.COMM_WORLD;error=None
     if world.size not in (1,2):raise ValueError('this small demo uses one or two ranks')
@@ -39,11 +43,25 @@ def main():
                       'density_shape':list(state.array('density').values.shape)} for state in states]
             if args.export_archives:
                 for state in states:state.export_archive(args.output/(state.material_id+'-gs2'))
-            states[0].close()
+            response=None
+            if args.current_steps:
+                model=states[0].tddft_model(dt=.001,max_steps=args.current_steps)
+                states[0].close()  # RT model owns its initial orbitals independently.
+                first=model.new_state('pulse-a');second=model.new_state('pulse-b')
+                try:
+                    currents=[]
+                    for i in range(1,args.current_steps+1):
+                        A=1e-4*np.array([0.,0.,np.sin(.23*i)])
+                        currents.append(first.step(A).tolist());second.step(-A)
+                    response={'material_id':model.material_id,'dt_au':.001,
+                              'charge_current_au':currents,'SCF_calls':0,'replayed_steps':0}
+                finally:
+                    first.close();second.close();model.close()
+            else:states[0].close()
             np.testing.assert_array_equal(before,states[1].array('density').values)
             if world.rank==0:
                 (args.output/'result.json').write_text(json.dumps({'status':'pass','materials':reports,
-                    'SCF_calls':0,'scope':'existing GS import; convergence/energy not established'},indent=2)+'\n')
+                    'SCF_calls':0,'response':response,'scope':'existing GS import; convergence/energy not established'},indent=2)+'\n')
         assert context._dependents==0
         return
     pp=Pseudopotential.from_file(Path(__file__).with_name('si_intro_data')/'Si_rps.dat',atomic_number=14,local_channel=2)

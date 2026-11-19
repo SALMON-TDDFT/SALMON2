@@ -631,7 +631,11 @@ This seed is not a complete HSE model or portable checkpoint. Python
 NativeGSBackend.load now accepts a fast build explicitly declaring gs_abi/1.
 That profile returns density/occupations/orbitals and material IDs; energies,
 residuals, tolerance and convergence remain None. Standard-runtime SCF behavior
-is unchanged. Fast session.run, eigenvalues/forces, archive export and direct
-GS→TDDFT model creation are not connected yet. The imported
+is unchanged. Fast session.run, eigenvalues/forces and archive export remain unconnected.
+New builds additionally declare gs_abi.memory_rt=1 after probing the compiled
+memory GS protocol: retained GS→fast-PR HSE model creation is supported without
+GS restart files/SCF/replay (NATIVE_GS.en.md). Ordinary XC is supported by the HSE-disabled fast profile described below. The imported
 state does not certify convergence, energy or forces. MD/DC/optimization import
 and real-material convergence validation are outside this measured path.
+
+The fast source also builds an ordinary-XC host library via build_embedded_tddft.py with USE_HSE=OFF. It declares source_profile=fast-pr, ordinary_rt_abi=1 and import-only gs_abi/1. Shared embedded RT/worker/parallel-bridge sources preserve normal APIs; fast numerical states already own stencil/XC scratch. PZ/TB-mBJ/Libxc-PZ/PBE memory GS handoff, independent states and direct RT restart are supported as described in NATIVE_GS.en.md. Computed GS and export migration remain pending.

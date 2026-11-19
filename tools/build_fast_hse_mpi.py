@@ -47,6 +47,8 @@ def main():
         adapters=root/'salmonpy/native_adapters'
         if not adapters.exists():adapters=root.parent/'native_adapters'
         names=['hse_model_inputs','hse_checkpoint','tddft_context','fast_hse_mpi','parallel_bridge']
+        if (build/'src/CMakeFiles/salmon.dir/salmonpy/parallel_bridge.f90.o').is_file():
+            names.remove('parallel_bridge')
         if not (build/'src/CMakeFiles/salmon.dir/io/step_output.f90.o').is_file():
             names.insert(1,'step_output')
         for name in names:
@@ -92,6 +94,11 @@ def main():
             protocol.argtypes=[];protocol.restype=c.c_int
             if protocol()!=1:raise ValueError('unsupported compiled GS protocol')
             r['gs_abi']={'protocol':1,'modes':['import'],'arrays':['density','occupations','orbitals']}
+            memory=getattr(probe,'sp_fast_hse_memory_gs_protocol',None)
+            if memory is not None:
+                memory.argtypes=[];memory.restype=c.c_int
+                if memory()!=1:raise ValueError('unsupported compiled memory GS protocol')
+                r['gs_abi']['memory_rt']=1
     executable_record={'schema':'salmonpy.runtime-build/1','status':'built-and-audited',
         'executable':str(build/'salmon'),'sha256':r['origin_sha256'],
         'build_configuration':{'mpi_enabled':True,'hse_enabled':True},

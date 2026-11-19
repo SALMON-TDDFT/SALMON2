@@ -48,7 +48,7 @@ def import_controls(args):
             a=session.load(bundles[1],material_id='material-1');before=snapshot(a)
             b=session.load(bundles[2],material_id='material-2');equal(before,snapshot(a))
             frames={1:before,2:snapshot(b)}
-            for operation in (lambda:session.run(None),lambda:a.tddft_model(dt=.001),
+            for operation in (lambda:session.run(None),
                               lambda:a.export_archive(work/'must-not-exist')):
                 try:operation()
                 except InputError:pass
@@ -86,6 +86,8 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('build',type=Path);parser.add_argument('output',type=Path)
     parser.add_argument('--size',type=int,choices=(1,2),default=2)
+    parser.add_argument('--baseline',type=Path,help='explicit independently built control runtime')
+    parser.add_argument('--check-export-assembly',action='store_true',help='intercept shared writer and inspect assembled arrays in RAM; do not write GS archives')
     parser.add_argument('--split',choices=('orbital','spatial'),default='orbital')
     parser.add_argument('--xc-a',choices=('pz','libxc_pz','libxc_pbe'),default='pz')
     parser.add_argument('--xc-b',choices=('pz','libxc_pz','libxc_pbe'),default='libxc_pbe')
@@ -113,7 +115,7 @@ def main():
           (1,1,1) if args.gamma else (2,1,1),xc=args.xc_a)
     b=DFT((14,14),np.eye(3)*9,[[.3,.4,.45],[.7,.6,.55]],(pp,),8,4,(12,12,12),(1,2,1),xc=args.xc_b)
     dec=(1,args.size,1,1,1) if args.split=='orbital' else (1,1,args.size,1,1)
-    backend=NativeGSBackend(args.build,work,decomposition=dec)
+    backend=NativeGSBackend(args.baseline if g and args.baseline else args.build,work,decomposition=dec)
     scf=SCFSettings(max_iterations=4,tolerance=args.tolerance)
     scf_b=SCFSettings(max_iterations=args.b_iterations,tolerance=args.tolerance if args.b_tolerance is None else args.b_tolerance)
     frames={};evidence={};warnings.simplefilter('always')
@@ -127,6 +129,19 @@ def main():
             except ValueError:pass
             else:raise AssertionError('array became writable')
             result[q]=(arr.lower_indices,arr.values)
+        if args.check_export_assembly:
+            import salmonpy._gs_archive as archive
+            original=archive._write;seen=[]
+            def inspect(gs,dest,block,waves,occ,eigen,info,model):
+                assert waves.shape==(int(np.prod(model.kmesh)),model.states,*reversed(model.grid))
+                assert np.isfinite(waves).all() and np.isfinite(occ).all() and np.isfinite(eigen).all()
+                seen.append({'shape':list(waves.shape),'wave_sha256':hashlib.sha256(waves.tobytes()).hexdigest()})
+                return None
+            archive._write=inspect
+            try:state.export_archive(work/('unwritten-'+str(state._token)))
+            finally:archive._write=original
+            assert not (work/('unwritten-'+str(state._token))).exists()
+            if comm.rank==0:assert len(seen)==1
         return result
 
     def equal(first,second):
@@ -183,8 +198,16 @@ def main():
     assert context._dependents==0
     gathered=world.allgather(frames)
     for offset in range(args.size):
-        equal(gathered[offset]['a'],gathered[args.size+offset]['a'])
-        equal(gathered[offset]['b'],gathered[2*args.size+offset]['b'])
+        for key,index in (('a',args.size+offset),('b',2*args.size+offset)):
+            first,second=gathered[offset][key],gathered[index][key]
+            if args.baseline:
+                for name in ('iterations','converged','atoms','bands'):assert getattr(first['info'],name)==getattr(second['info'],name)
+                np.testing.assert_allclose([first['info'].energy_hartree,first['info'].residual,first['info'].tolerance],
+                                          [second['info'].energy_hartree,second['info'].residual,second['info'].tolerance],rtol=3e-12,atol=3e-13)
+                for q in ('density','orbitals','occupations','eigenvalues','forces'):
+                    assert first[q][0]==second[q][0]
+                    np.testing.assert_allclose(first[q][1],second[q][1],rtol=3e-12,atol=3e-13)
+            else:equal(first,second)
     for key,frame in frames.items():
         evidence[key]={'info':vars(frame['info']),'arrays':{q:{'lower_indices':frame[q][0],
             'shape':frame[q][1].shape,'sha256':hashlib.sha256(frame[q][1].tobytes()).hexdigest()}
