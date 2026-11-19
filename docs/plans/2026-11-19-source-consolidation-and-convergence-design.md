@@ -149,3 +149,15 @@ changes. Existing unittest parametrization does not itself require pytest.
   verified standard-only state/bridge functionality and reconcile77 differing
   files before deleting either current tree. Host-side native_adapters are a
   separate build input and must also be retained in the migration inventory.
+
+## User clarification during campaign implementation
+
+Electron-number/norm preservation is the primary timestep diagnostic. Default
+relative target is approximately1e-5 electron loss. Report gain separately and
+use both sides for the acceptance flag. Exceeding the target records evidence
+without stopping the calculation; nonfinite/numerical breakdown stops only the
+affected trial. Current-trace convergence is optional supplementary evidence.
+Scientific numerical work belongs in Fortran/C; Python handles input/plans,
+dispatch and records. The first campaign layer uses backend-provided actual norm
+measurements. Wiring the built-in TDDFT measurement is the next stage, not a
+configured-nelec substitute. No new GS dataset is collected.

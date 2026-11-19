@@ -14,7 +14,7 @@ endforeach()
 add_custom_target(ld_audit ALL
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/native"
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/salmonpy")
-add_library(salmonpy_ld SHARED "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90" "${ROOT}/salmonpy/ld_handles.f90"
+add_library(salmonpy_ld SHARED "${ROOT}/salmonpy/convergence_kernel.f90" "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90" "${ROOT}/salmonpy/ld_handles.f90"
   "${ROOT}/native/sbe_types.f90" "${ROOT}/native/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90" "${ROOT}/salmonpy/sbe_handles.f90")
 if(APPLE)
   target_link_libraries(salmonpy_ld PRIVATE "-framework Accelerate")
@@ -275,3 +275,6 @@ install(FILES "${ROOT}/salmonpy/examples/mixed_hse_models.py" "${ROOT}/salmonpy/
 
 install(FILES "${ROOT}/tools/test_scf_progress.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_scf_progress.f90" "${ROOT}/tests/native/test_scf_convergence.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/convergence.py" "${ROOT}/salmonpy/CONVERGENCE.md" "${ROOT}/salmonpy/CONVERGENCE.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/convergence_kernel.f90" DESTINATION salmonpy/_runtime_source/salmonpy)

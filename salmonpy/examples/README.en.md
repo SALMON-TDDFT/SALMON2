@@ -183,3 +183,5 @@ MPI samples also display `--help` from ordinary Python. Computation requires mpi
 - `molecular_field_selection.py`: explicit own-source vacuum field subtraction on synthetic samples; no solver required.
 
 Larger parallel checks: `mpi_mixed_native` supports `--field-shape`. See [COUPLED.en.md](../COUPLED.en.md) for5–15-rank layouts and measurement scope. The4GiB/4-core beginner profile remains available.
+
+Offline convergence planning: `python -m salmonpy.examples.convergence_plan NEW_JSON`; see CONVERGENCE.en.md. Explicit illustrative PP radius only; no material computation.

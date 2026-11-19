@@ -197,3 +197,5 @@ MPIサンプルも通常のPythonから `--help` を表示できます。実計�
 - `molecular_field_selection.py`：分子自身の真空場だけを引く電場選択。人工標本のみ、ソルバー不要。
 
 大きな並列テスト: `mpi_mixed_native` は `--field-shape` に対応します。5〜15ランクの構成と計測の範囲は [COUPLED.md](../COUPLED.md) を参照してください。4GiB・4コアの入門条件は引き続き利用できます。
+
+収束試験の計画のみ：`python -m salmonpy.examples.convergence_plan NEW_JSON`。CONVERGENCE.md参照。例のPP半径は説明用で、物質計算は行いません。

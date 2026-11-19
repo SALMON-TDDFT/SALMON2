@@ -1435,10 +1435,10 @@ See docs/gs-reexport-validation-2026-11-19.md for final wheel/evidence.
   retaining public imports and separate GS→TDDFT lifecycle. Private module count
   reduced by2; function ASTs unchanged except private naming/self-import.
 - [x] Beginner examples: LD→synthetic SBE→Si execution check; JP/EN/AI synchronized.
-- [ ] One maintained fast-PR-capable solver tree, compatible no-HSE/HSE profiles:
+- [x] One maintained fast-PR-capable solver tree, compatible no-HSE/HSE profiles (completed d86d5692):
   migrate standard-only owners/bridges and reconcile77 effective differences.
   Current trees/references/fixed binaries preserved; no blanket copy/delete.
-- [ ] SALMON-specific grid/dt convergence workflow and synthetic campaign tests;
+- [x] SALMON-specific grid/dt planning, reporting and synthetic campaign tests (first callback/native-diagnostics stage);
   PP radius definition/explicit tolerance contract per approved design.
 
 - Final first-batch verification: source628/installed628 test methods (one skip
@@ -1461,7 +1461,7 @@ See docs/gs-reexport-validation-2026-11-19.md for final wheel/evidence.
   version except NVTX source-line labels; no-HSE preprocessor has no EXX calls.
 - [x] Same final source builds HSE ON and OFF. OFF omits HSE FFTW configuration
   and linkage. Source/object prohibition audits retained.
-- [ ] Full maintained-source unification:18 standard-only paths/74 differing
+- [x] Full maintained-source unification (completed d86d5692; following counts historical):18 standard-only paths/74 differing
   effective paths remain; default GS/TDDFT/EH preparation is not switched.
 
 - Final shared-SBE slice: same-source HSE ON/OFF builds audited; no-HSE executable
@@ -1767,3 +1767,15 @@ folded into existing unittest/MPI tests; test-method count remains628.
 - [x] Restore existing process-worker parser/endpoint wiring in the unified source; keep fast HSE numerical paths.
 
 Final closure: source/installed628 (627pass,1skip), installed736-file and JP/EN/AI byte parity; default serial and ordinary/HSE MPI audits/builds; ordinary six-case currents and HSE learned/history/direct restart exact. Installed mixed128-step serial control and direct63→128 A/E/j resume match exactly without replay. No GS dataset collection or CI. Evidence: calc2026/salmonpy-unified-source-20261119.
+
+### Norm-based convergence campaigns (2026-11-19)
+
+- [x] Unified-source commit d86d5692 pushed to independent SALMONpy branch; original history unchanged. OneDrive Git mmap issue avoided through verified local object transfer; no CI.
+- [x] Grid radius/3→0.1 angstrom plans, ceiling/deduplicated grids, explicit radius definition/species/PP hashes; finer limits allowed.
+- [x] Independent dt trials from0.2au, fixed impulse and common physical duration; norm tolerance default1e-5 after user clarification.
+- [x] Fortran scalar-IEEE sample checks, norm loss/gain/error and optional trace comparisons. Python handles planning/dispatch/records.
+- [x] Tolerance exceedance reports without stopping; numerical breakdown stops only that trial; runtime/cleanup failure separated. SCF nonconvergence warns/provisional.
+- [ ] Wire actual built-in TDDFT electron-number measurement and existing GS/RT callbacks; execute material campaign within agreed resources without collecting GS datasets.
+- [ ] Automatic PP cutoff-radius selection remains deferred: require an explicit physical radius rather than guess channel semantics.
+
+Campaign verification: source and installed631 tests (630pass,1skip); final provenance update covered by3 affected tests in source/final wheel. Installed planning sample and Fortran below/above1e-5 loss/gain/NaN/Inf controls pass; old LD/SBE regressions remain passing. JP/EN/AI byte parity and sdist→wheel verified. No new GS/native TDDFT norm measurement campaign or CI. Evidence: calc2026/salmonpy-convergence-campaigns-20261119.

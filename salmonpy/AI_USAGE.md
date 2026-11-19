@@ -765,3 +765,7 @@ context_mpi_protocol1の新しい高速PRランタイムでは、rt_open初期�
 標準TDDFTのcontext_mpi_protocol1は初期化〜初期電流の子コミュニケータを状態終了時に回収し、pending復元候補も破棄する。一native寿命／プロセスの制約は維持する。ホストMPI継続と多重状態対応を混同しない。MPIラッパーの内部コンパイラ指定もビルド記録に残す。
 
 標準TDDFTのhandle/model protocol1は、同じ全k点物質・dt・容量・MPI分割・初期Aの独立native状態を扱う実験的C入口。返すjは電荷電流で、旧sp_tddft_init/stepの物質Jとは異なる。保護／候補／A／保存上限は状態所有。Python create_stateの一寿命制約は維持し、共有生成器・異種入力対応とは説明しない。STANDARD_HANDLES日英と対応ヘッダーを参照。
+
+## 収束診断と数値処理の配置
+
+`CONVERGENCE.md`／`CONVERGENCE.en.md`を参照してください。Pythonは入力・計画・呼び出し・記録を担当し、数値処理は原則Fortran/Cに置きます。dtの基本指標は実測した電子数の減少率1e-5です。増加側も記録し、目安超過だけで計算を止めません。NaN/Inf等はその試験だけ直ちに終了します。設定nelecを測定値の代わりに使いません。既存native TDDFTへの測定口の接続は次段階であり、今回のコールバック契約を実装済みメソッドと混同しないでください。
