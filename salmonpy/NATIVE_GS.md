@@ -860,9 +860,9 @@ Pythonが保持するGS状態をcloseすると、その状態が所有する未�
 MPI操作を実行する機能ではありません。C ABIで直接準備した候補はそのホストの責任で
 破棄してください。Pythonは外部ホストの予約を勝手に解放せず、native側の拒否を保持します。
 
-### 通常XCのk点MPI数を変えて再開する
+### k点MPI数を変えて再開する
 
-新しい対応ランタイムでは、PZ／Libxc-PZ／Libxc-PBEの周期・非スピン分極・固定イオンSCFを、
+新しい対応ランタイムでは、PZ／Libxc-PZ／Libxc-PBEと高速PR版HSE06の周期・非スピン分極・固定イオンSCFを、
 k点だけで並列化した配置間で再開できます。確認済みは1→2ランクと2→1ランクです。
 通常のrestartは従来どおり同じMPI分割を要求し、変更時だけ明示的に指定します。
 
@@ -888,9 +888,12 @@ k部分を再配置します。密度・混合履歴・Poisson／XC数値状態�
 既定のGaussian初期化では乱数seedに担当開始k点が含まれ、MPI分割によって初期軌道が
 変わる場合があります。初期化自体は変更せず、別の初期状態を比較基準にしません。これは実装の検証であり、格子・k点などの物理収束を認定するものではありません。
 
-高速HSE、軌道／空間分割の変更、異なるランタイムへの移行はこの入口の対象外です。
+高速PR版HSEでは、密なACE因子・source/actionキャッシュ・k点別factor/PT-CN履歴も
+Fortranで再配置します。全k点／縮約k点とPBE準備段階の保存で1↔2を検証しています。
+packed/distributed ACE、軌道／空間分割の変更、異なるランタイムへの移行は対象外です。
 共通checkpoint_target／保護付き復元は、引き続き同一MPI分割で使います。
-必要なABIはsp_gs_scf_k_repartition_protocol()==1で、暗黙にはビルドしません。
+必要なABIはsp_gs_scf_k_repartition_protocol()の通常XC版1、HSE版2です。
+暗黙にはビルドしません。
 
 既存サンプルでは、保存側に `--k-parallel --save-scf NEW_CHECKPOINT`、
 異なるランク数の再開側に `--restart CHECKPOINT --repartition` を指定できます。

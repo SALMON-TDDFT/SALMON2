@@ -10,7 +10,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('build',type=Path);p.add_argument('output',type=Path)
     p.add_argument('--size',type=int,default=2)
-    p.add_argument('--restore-size',type=int,help='k-only ordinary-XC checkpoint migration to a different rank count')
+    p.add_argument('--restore-size',type=int,help='k-only ordinary-XC/fast-PR HSE checkpoint migration to a different rank count')
     p.add_argument('--repartition',action='store_true',help=argparse.SUPPRESS)
     p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='libxc_pbe')
     p.add_argument('--split',choices=('k','spatial'),default='k')

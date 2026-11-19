@@ -923,10 +923,10 @@ collector/destructor performs MPI operations. Reservations staged directly by an
 external C host remain that host's responsibility; Python never silently discards
 them, and native admission/refusal remains in effect.
 
-### Changing ordinary-XC k-MPI rank count at restart
+### Changing k-MPI rank count at restart
 
 A matching new runtime supports periodic scalar fixed-ion PZ/Libxc-PZ/Libxc-PBE
-SCF restart between k-only layouts; measured controls cover1→2 and2→1 ranks.
+and fast-PR HSE06 SCF restart between k-only layouts; measured controls cover1→2 and2→1 ranks.
 Default restart still requires the same decomposition. Opt in explicitly:
 
 ```python
@@ -954,9 +954,11 @@ initialization with a different decomposition may produce different orbitals.
 Initialization itself is unchanged; a different guess is not the same initial condition. These are execution controls, not physical
 grid/k convergence certification.
 
-Fast HSE, orbital/spatial repartition and changed-runtime migration remain outside
-this entry. Common checkpoint_target/protected restore still requires unchanged
-MPI decomposition. Optional ABI: sp_gs_scf_k_repartition_protocol()==1; no implicit build.
+Fast-PR HSE additionally reindexes dense ACE factors, source/action caches and
+per-k factor/PT-CN histories in Fortran. Full/reduced-k and PBE pre-stage cuts
+cover1↔2 ranks. Packed/distributed ACE, orbital/spatial repartition and
+changed-runtime migration remain outside this entry. Common checkpoint_target/protected restore still requires unchanged
+MPI decomposition. Optional ABI: sp_gs_scf_k_repartition_protocol()==1 for ordinary XC, version2 for HSE; no implicit build.
 
 The existing sample saves with `--k-parallel --save-scf NEW_CHECKPOINT` and loads
 with a different rank count using `--restart CHECKPOINT --repartition`. Both

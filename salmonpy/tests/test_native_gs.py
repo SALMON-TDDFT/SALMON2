@@ -108,6 +108,13 @@ class NativeGSTests(unittest.TestCase):
             with self.assertRaisesRegex(InputError,'more k ranks'):
                 _scf_disk_manifest(checkpoint,local,text.replace('nproc_k=1','nproc_k=3'),assets,'Si',repartition=True)
             local.lib.sp_gs_scf_k_repartition.assert_not_called()
+            from salmonpy.native_gs import _scf_k_repartition_api,_scf_k_input
+            with self.assertRaisesRegex(InputError,'protocol2'):_scf_k_repartition_api(local.lib,hse=True)
+            probe.return_value=2
+            self.assertIs(_scf_k_repartition_api(local.lib,hse=True),local.lib.sp_gs_scf_k_repartition)
+            hse_text=text.replace("xc='pz'","xc='hse06'")
+            self.assertIn('functional',_scf_k_input(hse_text,(1,1,1,1,1)))
+
 
 
     def test_imported_force_and_native_complex_array_contract(self):

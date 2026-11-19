@@ -77,7 +77,11 @@ end function
 ! Opt-in ordinary-XC full-real-grid k-only migration. Numerical data never
 ! pass through Python. Existing exact-layout disk/candidate entry is unchanged.
 integer(c_int) function sp_gs_scf_k_repartition_protocol() bind(C)
+#ifdef USE_HSE
+ sp_gs_scf_k_repartition_protocol=2
+#else
  sp_gs_scf_k_repartition_protocol=1
+#endif
 end function
 integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bind(C) result(status)
  integer(c_int64_t),value::token
@@ -99,6 +103,10 @@ integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bin
  if(ctx%info%isize_r/=1.or.ctx%info%isize_o/=1.or.ctx%info%isize_k/=nproc)status=15
  select case(trim(ctx%system%xc_input%xcname))
  case('pz','libxc_pz','libxc_pbe')
+#ifdef USE_HSE
+ case('hse06')
+  if(.not.ctx%hse_bound)status=15
+#endif
  case default
   status=15
  end select
@@ -182,6 +190,9 @@ integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bin
   call scf_merge_k_orbital(value%cg%pre_gk,donor%cg%pre_gk,first,ks,ke,status)
   call scf_merge_k_orbital(value%cg%pk,donor%cg%pk,first,ks,ke,status)
   call scf_merge_k_orbital(value%cg%hpk,donor%cg%hpk,first,ks,ke,status)
+#ifdef USE_HSE
+  if(ctx%hse_bound)call scf_merge_k_hse(value%hse,donor%hse,first,lo,hi,ks,ke,status)
+#endif
   if(status/=0)exit
   covered(max(lo,ks):min(hi,ke))=.true.;first=.false.
   deallocate(donor)
@@ -190,6 +201,18 @@ integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bin
  call comm_get_max(status,group)
  if(status/=0)return
  call value%continuation_inputs%parallel_from(ctx%inputs)
+#ifdef USE_HSE
+ if(ctx%hse_bound)then
+  value%hse%ace%metric_comm=ctx%info%icomm_r
+  value%hse%scf_damped_ace%metric_comm=ctx%info%icomm_r
+  value%hse%initial_ace%metric_comm=ctx%info%icomm_r
+  value%hse%midpoint_ace%metric_comm=ctx%info%icomm_r
+  ! Geometric phase tables are rank-specific runtime caches, not exchange history.
+  if(allocated(value%hse%native_symmetry%cached_phase))deallocate(value%hse%native_symmetry%cached_phase)
+  if(allocated(value%hse%native_symmetry%phase_offset))deallocate(value%hse%native_symmetry%phase_offset)
+  value%hse%native_symmetry%cached_first=1;value%hse%native_symmetry%cached_count=0
+ endif
+#endif
  call move_alloc(value,ctx%scf_pending)
  end associate
 end function
@@ -249,3 +272,101 @@ subroutine scf_merge_k_orbital(target,source,first,ks,ke,status)
   if(a<=b)target%zwf(:,:,:,:,:,a:b,:)=source%zwf(:,:,:,:,:,a:b,:)
  endif
 end subroutine
+
+#ifdef USE_HSE
+subroutine scf_merge_k_complex3(target,source,first,lo,hi,ks,ke,status)
+ complex(8),allocatable,intent(inout)::target(:,:,:)
+ complex(8),allocatable,intent(in)::source(:,:,:)
+ logical,intent(in)::first
+ integer,intent(in)::lo,hi,ks,ke
+ integer,intent(inout)::status
+ integer::lb(3),ub(3),istat,a,b,j
+ if(status/=0)return
+ if(first)then
+  if(allocated(target))deallocate(target)
+  if(allocated(source))then
+   lb=lbound(source);ub=ubound(source)
+   allocate(target(lb(1):ub(1),lb(2):ub(2),1:ke-ks+1),stat=istat)
+   if(istat/=0)then
+    status=4;return
+   endif
+   target=0d0
+  endif
+ endif
+ if(allocated(target).neqv.allocated(source))then
+  status=11;return
+ endif
+ if(.not.allocated(source))return
+ if(size(source,3)/=hi-lo+1)then
+  status=11;return
+ endif
+ do j=1,2
+  if(lbound(target,j)/=lbound(source,j).or.ubound(target,j)/=ubound(source,j))then
+   status=11;return
+  endif
+ enddo
+ a=max(ks,lo);b=min(ke,hi)
+ if(a<=b)target(:,:,a-ks+1:b-ks+1)=source(:,:,a-lo+lbound(source,3):b-lo+lbound(source,3))
+end subroutine
+subroutine scf_merge_k_ace(target,source,first,lo,hi,ks,ke,status)
+ type(s_exx_ace),intent(inout)::target
+ type(s_exx_ace),intent(in)::source
+ logical,intent(in)::first
+ integer,intent(in)::lo,hi,ks,ke
+ integer,intent(inout)::status
+ if(status/=0)return
+ if(source%packed.or.source%metric_distributed)then
+  status=15;return
+ endif
+ ! condition is diagnostic-only: retain a conservative bound over contributors.
+ if(.not.first)target%condition=max(target%condition,source%condition)
+ call scf_merge_k_complex3(target%factors,source%factors,first,lo,hi,ks,ke,status)
+end subroutine
+subroutine scf_merge_k_history(target,source,first,lo,hi,ks,ke,status)
+ type(s_factor_history),allocatable,intent(inout)::target(:)
+ type(s_factor_history),allocatable,intent(in)::source(:)
+ logical,intent(in)::first
+ integer,intent(in)::lo,hi,ks,ke
+ integer,intent(inout)::status
+ integer::j,istat
+ if(status/=0)return
+ if(first)then
+  if(allocated(target))deallocate(target)
+  if(allocated(source))then
+   allocate(target(ke-ks+1),stat=istat)
+   if(istat/=0)then
+    status=4;return
+   endif
+  endif
+ endif
+ if(allocated(target).neqv.allocated(source))then
+  status=11;return
+ endif
+ if(.not.allocated(source))return
+ if(size(source)/=hi-lo+1)then
+  status=11;return
+ endif
+ do j=max(ks,lo),min(ke,hi)
+  target(j-ks+1)=source(j-lo+lbound(source,1))
+ enddo
+end subroutine
+subroutine scf_merge_k_hse(target,source,first,lo,hi,ks,ke,status)
+ type(s_exx_rt_state),intent(inout)::target
+ type(s_exx_rt_state),intent(in)::source
+ logical,intent(in)::first
+ integer,intent(in)::lo,hi,ks,ke
+ integer,intent(inout)::status
+ call scf_merge_k_ace(target%ace,source%ace,first,lo,hi,ks,ke,status)
+ call scf_merge_k_ace(target%scf_damped_ace,source%scf_damped_ace,first,lo,hi,ks,ke,status)
+ call scf_merge_k_ace(target%initial_ace,source%initial_ace,first,lo,hi,ks,ke,status)
+ call scf_merge_k_ace(target%midpoint_ace,source%midpoint_ace,first,lo,hi,ks,ke,status)
+ call scf_merge_k_complex3(target%cached_source,source%cached_source,first,lo,hi,ks,ke,status)
+ call scf_merge_k_complex3(target%cached_action,source%cached_action,first,lo,hi,ks,ke,status)
+ call scf_merge_k_complex3(target%full_source,source%full_source,first,lo,hi,ks,ke,status)
+ call scf_merge_k_complex3(target%initial_source,source%initial_source,first,lo,hi,ks,ke,status)
+ call scf_merge_k_complex3(target%target_work,source%target_work,first,lo,hi,ks,ke,status)
+ call scf_merge_k_complex3(target%action_work,source%action_work,first,lo,hi,ks,ke,status)
+ call scf_merge_k_history(target%factor_history,source%factor_history,first,lo,hi,ks,ke,status)
+ call scf_merge_k_history(target%ptcn_history,source%ptcn_history,first,lo,hi,ks,ke,status)
+end subroutine
+#endif

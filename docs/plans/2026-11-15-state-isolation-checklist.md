@@ -11,7 +11,7 @@ retains results. GS saving/reuse and validation datasets in calc2026 are authori
 
 ### Completed and verified
 
-- [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC k-only1↔2 changed-rank restart is now measured; HSE/spatial/orbital/changed-runtime migration remains open.
+- [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC k-only1↔2 changed-rank restart is now measured; Spatial/orbital/changed-runtime migration remains open; dense fast-PR HSE k-only1↔2 is covered below.
 
 - [x] One maintained fast-PR solver tree and shared default preparation/build path;
   ordinary XC does not require HSE dependencies. Historical source evidence retained.
@@ -49,7 +49,7 @@ continuation. GS saving/reuse and the approved validation datasets are authorize
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
    physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
    silently changing existing results.
-4. [ ] Extend measured ordinary-XC k-only1↔2 SCF repartition to HSE/orbital/spatial layouts;
+4. [ ] Extend measured ordinary-XC/dense fast-PR HSE k-only1↔2 SCF repartition to orbital/spatial layouts;
    add portable/checkpoint-version migration across runtimes. Covered active-SCF
    and same-topology RT direct restart are complete within measured scopes.
 5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
@@ -1985,3 +1985,18 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 - [ ] HSE/spatial/orbital repartition and changed-binary/portable migration remain open; common protected targets retain exact-layout compatibility.
 
 - [x] Final release source/object audits, source/installed637 (636pass,1skip), installed ordinary-XC1↔2 migration, exact restored cuts/zero replay and fixed tolerances. Excess k ranks rejected before GS creation. Default ordinary/HSE prior-binary/current equality retained. JP/EN/AI/sample/tool/solver parity; no CI. Evidence: calc2026/salmonpy-scf-k-repartition-record-20261120.
+
+## 2026-11-20 Fast-PR HSE SCF k-only repartition
+
+- [x] HSE protocol2 maps dense ACE/cache arrays and per-k histories in Fortran;
+  rebinds communicator IDs, discards geometric rank caches only, no SCF replay.
+- [x] Full/reduced-k1↔2 and PBE pre-stage1↔2; exact restored cuts, zero bootstrap
+  iterations and continued arrays within preset1e-9/1e-10. Wheel HSE1↔2 passed.
+- [x] Ordinary PBE2→1, ordinary/HSE prior-binary SCF and16-step RT exact;
+  source/installed637 tests (636pass,1skip), audits and JP/EN/AI synchronization.
+- [ ] Orbital/spatial/packed/distributed ACE and changed-runtime/portable migration.
+  Earlier HSE-repartition-open statements are superseded only for dense k-only
+  protocol2. Common protected restoration still requires unchanged MPI topology.
+- Evidence: calc2026/salmonpy-scf-fast-hse-k-record-20261120. This user-authorized
+  GS dataset validation is numerical execution verification, not physical convergence
+  certification. No CI dispatch; OneDrive cloud sync not independently confirmed.

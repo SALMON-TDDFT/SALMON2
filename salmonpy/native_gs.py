@@ -63,11 +63,13 @@ def _scf_disk_api(lib):
     return lib.sp_gs_scf_disk
 
 
-def _scf_k_repartition_api(lib):
+def _scf_k_repartition_api(lib,*,hse=False):
     probe=getattr(lib,'sp_gs_scf_k_repartition_protocol',None)
     if probe is None:raise InputError('k-only SCF repartition requires a matching explicitly built runtime')
     probe.argtypes=[];probe.restype=c.c_int
-    if probe()!=1:raise InputError('unsupported SCF k repartition protocol')
+    version=probe()
+    if version not in (1,2) or (hse and version<2):
+        raise InputError('fast HSE k repartition requires protocol2' if hse else 'unsupported SCF k repartition protocol')
     fn=lib.sp_gs_scf_k_repartition
     fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
     return fn
@@ -83,8 +85,8 @@ def _scf_k_input(text,decomposition):
     match=re.fullmatch(r'\s*nproc_k\s*=\s*(\d+)\s*,\s*nproc_ob\s*=\s*(\d+)\s*,\s*nproc_rgrid\s*=\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*',body,re.I)
     if match is None or tuple(map(int,match.groups()))!=tuple(decomposition):
         raise InputError('SCF repartition requires an explicit matching k-only parallel block')
-    if _scalar(groups.get('functional',''),'xc','').lower() not in ('pz','libxc_pz','libxc_pbe'):
-        raise InputError('SCF k repartition currently supports PZ/Libxc-PZ/Libxc-PBE')
+    if _scalar(groups.get('functional',''),'xc','').lower() not in ('pz','libxc_pz','libxc_pbe','hse06'):
+        raise InputError('SCF k repartition requires a supported ordinary/fast-PR HSE profile')
     return groups
 
 
@@ -105,9 +107,11 @@ def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=F
         old_decomposition=record.get('decomposition')
         if old_decomposition!=[old_size,1,1,1,1] or tuple(session.backend.decomposition)!=(session.comm.size,1,1,1,1):
             raise InputError('SCF repartition currently requires k-only old and new layouts')
-        if _scf_k_input(record['input_text'],old_decomposition)!=_scf_k_input(text,session.backend.decomposition):
+        new_groups=_scf_k_input(text,session.backend.decomposition)
+        if _scf_k_input(record['input_text'],old_decomposition)!=new_groups:
             raise InputError('SCF repartition physical inputs differ')
-        _scf_k_repartition_api(session.lib)
+        from .bands import _scalar
+        _scf_k_repartition_api(session.lib,hse=_scalar(new_groups['functional'],'xc','').lower()=='hse06')
     files=record.get('files')
     if not isinstance(files,list) or len(files)!=old_size:raise InputError('SCF checkpoint rank files missing')
     for rank,entry in enumerate(files):
@@ -419,7 +423,7 @@ class NativeGSSession:
                 fn=_scf_disk_api(self.lib)
                 if repartition and saved['decomposition']!=list(self.backend.decomposition):
                     bounds=np.asarray([entry['k_bounds'] for entry in saved['files']],dtype=np.int32)
-                    migrate=_scf_k_repartition_api(self.lib)
+                    migrate=_scf_k_repartition_api(self.lib,hse=calculation.xc=='hse06')
                     self._check(migrate(state._token,os.fsencode(restart),saved['ranks'],bounds.ctypes.data))
                 else:
                     path=restart/f'rank-{self.comm.rank:08d}.bin'
