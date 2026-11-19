@@ -14,6 +14,7 @@ module exx_rt_state
  public::s_exx_rt_state,rt_taylor_stage,rt_ptcn_begin,rt_state_clear,rt_state_bytes,rt_values_copy
  type s_exx_rt_state
   type(spatial_exx_state)::spatial
+  logical::orbital_scf=.false.
   logical::recover_errors=.false.
   integer::step_error=0
   ! FFT owners are never intrinsically copied. Close before releasing this state.

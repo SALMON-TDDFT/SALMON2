@@ -890,7 +890,7 @@ k部分を再配置します。密度・混合履歴・Poisson／XC数値状態�
 
 高速PR版HSEでは、密なACE因子・source/actionキャッシュ・k点別factor/PT-CN履歴も
 Fortranで再配置します。全k点／縮約k点とPBE準備段階の保存で1↔2を検証しています。
-packed/distributed ACE、HSEの軌道／空間分割の変更、異なるランタイムへの移行は対象外です。
+packed/distributed ACE、HSEの空間分割の変更、異なるランタイムへの移行は対象外です。
 共通checkpoint_target／保護付き復元は、引き続き同一MPI分割で使います。
 必要なABIはsp_gs_scf_k_repartition_protocol()の通常XC版1、HSE版2です。
 暗黙にはビルドしません。
@@ -903,7 +903,7 @@ packed/distributed ACE、HSEの軌道／空間分割の変更、異なるラン�
 
 同じ `run(restart=..., repartition=True)` で、純粋な軌道並列配置にも対応します。
 両側の `decomposition=(1, comm.size, 1, 1, 1)` と、追加ABI
-`sp_gs_scf_o_repartition_protocol()==1` を使います。新規保存はglobal軌道範囲を
+`sp_gs_scf_o_repartition_protocol()` の版1または2を使います。新規保存はglobal軌道範囲を
 記録します。これがない旧保存も同一配置では読めますが、軌道配置変更には使えません。
 物理入力・資産・ランタイムは同一に保ちます。PZ／Libxc-PZ／PBEの1↔2ランクで、
 復元直後の軌道部分の完全一致、SCF再計算ゼロ、継続結果の既定rtol1e-9／atol1e-10
@@ -913,13 +913,13 @@ Pythonのローダーでは数値配列を並べ替えません。
 
 サンプルの保存は `--orbital-parallel --save-scf NEW_CHECKPOINT`、再開は
 新しいランク数で `--orbital-parallel --restart CHECKPOINT --repartition` です。
-軌道配置は明示的な対称性指定がなければ固定Gamma格子を使います。高速HSEの軌道並列、
+軌道配置は明示的な対称性指定がなければ固定Gamma格子を使います。高速HSEの軌道並列は後述の専用入口を使います。
 k並列と軌道並列の相互変更、空間／混合配置、別ランタイムへの移行は未対応です。
 通常の復元と共通の保護付き復元は、従来どおり同一MPI配置で使います。
 
 ### 高速PR版HSEのGamma軌道並列SCF：同じ配置への直接再開
 
-`sp_gs_hse_orbital_protocol()==1` を宣言する新しい明示ビルド版では、
+`sp_gs_hse_orbital_protocol()` の版1または2 を宣言する新しい明示ビルド版では、
 `decomposition=(1, comm.size, 1, 1, 1)` とGamma点のみの高速PR版HSE06 GSを
 保持できます。既存Gamma交換経路に従い、CPU・周期・非スピン分極・固定イオン・
 直交セル・整数の全占有スピン対を対象とし、対称性・局在化・ペア省略は使いません。
@@ -932,6 +932,38 @@ k並列と軌道並列の相互変更、空間／混合配置、別ランタイ�
 
 既存サンプルは `--xc hse06 --orbital-parallel --save-scf NEW_CHECKPOINT` で保存し、
 同じランク数で `--xc hse06 --orbital-parallel --restart CHECKPOINT` として再開します。
-`--repartition` は付けません。HSE軌道並列のランク数変更、複数k点の軌道HSE、
+ランク数を変える場合は後述のprotocol2入口を使います。複数k点の軌道HSE、
 空間／混合配置、軌道並列GSからRTへの受け渡しは未対応です。2ランクの別プロセス再開と
 PBE準備段階の保存は実行の検証であり、物理的な格子・k点収束を認定するものではありません。
+
+### 高速PR版HSEの軌道並列数を変える
+
+保存側と再開側の両方に、固定設定 `hse_orbital=True` を指定します。1ランクでも
+同じGamma軌道交換の計算経路を選び、既定のk点並列経路と区別するための指定です。
+HSE-orbital protocol2と、配置変更用orbital-repartition protocol2が必要です。
+既存の既定経路・同一配置への再開は維持し、物理入力とランタイムは揃えます。
+
+```python
+backend = NativeGSBackend(build_record, work_root,
+    decomposition=(1, comm.size, 1, 1, 1), hse_orbital=True)
+with backend.open(context) as session:
+    with session.run(calculation, scf=scf, material_id="Si",
+                     restart=checkpoint, repartition=True) as state:
+        assert state.scf_status["executed_iterations"] == 0
+        state.continue_scf(steps=5)
+```
+
+Fortranが保存したglobal軌道番号に沿って、密なACE因子とsource/action/work、
+交換用source・previousの列を再配置します。共有保持するgauge・占有・フェーズ・
+密度混合履歴は維持し、通信資源を復元先へ結び直します。保存状態を作り直すための
+ACE評価やSCF反復は行いません。保存元のファイルは変更しません。
+別プロセスの1↔2、PBE準備段階の1↔2、2原子・4バンドの不均等な2↔3を
+検証しました。軌道の復元直後は完全一致、初期SCF実行数は0、その後の5反復は
+保存元と同じ初期状態からの連続8反復と既定rtol1e-9／atol1e-10で一致しました。
+
+サンプルは両側に `--xc hse06 --orbital-parallel` を指定し、保存側に
+`--save-scf`、異なるランク数の再開側に `--restart CHECKPOINT --repartition` を
+付けます。1ランクの保存元にも明示的な軌道経路の指定が必要です。packed/distributed
+ACE、タイル形式gauge、局在疎表現、複数k点の軌道HSE、空間／混合配置、別ランタイム
+への移行と軌道並列GS→RTは、この密なGamma経路の対象外です。
+共通の保護付き復元は従来どおり同一MPI配置で使います。

@@ -1210,6 +1210,12 @@ subroutine scf_io_s_exx_rt_state(u,reading,value,ios,limit)
  call scf_io_spatial_exx_state(u,reading,value%spatial,ios,limit)
  if(ios/=0)return
  if(reading)then
+  read(u,iostat=ios)value%orbital_scf
+ else
+  write(u,iostat=ios)value%orbital_scf
+ endif
+ if(ios/=0)return
+ if(reading)then
   read(u,iostat=ios)value%recover_errors
  else
   write(u,iostat=ios)value%recover_errors

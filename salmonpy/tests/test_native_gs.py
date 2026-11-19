@@ -96,7 +96,7 @@ class NativeGSTests(unittest.TestCase):
             from salmonpy.errors import InputError
             with self.assertRaises(InputError):NativeGSBackend(receipt,root)
             for name,value in [('decomposition',(1,2,1,1,1)),('library',Path('/tmp/other')),
-                               ('work_root',Path('/tmp/other')),('sha256','different')]:
+                               ('work_root',Path('/tmp/other')),('hse_orbital',True),('sha256','different')]:
                 with self.assertRaises(AttributeError):setattr(backend,name,value)
 
             # A k-only repartition must reject an empty target k owner before
@@ -137,8 +137,11 @@ class NativeGSTests(unittest.TestCase):
             local.lib.sp_gs_scf_o_repartition.assert_not_called()
             manifest['input_text']=hse_text
             (checkpoint/'manifest.json').write_text(json.dumps(manifest))
-            with self.assertRaisesRegex(InputError,'HSE orbital'):
+            with self.assertRaisesRegex(InputError,'protocol2'):
                 _scf_disk_manifest(checkpoint,local,hse_text.replace('nproc_ob=1','nproc_ob=3'),assets,'Si',repartition=True)
+            from salmonpy.native_gs import _scf_o_repartition_api
+            local.lib.sp_gs_scf_o_repartition_protocol.return_value=2
+            self.assertIs(_scf_o_repartition_api(local.lib,hse=True),local.lib.sp_gs_scf_o_repartition)
 
 
 

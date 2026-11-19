@@ -75,11 +75,13 @@ def _scf_k_repartition_api(lib,*,hse=False):
     return fn
 
 
-def _scf_o_repartition_api(lib):
+def _scf_o_repartition_api(lib,*,hse=False):
     probe=getattr(lib,'sp_gs_scf_o_repartition_protocol',None)
     if probe is None:raise InputError('orbital-only SCF repartition requires a matching explicitly built runtime')
     probe.argtypes=[];probe.restype=c.c_int
-    if probe()!=1:raise InputError('unsupported SCF orbital repartition protocol')
+    version=probe()
+    if version not in (1,2) or (hse and version<2):
+        raise InputError('fast HSE orbital repartition requires protocol2' if hse else 'unsupported SCF orbital repartition protocol')
     fn=lib.sp_gs_scf_o_repartition
     fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
     return fn
@@ -125,8 +127,7 @@ def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=F
         from .bands import _scalar
         hse=_scalar(new_groups['functional'],'xc','').lower()=='hse06'
         if orbital:
-            if hse:raise InputError('fast HSE orbital repartition is not supported')
-            _scf_o_repartition_api(session.lib)
+            _scf_o_repartition_api(session.lib,hse=hse)
         else:_scf_k_repartition_api(session.lib,hse=hse)
     files=record.get('files')
     if not isinstance(files,list) or len(files)!=old_size:raise InputError('SCF checkpoint rank files missing')
@@ -269,7 +270,7 @@ class NativeGSArray:
 
 
 class NativeGSBackend:
-    def __init__(self,build_record,work_root,*,decomposition=(1,1,1,1,1)):
+    def __init__(self,build_record,work_root,*,decomposition=(1,1,1,1,1),hse_orbital=False):
         record=json.loads(Path(build_record).read_text())
         self._ordinary_rt=type(record.get('ordinary_rt_abi')) is int and record['ordinary_rt_abi']==1
         self._fast=record.get('schema')=='salmonpy.fast-hse-mpi/1' or record.get('source_profile')=='fast-pr'
@@ -284,6 +285,9 @@ class NativeGSBackend:
             raise InputError('verified embedded or declared fast GS build record required')
         self._fast_hse=record.get('schema')=='salmonpy.fast-hse-mpi/1'
         self._supports_compute=not self._fast or 'run' in record.get('gs_abi',{}).get('modes',[])
+        if type(hse_orbital) is not bool or (hse_orbital and not self._fast_hse):
+            raise InputError('hse_orbital must be a boolean for a fast-PR HSE runtime')
+        self._hse_orbital=hse_orbital
         from ._gs_archive import record_profile
         self._io_profile=record_profile(record)
         self._library=Path(record['library']).resolve();self._sha256=record['sha256']
@@ -293,6 +297,8 @@ class NativeGSBackend:
         self._decomposition=tuple(_integer(v,'decomposition',1,2**31-1) for v in decomposition)
         if len(self.decomposition)!=5:raise InputError('five decomposition values required')
 
+    @property
+    def hse_orbital(self):return self._hse_orbital
     @property
     def library(self):return self._library
     @property
@@ -370,12 +376,15 @@ class NativeGSSession:
             if calculation.xc=='hse06':
                 if not getattr(self.backend,'_fast_hse',False):
                     raise InputError('HSE06 GS requires a declared fast-PR HSE runtime')
-                if self.backend.decomposition!=(self.comm.size,1,1,1,1):
+                if getattr(self.backend,'hse_orbital',False) or self.backend.decomposition!=(self.comm.size,1,1,1,1):
                     probe=getattr(self.lib,'sp_gs_hse_orbital_protocol',None)
                     if probe is None:raise InputError('fast HSE GS requires k-only MPI decomposition or an explicitly matching orbital runtime')
                     probe.argtypes=[];probe.restype=c.c_int
-                    if (probe()!=1 or self.backend.decomposition!=(1,self.comm.size,1,1,1)
-                            or tuple(calculation.kmesh)!=(1,1,1) or calculation.symmetry is not None):
+                    version=probe()
+                    if (version not in (1,2) or (getattr(self.backend,'hse_orbital',False) and version<2)
+                            or self.backend.decomposition!=(1,self.comm.size,1,1,1)
+                            or tuple(calculation.kmesh)!=(1,1,1) or calculation.symmetry is not None
+                            or calculation.electrons!=2*calculation.states):
                         raise InputError('fast HSE GS requires k-only MPI or Gamma orbital-only layout and a matching runtime')
             if type(repartition) is not bool or (repartition and restart is None):
                 raise InputError('repartition is an explicit boolean option requiring restart')
@@ -390,7 +399,9 @@ class NativeGSSession:
                 _configure_scf(self.lib)
             scf=SCFSettings() if scf is None else scf
             _identifier(material_id,'material_id')
-            text=calculation.input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
+            text=calculation.input_text(scf)
+            if calculation.xc=='hse06' and getattr(self.backend,'hse_orbital',False):
+                text=text.replace('&functional',"&functional\n yn_hse_wannier='y',",1).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
             k,ob,x,y,z=self.backend.decomposition
             text=text.replace('&system',f'&parallel\n nproc_k={k},nproc_ob={ob},nproc_rgrid={x},{y},{z}\n/\n&system',1)
             assets=calculation.input_assets
@@ -445,7 +456,7 @@ class NativeGSSession:
                 if repartition and saved['decomposition']!=list(self.backend.decomposition):
                     orbital=self.backend.decomposition[1]>1 or saved['decomposition'][1]>1
                     bounds=np.asarray([entry['orbital_bounds' if orbital else 'k_bounds'] for entry in saved['files']],dtype=np.int32)
-                    migrate=_scf_o_repartition_api(self.lib) if orbital else _scf_k_repartition_api(self.lib,hse=calculation.xc=='hse06')
+                    migrate=_scf_o_repartition_api(self.lib,hse=calculation.xc=='hse06') if orbital else _scf_k_repartition_api(self.lib,hse=calculation.xc=='hse06')
                     self._check(migrate(state._token,os.fsencode(restart),saved['ranks'],bounds.ctypes.data))
                 else:
                     path=restart/f'rank-{self.comm.rank:08d}.bin'

@@ -1,7 +1,7 @@
 ! SCF rank-local disk v1. Host authenticates binary/input/topology and all files.
 integer(c_int) function sp_gs_hse_orbital_protocol() bind(C)
 #ifdef USE_HSE
- sp_gs_hse_orbital_protocol=1
+ sp_gs_hse_orbital_protocol=2
 #else
  sp_gs_hse_orbital_protocol=0
 #endif
@@ -92,7 +92,11 @@ integer(c_int) function sp_gs_scf_k_repartition_protocol() bind(C)
 #endif
 end function
 integer(c_int) function sp_gs_scf_o_repartition_protocol() bind(C)
+#ifdef USE_HSE
+ sp_gs_scf_o_repartition_protocol=2
+#else
  sp_gs_scf_o_repartition_protocol=1
+#endif
 end function
 integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bind(C) result(status)
  integer(c_int64_t),value::token
@@ -137,7 +141,8 @@ integer(c_int) function scf_repartition(token,path,old_size,kbounds,axis) result
  case('pz','libxc_pz','libxc_pbe')
 #ifdef USE_HSE
  case('hse06')
-  if(.not.ctx%hse_bound.or.axis/=6)status=15
+  if(.not.ctx%hse_bound)status=15
+  if(axis==5.and..not.ctx%hse%orbital_scf)status=15
 #endif
  case default
   status=15
@@ -228,7 +233,13 @@ integer(c_int) function scf_repartition(token,path,old_size,kbounds,axis) result
   call scf_merge_k_orbital(value%cg%pk,donor%cg%pk,first,ks,ke,status,axis)
   call scf_merge_k_orbital(value%cg%hpk,donor%cg%hpk,first,ks,ke,status,axis)
 #ifdef USE_HSE
-  if(ctx%hse_bound)call scf_merge_k_hse(value%hse,donor%hse,first,lo,hi,ks,ke,status)
+  if(ctx%hse_bound)then
+   if(axis==5)then
+    call scf_merge_o_hse(value%hse,donor%hse,first,lo,hi,ks,ke,status)
+   else
+    call scf_merge_k_hse(value%hse,donor%hse,first,lo,hi,ks,ke,status)
+   endif
+  endif
 #endif
   if(status/=0)exit
   covered(max(lo,ks):min(hi,ke))=.true.;first=.false.
@@ -240,6 +251,7 @@ integer(c_int) function scf_repartition(token,path,old_size,kbounds,axis) result
  call value%continuation_inputs%parallel_from(ctx%inputs)
 #ifdef USE_HSE
  if(ctx%hse_bound)then
+  value%hse%spatial%gauge_tiles%comm=ctx%info%icomm_ro
   value%hse%ace%metric_comm=ctx%info%icomm_r
   value%hse%scf_damped_ace%metric_comm=ctx%info%icomm_r
   value%hse%initial_ace%metric_comm=ctx%info%icomm_r
@@ -324,19 +336,23 @@ subroutine scf_merge_k_orbital(target,source,first,ks,ke,status,axis)
 end subroutine
 
 #ifdef USE_HSE
-subroutine scf_merge_k_complex3(target,source,first,lo,hi,ks,ke,status)
+subroutine scf_merge_k_complex3(target,source,first,lo,hi,ks,ke,status,axis)
  complex(8),allocatable,intent(inout)::target(:,:,:)
  complex(8),allocatable,intent(in)::source(:,:,:)
  logical,intent(in)::first
  integer,intent(in)::lo,hi,ks,ke
  integer,intent(inout)::status
- integer::lb(3),ub(3),istat,a,b,j
+ integer,optional,intent(in)::axis
+ integer::lb(3),ub(3),istat,a,b,j,dim
+ dim=3
+ if(present(axis))dim=axis
  if(status/=0)return
  if(first)then
   if(allocated(target))deallocate(target)
   if(allocated(source))then
    lb=lbound(source);ub=ubound(source)
-   allocate(target(lb(1):ub(1),lb(2):ub(2),1:ke-ks+1),stat=istat)
+   lb(dim)=1;ub(dim)=ke-ks+1
+   allocate(target(lb(1):ub(1),lb(2):ub(2),lb(3):ub(3)),stat=istat)
    if(istat/=0)then
     status=4;return
    endif
@@ -347,16 +363,23 @@ subroutine scf_merge_k_complex3(target,source,first,lo,hi,ks,ke,status)
   status=11;return
  endif
  if(.not.allocated(source))return
- if(size(source,3)/=hi-lo+1)then
+ if(size(source,dim)/=hi-lo+1)then
   status=11;return
  endif
- do j=1,2
+ do j=1,3
+  if(j==dim)cycle
   if(lbound(target,j)/=lbound(source,j).or.ubound(target,j)/=ubound(source,j))then
    status=11;return
   endif
  enddo
  a=max(ks,lo);b=min(ke,hi)
- if(a<=b)target(:,:,a-ks+1:b-ks+1)=source(:,:,a-lo+lbound(source,3):b-lo+lbound(source,3))
+ if(a<=b)then
+  if(dim==2)then
+   target(:,a-ks+1:b-ks+1,:)=source(:,a-lo+lbound(source,2):b-lo+lbound(source,2),:)
+  else
+   target(:,:,a-ks+1:b-ks+1)=source(:,:,a-lo+lbound(source,3):b-lo+lbound(source,3))
+  endif
+ endif
 end subroutine
 subroutine scf_merge_k_ace(target,source,first,lo,hi,ks,ke,status)
  type(s_exx_ace),intent(inout)::target
@@ -418,5 +441,67 @@ subroutine scf_merge_k_hse(target,source,first,lo,hi,ks,ke,status)
  call scf_merge_k_complex3(target%action_work,source%action_work,first,lo,hi,ks,ke,status)
  call scf_merge_k_history(target%factor_history,source%factor_history,first,lo,hi,ks,ke,status)
  call scf_merge_k_history(target%ptcn_history,source%ptcn_history,first,lo,hi,ks,ke,status)
+end subroutine
+subroutine scf_merge_o_hse(target,source,first,lo,hi,ks,ke,status)
+ type(s_exx_rt_state),intent(inout)::target
+ type(s_exx_rt_state),intent(in)::source
+ logical,intent(in)::first
+ integer,intent(in)::lo,hi,ks,ke
+ integer,intent(inout)::status
+ complex(8),allocatable::buffer(:,:,:),merged(:,:,:)
+ integer::istat
+ if(status/=0)return
+ if(.not.source%orbital_scf.or.allocated(source%spatial%gauge_tiles%matrix).or. &
+    allocated(source%spatial%sparse_source%offset).or.allocated(source%factor_history).or. &
+    allocated(source%ptcn_history))then
+  status=15;return
+ endif
+ call merge_ace(target%ace,source%ace)
+ call merge_ace(target%scf_damped_ace,source%scf_damped_ace)
+ call merge_ace(target%initial_ace,source%initial_ace)
+ call merge_ace(target%midpoint_ace,source%midpoint_ace)
+ call scf_merge_k_complex3(target%cached_source,source%cached_source,first,lo,hi,ks,ke,status,2)
+ call scf_merge_k_complex3(target%cached_action,source%cached_action,first,lo,hi,ks,ke,status,2)
+ call scf_merge_k_complex3(target%full_source,source%full_source,first,lo,hi,ks,ke,status,2)
+ call scf_merge_k_complex3(target%initial_source,source%initial_source,first,lo,hi,ks,ke,status,2)
+ call scf_merge_k_complex3(target%target_work,source%target_work,first,lo,hi,ks,ke,status,2)
+ call scf_merge_k_complex3(target%action_work,source%action_work,first,lo,hi,ks,ke,status,2)
+ call scf_merge_k_complex3(target%spatial%previous,source%spatial%previous,first,lo,hi,ks,ke,status,2)
+ if(status/=0)return
+ ! The source matrix has the same orbital-column layout as previous(:,:,1).
+ if(allocated(source%spatial%source))then
+  allocate(buffer(size(source%spatial%source,1),size(source%spatial%source,2),1),stat=istat)
+  if(istat/=0)then
+   status=4;return
+  endif
+  buffer(:,:,1)=source%spatial%source
+ endif
+ if(.not.first.and.allocated(target%spatial%source))then
+  allocate(merged(size(target%spatial%source,1),size(target%spatial%source,2),1),stat=istat)
+  if(istat/=0)then
+   status=4;return
+  endif
+  merged(:,:,1)=target%spatial%source
+ endif
+ call scf_merge_k_complex3(merged,buffer,first,lo,hi,ks,ke,status,2)
+ if(status/=0)return
+ if(allocated(target%spatial%source))deallocate(target%spatial%source)
+ if(allocated(merged))then
+  allocate(target%spatial%source(size(merged,1),size(merged,2)),stat=istat)
+  if(istat/=0)then
+   status=4;return
+  endif
+  target%spatial%source=merged(:,:,1)
+ endif
+contains
+ subroutine merge_ace(left,right)
+  type(s_exx_ace),intent(inout)::left
+  type(s_exx_ace),intent(in)::right
+  if(right%packed.or.right%metric_distributed)then
+   status=15;return
+  endif
+  if(.not.first)left%condition=max(left%condition,right%condition)
+  call scf_merge_k_complex3(left%factors,right%factors,first,lo,hi,ks,ke,status,2)
+ end subroutine
 end subroutine
 #endif

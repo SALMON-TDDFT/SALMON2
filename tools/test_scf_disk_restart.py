@@ -15,6 +15,7 @@ def main():
     p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='libxc_pbe')
     p.add_argument('--split',choices=('k','orbital','spatial'),default='k')
     p.add_argument('--symmetry',action='store_true')
+    p.add_argument('--two-atoms',action='store_true',help='four occupied bands for uneven orbital splits')
     p.add_argument('--gamma',action='store_true',help='Gamma-only ordinary-XC orbital restart control')
     p.add_argument('--pre-scf-threshold',type=float,default=0.)
     p.add_argument('--pre-scf-steps',type=int,default=4)
@@ -31,6 +32,7 @@ def main():
             if args.restore_size and phase in ('resume','reject'):command+=['--repartition']
             if args.symmetry:command+=['--symmetry']
             if args.gamma:command+=['--gamma']
+            if args.two_atoms:command+=['--two-atoms']
             if args.without_plot:command+=['--without-plot']
             with (args.output/(phase+'.log')).open('w') as log:
                 subprocess.run(command,env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'},stdout=log,stderr=subprocess.STDOUT,check=True)
@@ -70,9 +72,12 @@ def main():
             if self.xc=='hse06':text=text.replace('exx_pre_scf_threshold=0',f'exx_pre_scf_threshold={args.pre_scf_threshold},exx_pre_scf_steps={args.pre_scf_steps}')
             return text
     calc=DiskDFT((14,),np.diag([8.]*3),[[0,0,0]] if args.symmetry else [[.3,.4,.45]],(pp,),4,2,(8,8,8),mesh,xc=args.xc,symmetry=symmetry)
+    if args.two_atoms:
+        from dataclasses import replace
+        calc=replace(calc,numbers=(14,14),fractional_positions=[[.3,.4,.45],[.7,.6,.55]],electrons=8,states=4)
     scf=SCFSettings(max_iterations=8,tolerance=1e-30)
     dec=(args.size,1,1,1,1) if args.split=='k' else (1,args.size,1,1,1) if args.split=='orbital' else (1,1,args.size,1,1)
-    backend=NativeGSBackend(args.build,work,decomposition=dec)
+    backend=NativeGSBackend(args.build,work,decomposition=dec,hse_orbital=args.xc=='hse06' and args.split=='orbital')
     checkpoint=args.output/'checkpoint'
     def expected_orbitals(directory,orbital):
         # Test-only global-k assembly, never used by the production loader.
@@ -262,6 +267,25 @@ def main():
                 assert comm.allgather(code)==[4]*comm.size
                 assert state.scf_status['executed_iterations']==0
                 for q,value in before.items():np.testing.assert_array_equal(state.array(q).values,value)
+                if args.repartition:
+                    from salmonpy.native_gs import _scf_o_repartition_api,_scf_k_repartition_api
+                    saved=json.loads((checkpoint/'manifest.json').read_text())
+                    orbital=args.split=='orbital'
+                    bounds=np.asarray([entry['orbital_bounds' if orbital else 'k_bounds'] for entry in saved['files']],dtype=np.int32)
+                    migrate=_scf_o_repartition_api(session.lib,hse=args.xc=='hse06') if orbital else _scf_k_repartition_api(session.lib,hse=args.xc=='hse06')
+                    last=checkpoint/saved['files'][-1]['name'];withheld=last.with_suffix('.withheld')
+                    if comm.rank==0:last.rename(withheld)
+                    comm.Barrier()
+                    try:
+                        code=migrate(state._token,os.fsencode(checkpoint),saved['ranks'],bounds.ctypes.data)
+                        assert comm.allgather(code)==[4]*comm.size
+                    finally:
+                        comm.Barrier()
+                        if comm.rank==0:withheld.rename(last)
+                        comm.Barrier()
+                    for q,value in before.items():np.testing.assert_array_equal(state.array(q).values,value)
+                    assert state.scf_status['executed_iterations']==0
+
                 state.continue_scf(steps=5)
                 assert state.scf_status['executed_iterations']==5
                 state.write_scf_report(work/'diagnostics')

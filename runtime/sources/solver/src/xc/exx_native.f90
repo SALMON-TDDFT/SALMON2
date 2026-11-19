@@ -236,6 +236,8 @@ contains
     endif
     if(.not.native_owner_supported(system,info))return
     call exx_bind_system(system,owner,status)
+    if(status==0)owner%orbital_scf=product(system%kmesh)==1.and. &
+      (info%isize_o>1.or.yn_hse_wannier=='y')
   end subroutine
   subroutine exx_unbind_system(system)
     type(s_dft_system),intent(inout)::system
@@ -249,7 +251,7 @@ contains
     logical :: orbital_gs
     call hse_occupation_input(system,nelec,temperature,nstate)
     orbital_gs=.false.
-    if(theory=='dft'.and.info%isize_o>1)then
+    if(theory=='dft'.and.(info%isize_o>1.or.yn_hse_wannier=='y'))then
       offdiag=system%primitive_a
       do j=1,3
         offdiag(j,j)=0d0
@@ -1342,6 +1344,10 @@ contains
       endif
       return
     endif
+    if(theory=='dft'.and.exx_state_owner%orbital_scf)then
+      call refresh_spatial(system,mg,info,psi,rt_context=exx_state_owner)
+      return
+    endif
     if((.not.exx_state_owner%factor_experiment.or.product(system%kmesh)==1).and. &
        (info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested(system).or. &
         (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
@@ -1955,7 +1961,7 @@ contains
     subroutine apply_endpoint(state)
       implicit none
       type(s_exx_ace),intent(in) :: state
-      if(info%isize_o>1.or.state%packed)then
+      if(info%isize_o>1.or.state%packed.or.exx_state_owner%orbital_scf)then
         call orbital_ace_apply(state,exx_state_owner%target_work,exx_state_owner%action_work,info%icomm_r,info%icomm_o,ierr)
       else if(info%isize_r>1)then
         call exx_ace_apply(state,exx_state_owner%target_work,exx_state_owner%action_work,ierr,sum_spatial,exx_blas_thread_control)
@@ -2047,7 +2053,7 @@ contains
       offdiag(j,j)=0d0
     enddo
     if(maxval(abs(offdiag))>1d-12)error stop 'Spatial EXX: orthogonal cell required'
-    if(info%isize_o>1)orbital_comm=info%icomm_o
+    if(info%isize_o>1.or.exx_state_owner%orbital_scf)orbital_comm=info%icomm_o
     ! Apply and refresh never run concurrently. Reuse their mesh workspaces.
     if(allocated(exx_state_owner%target_work))then
       if(all(shape(exx_state_owner%target_work)==[product(mg%num),info%numo,1]))then
@@ -2255,7 +2261,7 @@ contains
     end subroutine
     subroutine build_exchange_ace()
       implicit none
-      if(info%isize_o>1.or.info%isize_r>1)then
+      if(info%isize_o>1.or.info%isize_r>1.or.exx_state_owner%orbital_scf)then
         call orbital_ace_build(exx_state_owner%ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status,comm_matrix=info%icomm_ro)
       else
         call exx_ace_build(exx_state_owner%ace,local,w,system%hvol,status,sum_spatial,exx_blas_thread_control)

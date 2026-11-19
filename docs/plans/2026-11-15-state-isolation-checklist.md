@@ -49,7 +49,7 @@ continuation. GS saving/reuse and the approved validation datasets are authorize
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
    physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
    silently changing existing results.
-4. [ ] Extend measured ordinary-XC k/orbital-only and dense fast-PR HSE k-only1↔2 SCF repartition to HSE orbital/spatial/mixed layouts;
+4. [ ] Extend measured ordinary-XC k/orbital-only and dense fast-PR HSE k-only1↔2 SCF repartition to spatial/mixed layouts and packed/tiled HSE states;
    add portable/checkpoint-version migration across runtimes. Covered active-SCF
    and same-topology RT direct restart are complete within measured scopes.
 5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
@@ -2036,3 +2036,25 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
   GS→RT and portable changed-runtime migration remain outside this entry.
 - Evidence: calc2026/salmonpy-hse-orbital-record-20261120. User-authorized HSE
   datasets stored locally; no cloud-sync confirmation and no CI dispatch.
+
+## 2026-11-20 Fast-PR HSE orbital rank-count restart
+
+- [x] Previous same-layout HSE orbital work committed/pushed as6ef7c87d [skip ci].
+- [x] Explicit immutable hse_orbital=True selects the same Gamma orbital algorithm
+  even on1 rank; HSE-orbital2 and orbital-repartition2 gate this added mode.
+  Default k/same-layout arithmetic remains unchanged.
+- [x] Fortran maps dense ACE, cache/work and spatial source/previous orbital
+  columns; replicated gauge/occupation/mixing/phase state retained, resources
+  rebound and detached candidate published only after collective success.
+- [x] HSE1↔2, PBE-stage1↔2 and four-band uneven2↔3: exact restored orbital cuts,
+  zero bootstrap SCF and continued source-initialized trajectories within existing
+  rtol1e-9/atol1e-10. Late missing donor rejects collectively, preserving live state
+  and source data; continuation still matches after file reinstatement.
+- [x] Default HSE orbital2 and ordinary/k-HSE prior-runtime comparisons; protected
+  independent owners preserved. Unit-test case count remains637. JP/EN/AI/header
+  and existing sample/tool extended; no new module or routine CI.
+- [ ] Packed/distributed ACE, tiled gauges, sparse localized support, multi-k
+  orbital HSE, spatial/mixed and changed-runtime migration; orbital GS→RT remains
+  unsupported. Historical HSE-orbital-repartition-open entries are superseded only
+  within this dense explicit Gamma profile.
+- Evidence: calc2026/salmonpy-hse-orbital-repartition-record-20261120.

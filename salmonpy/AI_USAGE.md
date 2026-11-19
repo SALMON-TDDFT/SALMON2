@@ -808,7 +808,7 @@ SCFデータ保存時には残差履歴も確認します。新しいnative GS�
 
 native SCFの準備済み復元候補を使わない場合はclose/discardまたはwith文で破棄します。GS状態のcloseと元のsnapshotのcloseも、それぞれが所有するPython候補を先に破棄します。MPI各rankで同順に呼び、Cホストが直接作った予約やGCによる自動MPI終了まで保証すると説明しません。
 
-通常XCのSCFディスク再開では、対応ランタイムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSE／空間／軌道分割変更は未対応です。既定と共通保護付き復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
+通常XCのSCFディスク再開では、対応ランタイムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSEのk／軌道分割変更は後述の対応protocolで扱い、空間／混合配置は未対応です。既定と共通保護付き復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
 
 ## SCFのk点MPI数を変える再開
 
@@ -816,18 +816,26 @@ native SCFの準備済み復元候補を使わない場合はclose/discardまた
 物理入力を保ち、k点だけのMPI分割を変える明示的な入口です。通常XCはprotocol1/2、
 密なACEを使う高速PR版HSEはk-repartition protocol2が必要です。確認済みは1↔2ランク、
 HSEの全k点／縮約k点とPBE準備段階です。FortranがACE・キャッシュ・履歴を再配置し、
-SCFを再実行しません。HSEの軌道／空間分割、packed/distributed ACE、異なるランタイムは
+SCFを再実行しません。HSEの軌道分割は後述の専用入口を使い、空間分割、packed/distributed ACE、異なるランタイムは
 未対応です。保護付き復元のMPI分割は従来どおり同一にします。詳細はNATIVE_GS.md／
 NATIVE_GS.en.mdを参照し、物理収束の検証と混同しないでください。
 
 通常XCの純粋な軌道並列も同じ明示的再開入口を使います。両側は
-`decomposition=(1, comm.size, 1, 1, 1)` とし、orbital-repartition protocol1と
-新保存のorbital_boundsを要求します。高速HSEの軌道並列とk／軌道間の配置変更は
+`decomposition=(1, comm.size, 1, 1, 1)` とし、orbital-repartition protocol1/2と
+新保存のorbital_boundsを要求します。高速HSEの軌道並列は後述のprotocol2を使います。k／軌道間の配置変更は
 未対応です。サンプルは両側に `--orbital-parallel` を指定します。
 
 高速PR版HSEのGamma軌道並列SCFは、新ランタイムの
-`sp_gs_hse_orbital_protocol()==1` がある場合、同じMPI分割への直接保存／再開を
+`sp_gs_hse_orbital_protocol()` の版1または2 がある場合、同じMPI分割への直接保存／再開を
 使えます。サンプルは両側に `--xc hse06 --orbital-parallel` を指定し、再開側に
-`--restart` を渡します。`--repartition` は未対応です。ACEとGamma交換作業状態を
+`--restart` を渡します。ランク数変更には後述のprotocol2を使います。ACEとGamma交換作業状態を
 各状態が所有し、混合履歴と一緒に直接復元します。詳細と対象条件はNATIVE_GSの最新節を
 参照してください。複数k点の軌道HSEや軌道並列GS→RTを対応済みとは案内しません。
+
+高速PR版HSEの軌道並列数を変える場合は、保存側・再開側とも
+`NativeGSBackend(..., decomposition=(1, comm.size, 1, 1, 1), hse_orbital=True)`
+とし、再開時に `run(restart=..., repartition=True)` を使います。1ランクでも
+同じGamma交換経路を選ぶため、hse_orbitalは省略しません。HSE-orbital protocol2と
+orbital-repartition protocol2が必要です。密なACE・タイルなしgaugeのCPU全支持
+Gamma SCFを対象とし、空間／混合配置や軌道GS→RTを対応済みとは案内しません。
+サンプルの `--xc hse06 --orbital-parallel` はこの明示設定を行います。

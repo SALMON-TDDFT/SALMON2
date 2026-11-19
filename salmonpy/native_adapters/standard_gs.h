@@ -46,7 +46,7 @@ int sp_gs_scf_snapshot_close(int64_t token,int64_t snapshot);
  * but skips initial orbitals/density, mixing and every SCF iteration. */
 /* Optional changed-layout SCF restart. Every rank enters in matching order.
  * k protocol1: ordinary XC; protocol2 also dense fast-PR HSE.
- * orbital protocol1: ordinary XC only. Bounds are old_size consecutive
+ * orbital protocol1: ordinary XC; protocol2 also dense Gamma orbital HSE. Bounds are old_size consecutive
  * (first,last) pairs in rank order; no spatial/mixed migration. */
 int sp_gs_scf_k_repartition_protocol(void);
 int sp_gs_scf_k_repartition(int64_t token,const char *directory,int old_size,const int *kbounds);
@@ -54,7 +54,8 @@ int sp_gs_scf_o_repartition_protocol(void);
 int sp_gs_scf_o_repartition(int64_t token,const char *directory,int old_size,const int *obounds);
 /* Optional fast-PR HSE Gamma orbital GS + same-layout SCF disk restart.
  * Runtime/input and full-support CPU requirements are in NATIVE_GS. No orbital
- * GS-to-RT handoff or changed orbital rank count is implied. */
+ * GS-to-RT handoff is implied. Protocol2 adds explicit one-rank orbital mode;
+ * changed orbital rank count additionally requires orbital-repartition2. */
 int sp_gs_hse_orbital_protocol(void);
 int sp_gs_scf_disk_protocol(void);
 int sp_gs_scf_bootstrap(const char *filename,int64_t *token);

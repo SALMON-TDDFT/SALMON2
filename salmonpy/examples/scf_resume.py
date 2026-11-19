@@ -56,7 +56,7 @@ def main():
     assert "write_gs_restart_data='no'" in calculation.input_text()
     context=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
     decomposition=(comm.size,1,1,1,1) if (args.xc=='hse06' and not args.orbital_parallel) or args.k_parallel or (args.repartition and not args.orbital_parallel) else (1,comm.size,1,1,1)
-    backend=NativeGSBackend(args.build,args.output,decomposition=decomposition)
+    backend=NativeGSBackend(args.build,args.output,decomposition=decomposition,hse_orbital=args.xc=='hse06' and args.orbital_parallel)
     with backend.open(context) as session:
         if args.restart is not None:
             with session.run(calculation,scf=SCFSettings(max_iterations=args.iterations,tolerance=1e-30),

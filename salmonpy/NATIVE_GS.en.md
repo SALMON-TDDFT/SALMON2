@@ -65,7 +65,7 @@ management slot high-water. Closing one owner preserves siblings; closing all
 returns live children to zero. Retained management slots are distinct from leaks.
 
 Python scope is periodic full-k unpolarized fixed-ion PZ/Libxc-PZ/PBE and HSE06
-with a declared fast-PR compute runtime. HSE uses k-only MPI decomposition. SOC/+U/DC GS,
+with a declared fast-PR compute runtime. HSE uses k-only MPI by default; explicit Gamma orbital GS is described below. SOC/+U/DC GS,
 full SCF checkpoint/restart and threaded GS/TDDFT are separate; sequential
 GS/RT interleaving and portable array export are described below.
 One native electronic attachment lifetime per process. Info, arrays and close are
@@ -956,7 +956,7 @@ grid/k convergence certification.
 
 Fast-PR HSE additionally reindexes dense ACE factors, source/action caches and
 per-k factor/PT-CN histories in Fortran. Full/reduced-k and PBE pre-stage cuts
-cover1↔2 ranks. Packed/distributed ACE, HSE orbital/spatial repartition and
+cover1↔2 ranks. Packed/distributed ACE, HSE spatial repartition and
 changed-runtime migration remain outside this entry. Common checkpoint_target/protected restore still requires unchanged
 MPI decomposition. Optional ABI: sp_gs_scf_k_repartition_protocol()==1 for ordinary XC, version2 for HSE; no implicit build.
 
@@ -968,7 +968,7 @@ ordinary-XC invocations use the same2×2×2 k mesh; keep other inputs identical.
 
 The same explicit `run(restart=..., repartition=True)` entry also accepts pure
 orbital layouts, with `decomposition=(1, comm.size, 1, 1, 1)` on both hosts.
-The optional `sp_gs_scf_o_repartition_protocol()==1` ABI is required. New saves
+The optional `sp_gs_scf_o_repartition_protocol()` version1 or2 ABI is required. New saves
 record global orbital bounds; older checkpoints without these bounds retain
 same-layout restore but cannot migrate orbital layout. All physical inputs,
 assets and runtime must match. PZ/Libxc-PZ/PBE1↔2 controls compare exact restored
@@ -980,13 +980,13 @@ the same native path. No Python numerical rearrangement occurs in the loader.
 The sample accepts `--orbital-parallel --save-scf NEW_CHECKPOINT`, followed by
 `--orbital-parallel --restart CHECKPOINT --repartition` on a fresh rank count.
 Its orbital layout uses a fixed Gamma mesh unless explicit symmetry is requested.
-Fast HSE orbital repartition, changes between k-only and orbital-only layouts,
+Fast HSE orbital repartition uses the explicit protocol2 entry below. Changes between k-only and orbital-only layouts,
 spatial/mixed repartition and changed-runtime migration remain unsupported.
 Default and common protected restore still require identical MPI layouts.
 
 ### Fast-PR HSE Gamma orbital SCF: same-layout direct restart
 
-A new explicitly built runtime declaring `sp_gs_hse_orbital_protocol()==1`
+A new explicitly built runtime declaring `sp_gs_hse_orbital_protocol()` version1 or2
 accepts retained fast-PR HSE06 GS with `decomposition=(1, comm.size, 1, 1, 1)`
 and Gamma-only sampling. The CPU full-support profile is periodic, unpolarized,
 fixed-ion, orthogonal-cell, integer fully occupied spin pairs, with no symmetry,
@@ -1002,7 +1002,42 @@ is used to reconstruct the saved numerical state.
 
 The existing sample uses `--xc hse06 --orbital-parallel --save-scf NEW_CHECKPOINT`,
 then `--xc hse06 --orbital-parallel --restart CHECKPOINT` with the same rank count.
-Do not add `--repartition`: changed-rank HSE orbital restart remains unsupported,
-as do multi-k orbital HSE, spatial/mixed layouts and orbital GS→RT handoff.
+Use the protocol2 entry below when changing ranks. Multi-k orbital HSE,
+spatial/mixed layouts and orbital GS→RT handoff remain unsupported.
 Two-rank fresh-process continuation and a cut during the PBE pre-stage are
 execution controls; they do not establish physical grid/k convergence.
+
+### Changing fast-PR HSE orbital rank count
+
+Use the explicit, immutable backend option `hse_orbital=True` on both saving and
+restoring hosts, including one rank. It selects the same full-support Gamma
+orbital exchange algorithm instead of interpreting a one-rank layout as the
+default k-only algorithm. This requires HSE-orbital protocol2; migration also
+requires orbital-repartition protocol2. Older default k/same-layout behavior
+is unchanged. Every physical input and the runtime must remain identical.
+
+```python
+backend = NativeGSBackend(build_record, work_root,
+    decomposition=(1, comm.size, 1, 1, 1), hse_orbital=True)
+with backend.open(context) as session:
+    with session.run(calculation, scf=scf, material_id="Si",
+                     restart=checkpoint, repartition=True) as state:
+        assert state.scf_status["executed_iterations"] == 0
+        state.continue_scf(steps=5)
+```
+
+Fortran maps dense ACE factor columns and source/action/work/spatial-source/
+previous columns by saved global orbital index. Replicated gauge, occupation,
+phase and density-mixing histories stay intact. Communicators are rebound;
+no accepted ACE evaluation or SCF replay reconstructs the checkpoint. Source
+files remain unchanged. Fresh-process controls cover1↔2, PBE pre-stage1↔2 and
+unequal two-atom/four-band2↔3 partitions. Restored orbitals are exact, bootstrap
+SCF work is zero, and five new iterations match the same source-initialized
+continuous8 at the existing rtol1e-9/atol1e-10.
+
+The sample uses `--xc hse06 --orbital-parallel` on both sides; add `--save-scf`
+on the source and `--restart CHECKPOINT --repartition` on the new rank count.
+The constructor option is needed even when the source has one rank. Packed/
+distributed ACE, tiled gauges, localized sparse support, multi-k orbital HSE,
+spatial/mixed layouts, changed-runtime migration and orbital GS→RT remain outside
+this dense Gamma contract. Common protected restore still keeps the same layout.
