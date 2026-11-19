@@ -1705,6 +1705,14 @@ folded into existing unittest/MPI tests; test-method count remains628.
 - [x] Nonconvergence warns; large-threshold control reports native convergence.
 - [x] Export assembly checked in RAM; no GS archive/restart dataset collected.
 - [x] Previous fast executable PZ/PBE scalar/text regression matches. Old standard unconverged PBE differs by 3.4e-7 Ha; do not relax its comparison.
-- [ ] Fresh HSE-enabled build regression after the GS mixing metadata addition.
-- [ ] Computed GS to ordinary RT lifecycle regression; installed-wheel validation for this slice.
+- [x] Fresh HSE-enabled build regression after the GS mixing metadata addition.
+- [x] Computed GS to ordinary RT lifecycle regression.
+- [x] Installed-wheel validation: sdist→wheel; source/installed628 (627 pass,1 skip); computed GS→current sample and spatial MPI6 direct resume exact.
 - [ ] HSE-enabled computed GS and final source-tree consolidation.
+
+### Computed GS→ordinary RT continuation
+
+- [x] Six-rank orbital/spatial controls: computed PZ/Libxc-PZ and PBE seed ownership, interleaved SCF, source GS close, independent current equality.
+- [x] Direct 8→16 restart exact, no replay; transient RT checkpoint files removed.
+- [x] Existing retained_gs sample now supports --current-steps in computed mode, with three-component A drive; MPI2 execution passes.
+- [x] Fresh HSE-enabled build and all-object audit; full learned Taylor/reduced learned PT-CN MPI6 currents, energy and history match the fixed previous build exactly; direct restart exact.

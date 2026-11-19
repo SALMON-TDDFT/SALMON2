@@ -500,3 +500,19 @@ retained_gsサンプルの--import-bundle／--current-steps 16も利用できま
 通常XCのGS接続検証では、PZ／Libxc-PZ／PBE、軌道・空間MPI2で独立実行と配列が完全一致しました。
 変更前の高速版とのPZ／PBEエネルギー・テキスト出力も一致しました。4反復の未収束PBEで
 旧標準版との差は約3.4e-7 Hartree残り、標準版との同一性や物理的収束を保証しません。
+
+計算済みGS→TDDFTも、同じtddft_model入口を使います。例えばHSE無効・Libxc有効の
+ビルド記録で、次のサンプルは4反復のGSを作り、最初のGSを閉じて16ステップ進めます。
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD_JSON NEW_OUTPUT --current-steps 16
+```
+
+この小さい例は物理的収束の例ではありません。SCF未収束は警告だけです。波動関数や
+GS再開ファイルは保存せず、結果JSONにGSの数値要約と電荷電流を記録します。
+物質IDを引き継ぎ、x/y/zを含むA/cで独立した2状態を駆動します。
+既存GSを読む場合の--import-bundleも引き続き使用できます。
+
+統合検証では、PZ／Libxc-PZとLibxc-PBE、軌道・空間MPI2で、GSから作ったモデルを
+保持したまま別のGSを計算します。GS終了後の電流は独立実行と完全一致し、
+16ステップの途中で直接保存・復元した状態も、時間発展の再実行なしで一致しました。

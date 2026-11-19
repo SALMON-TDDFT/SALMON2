@@ -86,6 +86,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('build',type=Path);parser.add_argument('output',type=Path)
     parser.add_argument('--size',type=int,choices=(1,2),default=2)
+    parser.add_argument('--current-steps',type=int,default=0,help='also exercise computed GS to independent RT states and direct resume')
     parser.add_argument('--baseline',type=Path,help='explicit independently built control runtime')
     parser.add_argument('--check-export-assembly',action='store_true',help='intercept shared writer and inspect assembled arrays in RAM; do not write GS archives')
     parser.add_argument('--split',choices=('orbital','spatial'),default='orbital')
@@ -98,6 +99,7 @@ def main():
     parser.add_argument('--import-bundle',type=Path,help='existing synthetic GS; import-only mode, never SCF')
     parser.add_argument('--second-bundle',type=Path)
     args=parser.parse_args()
+    if args.current_steps and args.current_steps<4:parser.error('--current-steps must be at least four')
     if args.import_bundle:
         import_controls(args);return
     world=MPI.COMM_WORLD
@@ -118,7 +120,7 @@ def main():
     backend=NativeGSBackend(args.baseline if g and args.baseline else args.build,work,decomposition=dec)
     scf=SCFSettings(max_iterations=4,tolerance=args.tolerance)
     scf_b=SCFSettings(max_iterations=args.b_iterations,tolerance=args.tolerance if args.b_tolerance is None else args.b_tolerance)
-    frames={};evidence={};warnings.simplefilter('always')
+    frames={};evidence={};responses={};warnings.simplefilter('always')
 
     def snapshot(state):
         result={'info':state.info}
@@ -150,12 +152,45 @@ def main():
             assert first[q][0]==second[q][0]
             np.testing.assert_array_equal(first[q][1],second[q][1])
 
+    def begin_response(gs,key):
+        if not args.current_steps:return None
+        model=gs.tddft_model(dt=.001,max_steps=args.current_steps+1)
+        assert model.material_id==gs.material_id
+        first=model.new_state('first');sibling=model.new_state('sibling')
+        def drive(i):return 1e-4*np.array([np.sin(.31*i),np.cos(.23*i)-1,np.sin(.17*i)])
+        trace=[];half=args.current_steps//2
+        for i in range(1,half+1):
+            trace.append(np.r_[first.step(drive(i)),sibling.step(-drive(i))])
+        path=work/f'rt-{key}-{comm.rank}.bin'
+        first.checkpoint(path,False)
+        restored=model.new_state('restored');restored.checkpoint(path,True)
+        path.unlink()  # transient RT restart control; never retain a GS dataset
+        assert restored.steps==first.steps==half
+        return model,first,sibling,restored,trace,drive,half
+
+    def finish_response(rt,key):
+        if rt is None:return
+        model,first,sibling,restored,trace,drive,half=rt
+        try:
+            # Seed remains owned after the original computed GS has closed.
+            fresh=model.new_state('fresh');fresh.close()
+            for i in range(half+1,args.current_steps+1):
+                trace.append(np.r_[first.step(drive(i)),sibling.step(-drive(i))])
+                np.testing.assert_array_equal(restored.step(drive(i)),first.current)
+                assert restored.steps==first.steps==i
+            responses[key]=np.asarray(trace)
+            assert not list(model.work.rglob('wfn.bin'))
+        finally:
+            restored.close();first.close();sibling.close();model.close()
+
     with backend.open(context) as session:
         if g==0:
             first=session.run(a,scf=scf,material_id='silicon-a')
             before=snapshot(first)
+            rt_a=begin_response(first,'a')
             second=session.run(b,scf=scf_b,material_id='silicon-b')
             equal(before,snapshot(first));frames['a']=before;frames['b']=snapshot(second)
+            rt_b=begin_response(second,'b')
             assert first.material_id=='silicon-a' and second.material_id=='silicon-b'
             counts=session.resources();assert counts['states']==2 and counts['live_child_communicators']>0
             # A failed collective input agreement must not change either owner.
@@ -190,16 +225,21 @@ def main():
                 now=session.resources();assert now['states']==1
                 assert now['live_child_communicators']==remaining_children
                 assert now['communicator_slots']<=counts['communicator_slots']
-            second.close();assert session.resources()['live_child_communicators']==0
+            second.close()
+            finish_response(rt_a,'a');finish_response(rt_b,'b')
+            assert session.resources()['live_child_communicators']==0
         else:
             key='a' if g==1 else 'b'
             state=session.run(a if g==1 else b,scf=scf if g==1 else scf_b,material_id='silicon-'+key)
             frames[key]=snapshot(state)
+            response=begin_response(state,key);state.close();finish_response(response,key)
     assert context._dependents==0
     gathered=world.allgather(frames)
+    rt_frames=world.allgather(responses)
     for offset in range(args.size):
         for key,index in (('a',args.size+offset),('b',2*args.size+offset)):
             first,second=gathered[offset][key],gathered[index][key]
+            if args.current_steps:np.testing.assert_array_equal(rt_frames[offset][key],rt_frames[index][key])
             if args.baseline:
                 for name in ('iterations','converged','atoms','bands'):assert getattr(first['info'],name)==getattr(second['info'],name)
                 np.testing.assert_allclose([first['info'].energy_hartree,first['info'].residual,first['info'].tolerance],
@@ -220,7 +260,9 @@ def main():
             'independent_arrays_exact':True,
             'retained_siblings_unchanged':True,'close_reuse_stale_tokens':True,'MPI_resources_released':True,
             'SCF_nonconvergence_warns_and_retains':args.tolerance==1e-12,
-            'native_convergence_flags':{key:frame['info'].converged for key,frame in frames.items()},'GS_restart_collected':False},indent=2)+'\n')
+            'native_convergence_flags':{key:frame['info'].converged for key,frame in frames.items()},'GS_restart_collected':False,'computed_GS_to_RT_steps':args.current_steps,
+            'RT_independent_and_direct_resume_exact':bool(args.current_steps),
+            'RT_replayed_steps':0,'RT_after_source_GS_closed':bool(args.current_steps)},indent=2)+'\n')
     comm.Free()
 
 

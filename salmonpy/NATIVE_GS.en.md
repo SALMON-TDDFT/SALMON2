@@ -535,3 +535,21 @@ owners matched exactly. PZ/PBE energy and text reports matched the previous fast
 executable. Four-iteration unconverged PBE still differs from the old standard
 profile by about 3.4e-7 Hartree; no standard-profile identity or physical
 convergence claim is made.
+
+Computed GS owners use the same tddft_model entry. With an HSE-disabled,
+Libxc-enabled build record, this example performs four SCF iterations, closes
+the first GS owner and advances its independent RT states for 16 steps:
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD_JSON NEW_OUTPUT --current-steps 16
+```
+
+This tiny example is not physically converged. SCF nonconvergence only warns.
+It writes GS scalar summaries and charge currents to JSON, without GS wavefunction
+or restart output. Material IDs persist; two independent states receive an A/c
+drive with x/y/z components. Existing --import-bundle usage remains available.
+
+Integration controls retain the RT model while another GS is computed, using
+PZ/Libxc-PZ and Libxc-PBE with orbital/spatial MPI2. Currents after source GS close
+match independent execution exactly. A direct checkpoint restored halfway through
+16 steps continues exactly, without replaying time propagation.

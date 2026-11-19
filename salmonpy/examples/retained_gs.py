@@ -1,8 +1,9 @@
 """Small retained-GS ownership demo; four SCF iterations, not converged material data.
 
 mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT
-For fast GS: add --import-bundle GS [--second-bundle OTHER_GS].
-Optional --current-steps 16 uses retained GS→RT without GS files/SCF (declared fast profile).
+For existing fast GS: add --import-bundle GS [--second-bundle OTHER_GS].
+Optional --current-steps 16 uses retained GS→RT without GS files (declared RT profile).
+Computed mode performs four SCF iterations first; imported mode performs no SCF.
 """
 import argparse
 import json
@@ -22,8 +23,8 @@ def main():
     parser.add_argument('--export-archives',action='store_true',
                         help='explicitly save regular-mesh GS/2 arrays on subgroup root; not a full SCF checkpoint')
     args=parser.parse_args()
-    if args.current_steps<0 or (args.current_steps and not args.import_bundle):
-        parser.error('--current-steps requires --import-bundle and a nonnegative count')
+    if args.current_steps<0:
+        parser.error('--current-steps requires a nonnegative count')
     from mpi4py import MPI
     world=MPI.COMM_WORLD;error=None
     if world.size not in (1,2):raise ValueError('this small demo uses one or two ranks')
@@ -32,6 +33,21 @@ def main():
         except Exception as exc:error=str(exc)
     error=world.bcast(error,root=0)
     if error:raise ValueError(error)
+    def response_from(gs):
+        if not args.current_steps:return None
+        model=gs.tddft_model(dt=.001,max_steps=args.current_steps)
+        gs.close()  # RT seed remains owned independently of the source GS.
+        first=model.new_state('pulse-a');second=model.new_state('pulse-b')
+        try:
+            currents=[]
+            for i in range(1,args.current_steps+1):
+                A=1e-4*np.array([np.sin(.23*i),np.cos(.17*i)-1,np.sin(.13*i)])
+                currents.append(first.step(A).tolist());second.step(-A)
+            return {'material_id':model.material_id,'dt_au':.001,
+                    'charge_current_au':currents,'replayed_steps':0}
+        finally:
+            first.close();second.close();model.close()
+
     if args.import_bundle:
         context=SimpleNamespace(solver_comm=world,closed=False,_dependents=0)
         backend=NativeGSBackend(args.build,args.output,decomposition=(world.size,1,1,1,1))
@@ -43,21 +59,8 @@ def main():
                       'density_shape':list(state.array('density').values.shape)} for state in states]
             if args.export_archives:
                 for state in states:state.export_archive(args.output/(state.material_id+'-gs2'))
-            response=None
-            if args.current_steps:
-                model=states[0].tddft_model(dt=.001,max_steps=args.current_steps)
-                states[0].close()  # RT model owns its initial orbitals independently.
-                first=model.new_state('pulse-a');second=model.new_state('pulse-b')
-                try:
-                    currents=[]
-                    for i in range(1,args.current_steps+1):
-                        A=1e-4*np.array([0.,0.,np.sin(.23*i)])
-                        currents.append(first.step(A).tolist());second.step(-A)
-                    response={'material_id':model.material_id,'dt_au':.001,
-                              'charge_current_au':currents,'SCF_calls':0,'replayed_steps':0}
-                finally:
-                    first.close();second.close();model.close()
-            else:states[0].close()
+            response=response_from(states[0])
+            states[0].close()
             np.testing.assert_array_equal(before,states[1].array('density').values)
             if world.rank==0:
                 (args.output/'result.json').write_text(json.dumps({'status':'pass','materials':reports,
@@ -77,11 +80,12 @@ def main():
         if args.export_archives:
             for state in states:
                 state.export_archive(args.output/(state.material_id+'-gs2'))
+        response=response_from(states[0])
         states[0].close()
         assert states[1].info.energy_hartree==reports[1]['energy_hartree']
         if world.rank==0:
             (args.output/'result.json').write_text(json.dumps({'status':'pass','materials':reports,
-                'scope':'retained ownership demonstration; not converged physics'},indent=2)+'\n')
+                'response':response,'scope':'four-iteration retained ownership demonstration; not converged physics'},indent=2)+'\n')
     assert context._dependents==0
 
 
