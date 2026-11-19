@@ -816,6 +816,11 @@ native SCFの準備済み復元候補を使わない場合はclose/discardまた
 物理入力を保ち、k点だけのMPI分割を変える明示的な入口です。通常XCはprotocol1/2、
 密なACEを使う高速PR版HSEはk-repartition protocol2が必要です。確認済みは1↔2ランク、
 HSEの全k点／縮約k点とPBE準備段階です。FortranがACE・キャッシュ・履歴を再配置し、
-SCFを再実行しません。軌道／空間分割、packed/distributed ACE、異なるランタイムは
+SCFを再実行しません。HSEの軌道／空間分割、packed/distributed ACE、異なるランタイムは
 未対応です。保護付き復元のMPI分割は従来どおり同一にします。詳細はNATIVE_GS.md／
 NATIVE_GS.en.mdを参照し、物理収束の検証と混同しないでください。
+
+通常XCの純粋な軌道並列も同じ明示的再開入口を使います。両側は
+`decomposition=(1, comm.size, 1, 1, 1)` とし、orbital-repartition protocol1と
+新保存のorbital_boundsを要求します。高速HSEの軌道並列とk／軌道間の配置変更は
+未対応です。サンプルは両側に `--orbital-parallel` を指定します。

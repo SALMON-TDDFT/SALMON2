@@ -114,6 +114,21 @@ class NativeGSTests(unittest.TestCase):
             self.assertIs(_scf_k_repartition_api(local.lib,hse=True),local.lib.sp_gs_scf_k_repartition)
             hse_text=text.replace("xc='pz'","xc='hse06'")
             self.assertIn('functional',_scf_k_input(hse_text,(1,1,1,1,1)))
+            # The same manifest admission handles an orbital-only owner, but
+            # never treats a fast-HSE orbital layout as a supported profile.
+            manifest['files'][0]['orbital_bounds']=[1,2]
+            (checkpoint/'manifest.json').write_text(json.dumps(manifest))
+            local.backend.decomposition=(1,3,1,1,1)
+            local.lib.sp_gs_scf_o_repartition_protocol=Mock(return_value=1)
+            local.lib.sp_gs_scf_o_repartition=Mock()
+            with self.assertRaisesRegex(InputError,'more orbital ranks'):
+                _scf_disk_manifest(checkpoint,local,text.replace('nproc_ob=1','nproc_ob=3'),assets,'Si',repartition=True)
+            local.lib.sp_gs_scf_o_repartition.assert_not_called()
+            manifest['input_text']=hse_text
+            (checkpoint/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(InputError,'HSE orbital'):
+                _scf_disk_manifest(checkpoint,local,hse_text.replace('nproc_ob=1','nproc_ob=3'),assets,'Si',repartition=True)
+
 
 
 

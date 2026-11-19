@@ -10,11 +10,12 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('build',type=Path);p.add_argument('output',type=Path)
     p.add_argument('--size',type=int,default=2)
-    p.add_argument('--restore-size',type=int,help='k-only ordinary-XC/fast-PR HSE checkpoint migration to a different rank count')
+    p.add_argument('--restore-size',type=int,help='pure k/orbital SCF checkpoint migration to a different rank count')
     p.add_argument('--repartition',action='store_true',help=argparse.SUPPRESS)
     p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='libxc_pbe')
-    p.add_argument('--split',choices=('k','spatial'),default='k')
+    p.add_argument('--split',choices=('k','orbital','spatial'),default='k')
     p.add_argument('--symmetry',action='store_true')
+    p.add_argument('--gamma',action='store_true',help='Gamma-only ordinary-XC orbital restart control')
     p.add_argument('--pre-scf-threshold',type=float,default=0.)
     p.add_argument('--pre-scf-steps',type=int,default=4)
     p.add_argument('--without-plot',action='store_true',help='verify unavailable optional plotting does not fail saving')
@@ -29,6 +30,7 @@ def main():
                      '--pre-scf-threshold',str(args.pre_scf_threshold),'--pre-scf-steps',str(args.pre_scf_steps)]
             if args.restore_size and phase in ('resume','reject'):command+=['--repartition']
             if args.symmetry:command+=['--symmetry']
+            if args.gamma:command+=['--gamma']
             if args.without_plot:command+=['--without-plot']
             with (args.output/(phase+'.log')).open('w') as log:
                 subprocess.run(command,env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'},stdout=log,stderr=subprocess.STDOUT,check=True)
@@ -36,7 +38,7 @@ def main():
                 'symmetry':args.symmetry,'continuous_resume_arrays_exact':not bool(args.restore_size),'restore_MPI_size':args.restore_size or args.size,
                 'comparison_rtol':1e-9 if args.restore_size else 0.,'comparison_atol':1e-10 if args.restore_size else 0.,
                 'restored_accepted_iterations':3,'bootstrap_executed_iterations':0,
-                'resume_executed_iterations':5,'restored_k_slices_exact':True,'corrupt_rank_rejected_before_creation':True,
+                'resume_executed_iterations':5,'restored_k_slices_exact':args.split=='k','restored_orbital_slices_exact':args.split=='orbital','corrupt_rank_rejected_before_creation':True,
                 'native_read_failure_preserves_live_state':True,'pre_scf_threshold':args.pre_scf_threshold,
                 'GS_datasets_saved':True}
         report=json.loads((args.output/'checkpoint/diagnostics/report.json').read_text())
@@ -61,7 +63,7 @@ def main():
     if args.symmetry:
         ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3);ops[1,:2,:2]=-np.eye(2)
         symmetry=SymmetryOperations(ops,directions='yyn')
-    mesh=(2,2,2) if args.symmetry else (2,1,1)
+    mesh=(1,1,1) if args.gamma else (2,2,2) if args.symmetry else (2,1,1)
     class DiskDFT(DFT):
         def input_text(self,scf=SCFSettings()):
             text=super().input_text(scf)
@@ -69,19 +71,22 @@ def main():
             return text
     calc=DiskDFT((14,),np.diag([8.]*3),[[0,0,0]] if args.symmetry else [[.3,.4,.45]],(pp,),4,2,(8,8,8),mesh,xc=args.xc,symmetry=symmetry)
     scf=SCFSettings(max_iterations=8,tolerance=1e-30)
-    dec=(args.size,1,1,1,1) if args.split=='k' else (1,1,args.size,1,1)
+    dec=(args.size,1,1,1,1) if args.split=='k' else (1,args.size,1,1,1) if args.split=='orbital' else (1,1,args.size,1,1)
     backend=NativeGSBackend(args.build,work,decomposition=dec)
     checkpoint=args.output/'checkpoint'
     def expected_orbitals(directory,orbital):
         # Test-only global-k assembly, never used by the production loader.
-        combined=np.empty_like(orbital.values);covered=np.zeros(combined.shape[5],dtype=bool)
-        klo=int(orbital.lower_indices[5]);khi=klo+combined.shape[5]-1
+        dim=4 if args.split=='orbital' else 5
+        combined=np.empty_like(orbital.values);covered=np.zeros(combined.shape[dim],dtype=bool)
+        klo=int(orbital.lower_indices[dim]);khi=klo+combined.shape[dim]-1
         for file in sorted(directory.glob('rank-*.npz')):
             with np.load(file) as old:
-                lo=int(old['orbital_lower'][5]);hi=lo+old['orbitals'].shape[5]-1
+                lo=int(old['orbital_lower'][dim]);hi=lo+old['orbitals'].shape[dim]-1
                 a=max(lo,klo);b=min(hi,khi)
                 if a<=b:
-                    combined[:,:,:,:,:,a-klo:b-klo+1,:]=old['orbitals'][:,:,:,:,:,a-lo:b-lo+1,:]
+                    dst=[slice(None)]*7;src=list(dst)
+                    dst[dim]=slice(a-klo,b-klo+1);src[dim]=slice(a-lo,b-lo+1)
+                    combined[tuple(dst)]=old['orbitals'][tuple(src)]
                     covered[a-klo:b-klo+1]=True
         assert covered.all()
         return combined

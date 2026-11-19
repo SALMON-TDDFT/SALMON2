@@ -956,10 +956,30 @@ grid/k convergence certification.
 
 Fast-PR HSE additionally reindexes dense ACE factors, source/action caches and
 per-k factor/PT-CN histories in Fortran. Full/reduced-k and PBE pre-stage cuts
-cover1↔2 ranks. Packed/distributed ACE, orbital/spatial repartition and
+cover1↔2 ranks. Packed/distributed ACE, HSE orbital/spatial repartition and
 changed-runtime migration remain outside this entry. Common checkpoint_target/protected restore still requires unchanged
 MPI decomposition. Optional ABI: sp_gs_scf_k_repartition_protocol()==1 for ordinary XC, version2 for HSE; no implicit build.
 
 The existing sample saves with `--k-parallel --save-scf NEW_CHECKPOINT` and loads
 with a different rank count using `--restart CHECKPOINT --repartition`. Both
 ordinary-XC invocations use the same2×2×2 k mesh; keep other inputs identical.
+
+### Ordinary-XC orbital-only SCF repartition
+
+The same explicit `run(restart=..., repartition=True)` entry also accepts pure
+orbital layouts, with `decomposition=(1, comm.size, 1, 1, 1)` on both hosts.
+The optional `sp_gs_scf_o_repartition_protocol()==1` ABI is required. New saves
+record global orbital bounds; older checkpoints without these bounds retain
+same-layout restore but cannot migrate orbital layout. All physical inputs,
+assets and runtime must match. PZ/Libxc-PZ/PBE1↔2 controls compare exact restored
+orbital slices, zero SCF bootstrap work and continued trajectories at the existing
+rtol1e-9/atol1e-10. Fortran reindexes orbital/CG buffers and retains replicated
+density, mixing, XC, Poisson and residual history. Real or complex orbitals use
+the same native path. No Python numerical rearrangement occurs in the loader.
+
+The sample accepts `--orbital-parallel --save-scf NEW_CHECKPOINT`, followed by
+`--orbital-parallel --restart CHECKPOINT --repartition` on a fresh rank count.
+Its orbital layout uses a fixed Gamma mesh unless explicit symmetry is requested.
+Fast HSE orbital repartition, changes between k-only and orbital-only layouts,
+spatial/mixed repartition and changed-runtime migration remain unsupported.
+Default and common protected restore still require identical MPI layouts.

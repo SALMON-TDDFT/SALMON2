@@ -19,8 +19,10 @@ def main():
     p.add_argument('build',type=Path);p.add_argument('output',type=Path)
     p.add_argument('--pause-at',type=int,default=3)
     p.add_argument('--iterations',type=int,default=8)
-    p.add_argument('--k-parallel',action='store_true',help='ordinary-XC k-only layout with a fixed 2x2x2 mesh')
-    p.add_argument('--repartition',action='store_true',help='opt into ordinary-XC k-only restart with a new rank count')
+    parallel=p.add_mutually_exclusive_group()
+    parallel.add_argument('--k-parallel',action='store_true',help='k-only layout with a fixed 2x2x2 mesh')
+    parallel.add_argument('--orbital-parallel',action='store_true',help='ordinary-XC orbital-only layout with a fixed Gamma mesh')
+    p.add_argument('--repartition',action='store_true',help='opt into k-only or ordinary-XC orbital-only restart with a new rank count')
     p.add_argument('--disk',action='store_true',help='exercise disk save/restore; requires --save-scf')
     p.add_argument('--protected',action='store_true',help='requires native SCF candidate protocol1')
     p.add_argument('--symmetry',choices=('none','c2z'),default='none')
@@ -29,6 +31,7 @@ def main():
     disk.add_argument('--save-scf',type=Path,help='save the paused SCF boundary for a fresh process')
     disk.add_argument('--restart',type=Path,help='load a prior --save-scf boundary, then continue')
     args=p.parse_args();comm=MPI.COMM_WORLD
+    if args.orbital_parallel and args.xc=='hse06':p.error('fast HSE orbital parallelism is not supported')
     if args.disk and args.save_scf is None:p.error('--disk requires --save-scf')
     if args.repartition and args.restart is None:p.error('--repartition requires --restart')
     if comm.size not in (1,2):p.error('one/two internal MPI ranks in this example')
@@ -48,12 +51,12 @@ def main():
     if args.symmetry!='none':
         ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3);ops[1,:2,:2]=-np.eye(2)
         symmetry=SymmetryOperations(ops,directions='yyn')
-    mesh=(2,2,2) if symmetry is not None or args.k_parallel or args.repartition else (comm.size,1,1) if args.xc=='hse06' else (1,1,1)
+    mesh=(2,2,2) if symmetry is not None or args.k_parallel or (args.repartition and not args.orbital_parallel) else (comm.size,1,1) if args.xc=='hse06' else (1,1,1)
     calculation=InMemoryDFT((14,),np.diag([8.]*3),[[0,0,0]] if symmetry is not None else [[.3,.4,.45]],
         (pp,),4,2,(8,8,8),mesh,xc=args.xc,symmetry=symmetry)
     assert "write_gs_restart_data='no'" in calculation.input_text()
     context=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
-    decomposition=(comm.size,1,1,1,1) if args.xc=='hse06' or args.k_parallel or args.repartition else (1,comm.size,1,1,1)
+    decomposition=(comm.size,1,1,1,1) if args.xc=='hse06' or args.k_parallel or (args.repartition and not args.orbital_parallel) else (1,comm.size,1,1,1)
     backend=NativeGSBackend(args.build,args.output,decomposition=decomposition)
     with backend.open(context) as session:
         if args.restart is not None:
@@ -63,7 +66,7 @@ def main():
                 assert loaded['executed_iterations']==0
                 state.continue_scf(steps=args.iterations)
                 result={'status':'pass','loaded_counters':loaded,'final_counters':state.scf_status,
-                        'final_info':asdict(state.info),'snapshot_storage':'same-build k-only repartitioned disk checkpoint' if args.repartition else 'same-build/topology disk checkpoint',
+                        'final_info':asdict(state.info),'snapshot_storage':'same-build k/orbital-only repartitioned disk checkpoint' if args.repartition else 'same-build/topology disk checkpoint',
                         'GS_datasets_collected':True}
                 if comm.rank==0:(args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n')
             return

@@ -83,14 +83,32 @@ integer(c_int) function sp_gs_scf_k_repartition_protocol() bind(C)
  sp_gs_scf_k_repartition_protocol=1
 #endif
 end function
+integer(c_int) function sp_gs_scf_o_repartition_protocol() bind(C)
+ sp_gs_scf_o_repartition_protocol=1
+end function
 integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bind(C) result(status)
  integer(c_int64_t),value::token
  character(c_char),intent(in)::path(*)
  integer(c_int),value::old_size
  integer(c_int),intent(in)::kbounds(2,*)
+ status=scf_repartition(token,path,old_size,kbounds,6)
+end function
+integer(c_int) function sp_gs_scf_o_repartition(token,path,old_size,obounds) bind(C) result(status)
+ integer(c_int64_t),value::token
+ character(c_char),intent(in)::path(*)
+ integer(c_int),value::old_size
+ integer(c_int),intent(in)::obounds(2,*)
+ status=scf_repartition(token,path,old_size,obounds,5)
+end function
+integer(c_int) function scf_repartition(token,path,old_size,kbounds,axis) result(status)
+ integer(c_int64_t),value::token
+ character(c_char),intent(in)::path(*)
+ integer,intent(in)::axis
+ integer(c_int),value::old_size
+ integer(c_int),intent(in)::kbounds(2,*)
  type(s_scf_payload),allocatable::value,donor
  character(4096)::directory,filename,expected_directory
- integer::index,group,rank,nproc,i,j,u,ios,cs,header(5),counters(2),ks,ke,lo,hi,iteration,old_reference,pair(2)
+ integer::index,group,rank,nproc,i,j,u,ios,cs,header(5),counters(2),ks,ke,lo,hi,iteration,old_reference,pair(2),last,dim
  integer(8)::limit,position
  logical::first
  logical,allocatable::covered(:)
@@ -100,18 +118,24 @@ integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bin
  associate(ctx=>gs_handles(index)%context)
  if(.not.scf_context_ok(ctx))status=15
  if(allocated(ctx%scf_pending))status=11
- if(ctx%info%isize_r/=1.or.ctx%info%isize_o/=1.or.ctx%info%isize_k/=nproc)status=15
+ last=ctx%system%nk;dim=6
+ if(axis==5)then
+  last=ctx%system%no;dim=5
+  if(ctx%info%isize_r/=1.or.ctx%info%isize_k/=1.or.ctx%info%isize_o/=nproc)status=15
+ else
+  if(ctx%info%isize_r/=1.or.ctx%info%isize_o/=1.or.ctx%info%isize_k/=nproc)status=15
+ endif
  select case(trim(ctx%system%xc_input%xcname))
  case('pz','libxc_pz','libxc_pbe')
 #ifdef USE_HSE
  case('hse06')
-  if(.not.ctx%hse_bound)status=15
+  if(.not.ctx%hse_bound.or.axis/=6)status=15
 #endif
  case default
   status=15
  end select
- if(old_size<1.or.old_size>ctx%system%nk)status=11
- if(nproc>ctx%system%nk.or.ctx%info%numk<1)status=15
+ if(old_size<1.or.old_size>last)status=11
+ if(nproc>last)status=15
  directory=''
  do i=1,len(directory)
   if(path(i)==c_null_char)exit
@@ -130,6 +154,9 @@ integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bin
  call comm_get_max(status,group)
  if(status/=0)return
  ks=ctx%info%ik_s;ke=ctx%info%ik_e
+ if(axis==5)then
+  ks=ctx%info%io_s;ke=ctx%info%io_e
+ endif
  allocate(covered(ks:ke),stat=ios)
  if(ios/=0)status=4
  call comm_get_max(status,group)
@@ -138,7 +165,7 @@ integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bin
  first=.true.;iteration=-1
  do j=1,old_size
   lo=kbounds(1,j);hi=kbounds(2,j)
-  if(lo<1.or.hi<lo.or.hi>ctx%system%nk)then
+  if(lo<1.or.hi<lo.or.hi>last)then
    status=11;exit
   endif
   if(hi<ks.or.lo>ke)cycle
@@ -178,18 +205,20 @@ integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bin
   if(donor%iterations/=iteration.or.donor%system%nk/=ctx%system%nk)then
    status=11;exit
   endif
-  if(.not.allocated(donor%spsi%zwf))then
-   status=15;exit
+  if(allocated(donor%spsi%zwf))then
+   if(lbound(donor%spsi%zwf,dim)/=lo.or.ubound(donor%spsi%zwf,dim)/=hi)status=11
+  else if(axis==5.and.allocated(donor%spsi%rwf))then
+   if(lbound(donor%spsi%rwf,dim)/=lo.or.ubound(donor%spsi%rwf,dim)/=hi)status=11
+  else
+   status=15
   endif
-  if(lbound(donor%spsi%zwf,6)/=lo.or.ubound(donor%spsi%zwf,6)/=hi)then
-   status=11;exit
-  endif
-  call scf_merge_k_orbital(value%spsi,donor%spsi,first,ks,ke,status)
-  call scf_merge_k_orbital(value%shpsi,donor%shpsi,first,ks,ke,status)
-  call scf_merge_k_orbital(value%sttpsi,donor%sttpsi,first,ks,ke,status)
-  call scf_merge_k_orbital(value%cg%pre_gk,donor%cg%pre_gk,first,ks,ke,status)
-  call scf_merge_k_orbital(value%cg%pk,donor%cg%pk,first,ks,ke,status)
-  call scf_merge_k_orbital(value%cg%hpk,donor%cg%hpk,first,ks,ke,status)
+  if(status/=0)exit
+  call scf_merge_k_orbital(value%spsi,donor%spsi,first,ks,ke,status,axis)
+  call scf_merge_k_orbital(value%shpsi,donor%shpsi,first,ks,ke,status,axis)
+  call scf_merge_k_orbital(value%sttpsi,donor%sttpsi,first,ks,ke,status,axis)
+  call scf_merge_k_orbital(value%cg%pre_gk,donor%cg%pre_gk,first,ks,ke,status,axis)
+  call scf_merge_k_orbital(value%cg%pk,donor%cg%pk,first,ks,ke,status,axis)
+  call scf_merge_k_orbital(value%cg%hpk,donor%cg%hpk,first,ks,ke,status,axis)
 #ifdef USE_HSE
   if(ctx%hse_bound)call scf_merge_k_hse(value%hse,donor%hse,first,lo,hi,ks,ke,status)
 #endif
@@ -216,19 +245,20 @@ integer(c_int) function sp_gs_scf_k_repartition(token,path,old_size,kbounds) bin
  call move_alloc(value,ctx%scf_pending)
  end associate
 end function
-subroutine scf_merge_k_orbital(target,source,first,ks,ke,status)
+subroutine scf_merge_k_orbital(target,source,first,ks,ke,status,axis)
  type(s_orbital),intent(inout)::target
  type(s_orbital),intent(in)::source
  logical,intent(in)::first
  integer,intent(in)::ks,ke
  integer,intent(inout)::status
+ integer,intent(in)::axis
  integer::lb(7),ub(7),a,b,istat
  if(status/=0)return
  if(first)target%update_zwf_overlap=source%update_zwf_overlap
  if(first)then
   if(allocated(target%rwf))deallocate(target%rwf)
   if(allocated(source%rwf))then
-   lb=lbound(source%rwf);ub=ubound(source%rwf);lb(6)=ks;ub(6)=ke
+   lb=lbound(source%rwf);ub=ubound(source%rwf);lb(axis)=ks;ub(axis)=ke
    allocate(target%rwf(lb(1):ub(1),lb(2):ub(2),lb(3):ub(3),lb(4):ub(4), &
     lb(5):ub(5),lb(6):ub(6),lb(7):ub(7)),stat=istat)
    if(istat/=0)then
@@ -241,17 +271,23 @@ subroutine scf_merge_k_orbital(target,source,first,ks,ke,status)
   status=11;return
  endif
  if(allocated(source%rwf))then
-  lb=lbound(source%rwf);ub=ubound(source%rwf);lb(6)=ks;ub(6)=ke
+  lb=lbound(source%rwf);ub=ubound(source%rwf);lb(axis)=ks;ub(axis)=ke
   if(any(lb/=lbound(target%rwf)).or.any(ub/=ubound(target%rwf)))then
    status=11;return
   endif
-  a=max(ks,lbound(source%rwf,6));b=min(ke,ubound(source%rwf,6))
-  if(a<=b)target%rwf(:,:,:,:,:,a:b,:)=source%rwf(:,:,:,:,:,a:b,:)
+  a=max(ks,lbound(source%rwf,axis));b=min(ke,ubound(source%rwf,axis))
+  if(a<=b)then
+   if(axis==5)then
+    target%rwf(:,:,:,:,a:b,:,:)=source%rwf(:,:,:,:,a:b,:,:)
+   else
+    target%rwf(:,:,:,:,:,a:b,:)=source%rwf(:,:,:,:,:,a:b,:)
+   endif
+  endif
  endif
  if(first)then
   if(allocated(target%zwf))deallocate(target%zwf)
   if(allocated(source%zwf))then
-   lb=lbound(source%zwf);ub=ubound(source%zwf);lb(6)=ks;ub(6)=ke
+   lb=lbound(source%zwf);ub=ubound(source%zwf);lb(axis)=ks;ub(axis)=ke
    allocate(target%zwf(lb(1):ub(1),lb(2):ub(2),lb(3):ub(3),lb(4):ub(4), &
     lb(5):ub(5),lb(6):ub(6),lb(7):ub(7)),stat=istat)
    if(istat/=0)then
@@ -264,12 +300,18 @@ subroutine scf_merge_k_orbital(target,source,first,ks,ke,status)
   status=11;return
  endif
  if(allocated(source%zwf))then
-  lb=lbound(source%zwf);ub=ubound(source%zwf);lb(6)=ks;ub(6)=ke
+  lb=lbound(source%zwf);ub=ubound(source%zwf);lb(axis)=ks;ub(axis)=ke
   if(any(lb/=lbound(target%zwf)).or.any(ub/=ubound(target%zwf)))then
    status=11;return
   endif
-  a=max(ks,lbound(source%zwf,6));b=min(ke,ubound(source%zwf,6))
-  if(a<=b)target%zwf(:,:,:,:,:,a:b,:)=source%zwf(:,:,:,:,:,a:b,:)
+  a=max(ks,lbound(source%zwf,axis));b=min(ke,ubound(source%zwf,axis))
+  if(a<=b)then
+   if(axis==5)then
+    target%zwf(:,:,:,:,a:b,:,:)=source%zwf(:,:,:,:,a:b,:,:)
+   else
+    target%zwf(:,:,:,:,:,a:b,:)=source%zwf(:,:,:,:,:,a:b,:)
+   endif
+  endif
  endif
 end subroutine
 

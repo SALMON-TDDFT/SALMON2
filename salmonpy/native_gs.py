@@ -75,6 +75,16 @@ def _scf_k_repartition_api(lib,*,hse=False):
     return fn
 
 
+def _scf_o_repartition_api(lib):
+    probe=getattr(lib,'sp_gs_scf_o_repartition_protocol',None)
+    if probe is None:raise InputError('orbital-only SCF repartition requires a matching explicitly built runtime')
+    probe.argtypes=[];probe.restype=c.c_int
+    if probe()!=1:raise InputError('unsupported SCF orbital repartition protocol')
+    fn=lib.sp_gs_scf_o_repartition
+    fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
+    return fn
+
+
 def _scf_k_input(text,decomposition):
     # Only the generated parallel block may differ. Every physical/input byte in
     # other groups is retained; do not ignore arbitrary parallel algorithm flags.
@@ -84,7 +94,7 @@ def _scf_k_input(text,decomposition):
     body=groups.pop('parallel','')
     match=re.fullmatch(r'\s*nproc_k\s*=\s*(\d+)\s*,\s*nproc_ob\s*=\s*(\d+)\s*,\s*nproc_rgrid\s*=\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*',body,re.I)
     if match is None or tuple(map(int,match.groups()))!=tuple(decomposition):
-        raise InputError('SCF repartition requires an explicit matching k-only parallel block')
+        raise InputError('SCF repartition requires an explicit matching parallel block')
     if _scalar(groups.get('functional',''),'xc','').lower() not in ('pz','libxc_pz','libxc_pbe','hse06'):
         raise InputError('SCF k repartition requires a supported ordinary/fast-PR HSE profile')
     return groups
@@ -105,13 +115,19 @@ def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=F
     if type(old_size) is not int or not 1<=old_size<2**31:raise InputError('invalid SCF saved rank count')
     if migrating:
         old_decomposition=record.get('decomposition')
-        if old_decomposition!=[old_size,1,1,1,1] or tuple(session.backend.decomposition)!=(session.comm.size,1,1,1,1):
-            raise InputError('SCF repartition currently requires k-only old and new layouts')
+        orbital=(old_decomposition==[1,old_size,1,1,1] and tuple(session.backend.decomposition)==(1,session.comm.size,1,1,1))
+        k_only=(old_decomposition==[old_size,1,1,1,1] and tuple(session.backend.decomposition)==(session.comm.size,1,1,1,1))
+        if not (orbital or k_only):
+            raise InputError('SCF repartition requires matching k-only or orbital-only layouts')
         new_groups=_scf_k_input(text,session.backend.decomposition)
         if _scf_k_input(record['input_text'],old_decomposition)!=new_groups:
             raise InputError('SCF repartition physical inputs differ')
         from .bands import _scalar
-        _scf_k_repartition_api(session.lib,hse=_scalar(new_groups['functional'],'xc','').lower()=='hse06')
+        hse=_scalar(new_groups['functional'],'xc','').lower()=='hse06'
+        if orbital:
+            if hse:raise InputError('fast HSE orbital repartition is not supported')
+            _scf_o_repartition_api(session.lib)
+        else:_scf_k_repartition_api(session.lib,hse=hse)
     files=record.get('files')
     if not isinstance(files,list) or len(files)!=old_size:raise InputError('SCF checkpoint rank files missing')
     for rank,entry in enumerate(files):
@@ -119,15 +135,15 @@ def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=F
     if migrating:
         bounds=[]
         for entry in files:
-            pair=entry.get('k_bounds')
+            pair=entry.get('orbital_bounds' if orbital else 'k_bounds')
             if not isinstance(pair,list) or len(pair)!=2 or any(type(v) is not int or not 1<=v<2**31 for v in pair) or pair[1]<pair[0]:
-                raise InputError('SCF repartition requires valid saved global k bounds')
+                raise InputError('SCF repartition requires valid saved global orbital/k bounds')
             bounds.append(pair)
         ordered=sorted(bounds)
         if ordered[0][0]!=1 or any(b[0]!=a[1]+1 for a,b in zip(ordered,ordered[1:])):
-            raise InputError('SCF saved k ranges overlap or have gaps')
+            raise InputError('SCF saved orbital/k ranges overlap or have gaps')
         if session.comm.size>ordered[-1][1]:
-            raise InputError('more k ranks than saved k points; choose fewer k ranks')
+            raise InputError('more orbital ranks than saved bands; choose fewer ranks' if orbital else 'more k ranks than saved k points; choose fewer k ranks')
         selected=[entry for index,entry in enumerate(files) if index%session.comm.size==session.comm.rank]
     else:selected=[files[session.comm.rank]]
     for entry in selected:
@@ -422,8 +438,9 @@ class NativeGSSession:
             if restart is not None:
                 fn=_scf_disk_api(self.lib)
                 if repartition and saved['decomposition']!=list(self.backend.decomposition):
-                    bounds=np.asarray([entry['k_bounds'] for entry in saved['files']],dtype=np.int32)
-                    migrate=_scf_k_repartition_api(self.lib,hse=calculation.xc=='hse06')
+                    orbital=self.backend.decomposition[1]>1 or saved['decomposition'][1]>1
+                    bounds=np.asarray([entry['orbital_bounds' if orbital else 'k_bounds'] for entry in saved['files']],dtype=np.int32)
+                    migrate=_scf_o_repartition_api(self.lib) if orbital else _scf_k_repartition_api(self.lib,hse=calculation.xc=='hse06')
                     self._check(migrate(state._token,os.fsencode(restart),saved['ranks'],bounds.ctypes.data))
                 else:
                     path=restart/f'rank-{self.comm.rank:08d}.bin'
@@ -812,7 +829,8 @@ class NativeGSState:
         try:
             with path.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
             entry={'name':path.name,'bytes':path.stat().st_size,'sha256':digest,
-                   'k_bounds':[int(lower[5]),int(lower[5]+shape[5]-1)]}
+                   'k_bounds':[int(lower[5]),int(lower[5]+shape[5]-1)],
+                   'orbital_bounds':[int(lower[4]),int(lower[4]+shape[4]-1)]}
         except Exception as exc:error=str(exc)
         _agree(comm,error);files=comm.allgather(entry)
         info=self.info;progress=self.scf_status

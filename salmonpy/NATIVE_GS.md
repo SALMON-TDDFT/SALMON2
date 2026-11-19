@@ -890,7 +890,7 @@ k部分を再配置します。密度・混合履歴・Poisson／XC数値状態�
 
 高速PR版HSEでは、密なACE因子・source/actionキャッシュ・k点別factor/PT-CN履歴も
 Fortranで再配置します。全k点／縮約k点とPBE準備段階の保存で1↔2を検証しています。
-packed/distributed ACE、軌道／空間分割の変更、異なるランタイムへの移行は対象外です。
+packed/distributed ACE、HSEの軌道／空間分割の変更、異なるランタイムへの移行は対象外です。
 共通checkpoint_target／保護付き復元は、引き続き同一MPI分割で使います。
 必要なABIはsp_gs_scf_k_repartition_protocol()の通常XC版1、HSE版2です。
 暗黙にはビルドしません。
@@ -898,3 +898,21 @@ packed/distributed ACE、軌道／空間分割の変更、異なるランタイ�
 既存サンプルでは、保存側に `--k-parallel --save-scf NEW_CHECKPOINT`、
 異なるランク数の再開側に `--restart CHECKPOINT --repartition` を指定できます。
 通常XCで両側とも同じ2×2×2 k格子を使い、その他の入力も揃えます。
+
+### 通常XCの軌道並列数を変えるSCF再開
+
+同じ `run(restart=..., repartition=True)` で、純粋な軌道並列配置にも対応します。
+両側の `decomposition=(1, comm.size, 1, 1, 1)` と、追加ABI
+`sp_gs_scf_o_repartition_protocol()==1` を使います。新規保存はglobal軌道範囲を
+記録します。これがない旧保存も同一配置では読めますが、軌道配置変更には使えません。
+物理入力・資産・ランタイムは同一に保ちます。PZ／Libxc-PZ／PBEの1↔2ランクで、
+復元直後の軌道部分の完全一致、SCF再計算ゼロ、継続結果の既定rtol1e-9／atol1e-10
+での一致を確認しました。Fortranが軌道とCG作業配列を再配置し、密度・混合・XC・
+Poisson・残差履歴を保持します。実軌道・複素軌道ともnative側で扱い、
+Pythonのローダーでは数値配列を並べ替えません。
+
+サンプルの保存は `--orbital-parallel --save-scf NEW_CHECKPOINT`、再開は
+新しいランク数で `--orbital-parallel --restart CHECKPOINT --repartition` です。
+軌道配置は明示的な対称性指定がなければ固定Gamma格子を使います。高速HSEの軌道並列、
+k並列と軌道並列の相互変更、空間／混合配置、別ランタイムへの移行は未対応です。
+通常の復元と共通の保護付き復元は、従来どおり同一MPI配置で使います。

@@ -49,7 +49,7 @@ continuation. GS saving/reuse and the approved validation datasets are authorize
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
    physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
    silently changing existing results.
-4. [ ] Extend measured ordinary-XC/dense fast-PR HSE k-only1↔2 SCF repartition to orbital/spatial layouts;
+4. [ ] Extend measured ordinary-XC k/orbital-only and dense fast-PR HSE k-only1↔2 SCF repartition to HSE orbital/spatial/mixed layouts;
    add portable/checkpoint-version migration across runtimes. Covered active-SCF
    and same-topology RT direct restart are complete within measured scopes.
 5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
@@ -2000,3 +2000,18 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 - Evidence: calc2026/salmonpy-scf-fast-hse-k-record-20261120. This user-authorized
   GS dataset validation is numerical execution verification, not physical convergence
   certification. No CI dispatch; OneDrive cloud sync not independently confirmed.
+
+## 2026-11-20 Ordinary-XC SCF orbital-only repartition
+
+- [x] Existing explicit restart entry, optional orbital ABI1 and orbital_bounds
+  metadata; Fortran orbital/CG donor-axis mapping retains replicated SCF state.
+  Default exact-layout disk restart and HSE k protocol remain unchanged.
+- [x] PBE2→1, PZ1→2, Gamma Libxc-PZ1→2/PZ2→1: exact cut arrays, zero SCF
+  bootstrap, continuation within preset1e-9/1e-10; corrupt/missing data rejected.
+- [x] Final ordinary/HSE builds audited, previous-binary SCF and16-step RT exact;
+  ordinary-k and reduced-HSE-k migration regressions passed. Source/installed637
+  tests (636pass,1skip), installed Gamma orbital restart and revised sample passed.
+- [x] JP/EN/AI guidance and existing sample/tool extended; no extra unit-test case
+  count or module. Evidence: calc2026/salmonpy-scf-orbital-record-20261120.
+- [ ] HSE orbital, spatial/mixed and changed-runtime/portable migration remain open.
+  Common protected restore still requires unchanged topology. No CI dispatch.
