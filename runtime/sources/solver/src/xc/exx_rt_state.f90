@@ -10,7 +10,7 @@ module exx_rt_state
  use exx_factor_history,only:s_factor_history
  implicit none
  private
- public::s_exx_rt_state,rt_taylor_stage,rt_ptcn_begin,rt_state_clear,rt_state_bytes
+ public::s_exx_rt_state,rt_taylor_stage,rt_ptcn_begin,rt_state_clear,rt_state_bytes,rt_values_copy
  type s_exx_rt_state
   logical::recover_errors=.false.
   integer::step_error=0
@@ -43,6 +43,20 @@ module exx_rt_state
   logical::reported_team=.false.
  end type
 contains
+ subroutine rt_values_copy(state,values,restore)
+  ! Same-owner snapshots copy numerical arrays/flags only. The live FFT/backend
+  ! owner is temporarily moved aside, never cloned, destroyed or rebuilt here.
+  type(s_exx_rt_state),intent(inout)::state,values
+  logical,intent(in)::restore
+  type(exx_k_kernel),allocatable::kernel
+  call move_alloc(state%native_kernel,kernel)
+  if(restore)then
+   state=values
+  else
+   values=state
+  endif
+  call move_alloc(kernel,state%native_kernel)
+ end subroutine
  subroutine rt_taylor_stage(state,stage,full_exact,status)
   use exx_ace,only:exx_ace_clear
   implicit none

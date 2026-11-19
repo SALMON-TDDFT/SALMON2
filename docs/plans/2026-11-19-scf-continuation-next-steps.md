@@ -33,3 +33,13 @@ assignment is a deep independent copy, not a checkpoint of an entire live GS.
 Do not advertise a public active-SCF resume API before these controls pass.
 Broader shared initialization/recovery/native ABI is group5, followed by NLCC
 certification/legacy eV-Hartree consistency as group3.
+
+## Fast-PR HSE memory continuation
+
+Retain the same-owner GS numerical payload plus the explicit HSE numerical owner
+(ACE/action/occupation/history/phase/support flags). Keep its FFT/backend kernel
+live; never copy opaque resources into snapshots. Preserve actual mixing age and
+PBE pre-SCF first-iteration/count across segments. Compare full-k kMPI1/2, Gamma,
+and a cut crossing the pre-SCF→HSE transition to fixed continuous binaries.
+Restore must not initialize GS or evaluate orbitals/exchange. Same-process memory
+only; no disk GS datasets, process-restart/repartitioning or SOC/DC expansion.

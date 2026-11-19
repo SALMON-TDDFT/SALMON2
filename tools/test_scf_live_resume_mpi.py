@@ -20,9 +20,13 @@ def main():
     for name in ('build','baseline','output'):p.add_argument(name,type=Path)
     p.add_argument('--size',type=int,default=2)
     p.add_argument('--split',choices=('orbital','spatial','k'),default='orbital')
-    p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe'),default='pz')
+    p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='pz')
     p.add_argument('--initial-no-mix',type=int,default=3)
     p.add_argument('--current-steps',type=int,default=0)
+    p.add_argument('--pre-scf-threshold',type=float,default=0.)
+    p.add_argument('--pre-scf-steps',type=int,default=4)
+    p.add_argument('--gamma',action='store_true')
+    p.add_argument('--tolerance',type=float,default=1e-30)
     args=p.parse_args();world=MPI.COMM_WORLD
     if world.size!=3*args.size:raise ValueError('launch exactly3*size ranks')
     g=world.rank//args.size;comm=world.Split(g,world.rank)
@@ -37,11 +41,13 @@ def main():
     class InMemoryDFT(DFT):
         def input_text(self,scf=SCFSettings()):
             text=super().input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
+            if self.xc=='hse06':
+                text=text.replace('exx_pre_scf_threshold=0',f'exx_pre_scf_threshold={args.pre_scf_threshold},exx_pre_scf_steps={args.pre_scf_steps}')
             return text.replace('&scf',f'&scf\n nscf_init_mix_zero={args.initial_no_mix}',1)
-    a=InMemoryDFT((14,),np.diag([8.]*3),[[.3,.4,.45]],(pseudo,),4,2,(8,8,8),(2,1,1),xc=args.xc)
-    b=InMemoryDFT((14,14),np.diag([9.]*3),[[.3,.4,.45],[.7,.6,.55]],(pseudo,),8,4,(12,12,12),(1,2,1),xc='libxc_pbe')
+    a=InMemoryDFT((14,),np.diag([8.]*3),[[.3,.4,.45]],(pseudo,),4,2,(8,8,8),((1,1,1) if args.gamma else (2,1,1)),xc=args.xc)
+    b=InMemoryDFT((14,14),np.diag([9.]*3),[[.3,.4,.45],[.7,.6,.55]],(pseudo,),8,4,(12,12,12),((1,1,1) if args.gamma else (1,2,1)),xc='hse06' if args.xc=='hse06' else 'libxc_pbe')
     assert "write_gs_restart_data='no'" in a.input_text()
-    scf=SCFSettings(max_iterations=8,tolerance=1e-30)
+    scf=SCFSettings(max_iterations=8,tolerance=args.tolerance)
     backend=NativeGSBackend(args.baseline if g==2 else args.build,work,decomposition=dec)
     def frame(state,final=False):
         return {q:state.array(q).values for q in (('density','occupations','eigenvalues','orbitals','forces') if final else ('density','occupations','eigenvalues','orbitals'))}
@@ -87,6 +93,14 @@ def main():
                 assert state.info==info
                 for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
             for q,value in frame(sibling).items():np.testing.assert_array_equal(value,sibling_cut[q])
+            sibling.continue_scf(steps=1)
+            sibling_future=frame(sibling);sibling_work=sibling.scf_status['executed_iterations']
+            sibling.restore(sibling_snapshot)
+            assert sibling.iterations==2 and sibling.scf_status['executed_iterations']==sibling_work
+            assert sibling.scf_status['initializations']==1
+            sibling.continue_scf(steps=1)
+            for q,value in frame(sibling).items():np.testing.assert_array_equal(value,sibling_future[q])
+            for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
             snap3.close();snap5.close();sibling_snapshot.close();sibling.close()
             assert state.scf_status['snapshots']==0
             for q in ('wfn.bin','occupation.bin'):assert not list(work.rglob(q))
@@ -115,10 +129,12 @@ def main():
         state.close()
     if world.rank==0:
         result={'status':'pass','size':args.size,'split':args.split,'xc':args.xc,'initial_no_mix':args.initial_no_mix,
-                'continuous_new_and_previous_exact':True,'snapshot_restore_numerical_arrays_exact':True,
+                'continuous_arrays_exact':True,
+                'continuous_new_and_previous_exact':args.build.resolve()!=args.baseline.resolve(),'snapshot_restore_numerical_arrays_exact':True,
                 'mixed_history_continuation_exact':True,'sibling_preserved':True,'restore_executed_iterations':0,
                 'linear_initializations':linear['initializations'],'linear_executed_iterations':linear['executed_iterations'],
                 'final_info':asdict(info),'GS_datasets_collected':False,
+                'pre_scf_threshold':args.pre_scf_threshold,'pre_scf_steps':args.pre_scf_steps,'gamma':args.gamma,
                 'continued_GS_to_RT_steps':args.current_steps,
                 'continued_GS_to_RT_exact':bool(args.current_steps)}
         (args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(result,flush=True)

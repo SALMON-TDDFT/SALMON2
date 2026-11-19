@@ -29,7 +29,7 @@ use communication,only:comm_begin_children,comm_end_children,comm_release_childr
 #endif
 use salmon_xc,only:finalize_xc
 #ifdef USE_HSE
-use exx_rt_state,only:s_exx_rt_state,rt_state_clear
+use exx_rt_state,only:s_exx_rt_state,rt_state_clear,rt_values_copy
 use exx_native,only:exx_unbind_system
 #endif
 implicit none
@@ -42,6 +42,9 @@ public::gs_seed_from_handle
 ! Never copy a live context; global inputs remain shared.
 ! Numerical-only snapshots; static communicators/Libxc/FFT handles stay live.
 type s_scf_payload
+#ifdef USE_HSE
+ type(s_exx_rt_state) :: hse
+#endif
  type(s_model_inputs) :: continuation_inputs
  type(s_dft_system) :: system
  type(s_orbital) :: spsi,shpsi,sttpsi
@@ -277,6 +280,15 @@ call init_dft(nproc_group_global,ctx%info,ctx%lg,ctx%mg,ctx%system,ctx%stencil,c
 call exx_bind_gs_system(ctx%system,ctx%info,ctx%hse,gs_hse_status)
 if(gs_hse_status==1)error stop 'GS HSE owner binding conflict'
 ctx%hse_bound=gs_hse_status==0
+if(ctx%mixing%scf_progress%stop_after>0.and.trim(xc)=='hse06'.and..not.ctx%hse_bound)then
+ call timer_end(LOG_INIT_GS)
+ call timer_end(LOG_TOTAL)
+#ifdef USE_MPI
+ if(ctx%mpi_child_owner>0)call comm_end_children(ctx%mpi_child_owner)
+#endif
+ status=15
+ return
+endif
 if(ctx%hse_bound.and.comm_is_root(nproc_id_global))write(*,'(a)')'EXX_GS_OWNER explicit'
 #endif
 allocate( ctx%rho_s(ctx%system%nspin),ctx%v_local(ctx%system%nspin),ctx%vxc(ctx%system%nspin) )
@@ -742,13 +754,21 @@ logical function scf_supported() result(ok)
  select case(trim(xc))
  case('pz','libxc_pz','libxc_pbe')
   ok=.true.
+#ifdef USE_HSE
+ case('hse06')
+  ok=.true.
+#endif
  end select
 end function
 logical function scf_context_ok(ctx) result(ok)
  type(s_gs_context),intent(in)::ctx
  ok=.false.
  if(.not.ctx%active.or.ctx%imported.or..not.ctx%scf_capable)return
- if(associated(ctx%system%salmonpy_hse_owner))return
+#ifdef USE_HSE
+ if(trim(ctx%system%xc_input%xcname)=='hse06')then
+  if(.not.ctx%hse_bound)return
+ endif
+#endif
  ok=.true.
 end function
 integer(c_int) function sp_gs_scf_protocol() bind(C)
@@ -843,7 +863,7 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
  end associate
 end function
 subroutine scf_copy(ctx,value,restore)
- type(s_gs_context),intent(inout)::ctx
+ type(s_gs_context),target,intent(inout)::ctx
  type(s_scf_payload),intent(inout)::value
  logical,intent(in)::restore
  if(restore)then
@@ -854,6 +874,12 @@ subroutine scf_copy(ctx,value,restore)
   ctx%poisson=value%poisson;ctx%fg=value%fg;ctx%energy=value%energy
   ctx%iterations=value%iterations;ctx%converged=value%converged
   ctx%residual=value%residual;ctx%threshold=value%threshold;ctx%xc_func%cval=value%cval
+#ifdef USE_HSE
+  if(ctx%hse_bound)then
+   call rt_values_copy(ctx%hse,value%hse,.true.)
+   ctx%system%salmonpy_hse_owner=>ctx%hse
+  endif
+#endif
  else
   value%continuation_inputs=ctx%continuation_inputs
   value%system=ctx%system;value%spsi=ctx%spsi;value%shpsi=ctx%shpsi;value%sttpsi=ctx%sttpsi
@@ -862,6 +888,11 @@ subroutine scf_copy(ctx,value,restore)
   value%poisson=ctx%poisson;value%fg=ctx%fg;value%energy=ctx%energy
   value%iterations=ctx%iterations;value%converged=ctx%converged
   value%residual=ctx%residual;value%threshold=ctx%threshold;value%cval=ctx%xc_func%cval
+  ! Never retain an alias back into a live context in the numerical payload.
+  nullify(value%system%salmonpy_hse_owner)
+#ifdef USE_HSE
+  if(ctx%hse_bound)call rt_values_copy(ctx%hse,value%hse,.false.)
+#endif
  endif
 end subroutine
 integer(c_int) function sp_gs_scf_snapshot(token,snapshot) bind(C)

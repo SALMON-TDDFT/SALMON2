@@ -131,12 +131,13 @@ if(system%gs_input_owned)then
  scf_metric=system%gs_input%convergence_metric
 endif
 mixing_age=Miter
+if(continuing_scf)mixing_age=mixing%scf_progress%mixing_age
 #ifdef USE_HSE
 if(.not.system%pre_scf%initialized)then
   call exx_pre_scf_initialize(system,exx_pre_scf_threshold,exx_pre_scf_steps,phase_status)
   if(phase_status/=0)error stop 'Invalid pre-SCF configuration'
 endif
-call exx_pre_scf_begin(system,Miter)
+if(.not.continuing_scf)call exx_pre_scf_begin(system,Miter)
 pre_scf_root=comm_is_root(nproc_id_global)
 if(yn_dc=='y')pre_scf_root=comm_is_root(dc%id_tot)
 adaptive_comm=info%icomm_rko
@@ -145,7 +146,7 @@ adaptive_exchange=(exx_enabled(system).or.exx_pre_scf(system)).and. &
   ((exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0).or. &
    (exx_mlwf_radius>0d0.and.(info%isize_r>1.or.info%isize_o>1))).and. &
   .not.(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')
-if(adaptive_exchange)then
+if(adaptive_exchange.and..not.continuing_scf)then
   ! Each static SCF starts with the full exchange operator.
   call exx_set_scf_flags(system,adaptive_ready=.false.)
 endif
@@ -587,9 +588,11 @@ end do DFT_Iteration
 if(mixing%scf_progress%paused)goto 9900
 #ifdef USE_HSE
 if(exx_pre_scf(system))error stop 'PBE pre-SCF unfinished; no hybrid ground state'
-if(system%pre_scf%threshold>0d0.and..not.(sum1<scf_threshold)) &
-  error stop 'Hybrid SCF after PBE pre-SCF not converged; ground state rejected'
-if(system%pre_scf%threshold>0d0.and..not.mixing%scf_progress%converged)then
+if(system%pre_scf%threshold>0d0.and..not.(sum1<scf_threshold))then
+ if(ilevel_print>=1.and.comm_is_root(nproc_id_global)) &
+  write(*,'(a)') 'WARNING: Hybrid SCF after PBE pre-SCF not converged; retaining last iterate'
+endif
+if(system%pre_scf%threshold>0d0.and.sum1<scf_threshold.and..not.mixing%scf_progress%converged)then
   mixing%scf_progress%converged=.true.
   if(ilevel_print>=3.and.comm_is_root(nproc_id_global)) &
     write(*,'(a,i6,a,e15.8)') '  #GS converged at',Miter,' (last allowed iteration):',sum1
@@ -614,6 +617,7 @@ endif
 mixing%scf_converged=mixing%scf_progress%converged
 
 
+mixing%scf_progress%mixing_age=mixing_age
 mixing%scf_progress%iterations=Miter
 mixing%scf_progress%residual=sum1
 mixing%scf_progress%rion_update=rion_update

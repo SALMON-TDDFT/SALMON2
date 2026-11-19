@@ -10,15 +10,17 @@ int sp_gs_protocol(void);
  * Standard profile: create computes SCF; fast import-only profile returns2. Unconverged SCF still succeeds and retains the last iterate.
  * Handles retain numerical/XC/MPI owners, with unique tokens invalidated at close. */
 int sp_gs_create(const char *filename,int64_t *token);
-/* Additive active-SCF1: CPU periodic nonsymmetric scalar PZ/Libxc-PZ/PBE.
- * Imports, HSE, SOC, +U, DC and ionic evolution are outside this entry.
+/* Additive active-SCF1: CPU periodic nonsymmetric scalar PZ/Libxc-PZ/PBE, fast-PR HSE06.
+ * HSE needs its explicit compute profile and k-only MPI. Imports, symmetry,
+ * SOC, +U, DC and ionic evolution are outside this entry.
  * All calls are collective in the same order. Start reads/initializes once;
  * continue skips initialization/no-mix warmup and retains the original total cap.
  * Snapshot tokens retain complete numerical copies in this live GS owner only;
  * no file/process/topology portability or allocation-failure atomicity claimed.
  * scf_info: paused,iterations,total cap,initializations,executed main iterations,
  * live snapshots. Restore changes no lifetime execution/init counters.
- * Snapshots exclude live MPI/Libxc/output handles; text output is not rewound.
+ * Snapshots exclude live MPI/Libxc/FFT/backend/output handles; text output is not rewound.
+ * HSE numerical ACE/cache/history/phase and true mixing age are retained.
  * Status11 rejects bad/mixed budgets/snapshot tokens before numerical writes;
  * status15 denotes an unsupported SCF profile. Unconverged final results warn.
  */

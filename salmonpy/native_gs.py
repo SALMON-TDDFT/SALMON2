@@ -192,8 +192,8 @@ class NativeGSSession:
                     raise InputError('fast HSE GS requires k-only MPI decomposition')
             if steps is not None:
                 steps=_integer(steps,'steps',1,2**31-2)
-                if calculation.xc not in ('pz','libxc_pz','libxc_pbe'):
-                    raise InputError('active SCF currently supports periodic scalar PZ/Libxc-PZ/PBE')
+                if calculation.xc not in ('pz','libxc_pz','libxc_pbe','hse06'):
+                    raise InputError('active SCF currently supports periodic scalar PZ/Libxc-PZ/PBE/fast-PR HSE06')
                 _configure_scf(self.lib)
             scf=SCFSettings() if scf is None else scf
             _identifier(material_id,'material_id')
@@ -420,8 +420,8 @@ class NativeGSState:
     def _scf_ready(self):
         self._live();error=None
         try:
-            if self.calculation is None or self.calculation.xc not in ('pz','libxc_pz','libxc_pbe'):
-                raise InputError('active SCF requires a computed periodic scalar PZ/Libxc-PZ/PBE owner')
+            if self.calculation is None or self.calculation.xc not in ('pz','libxc_pz','libxc_pbe','hse06'):
+                raise InputError('active SCF requires a computed periodic scalar PZ/Libxc-PZ/PBE/fast-PR HSE06 owner')
             _configure_scf(self.session.lib)
         except Exception as exc:error=str(exc)
         _agree(self.session.comm,error)

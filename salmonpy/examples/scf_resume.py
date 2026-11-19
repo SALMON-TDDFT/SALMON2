@@ -18,7 +18,7 @@ def main():
     p.add_argument('build',type=Path);p.add_argument('output',type=Path)
     p.add_argument('--pause-at',type=int,default=3)
     p.add_argument('--iterations',type=int,default=8)
-    p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe'),default='pz')
+    p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='pz')
     args=p.parse_args();comm=MPI.COMM_WORLD
     if comm.size not in (1,2):p.error('one/two internal MPI ranks in this example')
     if not 0<args.pause_at<args.iterations:p.error('pause-at must be between zero and total iterations')
@@ -33,10 +33,11 @@ def main():
     class InMemoryDFT(DFT):
         def input_text(self,scf=SCFSettings()):
             return super().input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
-    calculation=InMemoryDFT((14,),np.diag([8.]*3),[[.3,.4,.45]],(pp,),4,2,(8,8,8),(1,1,1),xc=args.xc)
+    calculation=InMemoryDFT((14,),np.diag([8.]*3),[[.3,.4,.45]],(pp,),4,2,(8,8,8),((comm.size,1,1) if args.xc=='hse06' else (1,1,1)),xc=args.xc)
     assert "write_gs_restart_data='no'" in calculation.input_text()
     context=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
-    backend=NativeGSBackend(args.build,args.output,decomposition=(1,comm.size,1,1,1))
+    decomposition=(comm.size,1,1,1,1) if args.xc=='hse06' else (1,comm.size,1,1,1)
+    backend=NativeGSBackend(args.build,args.output,decomposition=decomposition)
     with backend.open(context) as session:
         with session.run(calculation,scf=SCFSettings(max_iterations=args.iterations,tolerance=1e-30),
                          material_id='si-example',steps=args.pause_at) as state:

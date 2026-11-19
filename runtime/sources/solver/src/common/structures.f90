@@ -616,7 +616,7 @@ module structures
     integer :: iterations=0,no_mix_converged_count=0
     logical :: converged=.false.,rion_update=.false.
     logical :: continuing=.false.,paused=.false.
-    integer :: stop_after=0
+    integer :: stop_after=0,mixing_age=0
   end type s_scf_iteration_progress
 
   type s_mixing

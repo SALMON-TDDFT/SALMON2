@@ -1879,6 +1879,19 @@ Shared-source SCF progress validation: normal and fast-HSE builds source/object-
 - [x] Distinguish declared GS→RT input from effective SCF continuation settings. Fix interleaved-model force mismatch from derived Ewald cutoff input restoration.
 - [x] Six PZ/Libxc-PZ/PBE MPI1/2 orbital/spatial/k controls, no-mix0/3, same-owner snapshot3/5 and mixed-token/budget rejection. Numeric arrays/info match continuous new and fixed previous runtime exactly.
 - [x] Linear8 steps: initialization1/executed8. Restore executes0 iterations; intentional future branches are counted.
-- [ ] HSE/SOC/+U/DC continuation and numerical resource coverage; portable disk/process/checkpoint version and changed-decomposition restore remain group4 work. No completed disk checkpoint claimed.
+- [ ] Remaining numerical coverage: symmetry/SOC/+U/DC/ionic-motion continuation; portable disk/process/checkpoint version and changed-decomposition restore remain group4 work. Fast-PR HSE full-k memory continuation is completed below. No completed disk checkpoint claimed.
 
 Active SCF validation: source/installed634 tests (633pass,1skip). Six native ordinary-XC controls exact; PBE kMPI2 continued GS→16-step TDDFT currents equal both continuous new and fixed preceding runtime. Fresh-path arithmetic/copy probes pass. Fast-HSE computed GS→RT and learned/PT-CN history regression exact; this does not enable paused HSE SCF. Source and wheel example restore with initialization1/executed8 unchanged by restore. GS data not collected, CI not invoked. Evidence: calc2026/salmonpy-scf-live-resume-20261119.
+
+### Group4: fast-PR HSE live SCF continuation
+
+- [x] Commit/push previous ordinary-XC work as78c5bcd1 with skip-ci.
+- [x] Keep explicit HSE numerical ACE/cache/source/action/occupation/history/support flags independent in SCF snapshots. Never copy opaque FFT/backend owners; rebind the restored system to its live HSE owner.
+- [x] Preserve mixing age and pre-SCF first iteration/count/phase across segments. No GS initialization, no-mix replay or exchange evaluation in restore.
+- [x] Actual MPI1/2 full-k and Gamma controls, interleaved different materials, snapshot3/5, continuous new/fixed preceding arrays/forces/info exact. Sixteen TDDFT currents from continued GS exact too.
+- [x] PBE→HSE switch across cuts exact against fixed continuous runtime with a control-flow tolerance. Tight-threshold target HSE warns/retains (no false convergence) against the new continuous runtime; preceding binary rejects this case and is not claimed to pass it.
+- [ ] Same-process memory scope only. Symmetry/SOC/+U/DC/ionic motion, portable disk/process restart, topology change and common protected checkpoint integration remain open.
+
+No GS datasets or CI; numerical arrays remain in RAM. Regression cases establish execution equivalence, not physical convergence.
+
+Fast-PR HSE SCF validation: source/installed634 tests (633pass,1skip), sdist→wheel and JP/EN/AI/API/tool byte parity. Five native full-k/Gamma/MPI1/2 cases exact to continuous execution; four also compare fixed preceding runtime, while the newly warning-only nonconverged pre-SCF case uses new continuous controls. Normal-XC PBE spatialMPI2 regression, fresh arithmetic/copy MPI1/2×OMP1/2, HSE GS→RT and learned/PT-CN history controls pass. Source/installed examples show init1/executed8 and zero restore work. Evidence: calc2026/salmonpy-hse-scf-live-resume-20261119. Disk/process restart and symmetry remain pending.

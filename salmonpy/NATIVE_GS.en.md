@@ -638,8 +638,8 @@ at the user's request. No GS datasets are collected by the validation probes.
 
 ## Active SCF pause and in-memory snapshots
 
-New explicitly built ordinary CPU runtimes expose SCF protocol1 for periodic,
-unpolarized, nonsymmetric fixed-ion PZ/Libxc-PZ/PBE. Existing run() remains a
+New explicitly built CPU runtimes expose SCF protocol1 for periodic,
+unpolarized, nonsymmetric fixed-ion PZ/Libxc-PZ/PBE and fast-PR HSE06. Existing run() remains a
 full SCF call. A steps budget pauses only at an accepted iteration boundary:
 
 ```python
@@ -674,7 +674,8 @@ remaining numerical copies. Complete copies consume memory. This entry is not a
 disk checkpoint, pickle format or process-restart/repartitioning mechanism. Text
 logs/output positions are not rewound. Invalid/mixed snapshot selections reject
 before numerical writes; general OOM/initialization/process-failure atomicity is
-not established. HSE/SOC/+U/DC/ionic-motion continuation is not connected yet.
+not established. SOC/+U/DC/ionic-motion continuation is not connected yet. Fast-PR HSE06
+requires its compute-capable HSE runtime and k-only MPI decomposition.
 Old runtimes remain usable for ordinary run/load; new APIs require a matching
 explicitly built runtime and never trigger an implicit build.
 
@@ -685,3 +686,37 @@ mpiexec -n 2 python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT
 The sample performs a small execution check with GS restart output disabled.
 It compares continued/restored numerical values in RAM and saves scalar evidence
 only; it does not collect GS wavefunction/density datasets.
+
+### Fast-PR HSE06 SCF snapshots
+
+The same run(steps=...), snapshot/restore and continue_scf entry supports full-k
+CPU fast-PR HSE06, including Gamma and internal k-MPI. Select
+`decomposition=(comm.size, 1, 1, 1, 1)` and a matching HSE build; the ordinary
+HSE-disabled runtime cannot execute this profile. There is no slow HSE fallback.
+
+Snapshots also retain the explicit owner's ACE/damped operator, cached
+source/action/occupation, factor/PT-CN history arrays and flags, exchange energy,
+support decisions, actual mixing age and PBE pre-SCF phase/count/first iteration.
+The owner's FFT/backend kernel stays live; it is moved aside during numerical
+copying, never intrinsically copied, recreated or evaluated by restore. System
+owner pointers are rebound to the same live context, not to the saved payload.
+A subsequent natural PBE→HSE transition still builds the target exchange as in a
+continuous calculation; that is future work, not restore-time replay.
+
+A target-HSE iteration cap without convergence warns and retains the last
+iterate, including after PBE pre-SCF; it is not labelled converged. An unfinished
+PBE-only pre-stage is still not a target-HSE result. SCF thresholds in the small
+phase-transition tests are control-flow settings, not physical certification.
+The snapshots remain memory-only, same owner/build/decomposition; symmetry,
+SOC/+U/DC, ionic motion and process/disk restart are not added by this change.
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.scf_resume HSE_BUILD_JSON NEW_OUTPUT --xc hse06
+```
+
+Native controls compare density, occupations, orbitals, eigenvalues, forces and
+metadata to both continuous new and fixed preceding runtimes. Cuts before/after
+the PBE→HSE switch retain mixing history; a separate tight-threshold test confirms
+nonconvergence warns. Interleaved different-material snapshots remain independent.
+GS→16-step TDDFT currents also match exactly. These are execution regressions;
+they do not establish physical convergence. No GS datasets are collected.
