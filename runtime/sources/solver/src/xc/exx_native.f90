@@ -236,6 +236,10 @@ contains
       if(.not.present(allow_symmetry))return
       if(.not.allow_symmetry)return
     endif
+    if(info%isize_r>1)then
+      if(.not.present(allow_symmetry))return
+      if(.not.allow_symmetry)return
+    endif
     if(.not.native_owner_supported(system,info))return
     call exx_bind_system(system,owner,status)
     if(status==0)owner%orbital_scf=product(system%kmesh)==1.and. &
@@ -253,19 +257,21 @@ contains
     logical :: orbital_gs
     call hse_occupation_input(system,nelec,temperature,nstate)
     orbital_gs=.false.
-    if(theory=='dft'.and.(info%isize_o>1.or.yn_hse_wannier=='y'))then
+    if(theory=='dft'.and.(info%isize_o>1.or.info%isize_r>1.or.yn_hse_wannier=='y'))then
       offdiag=system%primitive_a
       do j=1,3
         offdiag(j,j)=0d0
       enddo
       orbital_gs=info%isize_k==1.and.info%isize_o<=system%no.and. &
+        (info%isize_o==1.or.info%isize_r==1).and. &
         all(system%kmesh==1).and..not.system%kpoint_input%use_symmetry.and. &
         maxval(abs(offdiag))<=1d-12.and.maxval(abs(system%vec_k))<=1d-12.and. &
         exx_local_backend=='cpu'.and.exx_pair_screening=='off'
     endif
     ok=system_functional(system)=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
       yn_dc=='n'.and.(yn_hse_wannier=='n'.or.orbital_gs).and.temperature<0d0.and. &
-      info%isize_r==1.and.(info%isize_o==1.or.orbital_gs).and.info%isize_k>=1.and.info%numm==1.and. &
+      (info%isize_r==1.or.orbital_gs).and.(info%isize_o==1.or.orbital_gs).and. &
+      info%isize_k>=1.and.info%numm==1.and. &
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.exx_kpoint_backend=='cpu'
     if(.not.ok)return
     if(system%kpoint_input%use_symmetry)then

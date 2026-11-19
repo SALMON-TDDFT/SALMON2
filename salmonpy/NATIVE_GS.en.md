@@ -956,8 +956,8 @@ grid/k convergence certification.
 
 Fast-PR HSE additionally reindexes dense ACE factors, source/action caches and
 per-k factor/PT-CN histories in Fortran. Full/reduced-k and PBE pre-stage cuts
-cover1↔2 ranks. Packed/distributed ACE, HSE spatial repartition and
-changed-runtime migration remain outside this entry. Common checkpoint_target/protected restore still requires unchanged
+cover1↔2 ranks. Packed/distributed ACE and changed-runtime migration remain outside this entry;
+HSE spatial restart uses the explicit Gamma entry below. Common checkpoint_target/protected restore still requires unchanged
 MPI decomposition. Optional ABI: sp_gs_scf_k_repartition_protocol()==1 for ordinary XC, version2 for HSE; no implicit build.
 
 The existing sample saves with `--k-parallel --save-scf NEW_CHECKPOINT` and loads
@@ -1003,7 +1003,8 @@ is used to reconstruct the saved numerical state.
 The existing sample uses `--xc hse06 --orbital-parallel --save-scf NEW_CHECKPOINT`,
 then `--xc hse06 --orbital-parallel --restart CHECKPOINT` with the same rank count.
 Use the protocol2 entry below when changing ranks. Multi-k orbital HSE,
-spatial/mixed layouts and orbital GS→RT handoff remain unsupported.
+Mixed layouts and orbital GS→RT handoff remain unsupported; HSE spatial GS
+uses the explicit entry below.
 Two-rank fresh-process continuation and a cut during the PBE pre-stage are
 execution controls; they do not establish physical grid/k convergence.
 
@@ -1039,12 +1040,12 @@ The sample uses `--xc hse06 --orbital-parallel` on both sides; add `--save-scf`
 on the source and `--restart CHECKPOINT --repartition` on the new rank count.
 The constructor option is needed even when the source has one rank. Packed/
 distributed ACE, tiled gauges, localized sparse support, multi-k orbital HSE,
-spatial/mixed layouts, changed-runtime migration and orbital GS→RT remain outside
-this dense Gamma contract. Common protected restore still keeps the same layout.
+Mixed layouts, changed-runtime migration and orbital GS→RT remain outside
+this dense Gamma contract; HSE spatial GS uses the dedicated entry below. Common protected restore still keeps the same layout.
 
 ### Ordinary-XC spatial rank-count restart
 
-A matching runtime declaring `sp_gs_scf_r_repartition_protocol()==1` accepts
+A matching runtime declaring `sp_gs_scf_r_repartition_protocol()` version1 or2 accepts
 periodic scalar fixed-ion PZ/Libxc-PZ/PBE SCF restart between pure spatial
 layouts. Use `decomposition=(1, 1, nx, ny, nz)` with `nx*ny*nz == comm.size`
 on each fresh host. Only the parallel block may differ; runtime, material ID,
@@ -1082,5 +1083,43 @@ checks, not physical convergence certification. The sample uses
 `--spatial-parallel --save-scf NEW_CHECKPOINT` followed by
 `--spatial-parallel --restart CHECKPOINT --repartition` with a different rank count.
 Older saves without grid_bounds still support same-layout restoration.
-HSE spatial, k/orbital/spatial mixed migration and changed-runtime portability
-remain unsupported; common protected restore still keeps the same layout.
+HSE spatial GS uses the explicit entry below. k/orbital/spatial mixed migration
+and changed-runtime portability remain unsupported; common protected restore still keeps the same layout.
+
+### Fast-PR HSE spatial rank-count restart
+
+Use immutable `hse_spatial=True` on both hosts, including one rank, to select the
+same full-support CPU Gamma collective exchange algorithm. It excludes
+hse_orbital. HSE-spatial compute protocol1 and spatial-repartition protocol2 are
+required; physical inputs, runtime, assets, material ID and SCF settings must match.
+
+```python
+backend = NativeGSBackend(build_record, work_root,
+    decomposition=(1, 1, comm.size, 1, 1), hse_spatial=True)
+with backend.open(context) as session:
+    with session.run(calculation, scf=scf, material_id="Si",
+                     restart=checkpoint, repartition=True) as state:
+        assert state.scf_status["executed_iterations"] == 0
+        state.continue_scf(steps=5)
+```
+
+Fortran maps dense ACE factor rows and exchange source/action/work/spatial-source/
+previous rows by saved global physical grid coordinates, using the x-fast local
+row layout. Replicated gauge, occupations, phase and mixing histories are retained.
+Communicators are rebound; no accepted ACE evaluation, eigenstate/density solve
+or SCF replay reconstructs the saved state. Static new-layout resources and dead
+FFT/XC scratch follow the ordinary spatial contract above. Source data stays intact.
+
+Fresh-process HSE1↔2, pre-PBE-stage1↔2,16³2↔4 and2×2×1→1×1×2 layouts passed.
+Physical cut interiors match exactly, bootstrap SCF work is zero, and five new
+iterations match the source-initialized continuous8 at the unchanged
+rtol1e-9/atol1e-10. Late donor failures preserve originals before retry/continuation.
+These are execution checks, not physical convergence certification.
+
+The existing sample uses `--xc hse06 --spatial-parallel` on both sides; save with
+`--save-scf NEW_CHECKPOINT`, then use `--restart CHECKPOINT --repartition` on the
+new rank count. Existing default k/orbital and legacy CLI behavior is preserved.
+The profile is periodic scalar, orthogonal-cell, fully occupied integer spin pairs,
+fixed-ion, CPU, full-support Gamma with dense ACE and untiled gauges. Packed or
+distributed ACE, tiled gauges, sparse localization, multi-k or mixed layouts,
+changed-runtime migration and HSE spatial GS→RT remain outside this entry.

@@ -890,7 +890,8 @@ k部分を再配置します。密度・混合履歴・Poisson／XC数値状態�
 
 高速PR版HSEでは、密なACE因子・source/actionキャッシュ・k点別factor/PT-CN履歴も
 Fortranで再配置します。全k点／縮約k点とPBE準備段階の保存で1↔2を検証しています。
-packed/distributed ACE、HSEの空間分割の変更、異なるランタイムへの移行は対象外です。
+HSE空間分割は後述の専用入口を使います。packed/distributed ACEと
+異なるランタイムへの移行は対象外です。
 共通checkpoint_target／保護付き復元は、引き続き同一MPI分割で使います。
 必要なABIはsp_gs_scf_k_repartition_protocol()の通常XC版1、HSE版2です。
 暗黙にはビルドしません。
@@ -934,7 +935,7 @@ Pythonのローダーでは数値配列を並べ替えません。
 既存サンプルは `--xc hse06 --orbital-parallel --save-scf NEW_CHECKPOINT` で保存し、
 同じランク数で `--xc hse06 --orbital-parallel --restart CHECKPOINT` として再開します。
 ランク数を変える場合は後述のprotocol2入口を使います。複数k点の軌道HSE、
-空間／混合配置、軌道並列GSからRTへの受け渡しは未対応です。2ランクの別プロセス再開と
+HSE空間GSは後述の専用入口を使います。混合配置、軌道並列GSからRTへの受け渡しは未対応です。2ランクの別プロセス再開と
 PBE準備段階の保存は実行の検証であり、物理的な格子・k点収束を認定するものではありません。
 
 ### 高速PR版HSEの軌道並列数を変える
@@ -971,7 +972,7 @@ ACE、タイル形式gauge、局在疎表現、複数k点の軌道HSE、空間�
 
 ### 通常XCの空間並列数を変えるSCF再開
 
-`sp_gs_scf_r_repartition_protocol()==1` の対応ランタイムでは、周期・非スピン分極・
+`sp_gs_scf_r_repartition_protocol()` の版1または2 の対応ランタイムでは、周期・非スピン分極・
 固定イオンのPZ／Libxc-PZ／PBEを、純粋な空間分割間で直接再開できます。各ホストを
 `decomposition=(1, 1, nx, ny, nz)`、`nx*ny*nz == comm.size` で開きます。
 並列設定だけを変え、ランタイム・物質ID・物理入力・資産・SCF上限・混合条件は揃えます。
@@ -1004,6 +1005,44 @@ FFTの部分変換バッファとXCの再利用作業領域は履歴ではない
 これは実装の検証であり、物理収束の認定ではありません。サンプルは保存側に
 `--spatial-parallel --save-scf NEW_CHECKPOINT`、ランク数を変えた再開側に
 `--spatial-parallel --restart CHECKPOINT --repartition` を指定します。
-grid_boundsがない旧保存も、同一配置では復元できます。HSEの空間分割、
+grid_boundsがない旧保存も、同一配置では復元できます。HSEの空間分割は後述の専用入口を使います。
 k／軌道／空間の混合配置変更、別ランタイムへの可搬化は未対応です。
 共通の保護付き復元は引き続き同じMPI分割で使います。
+
+### 高速PR版HSEの空間並列数を変えるSCF再開
+
+保存側・再開側の両方に、固定設定 `hse_spatial=True` を指定します。1ランクでも
+同じCPU・全支持Gamma交換経路を選ぶ指定で、hse_orbitalとは同時に使いません。
+HSE-spatial compute protocol1とspatial-repartition protocol2が必要です。
+物理入力・ランタイム・資産・物質ID・SCF設定は揃えます。
+
+```python
+backend = NativeGSBackend(build_record, work_root,
+    decomposition=(1, 1, comm.size, 1, 1), hse_spatial=True)
+with backend.open(context) as session:
+    with session.run(calculation, scf=scf, material_id="Si",
+                     restart=checkpoint, repartition=True) as state:
+        assert state.scf_status["executed_iterations"] == 0
+        state.continue_scf(steps=5)
+```
+
+Fortranが保存したglobal格子座標とx方向が最速の配列順序に従って、密なACE因子、
+交換用source/action/work、spatial source/previousの格子行を再配置します。
+共有保持するgauge・占有・フェーズ・混合履歴は引き継ぎ、通信資源を結び直します。
+保存状態の再構築にACE評価・固有状態／密度計算・SCF反復は行いません。
+新分割の静的資源と履歴を持たないFFT／XC作業領域は通常XCの空間再開と同じ扱いです。
+保存元データは変更しません。
+
+HSEの別プロセス1↔2、PBE準備段階の1↔2、16³格子の2↔4、
+2×2×1→1×1×2分割で成功しました。格子内部の復元直後は完全一致し、
+SCF実行数0、続く5反復は保存元と同じ初期状態からの連続8反復と
+既定rtol1e-9／atol1e-10で一致します。途中読込失敗でも元の状態を保持し、
+復旧後の継続が可能です。これは実装の検証であり、物理収束の認定ではありません。
+
+サンプルは両側に `--xc hse06 --spatial-parallel` を指定し、保存側に
+`--save-scf NEW_CHECKPOINT`、ランク数を変えた再開側に
+`--restart CHECKPOINT --repartition` を付けます。既定のk／軌道経路と
+従来CLIの挙動は維持します。対象はCPU・周期・非スピン分極・直交セル・固定イオン・
+全占有の整数スピン対・Gamma点・全支持・密なACE・タイルなしgaugeです。
+packed/distributed ACE、タイルgauge、局在疎表現、複数k点／混合配置、
+別ランタイム移行と空間HSE GS→RTは対象外です。

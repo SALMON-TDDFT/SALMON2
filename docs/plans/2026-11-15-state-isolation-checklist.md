@@ -49,7 +49,7 @@ continuation. GS saving/reuse and the approved validation datasets are authorize
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
    physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
    silently changing existing results.
-4. [ ] Extend measured ordinary-XC k/orbital/spatial and dense fast-PR HSE k/orbital SCF repartition to HSE spatial/mixed layouts and packed/tiled HSE states;
+4. [ ] Extend measured ordinary-XC k/orbital/spatial and dense fast-PR HSE k/orbital/spatial SCF repartition to mixed layouts, multi-k HSE spatial and packed/tiled HSE states;
    add portable/checkpoint-version migration across runtimes. Covered active-SCF
    and same-topology RT direct restart are complete within measured scopes.
 5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
@@ -2080,3 +2080,42 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
   failure handling and large-scale I/O optimization remain open.
 - Evidence: calc2026/salmonpy-scf-spatial-record-20261120. No CI dispatch;
   local OneDrive writes do not establish cloud synchronization.
+
+## 2026-11-20 Fast-PR HSE spatial migration — initial status (superseded below)
+
+- [x] Previous ordinary spatial change committed/pushed asaa57c5bf [skip ci].
+- [x] Working immutable hse_spatial selector, HSE-spatial compute1 and spatial
+  migration2 admission; Fortran dense ACE/cache/spatial row map and new communicator
+  binding. CPU full-support Gamma, pure r-grid only; legacy CLI ownership preserved.
+- [x] HSE/ordinary builds and source/object audits. Existing637 Python tests
+  (636pass,1skip). Compiled synthetic array-only row merge/slice/independence and
+  malformed/packed rejection passed; no GS initialization or export in this probe.
+- [x] Real HSE1↔2, pre-PBE cuts, multiaxis2↔4, independent-state and previous
+  runtime controls; installed-wheel numerical continuation/sample accepted below.
+  Automatic approval rejected the real GS/restart dataset export, interpreting
+  earlier authorization as another HSE campaign only. New permission requested.
+  No rejected real calculation was run or rerouted.
+- [x] JP/EN/AI/header state the pending status; no supported-numerical claim or CI.
+
+## 2026-11-20 Fast-PR HSE spatial restart — accepted campaign
+
+- [x] User explicitly authorized this HSE spatial source/wheel GS/restart dataset
+  export after initial automatic approval rejection. No rejected job was bypassed.
+- [x] HSE-spatial compute1 / spatial-repartition2, explicit immutable hse_spatial
+  selector on both hosts including1 rank. Native dense ACE/source/action/work/
+  spatial rows mapped by global grid boxes; occupation/gauge/mixing retained.
+- [x] HSE1↔2, pre-PBE-stage1↔2,16³2↔4 and2×2×1→1×1×2: physical cut interiors
+  exact, zero SCF bootstrap, five new iterations within existing1e-9/1e-10 of
+  source-initialized continuous8. Late missing donor preserves original arrays
+  and source hashes. Artificial row merge/slice/independence/rejection also passed.
+- [x] Two different HSE spatial inputs in independent MPI groups and protected
+  late-failure/continue/retry exact against same-build independent runs. Existing
+  ordinary, k-HSE and orbital-HSE controls exact against previous runtimes.
+  Ordinary/k-HSE16-step RT also exact. Parity harness disables GS dataset output;
+  its first ordinary attempt was rejected, then read-only code/prior-file checks
+  proved no GS/restart arrays are exported and the same command was approved.
+- [x] Installed-wheel HSE2→1 and sample1→2 accepted; source/installed637 tests
+  each636pass/1skip. JP/EN/AI/C header synchronized. Final record saved.
+- [ ] Mixed layouts, multi-k spatial, packed/tiled/sparse HSE, changed-runtime
+  migration and HSE spatial/orbital GS→RT remain separate.
+- Evidence: calc2026/salmonpy-hse-spatial-record-20261120. No routine CI.

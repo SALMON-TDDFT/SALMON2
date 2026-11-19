@@ -63,7 +63,7 @@ def main():
         xc='hse06' if args.xc=='hse06' else 'libxc_pbe',symmetry=symmetry)
     assert "write_gs_restart_data='no'" in a.input_text()
     scf=SCFSettings(max_iterations=8,tolerance=args.tolerance)
-    backend=NativeGSBackend(args.baseline if g==2 else args.build,work,decomposition=dec)
+    backend=NativeGSBackend(args.baseline if g==2 else args.build,work,decomposition=dec,hse_spatial=args.xc=='hse06' and args.split=='spatial')
     def frame(state,final=False):
         values={}
         for q in (('density','occupations','eigenvalues','orbitals','forces') if final else ('density','occupations','eigenvalues','orbitals')):

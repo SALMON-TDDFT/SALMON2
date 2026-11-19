@@ -87,7 +87,7 @@ def main():
     dec=(args.size,1,1,1,1) if args.split=='k' else (1,args.size,1,1,1) if args.split=='orbital' else (1,1,args.size,1,1)
     if args.split=='spatial':
         axes=[1,1,1];axes['xyz'.index(args.spatial_axis)]=args.size;dec=(1,1,*(args.rgrid or axes))
-    backend=NativeGSBackend(args.build,work,decomposition=dec,hse_orbital=args.xc=='hse06' and args.split=='orbital')
+    backend=NativeGSBackend(args.build,work,decomposition=dec,hse_orbital=args.xc=='hse06' and args.split=='orbital',hse_spatial=args.xc=='hse06' and args.split=='spatial')
     checkpoint=args.output/'checkpoint'
     def spatial_expected(directory,array,lower):
         result=np.empty_like(array);covered=np.zeros(array.shape[:3],dtype=bool)
@@ -308,7 +308,7 @@ def main():
                     saved=json.loads((checkpoint/'manifest.json').read_text())
                     orbital=args.split=='orbital'
                     bounds=np.asarray([entry['grid_bounds' if args.split=='spatial' else 'orbital_bounds' if orbital else 'k_bounds'] for entry in saved['files']],dtype=np.int32)
-                    migrate=_scf_r_repartition_api(session.lib) if args.split=='spatial' else _scf_o_repartition_api(session.lib,hse=args.xc=='hse06') if orbital else _scf_k_repartition_api(session.lib,hse=args.xc=='hse06')
+                    migrate=_scf_r_repartition_api(session.lib,hse=args.xc=='hse06') if args.split=='spatial' else _scf_o_repartition_api(session.lib,hse=args.xc=='hse06') if orbital else _scf_k_repartition_api(session.lib,hse=args.xc=='hse06')
                     last=checkpoint/saved['files'][-1]['name'];withheld=last.with_suffix('.withheld')
                     if comm.rank==0:last.rename(withheld)
                     comm.Barrier()

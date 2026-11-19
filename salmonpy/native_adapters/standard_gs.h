@@ -57,7 +57,12 @@ int sp_gs_scf_o_repartition(int64_t token,const char *directory,int old_size,con
  * GS-to-RT handoff is implied. Protocol2 adds explicit one-rank orbital mode;
  * changed orbital rank count additionally requires orbital-repartition2. */
 int sp_gs_hse_orbital_protocol(void);
-/* Optional ordinary-XC spatial repartition1. boxes is 6*old_size integers:
+/* Optional HSE spatial compute1.
+ * Explicit full-support CPU Gamma profile, selected on both hosts including1 rank.
+ * Spatial-repartition2 additionally maps dense ACE/workspace physical grid rows. */
+int sp_gs_hse_spatial_protocol(void);
+/* Spatial repartition1: ordinary XC;2 also dense full-support Gamma HSE.
+ * boxes is 6*old_size integers:
  * (xlo,xhi,ylo,yhi,zlo,zhi) for each old rank's physical interior. Pure r-grid
  * layouts only. Copies accepted interiors/mixing and periodic halos; static
  * new-layout FFT/communication resources and dead scratch remain live. */

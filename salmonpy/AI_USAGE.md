@@ -808,7 +808,7 @@ SCFデータ保存時には残差履歴も確認します。新しいnative GS�
 
 native SCFの準備済み復元候補を使わない場合はclose/discardまたはwith文で破棄します。GS状態のcloseと元のsnapshotのcloseも、それぞれが所有するPython候補を先に破棄します。MPI各rankで同順に呼び、Cホストが直接作った予約やGCによる自動MPI終了まで保証すると説明しません。
 
-通常XCのSCFディスク再開では、対応ランタイムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSEのk／軌道分割変更は後述の対応protocolで扱います。通常XCの空間分割は後述の専用入口を使い、HSE空間／混合配置は未対応です。既定と共通保護付き復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
+通常XCのSCFディスク再開では、対応ランタイムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSEのk／軌道分割変更は後述の対応protocolで扱います。通常XCの空間分割は後述の専用入口を使い、HSE空間GSは後述の専用入口を使い、混合配置は未対応です。既定と共通保護付き復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
 
 ## SCFのk点MPI数を変える再開
 
@@ -816,7 +816,7 @@ native SCFの準備済み復元候補を使わない場合はclose/discardまた
 物理入力を保ち、k点だけのMPI分割を変える明示的な入口です。通常XCはprotocol1/2、
 密なACEを使う高速PR版HSEはk-repartition protocol2が必要です。確認済みは1↔2ランク、
 HSEの全k点／縮約k点とPBE準備段階です。FortranがACE・キャッシュ・履歴を再配置し、
-SCFを再実行しません。HSEの軌道分割は後述の専用入口を使い、HSE空間分割、packed/distributed ACE、異なるランタイムは
+SCFを再実行しません。HSEの軌道分割は後述の専用入口を使い、HSE空間GSは後述の専用入口を使います。packed/distributed ACE、異なるランタイムは
 未対応です。保護付き復元のMPI分割は従来どおり同一にします。詳細はNATIVE_GS.md／
 NATIVE_GS.en.mdを参照し、物理収束の検証と混同しないでください。
 
@@ -847,4 +847,15 @@ Fortranが密度・ポテンシャル・軌道／CG内部値と混合履歴を�
 周期haloは内部値からコピーします。新分割の静的FFT／通信資源と履歴を持たないXC／
 FFT作業バッファの準備を、GS再計算と混同しないでください。比較は格子内部で行います。
 サンプルは両側に `--spatial-parallel` を指定します。対象はPZ／Libxc-PZ／PBEで、
-HSE空間分割・k／軌道との混合配置変更・別ランタイム移行は未対応です。
+HSE空間GSは後述の専用入口を使います。k／軌道との混合配置変更・別ランタイム移行は未対応です。
+
+高速PR版HSEの空間SCF再開は、保存側・再開側とも
+`NativeGSBackend(..., decomposition=(1,1,nx,ny,nz), hse_spatial=True)` を使い、
+再開時は `run(restart=..., repartition=True)` とします。1ランクでも同じGamma交換
+経路を使うため指定を省略しません。HSE-spatial compute1とspatial-repartition2が必要です。
+Fortranが密なACEと交換作業配列の格子行を直接再配置し、SCF再計算を行いません。
+検証済みは1↔2、PBE準備段階、16³2↔4と二方向分割です。CPU・全支持・Gamma・
+直交セル・固定イオン・全占有スピン対・タイルなしgaugeの範囲です。hse_orbitalとは
+同時に指定しません。サンプルは `--xc hse06 --spatial-parallel` を両側に指定します。
+複数k点／混合配置・packed/tiled/sparse表現・別ランタイム移行・空間HSE GS→RTを
+対応済みとは案内しません。これは実装検証で、物理収束の認定ではありません。

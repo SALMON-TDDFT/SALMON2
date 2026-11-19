@@ -506,8 +506,19 @@ contains
 end subroutine
 #endif
 
+integer(c_int) function sp_gs_hse_spatial_protocol() bind(C)
+#ifdef USE_HSE
+ sp_gs_hse_spatial_protocol=1
+#else
+ sp_gs_hse_spatial_protocol=0
+#endif
+end function
 integer(c_int) function sp_gs_scf_r_repartition_protocol() bind(C)
+#ifdef USE_HSE
+ sp_gs_scf_r_repartition_protocol=2
+#else
  sp_gs_scf_r_repartition_protocol=1
+#endif
 end function
 integer(c_int) function sp_gs_scf_r_repartition(token,path,old_size,boxes) bind(C) result(status)
  integer(c_int64_t),value::token
@@ -529,6 +540,10 @@ integer(c_int) function sp_gs_scf_r_repartition(token,path,old_size,boxes) bind(
  if(allocated(ctx%scf_pending))status=11
  select case(trim(ctx%system%xc_input%xcname))
  case('pz','libxc_pz','libxc_pbe')
+#ifdef USE_HSE
+ case('hse06')
+  if(.not.ctx%hse_bound.or..not.ctx%hse%orbital_scf)status=15
+#endif
  case default
   status=15
  end select
@@ -607,6 +622,9 @@ integer(c_int) function sp_gs_scf_r_repartition(token,path,old_size,boxes) bind(
    status=11;exit
   endif
   call scf_merge_r_payload(value,donor,first,lo,hi,ctx%mg,ctx%lg%num,status)
+#ifdef USE_HSE
+  if(ctx%hse_bound)call scf_merge_r_hse(value%hse,donor%hse,first,lo,hi,ctx%mg,status)
+#endif
   if(status/=0)exit
   if(all(a<=b))covered(a(1):b(1),a(2):b(2),a(3):b(3))=.true.
   first=.false.;deallocate(donor)
@@ -615,6 +633,15 @@ integer(c_int) function sp_gs_scf_r_repartition(token,path,old_size,boxes) bind(
  call comm_get_max(status,group)
  if(status/=0)return
  call value%continuation_inputs%parallel_from(ctx%inputs)
+#ifdef USE_HSE
+ if(ctx%hse_bound)then
+  value%hse%ace%metric_comm=ctx%info%icomm_r
+  value%hse%scf_damped_ace%metric_comm=ctx%info%icomm_r
+  value%hse%initial_ace%metric_comm=ctx%info%icomm_r
+  value%hse%midpoint_ace%metric_comm=ctx%info%icomm_r
+  value%hse%spatial%gauge_tiles%comm=ctx%info%icomm_ro
+ endif
+#endif
  call move_alloc(value,ctx%scf_pending)
  end associate
 end function
@@ -880,3 +907,109 @@ subroutine scf_merge_r_payload(target,source,first,lo,hi,mg,n,status)
    source%poisson%zrhoG_ele(a(1):b(1),a(2):b(2),a(3):b(3))
  endif
 end subroutine
+
+#ifdef USE_HSE
+subroutine scf_merge_r_complex3(target,source,first,lo,hi,mg,status)
+ complex(8),allocatable,intent(inout)::target(:,:,:)
+ complex(8),allocatable,intent(in)::source(:,:,:)
+ logical,intent(in)::first
+ integer,intent(in)::lo(3),hi(3)
+ type(s_rgrid),intent(in)::mg
+ integer,intent(inout)::status
+ integer::lb(3),ub(3),istat,a(3),b(3),x,y,z,old_row,new_row,width(3)
+ if(status/=0)return
+ if(first)then
+  if(allocated(target))deallocate(target)
+  if(allocated(source))then
+   lb=lbound(source);ub=ubound(source)
+   allocate(target(1:product(mg%num),lb(2):ub(2),lb(3):ub(3)),stat=istat)
+   if(istat/=0)then
+    status=4;return
+   endif
+   target=0d0
+  endif
+ endif
+ if(allocated(target).neqv.allocated(source))then
+  status=11;return
+ endif
+ if(.not.allocated(source))return
+ width=hi-lo+1;lb=lbound(source);ub=ubound(source)
+ if(lb(1)/=1.or.size(source,1)/=product(width).or. &
+    lbound(target,2)/=lb(2).or.ubound(target,2)/=ub(2).or. &
+    lbound(target,3)/=lb(3).or.ubound(target,3)/=ub(3))then
+  status=11;return
+ endif
+ a=max(lo,mg%is);b=min(hi,mg%ie)
+ do z=a(3),b(3)
+ do y=a(2),b(2)
+ do x=a(1),b(1)
+  old_row=1+x-lo(1)+width(1)*(y-lo(2)+width(2)*(z-lo(3)))
+  new_row=1+x-mg%is(1)+mg%num(1)*(y-mg%is(2)+mg%num(2)*(z-mg%is(3)))
+  target(new_row,:,:)=source(old_row,:,:)
+ enddo
+ enddo
+ enddo
+end subroutine
+subroutine scf_merge_r_hse(target,source,first,lo,hi,mg,status)
+ type(s_exx_rt_state),intent(inout)::target
+ type(s_exx_rt_state),intent(in)::source
+ logical,intent(in)::first
+ integer,intent(in)::lo(3),hi(3)
+ type(s_rgrid),intent(in)::mg
+ integer,intent(inout)::status
+ complex(8),allocatable::buffer(:,:,:),merged(:,:,:)
+ integer::istat
+ if(status/=0)return
+ if(.not.source%orbital_scf.or.allocated(source%spatial%gauge_tiles%matrix).or. &
+    allocated(source%spatial%sparse_source%offset).or.allocated(source%factor_history).or. &
+    allocated(source%ptcn_history))then
+  status=15;return
+ endif
+ call merge_ace(target%ace,source%ace)
+ call merge_ace(target%scf_damped_ace,source%scf_damped_ace)
+ call merge_ace(target%initial_ace,source%initial_ace)
+ call merge_ace(target%midpoint_ace,source%midpoint_ace)
+ call scf_merge_r_complex3(target%cached_source,source%cached_source,first,lo,hi,mg,status)
+ call scf_merge_r_complex3(target%cached_action,source%cached_action,first,lo,hi,mg,status)
+ call scf_merge_r_complex3(target%full_source,source%full_source,first,lo,hi,mg,status)
+ call scf_merge_r_complex3(target%initial_source,source%initial_source,first,lo,hi,mg,status)
+ call scf_merge_r_complex3(target%target_work,source%target_work,first,lo,hi,mg,status)
+ call scf_merge_r_complex3(target%action_work,source%action_work,first,lo,hi,mg,status)
+ call scf_merge_r_complex3(target%spatial%previous,source%spatial%previous,first,lo,hi,mg,status)
+ if(status/=0)return
+ if(allocated(source%spatial%source))then
+  allocate(buffer(size(source%spatial%source,1),size(source%spatial%source,2),1),stat=istat)
+  if(istat/=0)then
+   status=4;return
+  endif
+  buffer(:,:,1)=source%spatial%source
+ endif
+ if(.not.first.and.allocated(target%spatial%source))then
+  allocate(merged(size(target%spatial%source,1),size(target%spatial%source,2),1),stat=istat)
+  if(istat/=0)then
+   status=4;return
+  endif
+  merged(:,:,1)=target%spatial%source
+ endif
+ call scf_merge_r_complex3(merged,buffer,first,lo,hi,mg,status)
+ if(status/=0)return
+ if(allocated(target%spatial%source))deallocate(target%spatial%source)
+ if(allocated(merged))then
+  allocate(target%spatial%source(size(merged,1),size(merged,2)),stat=istat)
+  if(istat/=0)then
+   status=4;return
+  endif
+  target%spatial%source=merged(:,:,1)
+ endif
+contains
+ subroutine merge_ace(left,right)
+  type(s_exx_ace),intent(inout)::left
+  type(s_exx_ace),intent(in)::right
+  if(right%packed.or.right%metric_distributed)then
+   status=15;return
+  endif
+  if(.not.first)left%condition=max(left%condition,right%condition)
+  call scf_merge_r_complex3(left%factors,right%factors,first,lo,hi,mg,status)
+ end subroutine
+end subroutine
+#endif
