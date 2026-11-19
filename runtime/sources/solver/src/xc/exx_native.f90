@@ -51,7 +51,6 @@ module exx_native
   public :: exx_enabled,exx_refresh,exx_add_action,exx_exchange_energy,exx_freeze
   public :: exx_pack,exx_unpack
   public :: exx_taylor_stage,exx_core_exchange,exx_force_full_action
-  type(spatial_exx_state),target,save :: spatial
   type(s_exx_wannier),save :: wannier
   public :: exx_scf_prepare,exx_scf_residual
   public :: exx_bind_gs_system
@@ -245,12 +244,24 @@ contains
   logical function native_owner_supported(system,info) result(ok)
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
-    integer :: nelec,nstate
-    real(8) :: temperature
+    integer :: nelec,nstate,j
+    real(8) :: temperature,offdiag(3,3)
+    logical :: orbital_gs
     call hse_occupation_input(system,nelec,temperature,nstate)
+    orbital_gs=.false.
+    if(theory=='dft'.and.info%isize_o>1)then
+      offdiag=system%primitive_a
+      do j=1,3
+        offdiag(j,j)=0d0
+      enddo
+      orbital_gs=info%isize_k==1.and.info%isize_o<=system%no.and. &
+        all(system%kmesh==1).and..not.system%kpoint_input%use_symmetry.and. &
+        maxval(abs(offdiag))<=1d-12.and.maxval(abs(system%vec_k))<=1d-12.and. &
+        exx_local_backend=='cpu'.and.exx_pair_screening=='off'
+    endif
     ok=system_functional(system)=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
-      yn_dc=='n'.and.yn_hse_wannier=='n'.and.temperature<0d0.and. &
-      info%isize_r==1.and.info%isize_o==1.and.info%isize_k>=1.and.info%numm==1.and. &
+      yn_dc=='n'.and.(yn_hse_wannier=='n'.or.orbital_gs).and.temperature<0d0.and. &
+      info%isize_r==1.and.(info%isize_o==1.or.orbital_gs).and.info%isize_k>=1.and.info%numm==1.and. &
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.exx_kpoint_backend=='cpu'
     if(.not.ok)return
     if(system%kpoint_input%use_symmetry)then
@@ -1772,6 +1783,7 @@ contains
     implicit none
     type(s_exx_rt_state),target,optional,intent(inout)::rt_context
     type(s_exx_rt_state),pointer::exx_state_owner
+    type(spatial_exx_state),pointer::spatial
     integer,optional,intent(out)::rt_status
     type(s_orbital),intent(in) :: psi
     type(s_orbital),intent(inout) :: hpsi
@@ -1782,6 +1794,7 @@ contains
     integer,allocatable :: orbital_comm
     real(8) :: action_scale
     exx_state_owner=>resolve_rt_context(rt_context,system)
+    spatial=>exx_state_owner%spatial
     if(exx_state_owner%recover_errors.and.exx_state_owner%step_error/=0)return
     if(present(rt_status))rt_status=0
     if(.not.associated(exx_state_owner,rt_owned).and..not.exx_state_owner%native_resources_enabled)then
@@ -1998,6 +2011,7 @@ contains
     implicit none
     type(s_exx_rt_state),target,optional,intent(inout)::rt_context
     type(s_exx_rt_state),pointer::exx_state_owner
+    type(spatial_exx_state),pointer::spatial
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -2015,6 +2029,7 @@ contains
     integer :: adaptive_bad
     real(8) :: mask_diagnostic(2),mask_maximum(2)
     exx_state_owner=>resolve_rt_context(rt_context,system)
+    spatial=>exx_state_owner%spatial
     if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.theory/='dft')exx_state_owner%exx_adaptive_ready=.true.
     if(info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
       error stop 'Spatial EXX: Gamma spatial domains required'

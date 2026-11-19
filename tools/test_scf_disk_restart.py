@@ -244,6 +244,18 @@ def main():
                     orbital=state.array('orbitals')
                     np.testing.assert_array_equal(orbital.values,expected_orbitals(args.output/'save',orbital))
                 assert state.scf_status['executed_iterations']==0,'bootstrap replayed SCF'
+                if args.xc=='hse06' and args.split=='orbital' and not args.repartition:
+                    # Round-trip every serialized numerical field, including
+                    # spatial exchange workspace and ACE, before any continuation.
+                    roundtrip=work/'restored-checkpoint'
+                    state.save_scf(roundtrip)
+                    original=(checkpoint/f'rank-{comm.rank:08d}.bin').read_bytes()
+                    restored=(roundtrip/f'rank-{comm.rank:08d}.bin').read_bytes()
+                    # Five header integers and two execution counters are host data.
+                    import ctypes
+                    offset=7*ctypes.sizeof(ctypes.c_int)
+                    assert restored[offset:]==original[offset:],'HSE numerical payload changed on restore'
+
                 before={q:state.array(q).values for q in ('density','orbitals','occupations','eigenvalues')}
                 bad_path=work/'missing.bin' if comm.rank==comm.size-1 else checkpoint/f'rank-{comm.rank:08d}.bin'
                 code=session.lib.sp_gs_scf_disk(state._token,os.fsencode(bad_path),2)

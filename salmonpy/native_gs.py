@@ -371,7 +371,12 @@ class NativeGSSession:
                 if not getattr(self.backend,'_fast_hse',False):
                     raise InputError('HSE06 GS requires a declared fast-PR HSE runtime')
                 if self.backend.decomposition!=(self.comm.size,1,1,1,1):
-                    raise InputError('fast HSE GS requires k-only MPI decomposition')
+                    probe=getattr(self.lib,'sp_gs_hse_orbital_protocol',None)
+                    if probe is None:raise InputError('fast HSE GS requires k-only MPI decomposition or an explicitly matching orbital runtime')
+                    probe.argtypes=[];probe.restype=c.c_int
+                    if (probe()!=1 or self.backend.decomposition!=(1,self.comm.size,1,1,1)
+                            or tuple(calculation.kmesh)!=(1,1,1) or calculation.symmetry is not None):
+                        raise InputError('fast HSE GS requires k-only MPI or Gamma orbital-only layout and a matching runtime')
             if type(repartition) is not bool or (repartition and restart is None):
                 raise InputError('repartition is an explicit boolean option requiring restart')
             if restart is not None and steps is not None:

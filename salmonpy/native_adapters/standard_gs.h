@@ -13,7 +13,7 @@ int sp_gs_cartesian_force_protocol(void);
  * Handles retain numerical/XC/MPI owners, with unique tokens invalidated at close. */
 int sp_gs_create(const char *filename,int64_t *token);
 /* Additive active-SCF1: CPU periodic nonsymmetric scalar PZ/Libxc-PZ/PBE, fast-PR HSE06.
- * HSE needs its explicit compute profile and k-only MPI. Imports, symmetry,
+ * HSE needs its explicit compute profile; Gamma orbital GS additionally requires sp_gs_hse_orbital_protocol()==1. Imports, symmetry,
  * SOC, +U, DC and ionic evolution are outside this entry.
  * All calls are collective in the same order. Start reads/initializes once;
  * continue skips initialization/no-mix warmup and retains the original total cap.
@@ -44,12 +44,18 @@ int sp_gs_scf_snapshot_close(int64_t token,int64_t snapshot);
  * mode2 stages a numerical read collectively, then candidate(token,0,3) publishes.
  * Host verifies manifest/SHA256 first. Bootstrap prepares static runtime resources
  * but skips initial orbitals/density, mixing and every SCF iteration. */
-/* Optional ordinary PZ/Libxc-PZ/PBE full-grid k-only repartition.
- * Host validates binary/model/input/old-file hashes first. kbounds is2*old_size
- * integers in [lo0,hi0,lo1,hi1,...] global-k order; stage then candidate publish.
- * HSE and orbital/spatial repartition are not supported by this protocol. */
+/* Optional changed-layout SCF restart. Every rank enters in matching order.
+ * k protocol1: ordinary XC; protocol2 also dense fast-PR HSE.
+ * orbital protocol1: ordinary XC only. Bounds are old_size consecutive
+ * (first,last) pairs in rank order; no spatial/mixed migration. */
 int sp_gs_scf_k_repartition_protocol(void);
 int sp_gs_scf_k_repartition(int64_t token,const char *directory,int old_size,const int *kbounds);
+int sp_gs_scf_o_repartition_protocol(void);
+int sp_gs_scf_o_repartition(int64_t token,const char *directory,int old_size,const int *obounds);
+/* Optional fast-PR HSE Gamma orbital GS + same-layout SCF disk restart.
+ * Runtime/input and full-support CPU requirements are in NATIVE_GS. No orbital
+ * GS-to-RT handoff or changed orbital rank count is implied. */
+int sp_gs_hse_orbital_protocol(void);
 int sp_gs_scf_disk_protocol(void);
 int sp_gs_scf_bootstrap(const char *filename,int64_t *token);
 int sp_gs_scf_disk(int64_t token,const char *filename,int mode);

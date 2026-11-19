@@ -8,10 +8,12 @@ module exx_rt_state
  use exx_symmetry,only:s_exx_symmetry_map
  use exx_ace,only:s_exx_ace
  use exx_factor_history,only:s_factor_history
+ use exx_spatial,only:spatial_exx_state
  implicit none
  private
  public::s_exx_rt_state,rt_taylor_stage,rt_ptcn_begin,rt_state_clear,rt_state_bytes,rt_values_copy
  type s_exx_rt_state
+  type(spatial_exx_state)::spatial
   logical::recover_errors=.false.
   integer::step_error=0
   ! FFT owners are never intrinsically copied. Close before releasing this state.

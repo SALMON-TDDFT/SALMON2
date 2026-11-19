@@ -32,6 +32,9 @@ use communication,only:comm_begin_children,comm_end_children,comm_release_childr
 use salmon_xc,only:finalize_xc
 #ifdef USE_HSE
 use exx_rt_state,only:s_exx_rt_state,rt_state_clear,rt_values_copy
+use exx_spatial,only:spatial_exx_state
+use exx_distributed_gauge,only:s_exx_gauge
+use exx_sparse_orbitals,only:s_sparse_orbitals
 use exx_ace,only:s_exx_ace
 use exx_symmetry,only:s_exx_symmetry_map
 use exx_factor_history,only:s_factor_history

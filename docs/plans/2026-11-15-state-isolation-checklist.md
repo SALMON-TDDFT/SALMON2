@@ -2015,3 +2015,24 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
   count or module. Evidence: calc2026/salmonpy-scf-orbital-record-20261120.
 - [ ] HSE orbital, spatial/mixed and changed-runtime/portable migration remain open.
   Common protected restore still requires unchanged topology. No CI dispatch.
+
+## 2026-11-20 Fast-PR HSE Gamma orbital SCF same-layout restart
+
+- [x] Publish previous ordinary orbital work as a29ac3e4 [skip ci].
+- [x] Optional HSE orbital GS protocol1 admits existing full-support CPU Gamma
+  orbital exchange; move spatial numerical workspace from SAVE to each HSE owner.
+  Preserve source arithmetic and k/RT profile; CPU callbacks/communicators excluded
+  from serialization and borrowed communication rebound on read.
+- [x] Orbital MPI2 fresh-process restore, HSE and PBE-stage cuts: complete saved
+  numerical payload exact before continuation; zero bootstrap SCF iterations;
+  five new iterations exactly match continuous8. Corrupt/missing read rejected.
+- [x] Two different material states and three independent two-rank groups: exact
+  independent/memory restore results, late candidate failure preserves originals,
+  continue-before-retry and retry exact. This control uses the same build.
+- [x] Existing ordinary and k-HSE prior-binary SCF and16-step RT exact; installed
+  orbital direct restart and sample verified. Source/installed637 tests each
+  (636pass,1skip), no added unit-test case count.
+- [ ] HSE changed orbital rank count, multi-k orbital/spatial/mixed layouts, orbital
+  GS→RT and portable changed-runtime migration remain outside this entry.
+- Evidence: calc2026/salmonpy-hse-orbital-record-20261120. User-authorized HSE
+  datasets stored locally; no cloud-sync confirmation and no CI dispatch.

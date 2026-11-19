@@ -1,4 +1,11 @@
 ! SCF rank-local disk v1. Host authenticates binary/input/topology and all files.
+integer(c_int) function sp_gs_hse_orbital_protocol() bind(C)
+#ifdef USE_HSE
+ sp_gs_hse_orbital_protocol=1
+#else
+ sp_gs_hse_orbital_protocol=0
+#endif
+end function
 integer(c_int) function sp_gs_scf_disk_protocol() bind(C)
  sp_gs_scf_disk_protocol=1
 end function
@@ -64,6 +71,7 @@ integer(c_int) function sp_gs_scf_disk(token,path,mode) bind(C) result(status)
  if(status==0.and.reading)then
   ! Rank-local ACE metric communicators are runtime resources, never disk data.
 #ifdef USE_HSE
+  value%hse%spatial%gauge_tiles%comm=ctx%info%icomm_ro
   value%hse%ace%metric_comm=ctx%info%icomm_r
   value%hse%initial_ace%metric_comm=ctx%info%icomm_r
   value%hse%midpoint_ace%metric_comm=ctx%info%icomm_r

@@ -824,3 +824,10 @@ NATIVE_GS.en.mdを参照し、物理収束の検証と混同しないでくだ�
 `decomposition=(1, comm.size, 1, 1, 1)` とし、orbital-repartition protocol1と
 新保存のorbital_boundsを要求します。高速HSEの軌道並列とk／軌道間の配置変更は
 未対応です。サンプルは両側に `--orbital-parallel` を指定します。
+
+高速PR版HSEのGamma軌道並列SCFは、新ランタイムの
+`sp_gs_hse_orbital_protocol()==1` がある場合、同じMPI分割への直接保存／再開を
+使えます。サンプルは両側に `--xc hse06 --orbital-parallel` を指定し、再開側に
+`--restart` を渡します。`--repartition` は未対応です。ACEとGamma交換作業状態を
+各状態が所有し、混合履歴と一緒に直接復元します。詳細と対象条件はNATIVE_GSの最新節を
+参照してください。複数k点の軌道HSEや軌道並列GS→RTを対応済みとは案内しません。

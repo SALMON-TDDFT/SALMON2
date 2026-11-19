@@ -983,3 +983,26 @@ Its orbital layout uses a fixed Gamma mesh unless explicit symmetry is requested
 Fast HSE orbital repartition, changes between k-only and orbital-only layouts,
 spatial/mixed repartition and changed-runtime migration remain unsupported.
 Default and common protected restore still require identical MPI layouts.
+
+### Fast-PR HSE Gamma orbital SCF: same-layout direct restart
+
+A new explicitly built runtime declaring `sp_gs_hse_orbital_protocol()==1`
+accepts retained fast-PR HSE06 GS with `decomposition=(1, comm.size, 1, 1, 1)`
+and Gamma-only sampling. The CPU full-support profile is periodic, unpolarized,
+fixed-ion, orthogonal-cell, integer fully occupied spin pairs, with no symmetry,
+localization or pair-screening approximation. These are the existing Gamma
+exchange implementation's requirements. The k-only HSE path is unchanged.
+
+`save_scf()` and `run(restart=...)` preserve the same runtime/input/MPI layout.
+Wavefunction/CG, density/mixing, ACE and Gamma exchange workspace (including
+its progress/gauge/source data) are owned by each state and serialized directly.
+Backend procedure pointers and communicator IDs are not serialized; borrowed
+communicators are rebound on restore. No SCF iteration or accepted ACE rebuild
+is used to reconstruct the saved numerical state.
+
+The existing sample uses `--xc hse06 --orbital-parallel --save-scf NEW_CHECKPOINT`,
+then `--xc hse06 --orbital-parallel --restart CHECKPOINT` with the same rank count.
+Do not add `--repartition`: changed-rank HSE orbital restart remains unsupported,
+as do multi-k orbital HSE, spatial/mixed layouts and orbital GS→RT handoff.
+Two-rank fresh-process continuation and a cut during the PBE pre-stage are
+execution controls; they do not establish physical grid/k convergence.

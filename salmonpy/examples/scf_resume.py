@@ -31,7 +31,6 @@ def main():
     disk.add_argument('--save-scf',type=Path,help='save the paused SCF boundary for a fresh process')
     disk.add_argument('--restart',type=Path,help='load a prior --save-scf boundary, then continue')
     args=p.parse_args();comm=MPI.COMM_WORLD
-    if args.orbital_parallel and args.xc=='hse06':p.error('fast HSE orbital parallelism is not supported')
     if args.disk and args.save_scf is None:p.error('--disk requires --save-scf')
     if args.repartition and args.restart is None:p.error('--repartition requires --restart')
     if comm.size not in (1,2):p.error('one/two internal MPI ranks in this example')
@@ -51,12 +50,12 @@ def main():
     if args.symmetry!='none':
         ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3);ops[1,:2,:2]=-np.eye(2)
         symmetry=SymmetryOperations(ops,directions='yyn')
-    mesh=(2,2,2) if symmetry is not None or args.k_parallel or (args.repartition and not args.orbital_parallel) else (comm.size,1,1) if args.xc=='hse06' else (1,1,1)
+    mesh=(2,2,2) if symmetry is not None or args.k_parallel or (args.repartition and not args.orbital_parallel) else (comm.size,1,1) if args.xc=='hse06' and not args.orbital_parallel else (1,1,1)
     calculation=InMemoryDFT((14,),np.diag([8.]*3),[[0,0,0]] if symmetry is not None else [[.3,.4,.45]],
         (pp,),4,2,(8,8,8),mesh,xc=args.xc,symmetry=symmetry)
     assert "write_gs_restart_data='no'" in calculation.input_text()
     context=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
-    decomposition=(comm.size,1,1,1,1) if args.xc=='hse06' or args.k_parallel or (args.repartition and not args.orbital_parallel) else (1,comm.size,1,1,1)
+    decomposition=(comm.size,1,1,1,1) if (args.xc=='hse06' and not args.orbital_parallel) or args.k_parallel or (args.repartition and not args.orbital_parallel) else (1,comm.size,1,1,1)
     backend=NativeGSBackend(args.build,args.output,decomposition=decomposition)
     with backend.open(context) as session:
         if args.restart is not None:

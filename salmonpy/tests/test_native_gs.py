@@ -81,6 +81,17 @@ class NativeGSTests(unittest.TestCase):
                 session=NativeGSSession(SimpleNamespace(_supports_compute=True,**backend_options),native,lib)
                 with self.assertRaisesRegex(ValueError,message):session.run(hybrid)
             lib.sp_gs_create.assert_not_called()
+            # Old/disabled orbital protocols reject before touching native GS.
+            from dataclasses import replace
+            gamma=replace(hybrid,kmesh=(1,1,1))
+            native2=SimpleNamespace(_live=lambda:None,context=SimpleNamespace(
+                solver_comm=SimpleNamespace(size=2,allgather=lambda v:[v,v])))
+            orbital_lib=SimpleNamespace(sp_gs_hse_orbital_protocol=Mock(return_value=0),sp_gs_create=Mock())
+            session=NativeGSSession(SimpleNamespace(_supports_compute=True,_fast_hse=True,
+                decomposition=(1,2,1,1,1)),native2,orbital_lib)
+            with self.assertRaisesRegex(ValueError,'matching runtime'):session.run(gamma)
+            orbital_lib.sp_gs_create.assert_not_called()
+
             malformed=json.loads(receipt.read_text());malformed.pop('gs_abi');receipt.write_text(json.dumps(malformed))
             from salmonpy.errors import InputError
             with self.assertRaises(InputError):NativeGSBackend(receipt,root)
