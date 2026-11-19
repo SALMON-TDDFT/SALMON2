@@ -585,4 +585,241 @@ module salmon_pp
   end subroutine calc_nlcc
   
 
+  subroutine calc_nlcc_force(pp,sys,rg,Vxc,force,istat)
+    use structures, only: s_pp_info,s_dft_system,s_rgrid,s_scalar
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    type(s_pp_info),intent(in) :: pp
+    type(s_dft_system),intent(in) :: sys
+    type(s_rgrid),intent(in) :: rg
+    type(s_scalar),intent(in) :: Vxc(sys%Nspin)
+    real(8),intent(out) :: force(3,sys%nion)
+    integer,intent(out) :: istat
+    real(8),allocatable :: rc(:),slope(:,:)
+    integer,allocatable :: cutoff(:),image_max(:)
+    integer :: nk,ik,i,j,a,ispin,j1,j2,j3,i1,i2,i3,lo,hi,mid,intr
+    integer :: irepr_min,irepr_max
+    real(8) :: spacing,r,u,v,w,rion_repr(3),point(3),d(3),force3(3),vcore
+    real(8) :: compensation(3),increment(3),accumulated(3)
+    logical :: flag_cuboid
+    logical,allocatable :: full_support(:)
+    real(8) :: plane_distance,crossnorm,cv(3),rh(3),cell_cross(3),images
+
+    force=0d0
+    istat=0
+    if(.not.pp%flag_nlcc) return
+    if(sys%Nspin/=1 .and. sys%Nspin/=2) then
+      istat=1; return
+    end if
+    if(.not.ieee_is_finite(sys%Hvol) .or. sys%Hvol<=0d0) then
+      istat=1; return
+    end if
+    do i=1,3
+      if(.not.ieee_is_finite(sys%hgs(i))) istat=1
+      do j=1,3
+        if(.not.ieee_is_finite(sys%primitive_a(i,j))) istat=1
+        if(.not.ieee_is_finite(sys%rmatrix_a(i,j))) istat=1
+      end do
+      do a=1,sys%nion
+        if(.not.ieee_is_finite(sys%Rion(i,a))) istat=1
+      end do
+    end do
+    if(istat/=0) return
+    if(.not.allocated(pp%rad) .or. .not.allocated(pp%rho_nlcc_tbl) .or. &
+       .not.allocated(pp%tau_nlcc_tbl)) then
+      istat=2; return
+    end if
+    nk=size(pp%rho_nlcc_tbl,2)
+    if(pp%nrmax<2 .or. size(pp%rad,1)<pp%nrmax .or. size(pp%rad,2)/=nk .or. &
+       size(pp%rho_nlcc_tbl,1)<pp%nrmax .or. size(pp%tau_nlcc_tbl,1)<pp%nrmax .or. &
+       size(pp%tau_nlcc_tbl,2)/=nk) then
+      istat=2; return
+    end if
+    if(.not.allocated(sys%kion))then
+      istat=2;return
+    endif
+    if(size(sys%kion)/=sys%nion)then
+      istat=2;return
+    endif
+    allocate(rc(nk),cutoff(nk),slope(pp%nrmax-1,nk),image_max(nk),full_support(nk))
+    full_support=.false.
+    if(allocated(pp%full_nlcc_support))then
+      if(size(pp%full_nlcc_support)/=nk)then
+        istat=2;return
+      endif
+      full_support=pp%full_nlcc_support
+    endif
+    image_max=2
+    if(pp%input_config%iperiodic==0)then
+      image_max=0
+    else if(pp%input_config%iperiodic/=3)then
+      istat=1;return
+    endif
+    plane_distance=huge(1d0)
+    if(any(full_support).and.pp%input_config%iperiodic==3)then
+      do i=1,3
+        cv=sys%primitive_a(:,mod(i,3)+1);rh=sys%primitive_a(:,mod(i+1,3)+1)
+        cell_cross=[cv(2)*rh(3)-cv(3)*rh(2),cv(3)*rh(1)-cv(1)*rh(3),cv(1)*rh(2)-cv(2)*rh(1)]
+        crossnorm=sqrt(sum(cell_cross**2))
+        if(.not.ieee_is_finite(crossnorm).or.crossnorm<=0d0)then
+          istat=1;return
+        endif
+        plane_distance=min(plane_distance,abs(dot_product(sys%primitive_a(:,i),cell_cross))/crossnorm)
+      enddo
+      if(.not.ieee_is_finite(plane_distance).or.plane_distance<=0d0)then
+        istat=1;return
+      endif
+    endif
+    rc=0d0; cutoff=0; slope=0d0
+    ! Validate used table entries before OMP; IEEE inquiries are scalar.
+    do ik=1,nk
+      if(full_support(ik))then
+        if(.not.allocated(pp%mr))then
+          istat=2;return
+        endif
+        if(size(pp%mr)/=nk)then
+          istat=2;return
+        endif
+        cutoff(ik)=pp%mr(ik)
+        if(cutoff(ik)<1.or.cutoff(ik)>=pp%nrmax)then
+          istat=2;return
+        endif
+        rc(ik)=pp%rad(cutoff(ik)+1,ik)
+        if(.not.ieee_is_finite(rc(ik)).or.rc(ik)<=0d0)then
+          istat=2;return
+        endif
+        if(pp%input_config%iperiodic==3)then
+          images=rc(ik)/plane_distance
+          if(.not.ieee_is_finite(images).or.images>real(huge(0)-2,8))then
+            istat=2;return
+          endif
+          image_max(ik)=max(2,ceiling(images)+1)
+        endif
+      endif
+      do i=1,merge(cutoff(ik)+1,pp%nrmax,full_support(ik))
+        if(.not.ieee_is_finite(pp%rho_nlcc_tbl(i,ik))) istat=2
+        if(.not.ieee_is_finite(pp%tau_nlcc_tbl(i,ik))) istat=2
+        if(.not.ieee_is_finite(pp%rad(i,ik))) istat=2
+        if(istat/=0) return
+        if(.not.full_support(ik).and.pp%rho_nlcc_tbl(i,ik)+pp%tau_nlcc_tbl(i,ik)<1d-6) then
+          cutoff(ik)=i; rc(ik)=pp%rad(i,ik); exit
+        end if
+      end do
+      if(cutoff(ik)<1 .or. cutoff(ik)>=pp%nrmax) then
+        istat=2; return
+      end if
+      if(cutoff(ik)==1.and..not.full_support(ik)) cycle ! Historical empty V1 core.
+      if(pp%rad(1,ik)/=0d0) then
+        istat=2; return ! The original density lookup otherwise permits intr=0.
+      end if
+      do i=1,cutoff(ik)
+        if(.not.ieee_is_finite(pp%rad(i+1,ik))) istat=2
+        if(.not.ieee_is_finite(pp%rho_nlcc_tbl(i+1,ik))) istat=2
+        spacing=pp%rad(i+1,ik)-pp%rad(i,ik)
+        if(.not.ieee_is_finite(spacing) .or. spacing<=0d0) istat=2
+        if(istat/=0) return
+        slope(i,ik)=(pp%rho_nlcc_tbl(i+1,ik)-pp%rho_nlcc_tbl(i,ik))/spacing
+        if(.not.ieee_is_finite(slope(i,ik))) then
+          istat=2; return
+        end if
+      end do
+    end do
+    do a=1,sys%nion
+      if(sys%kion(a)<1 .or. sys%kion(a)>nk) istat=2
+    end do
+    if(istat/=0) return
+    do ispin=1,sys%Nspin
+    do j3=rg%is(3),rg%ie(3)
+    do j2=rg%is(2),rg%ie(2)
+    do j1=rg%is(1),rg%ie(1)
+      if(.not.ieee_is_finite(Vxc(ispin)%f(j1,j2,j3))) istat=3
+    end do
+    end do
+    end do
+    end do
+    if(istat/=0) return
+    if(pp%input_config%iperiodic==0) then
+      irepr_min=0; irepr_max=0
+    else if(pp%input_config%iperiodic==3) then
+      irepr_min=-2; irepr_max=2
+    else
+      istat=1; return
+    end if
+    flag_cuboid=.not.(abs(sys%primitive_a(1,2))>=1d-10 .or. &
+      abs(sys%primitive_a(1,3))>=1d-10 .or. abs(sys%primitive_a(2,3))>=1d-10 .or. &
+      abs(sys%primitive_a(2,1))>=1d-10 .or. abs(sys%primitive_a(3,1))>=1d-10 .or. &
+      abs(sys%primitive_a(3,2))>=1d-10)
+
+!$omp parallel do default(none) &
+!$omp shared(pp,sys,rg,Vxc,force,rc,cutoff,slope,image_max,full_support,flag_cuboid) &
+!$omp private(a,ik,i1,i2,i3,j1,j2,j3,u,v,w,rion_repr,point,d,r,lo,hi,mid,intr,force3,vcore,ispin,irepr_min,irepr_max, &
+!$omp compensation,increment,accumulated)
+    do a=1,sys%nion
+      ik=sys%kion(a)
+      if(cutoff(ik)==1.and..not.full_support(ik)) cycle
+      force3=0d0;compensation=0d0
+      irepr_min=-image_max(ik);irepr_max=image_max(ik)
+      do i1=irepr_min,irepr_max
+      do i2=irepr_min,irepr_max
+      do i3=irepr_min,irepr_max
+        rion_repr=sys%Rion(:,a)+i1*sys%primitive_a(:,1) &
+                 +i2*sys%primitive_a(:,2)+i3*sys%primitive_a(:,3)
+        do j1=rg%is(1),rg%ie(1)
+          u=(j1-1)*sys%hgs(1)
+        do j2=rg%is(2),rg%ie(2)
+          v=(j2-1)*sys%hgs(2)
+        do j3=rg%is(3),rg%ie(3)
+          w=(j3-1)*sys%hgs(3)
+          if(flag_cuboid) then
+            point=[u,v,w]
+          else
+            point=sys%rmatrix_a(:,1)*u+sys%rmatrix_a(:,2)*v+sys%rmatrix_a(:,3)*w
+          end if
+          d=point-rion_repr
+          r=sqrt(sum(d*d))
+          if(r>rc(ik) .or. r==0d0) cycle
+          if(full_support(ik))then
+            if(r>=rc(ik))cycle
+            intr=min(pp%mr(ik),int(r/(pp%rad(2,ik)-pp%rad(1,ik)))+1)
+          else
+          ! Strict upper bound matches calc_nlcc at radial knots.
+          lo=1; hi=cutoff(ik)+1
+          do while(lo<hi)
+            mid=(lo+hi)/2
+            if(pp%rad(mid,ik)>r) then
+              hi=mid
+            else
+              lo=mid+1
+            end if
+          end do
+          intr=lo-1
+          endif
+          vcore=Vxc(1)%f(j1,j2,j3)
+          if(sys%Nspin==2) vcore=.5d0*vcore+.5d0*Vxc(2)%f(j1,j2,j3)
+          if(full_support(ik))then
+            ! Broad periodic V2 cores cancel across many image contributions.
+            increment=vcore*slope(intr,ik)*d/r-compensation
+            accumulated=force3+increment
+            compensation=(accumulated-force3)-increment
+            force3=accumulated
+          else
+            force3=force3+vcore*slope(intr,ik)*d/r
+          endif
+        end do
+        end do
+        end do
+      end do
+      end do
+      end do
+      force(:,a)=force3*sys%Hvol
+    end do
+!$omp end parallel do
+    do a=1,sys%nion
+    do i=1,3
+      if(.not.ieee_is_finite(force(i,a))) istat=4
+    end do
+    end do
+    if(istat/=0) force=0d0
+  end subroutine calc_nlcc_force
+
 end module salmon_pp

@@ -65,7 +65,8 @@
     "src/rt/embedded_tddft.f90",
     "src/rt/tddft_worker.f90",
     "src/salmonpy/parallel_bridge.f90",
-    "src/config.h.in"
+    "src/config.h.in",
+    "src/gs/main_dft_md.f90"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -95,7 +96,7 @@
   ],
   "scope": "explicit full-support fast HSE native ownership; serial and experimental k-only host-MPI CPU contexts, common immutable per-group configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "267a71e7a21b301d4a9e1f51d5f292d89e223230b112c3c0394394e1904af8fc",
+  "replacements_sha256": "1fd87df6d7b33f9f48b12f8a2d4713d41296a77f1a2b8c5682dba8800b3f23d9",
   "patch_sha256_role": "historical migration identity; no patch is applied",
   "shared_kernels": {
     "native/sbe_types.f90": "src/ssbe/sbe_types.f90",

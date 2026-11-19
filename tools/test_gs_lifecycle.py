@@ -83,11 +83,65 @@ def import_existing(args):
     print('GS import-only ownership PASS',flush=True)
 
 
+def batch_controls(args):
+    """Public DFT batch reports versus fixed fast CLI, without GS restart output."""
+    import warnings
+    import numpy as np
+    from salmonpy.dft import DFT,Pseudopotential,SCFSettings
+    from salmonpy.fdtd import SalmonExecutable
+    # Legacy gs_info.data uses inputoutput.f90's fixed conversion, not newer CODATA.
+    legacy_ev_per_hartree=27.21138505
+    root=Path(__file__).resolve().parents[1];out=args.output.resolve();out.mkdir(parents=True,exist_ok=False)
+    def executable(receipt):
+        record=json.loads(receipt.read_text());path=Path(record['executable'])
+        if record.get('status')!='built-and-audited' or hashlib.sha256(path.read_bytes()).hexdigest()!=record['sha256']:
+            raise ValueError('unchanged audited executable required')
+        return SalmonExecutable(path,record['sha256'])
+    engine=executable(args.build);reference=executable(args.reference)
+    pp=Pseudopotential.from_file(root/'salmonpy/examples/si_intro_data/Si_rps.dat',atomic_number=14,local_channel=2)
+    cases=[DFT((14,),np.eye(3)*8,[[.3,.4,.45]],(pp,),4,2,(8,8,8),(2,1,1),xc='pz'),
+           DFT((14,14),np.eye(3)*9,[[.3,.4,.45],[.7,.6,.55]],(pp,),8,4,(12,12,12),(1,2,1),xc='libxc_pbe')]
+    summary=[]
+    for i,model in enumerate(cases):
+        scf=SCFSettings(max_iterations=4,tolerance=1e-12 if i==0 else 1.)
+        with warnings.catch_warnings(record=True) as observed:
+            warnings.simplefilter('always')
+            result=model.run(engine,out/('batch-'+str(i)),scf=scf,save_restart=False)
+            forces=result.forces_hartree_per_bohr
+        assert not result.restart_saved and not list(result.directory.rglob('wfn.bin'))
+        assert result.converged==bool(i)
+        if not result.converged:assert any('not converged' in str(w.message) for w in observed)
+        old=out/('reference-'+str(i));old.mkdir()
+        (old/model._pseudo_name(0)).write_bytes(pp.data)
+        text=model.input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
+        text=text.replace('&scf','&scf\n nscf_init_mix_zero=0,')
+        with (old/'stdout.log').open('w') as log:
+            subprocess.run([str(reference.path)],input=text,text=True,cwd=old,
+                stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120,
+                env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'})
+        assert not list(old.rglob('wfn.bin'))
+        report=(old/'gs_info.data').read_text()
+        energy=float(re.search(r'Total energy \(eV\)\s*=\s*([-+0-9.Ee]+)',report)[1])/legacy_ev_per_hartree
+        np.testing.assert_allclose(result.energy_hartree,energy,rtol=3e-12,atol=3e-13)
+        lines=report.split('Force [au]')[1].strip().splitlines()[:len(model.numbers)]
+        for actual,line in zip(forces,lines):
+            for value,printed in zip(actual,line.split()[1:]):
+                number=Decimal(printed);rounding=float(Decimal('0.5')*Decimal(10)**number.as_tuple().exponent)
+                assert abs(float(value)-float(number))<=rounding+3e-13
+        summary.append({'xc':model.xc,'converged':result.converged,'iterations':result.iterations,
+            'energy_hartree':result.energy_hartree,'energy_difference_hartree':result.energy_hartree-energy,
+            'reference_force_print_rounding_respected':True,'restart_saved':False})
+    (out/'result.json').write_text(json.dumps({'status':'pass','cases':summary,
+        'GS_restart_collected':False,'scope':'scalar report/API regression, not physical convergence'},indent=2)+'\n')
+    print('Public GS batch scalar reports PASS',flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('build', type=Path)
     parser.add_argument('reference', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--batch',action='store_true',help='public scalar-only DFT runs; no GS restart collection')
     parser.add_argument('--convergence', choices=('rho_dne','norm_rho','norm_rho_dng','norm_pot','norm_pot_dng'), default='rho_dne')
     parser.add_argument('--mixing', choices=('simple','broyden','pulay','simple_potential'), default='simple')
     parser.add_argument('--auto-mixing', action='store_true')
@@ -97,6 +151,9 @@ def main():
     parser.add_argument('--import-bundle',type=Path,help='read-only existing synthetic restart; no SCF; reference positional unused')
     parser.add_argument('--ranks',type=int,default=2)
     args = parser.parse_args()
+    if args.batch:
+        batch_controls(args)
+        return
     if args.import_bundle:
         import_existing(args)
         return

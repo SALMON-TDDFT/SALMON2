@@ -163,3 +163,40 @@ placeholder values are not physical zeros. SCF creation, computed eigenvalues/
 forces, portable export and GS→TDDFT initialization remain standard-profile
 features, not fast GS features yet. The retained_gs sample has an import-only
 mode rather than a new sample file. See NATIVE_GS guides for the Python example.
+
+### NLCC migration before solver-source consolidation
+
+The fast source now carries the standard profile's NLCC Libxc energy weighting
+and core-force correction. The valence-plus-core density supplied to Libxc also
+weights its energy density. Core forces differentiate the actually sampled core
+table using each material's species, boundary configuration and XC potential.
+Fast HSE projector derivatives, owned state and existing spin handling are retained.
+
+V1 cutoff behavior and V2 full support remain distinct. V2 uses the same table
+interpolation and periodic-image extent for orthogonal/skew cells and long cores;
+its cancellation-sensitive force integral uses compensated summation. IEEE
+inquiries remain scalar and only used V2 table entries are inspected, not padding.
+
+Prescribed-density energy/force variation and OMP/MPI partition checks are
+implementation tests, not material convergence certification. They do not attach
+validated NLCC-force capability records to an ASE Calculator runtime. Existing
+capability gates remain. No-NLCC workflows retain regression checks. Removing
+legacy sources and changing default preparation still require the remaining
+workflow/provenance validation; this migration alone does not complete unification.
+
+### 一本化に向けた高速版NLCCの移植
+
+高速ソースに、通常版で検証していたNLCC付きLibxcのエネルギー重み付けと内殻の力を移しました。
+Libxcが使う価電子＋内殻密度と、エネルギー密度の重みを一致させます。力は各物質が持つ
+原子種・境界条件・XCポテンシャルと、実際にサンプルした内殻表の微分から計算します。
+HSE用のプロジェクター微分、状態所有、既存のスピン処理は保持します。
+
+V1の打切りとV2の全サポートを分け、V2は斜交セル・セルをまたぐ長い内殻・周期像を
+同じ補間規約で扱います。広いV2内殻の力積分には補償和を使います。IEEE検査はスカラーで、
+使用する表の範囲を検査し、V2の未使用パディングは参照しません。
+
+検証は与えた密度のエネルギー微分と力、OMPおよびMPIの分割比較です。
+実材料の収束を保証せず、ASE CalculatorのNLCC力に必要なランタイム検証記録を
+自動的に付与するものでもありません。従来ランタイムの保護は維持します。
+NLCCなしの既存計算は数値回帰で確認します。旧ソースの削除・既定ビルドの切替は
+残る経路の確認後に行い、この移植だけで一本化完了とはしません。

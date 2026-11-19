@@ -65,9 +65,10 @@ SALMON本体が記録した収束フラグ、原子数、バンド数を返し�
 
 ## 対応範囲と導入
 
-Python入口は既存DFT設定と同じ周期・全k点・非スピン偏極・固定イオンのPZ、Libxc-PZ/PBEです。
-高速PR-HSE、SOC／+U／DC、保存／再開、
-スレッド並行や同時GS／TDDFTは今回の対応外です。1プロセスでnative電子計算の接続は1生存期間です。
+Python入口は周期・全k点・非スピン偏極・固定イオンのPZ、Libxc-PZ/PBEと、
+機能宣言のある高速PR版ランタイムでのHSE06です。HSEはk点方向のMPI分割を使います。
+SOC／+U／DC、GSの完全なSCF保存／再開、
+スレッド並行は対応外です。逐次のGS／TDDFT切替は後述の入口を使います。1プロセスでnative電子計算の接続は1生存期間です。
 ハンドルの参照・配列取得・closeも群内の集合呼出しです。全状態を閉じてからホストMPIを終了します。
 
 `sp_gs_protocol()==1` を持つ、明示的にビルド・監査した標準ランタイムを指定します。
@@ -407,7 +408,7 @@ RT因数学習と予備SCFだけを無効にし、XC・HSE遮蔽係数は保持�
 
 高速版では密度・占有数・軌道を取得できます。infoのenergy_hartree・residual・
 tolerance・convergedは未計算を示すNoneで、物理的なゼロではありません。
-固有値・力は計算していません。高速版のsession.run・export_archiveは未接続です。tddft_modelは
+固有値・力は計算していません。import専用記録のsession.runと、読み込み状態の計算済みアーカイブ出力は利用できません。tddft_modelは
 下記の追加機能を持つランタイムで利用できます。通常版の既存機能は維持します。読み込みだけで収束を保証しません。
 
 既存サンプルに読み込みモードを追加しました。
@@ -490,7 +491,7 @@ RTの入力・タイマーを退避／再開します。主スレッド・全ラ
 ファイル入力ではAPIが指定したdt・最大ステップ・MPI分割を反映してから入力スナップショットを
 確定し、標準版と同じ順序にします。高速HSEと標準版の既存経路は維持します。
 通常XCとHSEを同じGS session内のレジストリに混在させる入口と、旧ソースツリーの削除は
-未実装です。HSE有効構成のGS計算入口と最終的なソース統合は残っています。
+未実装です。HSE有効構成の新しいGS計算入口は後述します。最終的なソース統合は残っています。
 
 retained_gsサンプルの--import-bundle／--current-steps 16も利用できます。
 合成入力でk点・軌道・空間の内部MPI2、直接再開、異なるXCのGS逐次読込みを検証します。
@@ -516,3 +517,67 @@ GS再開ファイルは保存せず、結果JSONにGSの数値要約と電荷電
 統合検証では、PZ／Libxc-PZとLibxc-PBE、軌道・空間MPI2で、GSから作ったモデルを
 保持したまま別のGSを計算します。GS終了後の電流は独立実行と完全一致し、
 16ステップの途中で直接保存・復元した状態も、時間発展の再実行なしで一致しました。
+
+### 高速PR版HSEの計算済みGS
+
+新しい高速HSEビルドはgs_abi.modesにrunを宣言します。以前のimport専用ビルドに
+計算機能を推定して追加しません。DFT(..., xc="hse06")を作り、
+NativeGSBackendのsession.runに渡します。MPI分割は(size,1,1,1,1)、
+周期・全k点・非スピン偏極・固定イオンです。既存のGS→TDDFTと同じく、
+元のGSをcloseした後もモデルは独立した初期配列を保持します。
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD_JSON NEW_OUTPUT --xc hse06 --current-steps 16
+```
+
+新しいHSE入力はexx_pre_scf_threshold=0を明示し、指定したSCF反復を最初からHSEで行います。
+PBE予備SCFの進捗をHSE収束と誤認しません。未収束は警告とし最終反復の状態を返します。
+HSEのバッチDFT.runは出力レポートが未接続のため、この入口へ案内します。
+通常HSEへのフォールバックはありません。力の物理的収束・精度の検証は別途必要です。
+
+macOSのHSEライブラリは通常TDDFTと同じリンク処理を使い、NumPyのBLASと
+指定したBLASの複素数ABIを混同しません。機能追加には新しい明示ビルドを使い、
+既存の固定ランタイムは書き換えません。
+
+## 再開用配列を保存せず、エネルギー・力を得る
+
+バッチDFT.runは既定で従来どおり再開データを保存します。エネルギーと力だけ必要なら
+実行時にsave_restart=Falseを指定します（モデル設定は変わりません）。
+
+```python
+gs = calculation.run(engine, "new-output", scf=SCFSettings(max_iterations=4),
+                     save_restart=False)
+print(gs.energy_hartree, gs.forces_hartree_per_bohr, gs.restart_saved)
+```
+
+対象はバッチ入口のPZ／Libxc-PZ／PBEです。4反復は接続確認用で、物理的な収束を保証しません。
+未収束でも警告とともに結果を返します。restart_savedは実際に再開用3ファイルが揃ったかを
+示し、省略した場合はFalseです。エネルギー・力の読み込みは可能ですが、バンド初期化、
+TDDFT初期化、warm start、GSアーカイブ出力には再開用配列を保存した結果が必要です。
+save_restartを記録していない従来の結果は保存ありとして扱います。
+ランタイムが保存省略を無視しても計算失敗にはせず、警告して実際の保存状態を記録します。
+
+高速版ソースもgs_status.dat（SALMONPY_GS_V1、Hartree）と
+gs_forces.dat（SALMONPY_FORCES_V1、Hartree/Bohr）を出します。SCFや力の計算順は変えません。
+HSEのnative入口とCLIもこのレポートを出しますが、DFT.runのHSE選択は
+高速PR版の来歴確認が未接続のため、引き続きNativeGSBackendを使います。
+
+Siサンプルは--no-restartと--max-iterationsに対応します。
+`python -m salmonpy.examples.dft_si EXECUTABLE SHA256 PSEUDO NEW_OUTPUT --no-restart --max-iterations 4`
+
+### 一本化に向けた高速版NLCCの移植
+
+高速ソースに、通常版で検証していたNLCC付きLibxcのエネルギー重み付けと内殻の力を移しました。
+Libxcが使う価電子＋内殻密度と、エネルギー密度の重みを一致させます。力は各物質が持つ
+原子種・境界条件・XCポテンシャルと、実際にサンプルした内殻表の微分から計算します。
+HSE用のプロジェクター微分、状態所有、既存のスピン処理は保持します。
+
+V1の打切りとV2の全サポートを分け、V2は斜交セル・セルをまたぐ長い内殻・周期像を
+同じ補間規約で扱います。広いV2内殻の力積分には補償和を使います。IEEE検査はスカラーで、
+使用する表の範囲を検査し、V2の未使用パディングは参照しません。
+
+検証は与えた密度のエネルギー微分と力、OMPおよびMPIの分割比較です。
+実材料の収束を保証せず、ASE CalculatorのNLCC力に必要なランタイム検証記録を
+自動的に付与するものでもありません。従来ランタイムの保護は維持します。
+NLCCなしの既存計算は数値回帰で確認します。旧ソースの削除・既定ビルドの切替は
+残る経路の確認後に行い、この移植だけで一本化完了とはしません。

@@ -408,7 +408,7 @@ subroutine initialization_dft_md( Miter, rion_update,  &
                           pp,ppg,ppn,  &
                           band, 2 )
 
-  call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
+  call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald,Vxc)
 
   md%Uene0 = energy%E_tot
   md%E_tot0= energy%E_tot + md%Tene

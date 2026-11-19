@@ -56,7 +56,7 @@ def main():
     if not adapters.is_dir():
         adapters = root.parent/'native_adapters'
     names = ['hse_checkpoint', 'tddft_context', 'fast_hse_worker']
-    shared_output = root/'runtime/sources/standard/src/io/step_output.f90'
+    shared_output = source/'src/io/step_output.f90'
     if not (build/'src/CMakeFiles/salmon.dir/io/step_output.f90.o').is_file():
         names.insert(0, 'step_output')
     for name in names:

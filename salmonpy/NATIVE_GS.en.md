@@ -60,8 +60,8 @@ only when needed. session.resources reports states, live child communicators and
 management slot high-water. Closing one owner preserves siblings; closing all
 returns live children to zero. Retained management slots are distinct from leaks.
 
-Python scope matches existing DFT settings: periodic full-k unpolarized fixed-ion
-PZ/Libxc-PZ/PBE. Fast-PR HSE, SOC/+U/DC GS,
+Python scope is periodic full-k unpolarized fixed-ion PZ/Libxc-PZ/PBE and HSE06
+with a declared fast-PR compute runtime. HSE uses k-only MPI decomposition. SOC/+U/DC GS,
 full SCF checkpoint/restart and threaded GS/TDDFT are separate; sequential
 GS/RT interleaving and portable array export are described below.
 One native electronic attachment lifetime per process. Info, arrays and close are
@@ -431,7 +431,7 @@ collective on the main thread; one attachment lifetime/process as above.
 
 Fast imports expose density, occupations and orbitals. Their info energy_hartree,
 residual, tolerance and converged are None, not physical zero. Eigenvalues and
-forces were not computed. Fast session.run and export_archive remain unconnected; tddft_model
+forces were not computed. For import-only records session.run remains unavailable; imported owners cannot export computed results. tddft_model
 requires the additional memory-RT capability described below; the standard profile retains its existing features. No convergence
 claim follows from importing a synthetic or unlabelled GS.
 
@@ -521,7 +521,7 @@ For file initialization, parser snapshots capture API dt/capacity/MPI decomposit
 after worker configuration, matching the standard reader's order. The existing
 fast HSE ABI and standard runtime behavior are preserved. This does not yet
 unify ordinary XC and HSE registries in one GS session or remove the old source
-tree. HSE-enabled computed-GS support and final tree consolidation remain.
+tree. New fast-HSE compute records are described below; final tree consolidation remains.
 
 The retained_gs sample's import mode also accepts these records with
 --current-steps 16. Native k/orbital/spatial MPI2 response, direct restart and
@@ -553,3 +553,69 @@ Integration controls retain the RT model while another GS is computed, using
 PZ/Libxc-PZ and Libxc-PBE with orbital/spatial MPI2. Currents after source GS close
 match independent execution exactly. A direct checkpoint restored halfway through
 16 steps continues exactly, without replaying time propagation.
+
+### Computed GS with fast-PR HSE
+
+New fast-HSE builds declare run in gs_abi.modes. Older import-only builds are not
+silently upgraded. Pass DFT(..., xc="hse06") to NativeGSBackend session.run with
+decomposition=(size,1,1,1,1). Scope is periodic full-k unpolarized fixed-ion.
+The existing GS→TDDFT model owns its seed after the source GS closes.
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD_JSON NEW_OUTPUT --xc hse06 --current-steps 16
+```
+
+New HSE inputs explicitly set exx_pre_scf_threshold=0, so the requested SCF
+iterations start in HSE rather than a PBE warmup phase. Nonconvergence warns and
+returns the last iterate. Batch DFT.run HSE reports remain unconnected and direct
+users to this native entry. No conventional-HSE fallback is used. Physical force
+accuracy and convergence remain separate validation tasks.
+
+Darwin HSE libraries reuse the ordinary TDDFT linker policy to bind the selected
+BLAS, avoiding NumPy's incompatible complex-return ABI. Explicitly build a new
+runtime; fixed previous libraries are not modified.
+
+### Batch energy/forces without restart arrays
+
+Batch DFT.run keeps its existing save-by-default behavior. Set save_restart=False
+per call to obtain energy and forces without GS restart arrays:
+
+```python
+gs = calculation.run(engine, "new-output", scf=SCFSettings(max_iterations=4),
+                     save_restart=False)
+print(gs.energy_hartree, gs.forces_hartree_per_bohr, gs.restart_saved)
+```
+
+Batch scope is PZ/Libxc-PZ/PBE. Four iterations test execution, not physical
+convergence. Unconverged results warn and remain usable. restart_saved reports
+whether all three restart files actually exist. Energy/force access works without
+them; band/TDDFT initialization, warm start and GS archive export require a result
+with restart arrays. Legacy manifests without this flag retain saved semantics.
+If a runtime ignores output suppression, warn and record actual output rather
+than turning a completed calculation into a failure.
+
+The fast source now emits gs_status.dat (SALMONPY_GS_V1, Hartree) and gs_forces.dat
+(SALMONPY_FORCES_V1, Hartree/Bohr), preserving SCF/force operation order. Native
+HSE and CLI produce these reports too; batch DFT.run HSE selection still requires
+fast-PR provenance integration, so use NativeGSBackend for HSE. The existing
+dft_si sample accepts --no-restart and --max-iterations for this workflow.
+
+### NLCC migration before solver-source consolidation
+
+The fast source now carries the standard profile's NLCC Libxc energy weighting
+and core-force correction. The valence-plus-core density supplied to Libxc also
+weights its energy density. Core forces differentiate the actually sampled core
+table using each material's species, boundary configuration and XC potential.
+Fast HSE projector derivatives, owned state and existing spin handling are retained.
+
+V1 cutoff behavior and V2 full support remain distinct. V2 uses the same table
+interpolation and periodic-image extent for orthogonal/skew cells and long cores;
+its cancellation-sensitive force integral uses compensated summation. IEEE
+inquiries remain scalar and only used V2 table entries are inspected, not padding.
+
+Prescribed-density energy/force variation and OMP/MPI partition checks are
+implementation tests, not material convergence certification. They do not attach
+validated NLCC-force capability records to an ASE Calculator runtime. Existing
+capability gates remain. No-NLCC workflows retain regression checks. Removing
+legacy sources and changing default preparation still require the remaining
+workflow/provenance validation; this migration alone does not complete unification.

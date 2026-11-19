@@ -89,9 +89,9 @@ def main():
     parser.add_argument('--current-steps',type=int,default=0,help='also exercise computed GS to independent RT states and direct resume')
     parser.add_argument('--baseline',type=Path,help='explicit independently built control runtime')
     parser.add_argument('--check-export-assembly',action='store_true',help='intercept shared writer and inspect assembled arrays in RAM; do not write GS archives')
-    parser.add_argument('--split',choices=('orbital','spatial'),default='orbital')
-    parser.add_argument('--xc-a',choices=('pz','libxc_pz','libxc_pbe'),default='pz')
-    parser.add_argument('--xc-b',choices=('pz','libxc_pz','libxc_pbe'),default='libxc_pbe')
+    parser.add_argument('--split',choices=('orbital','spatial','k'),default='orbital')
+    parser.add_argument('--xc-a',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='pz')
+    parser.add_argument('--xc-b',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='libxc_pbe')
     parser.add_argument('--gamma',action='store_true')
     parser.add_argument('--tolerance',type=float,default=1e-12)
     parser.add_argument('--b-iterations',type=int,default=4)
@@ -116,7 +116,7 @@ def main():
     a=DFT((14,),np.eye(3)*8,[[.3,.4,.45]],(pp,),4,2,(8,8,8),
           (1,1,1) if args.gamma else (2,1,1),xc=args.xc_a)
     b=DFT((14,14),np.eye(3)*9,[[.3,.4,.45],[.7,.6,.55]],(pp,),8,4,(12,12,12),(1,2,1),xc=args.xc_b)
-    dec=(1,args.size,1,1,1) if args.split=='orbital' else (1,1,args.size,1,1)
+    dec=(1,args.size,1,1,1) if args.split=='orbital' else (args.size,1,1,1,1) if args.split=='k' else (1,1,args.size,1,1)
     backend=NativeGSBackend(args.baseline if g and args.baseline else args.build,work,decomposition=dec)
     scf=SCFSettings(max_iterations=4,tolerance=args.tolerance)
     scf_b=SCFSettings(max_iterations=args.b_iterations,tolerance=args.tolerance if args.b_tolerance is None else args.b_tolerance)
@@ -160,7 +160,8 @@ def main():
         def drive(i):return 1e-4*np.array([np.sin(.31*i),np.cos(.23*i)-1,np.sin(.17*i)])
         trace=[];half=args.current_steps//2
         for i in range(1,half+1):
-            trace.append(np.r_[first.step(drive(i)),sibling.step(-drive(i))])
+            trace.append(np.r_[first.step(drive(i)),sibling.step(-drive(i)),
+                               [first.energy,sibling.energy] if hasattr(first,'energy') else []])
         path=work/f'rt-{key}-{comm.rank}.bin'
         first.checkpoint(path,False)
         restored=model.new_state('restored');restored.checkpoint(path,True)
@@ -175,8 +176,10 @@ def main():
             # Seed remains owned after the original computed GS has closed.
             fresh=model.new_state('fresh');fresh.close()
             for i in range(half+1,args.current_steps+1):
-                trace.append(np.r_[first.step(drive(i)),sibling.step(-drive(i))])
+                trace.append(np.r_[first.step(drive(i)),sibling.step(-drive(i)),
+                               [first.energy,sibling.energy] if hasattr(first,'energy') else []])
                 np.testing.assert_array_equal(restored.step(drive(i)),first.current)
+                if hasattr(first,'energy'):assert restored.energy==first.energy
                 assert restored.steps==first.steps==i
             responses[key]=np.asarray(trace)
             assert not list(model.work.rglob('wfn.bin'))

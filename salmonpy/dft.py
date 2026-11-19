@@ -91,7 +91,7 @@ def _read_status(path):
         if residual<0 or tolerance<=0: raise InputError('invalid residual or tolerance')
         converged=bool(flag==1 and residual<tolerance)
         if not converged:
-            warnings.warn(f'SCF not converged after {iterations} iterations (residual={residual:.6g}, tolerance={tolerance:.6g}); continuing with the saved state', RuntimeWarning, stacklevel=2)
+            warnings.warn(f'SCF not converged after {iterations} iterations (residual={residual:.6g}, tolerance={tolerance:.6g}); continuing with the last iterate', RuntimeWarning, stacklevel=2)
         return dict(iterations=iterations,residual=residual,tolerance=tolerance,energy_hartree=energy,converged=converged)
     except (OSError,ValueError) as exc:
         raise RuntimeFailure('Invalid or missing GS status; inspect gs_status.dat and stdout.log') from exc
@@ -137,7 +137,7 @@ class DFT:
         grid=tuple(_integer(n,'grid',8,2**20) for n in self.grid)
         kmesh=tuple(_integer(n,'kmesh',1,2**20) for n in self.kmesh)
         if len(grid)!=3 or len(kmesh)!=3: raise InputError('three grid and kmesh dimensions required')
-        if self.xc.lower() not in ('pz','libxc_pz','libxc_pbe'): raise InputError('supported xc: pz, libxc_pz, libxc_pbe')
+        if self.xc.lower() not in ('pz','libxc_pz','libxc_pbe','hse06'): raise InputError('supported xc: pz, libxc_pz, libxc_pbe, hse06 (fast native GS)')
         for name,value in [('numbers',numbers),('pseudopotentials',pseudos),('cell',cell),('fractional_positions',positions),
                            ('electrons',electrons),('states',states),('grid',grid),('kmesh',kmesh),('xc',self.xc.lower())]:
             object.__setattr__(self,name,value)
@@ -153,6 +153,7 @@ class DFT:
         index={p.atomic_number:i+1 for i,p in enumerate(self.pseudopotentials)}
         atoms='\n'.join(f"'Z{z}' "+' '.join(f'{v:.17e}' for v in row)+f' {index[z]}'
                         for z,row in zip(self.numbers,self.fractional_positions))
+        hybrid_options=', exx_pre_scf_threshold=0' if self.xc=='hse06' else ''
         return f"""&calculation
  theory='dft'
 /
@@ -170,7 +171,7 @@ class DFT:
 {pseudo}
 /
 &functional
- xc='{self.xc}'
+ xc='{self.xc}'{hybrid_options}
 /
 &rgrid
  num_rgrid={','.join(map(str,self.grid))}
@@ -195,11 +196,15 @@ class DFT:
                                      'sha256': p.sha256, 'local_channel': p.local_channel}
                                     for p in self.pseudopotentials]}
 
-    def run(self,executable,directory,*,scf=SCFSettings(),threads=1,timeout=600.,initial_guess=None):
+    def run(self,executable,directory,*,scf=SCFSettings(),threads=1,timeout=600.,initial_guess=None,save_restart=True):
         import os,subprocess
         import shutil
         if not isinstance(executable,SalmonExecutable): raise InputTypeError('expected SalmonExecutable')
+        if self.xc=='hse06':
+            raise InputError('HSE06 GS uses NativeGSBackend with a declared fast-PR compute runtime; batch HSE selection requires fast-PR provenance')
+        if type(save_restart) is not bool:raise InputTypeError('save_restart must be boolean')
         text=self.input_text(scf)
+        if not save_restart:text=text.replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
         threads=_integer(threads,'threads',1,2**31-1);timeout=_positive(timeout,'timeout')
         if _digest(executable.path)!=executable.sha256: raise InputError('executable checksum mismatch')
         dest=Path(directory).expanduser().resolve()
@@ -207,7 +212,7 @@ class DFT:
         if initial_guess is not None:
             if not isinstance(initial_guess, GroundStateResult):
                 raise InputTypeError('initial_guess must be a completed GroundStateResult')
-            source = GroundStateResult.open(initial_guess.directory)
+            source = initial_guess._with_restart()
             source_record = json.loads((source.directory/'ground-state.json').read_text())
             signature = dict(self._restart_signature(), executable_sha256=executable.sha256)
             if any(source_record.get(key) != value for key, value in signature.items()):
@@ -222,7 +227,7 @@ class DFT:
                 'xc':self.xc,'electrons':self.electrons,'states':self.states,'grid':self.grid,'kmesh':self.kmesh,
                 'cell_bohr':self.cell.tolist(),'fractional_positions':self.fractional_positions.tolist(),'numbers':self.numbers,
                 'pseudopotentials':[{'atomic_number':p.atomic_number,'sha256':p.sha256,'local_channel':p.local_channel} for p in self.pseudopotentials],
-                'max_iterations':scf.max_iterations,'tolerance':scf.tolerance,'threads':threads}
+                'max_iterations':scf.max_iterations,'tolerance':scf.tolerance,'threads':threads,'restart_saved':save_restart}
         manifest=dest/'ground-state.json'
         try:
             if source is not None:
@@ -249,7 +254,12 @@ class DFT:
             _read_forces(work/'gs_forces.dat',len(self.numbers))
             if result['tolerance']!=scf.tolerance: raise RuntimeFailure('native convergence threshold differs from request')
             for name in ('info.bin','occupation.bin','wfn.bin'):
-                if not (work/'data_for_restart'/name).is_file(): raise RuntimeFailure('missing restart record: '+name)
+                exists=(work/'data_for_restart'/name).is_file()
+                if save_restart and not exists:raise RuntimeFailure('missing restart record: '+name)
+            present=[(work/'data_for_restart'/name).is_file() for name in ('info.bin','occupation.bin','wfn.bin')]
+            if not save_restart and any(present):
+                warnings.warn('runtime wrote restart output despite save_restart=False; calculation results are retained',RuntimeWarning,stacklevel=2)
+            record['restart_saved']=all(present)
             record.update(result,status='complete',files={p.relative_to(dest).as_posix():_digest(p) for p in work.rglob('*') if p.is_file()})
         except BaseException as exc:
             record.update(status='failed',error=str(exc));raise
@@ -264,6 +274,7 @@ class GroundStateResult:
     energy_hartree: float
     iterations: int
     converged: bool=True
+    restart_saved: bool=True
 
     @classmethod
     def open(cls,directory):
@@ -272,7 +283,11 @@ class GroundStateResult:
         record=json.loads((root/'ground-state.json').read_text())
         if record.get('schema')!='salmonpy.gs/1' or record.get('status')!='complete': raise InputError('not a completed GS result')
         files=record.get('files',{})
-        required={'native/gs.inp','native/gs_status.dat',*(f'native/data_for_restart/{n}' for n in ('info.bin','occupation.bin','wfn.bin'))}
+        saved=record.get('restart_saved',True)
+        if type(saved) is not bool:raise InputError('invalid restart_saved flag')
+        restart={f'native/data_for_restart/{n}' for n in ('info.bin','occupation.bin','wfn.bin')}
+        required={'native/gs.inp','native/gs_status.dat'}
+        if saved:required.update(restart)
         if not required<=files.keys(): raise InputError('incomplete GS manifest')
         paths=list((root/'native').rglob('*'))
         if any(p.is_symlink() for p in paths) or {p.relative_to(root).as_posix() for p in paths if p.is_file()}!=set(files):
@@ -287,7 +302,13 @@ class GroundStateResult:
             raise InputError('inconsistent GS metadata')
         if 'converged' in record and record['converged'] != status['converged']:
             raise InputError('inconsistent GS convergence metadata')
-        return cls(root,status['energy_hartree'],status['iterations'],status['converged'])
+        return cls(root,status['energy_hartree'],status['iterations'],status['converged'],saved)
+
+    def _with_restart(self):
+        verified=self.open(self.directory)
+        if not verified.restart_saved:
+            raise InputError('restart arrays were not saved; run a new GS with save_restart=True for this operation')
+        return verified
 
     @property
     def forces_hartree_per_bohr(self):
@@ -303,18 +324,18 @@ class GroundStateResult:
         """
         from .gs_native import GammaRestartConverter
         if not isinstance(converter,GammaRestartConverter):raise InputTypeError('GammaRestartConverter required')
-        return converter.export_archive(self,directory,orbital_block=orbital_block,timeout=timeout)
+        return converter.export_archive(self._with_restart(),directory,orbital_block=orbital_block,timeout=timeout)
 
     def band_initial_state(self,*,executable):
         from .bands import BandInitialState
-        verified=self.open(self.directory)
+        verified=self._with_restart()
         return BandInitialState.from_salmon(verified.directory/'native','gs.inp',executable=executable)
 
     def tddft_initial_state(self,*,executable,max_steps=1000,threads=1,timeout=300.):
         import tempfile
         from .bands import _input_groups
         from .tddft import TDDFTInitialState
-        verified=self.open(self.directory)
+        verified=self._with_restart()
         with tempfile.TemporaryDirectory(prefix='salmonpy-gs-to-rt-') as tmp:
             bundle=Path(tmp)/'bundle';_copy_bundle(verified.directory/'native',bundle)
             groups=_input_groups((bundle/'gs.inp').read_text())

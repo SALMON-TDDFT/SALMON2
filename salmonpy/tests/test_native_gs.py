@@ -58,6 +58,29 @@ class NativeGSTests(unittest.TestCase):
             with patch('salmonpy.native_gs.c.CDLL') as load:
                 backend=NativeGSBackend(receipt,root)
                 load.assert_not_called()
+            self.assertFalse(backend._supports_compute)
+            computed=json.loads(receipt.read_text());computed['gs_abi']['modes'].append('run')
+            receipt.write_text(json.dumps(computed))
+            with patch('salmonpy.native_gs.c.CDLL') as load:
+                computed_backend=NativeGSBackend(receipt,root)
+                load.assert_not_called()
+            self.assertTrue(computed_backend._supports_compute)
+            self.assertTrue(computed_backend._fast_hse)
+            from types import SimpleNamespace
+            from unittest.mock import Mock
+            import numpy as np
+            from salmonpy.native_gs import NativeGSSession
+            from salmonpy.dft import DFT,Pseudopotential
+            hybrid=DFT((14,),np.eye(3)*8,[[0,0,0]],
+                       (Pseudopotential(14,2,'_rps.dat',b'header'),),4,2,(8,8,8),(2,1,1),xc='hse06')
+            comm=SimpleNamespace(size=1,allgather=lambda v:[v])
+            native=SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=comm))
+            lib=Mock()
+            for backend_options,message in [(dict(_fast_hse=False),'fast-PR'),
+                    (dict(_fast_hse=True,decomposition=(1,2,1,1,1)),'k-only')]:
+                session=NativeGSSession(SimpleNamespace(_supports_compute=True,**backend_options),native,lib)
+                with self.assertRaisesRegex(ValueError,message):session.run(hybrid)
+            lib.sp_gs_create.assert_not_called()
             malformed=json.loads(receipt.read_text());malformed.pop('gs_abi');receipt.write_text(json.dumps(malformed))
             from salmonpy.errors import InputError
             with self.assertRaises(InputError):NativeGSBackend(receipt,root)

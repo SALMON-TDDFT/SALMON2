@@ -23,7 +23,7 @@ a.output.mkdir(parents=True,exist_ok=False);out=a.output.resolve()
 obj=out/(a.test+'.o');exe=out/a.test
 link=shlex.split((build/'src/CMakeFiles/salmon.dir/link.txt').read_text())
 compiler=link[0]
-subprocess.run([compiler,'-fopenmp','-ffree-line-length-none','-I'+str(build),'-c',
+subprocess.run([compiler,'-cpp','-fopenmp','-ffree-line-length-none','-I'+str(build),'-c',
                 str(root/'tests/runtime'/(a.test+'.f90')),'-o',str(obj)],check=True)
 check('--object-tree',build/'src')
 check('--object-tree',out)
@@ -37,10 +37,14 @@ for arg in link:
     cmd.append(arg)
 cmd += [str(obj),'-o',str(exe)]
 subprocess.run(cmd,cwd=build/'src',check=True)
-source_spec=json.loads((Path(source)/'salmonpy-runtime-source.json').read_text())
+source_marker=Path(source)/'salmonpy-runtime-source.json'
+if not source_marker.is_file():source_marker=Path(source)/'salmonpy-hse-rt-state.json'
+source_spec=json.loads(source_marker.read_text())
 record={'test':a.test,'source_root':source,'executable_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),
         'runtime_executable_sha256':hashlib.sha256((build/'salmon').read_bytes()).hexdigest(),
-        'runtime_source_patch_sha256':source_spec['patch_sha256']}
+        'runtime_source_patch_sha256':source_spec['patch_sha256'],
+        'runtime_source_marker_sha256':hashlib.sha256(source_marker.read_bytes()).hexdigest(),
+        'runtime_source_profile':'fast-pr' if source_marker.name=='salmonpy-hse-rt-state.json' else 'standard'}
 results=[]
 for ranks in a.ranks:
  for threads in (1,2):

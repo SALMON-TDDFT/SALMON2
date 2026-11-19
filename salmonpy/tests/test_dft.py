@@ -19,6 +19,16 @@ class DFTTest(unittest.TestCase):
             self.assertIn("theory='dft'",text)
             self.assertIn('nscf=100',text)
             self.assertIn('_rps.dat',text)
+            from dataclasses import replace
+            hybrid=replace(model,xc='hse06')
+            self.assertIn("xc='hse06'",hybrid.input_text())
+            from salmonpy.fdtd import SalmonExecutable
+            import hashlib
+            binary=Path(tmp)/'solver';binary.write_bytes(b'not executable')
+            engine=SalmonExecutable(binary,hashlib.sha256(binary.read_bytes()).hexdigest())
+            with self.assertRaisesRegex(ValueError,'NativeGSBackend'):
+                hybrid.run(engine,Path(tmp)/'must-not-run')
+            self.assertFalse((Path(tmp)/'must-not-run').exists())
             with self.assertRaises(ValueError):model.cell.setflags(write=True)
             with self.assertRaises(ValueError):DFT([14],np.eye(3),[[0,0,0]],[pseudo],electrons=3,states=8,grid=[12]*3,kmesh=[2]*3)
 
@@ -93,14 +103,42 @@ class WarmStartTest(unittest.TestCase):
                 kw['stdout'].write('end SALMON\n'); kw['stdout'].flush()
                 (work/'gs_status.dat').write_text('SALMONPY_GS_V1\n0 5\n1e-5 1e-9 -1.0\nrho_dne\n')
                 (work/'gs_forces.dat').write_text('SALMONPY_FORCES_V1\n1\n0 0 0\n')
-                restart = work/'data_for_restart'; restart.mkdir()
-                for name in ('info.bin','occupation.bin','wfn.bin'):
-                    (restart/name).write_bytes(name.encode())
+                if "write_gs_restart_data='no'" not in kw['input']:
+                    restart = work/'data_for_restart'; restart.mkdir()
+                    for name in ('info.bin','occupation.bin','wfn.bin'):
+                        (restart/name).write_bytes(name.encode())
                 return SimpleNamespace(returncode=0)
             with patch('subprocess.run', side_effect=native), self.assertWarns(RuntimeWarning):
                 source = model.run(engine, root/'source')
             self.assertFalse(source.converged)
+            with patch('subprocess.run',side_effect=native), self.assertWarns(RuntimeWarning):
+                scalar=model.run(engine,root/'scalar',save_restart=False)
+            self.assertFalse(scalar.restart_saved)
+            np.testing.assert_array_equal(scalar.forces_hartree_per_bohr,[[0,0,0]])
+            self.assertFalse(list(scalar.directory.rglob('wfn.bin')))
+            for operation in (lambda:scalar.band_initial_state(executable=engine),
+                              lambda:scalar.tddft_initial_state(executable=engine),
+                              lambda:model.run(engine,root/'scalar-guess',initial_guess=scalar)):
+                with self.assertRaisesRegex(ValueError,'restart'):operation()
+            self.assertFalse((root/'scalar-guess').exists())
+            with patch('subprocess.run') as run:
+                with self.assertRaisesRegex(TypeError,'save_restart'):model.run(engine,root/'bad-flag',save_restart='no')
+                run.assert_not_called()
             self.assertFalse(json.loads((source.directory/'ground-state.json').read_text())['converged'])
+            # Older runtimes may ignore the output request: warn, retain results, and record actual state.
+            for names in [('info.bin',),('info.bin','occupation.bin','wfn.bin')]:
+                def extra_output(*args,**kw):
+                    result=native(*args,**kw);restart=Path(kw['cwd'])/'data_for_restart';restart.mkdir()
+                    for name in names:(restart/name).write_bytes(b'synthetic')
+                    return result
+                with patch('subprocess.run',side_effect=extra_output),self.assertWarnsRegex(RuntimeWarning,'runtime wrote restart output'):
+                    unexpected=model.run(engine,root/('extra-'+str(len(names))),save_restart=False)
+                self.assertEqual(unexpected.restart_saved,len(names)==3)
+            legacy_path=source.directory/'ground-state.json'
+            original=legacy_path.read_bytes();legacy=json.loads(original);legacy.pop('restart_saved')
+            legacy_path.write_text(json.dumps(legacy))
+            self.assertTrue(GroundStateResult.open(source.directory).restart_saved)
+            legacy_path.write_bytes(original)
             original = (source.directory/'ground-state.json').read_bytes()
             displaced = replace(model, fractional_positions=[[.01,0,0]])
             with patch('subprocess.run', side_effect=native) as run:

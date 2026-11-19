@@ -21,8 +21,9 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,tpsi,ewald)
+  subroutine calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,tpsi,ewald,Vxc)
     use structures
+    use salmon_pp,only:calc_nlcc_force
     use math_constants,only : zi,pi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
     use communication, only: comm_summation
@@ -47,6 +48,7 @@ contains
     type(s_sendrecv_grid)   ,intent(inout) :: srg
     type(s_pp_grid)         ,intent(in)    :: ppg
     type(s_orbital)         ,intent(inout) :: tpsi
+    type(s_scalar),intent(in) :: Vxc(system%Nspin)
     type(s_ewald_ion_ion)   ,intent(in)    :: ewald
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
@@ -63,7 +65,7 @@ contains
     complex(8),parameter :: zero=(0.0d0,0.0d0)
     complex(8),allocatable :: zF_tmp(:,:)
     complex(8) :: ztmp
-    integer :: Norb,iorb,ilocal
+    integer :: Norb,iorb,ilocal,nlcc_status,nlcc_status_all
     logical :: variational_projector_force
     real(8),allocatable :: projector_grad(:,:,:)
 #ifdef USE_OPENACC
@@ -450,6 +452,22 @@ contains
 !$omp end parallel do
 #endif
 !
+    if(pp%flag_nlcc) then
+#ifdef USE_OPENACC
+      error stop 'NLCC core force: OpenACC implementation not validated'
+#endif
+      call calc_nlcc_force(pp,system,mg,Vxc,F_tmp,nlcc_status)
+      ! Status is collective over all solver replicas; force is grid-only.
+      call comm_summation(nlcc_status,nlcc_status_all,info%icomm_rko)
+      if(nlcc_status_all/=0) error stop 'invalid input to NLCC force'
+      call comm_summation(F_tmp,F_sum,3*nion,info%icomm_r)
+!$omp parallel do private(ia)
+      do ia=1,nion
+        system%Force(:,ia)=system%Force(:,ia)+F_sum(:,ia)
+      end do
+!$omp end parallel do
+    end if
+
     if (use_symmetry) then
       call sym_vector_force_xyz( system%Force, system%Rion )
     end if

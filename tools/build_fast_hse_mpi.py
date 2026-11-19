@@ -52,8 +52,8 @@ def main():
         if not (build/'src/CMakeFiles/salmon.dir/io/step_output.f90.o').is_file():
             names.insert(1,'step_output')
         for name in names:
-            path=(root/'runtime/sources/standard/src/salmonpy/parallel_bridge.f90' if name=='parallel_bridge'
-                  else root/'runtime/sources/standard/src/io/step_output.f90' if name=='step_output'
+            path=(source/'src/salmonpy/parallel_bridge.f90' if name=='parallel_bridge'
+                  else source/'src/io/step_output.f90' if name=='step_output'
                   else adapters/(name+'.f90'))
             shutil.copy2(path,staged/(name+'.f90'))
         shutil.copy2(adapters/'fast_hse_handles.h',staged/'fast_hse_handles.h')
@@ -69,8 +69,9 @@ def main():
         library=out/('libsalmonpy_fast_hse.dylib' if sys.platform=='darwin' else 'libsalmonpy_fast_hse.so')
         link[link.index('-o')+1]=str(library)
         link=[x for x in link if x!='CMakeFiles/salmon.dir/main.f90.o']
-        link[1:1]=['-shared',*[str(out/(n+'.o')) for n in names]]
-        run(link,cwd=build/'src')
+        link[1:1]=[str(out/(n+'.o')) for n in names]
+        from build_embedded_tddft import mpi_link_command
+        run(mpi_link_command(link,shared=True),cwd=build/'src')
     r={'schema':'salmonpy.fast-hse-mpi/1','status':'built-and-audited','library':str(library),
        'sha256':digest(library),'origin_sha256':digest(build/'salmon'),'source':marker,
        'source_marker_sha256':digest(marker_path),'source_hashes':{str(x.relative_to(source)):digest(x) for x in sorted((source/'src').rglob('*')) if x.is_file()},
@@ -94,6 +95,12 @@ def main():
             protocol.argtypes=[];protocol.restype=c.c_int
             if protocol()!=1:raise ValueError('unsupported compiled GS protocol')
             r['gs_abi']={'protocol':1,'modes':['import'],'arrays':['density','occupations','orbitals']}
+            compute=getattr(probe,'sp_gs_compute_protocol',None)
+            if compute is not None:
+                compute.argtypes=[];compute.restype=c.c_int
+                if compute()==1:
+                    r['gs_abi']['modes'].append('run')
+                    r['gs_abi']['arrays'].extend(['eigenvalues','forces'])
             memory=getattr(probe,'sp_fast_hse_memory_gs_protocol',None)
             if memory is not None:
                 memory.argtypes=[];memory.restype=c.c_int

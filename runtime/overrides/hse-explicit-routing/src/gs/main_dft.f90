@@ -147,7 +147,7 @@ logical::reading_only
 #ifdef USE_HSE
  integer :: gs_hse_status
 #endif
-integer :: phase_status
+integer :: phase_status,gs_status_unit,force_status_unit
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
 logical :: pre_scf_root
@@ -356,6 +356,17 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         ctx%pp,ctx%ppg,ctx%ppn,  &
                         ctx%band, ilevel_print, ctx%dc)
 ctx%converged=ctx%mixing%scf_converged
+! Scalar bridge reports mirror native values without changing SCF arithmetic.
+if(theory=='dft'.and.yn_opt=='n'.and.yn_md=='n'.and.yn_dc=='n')then
+ if(comm_is_root(nproc_id_global))then
+  open(newunit=gs_status_unit,file='gs_status.dat',status='replace')
+  write(gs_status_unit,'(a)')'SALMONPY_GS_V1'
+  write(gs_status_unit,*)merge(1,0,ctx%converged),Miter
+  write(gs_status_unit,'(3es26.17e3)')sum1,selected%threshold,ctx%energy%E_tot
+  write(gs_status_unit,'(a)')trim(selected%convergence_metric)
+  close(gs_status_unit)
+ endif
+endif
 
 
 if(theory=='dft_band')then
@@ -387,8 +398,17 @@ end if
 
    ! force
    if(yn_jm=='n' .and. yn_dc=="n")then
-     call calc_force(ctx%system,ctx%pp,ctx%fg,ctx%info,ctx%mg,ctx%stencil,ctx%poisson,ctx%srg,ctx%ppg,ctx%spsi,ctx%ewald)
+     call calc_force(ctx%system,ctx%pp,ctx%fg,ctx%info,ctx%mg,ctx%stencil,ctx%poisson,ctx%srg,ctx%ppg,ctx%spsi,ctx%ewald,ctx%Vxc)
      if(comm_is_root(nproc_id_global))then
+        if(theory=='dft'.and.yn_opt=='n'.and.yn_md=='n')then
+         open(newunit=force_status_unit,file='gs_forces.dat',status='replace')
+         write(force_status_unit,'(a)')'SALMONPY_FORCES_V1'
+         write(force_status_unit,*)natom
+         do iatom=1,natom
+          write(force_status_unit,'(3es26.17e3)')ctx%system%Force(:,iatom)
+         enddo
+         close(force_status_unit)
+        endif
         write(*,*) "===== force ====="
         do iatom=1,natom
            select case(unit_system)
@@ -675,11 +695,7 @@ integer(c_int) function sp_gs_protocol() bind(C)
  sp_gs_protocol=1
 end function
 integer(c_int) function sp_gs_compute_protocol() bind(C)
-#ifdef USE_HSE
- sp_gs_compute_protocol=0 ! HSE creation remains a separately validated step.
-#else
  sp_gs_compute_protocol=1
-#endif
 end function
 integer(c_int) function sp_gs_create(path,token) bind(C)
  character(c_char),intent(in)::path(*)

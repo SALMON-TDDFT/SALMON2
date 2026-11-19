@@ -17,12 +17,15 @@ from salmonpy.native_gs import NativeGSBackend
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('build',type=Path);parser.add_argument('output',type=Path)
+    parser.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),help='computed-mode XC override; hse06 requires a compute-capable fast-HSE build')
     parser.add_argument('--import-bundle',type=Path,help='read existing compatible GS without SCF')
     parser.add_argument('--second-bundle',type=Path)
     parser.add_argument('--current-steps',type=int,default=0,help='optional current steps; requires a declared retained-GS RT profile')
     parser.add_argument('--export-archives',action='store_true',
                         help='explicitly save regular-mesh GS/2 arrays on subgroup root; not a full SCF checkpoint')
     args=parser.parse_args()
+    if args.import_bundle and args.xc is not None:
+        parser.error('--xc selects computed GS; imported GS retains its recorded XC')
     if args.current_steps<0:
         parser.error('--current-steps requires a nonnegative count')
     from mpi4py import MPI
@@ -68,10 +71,11 @@ def main():
         assert context._dependents==0
         return
     pp=Pseudopotential.from_file(Path(__file__).with_name('si_intro_data')/'Si_rps.dat',atomic_number=14,local_channel=2)
-    models=[DFT((14,),np.eye(3)*8,[[.3,.4,.45]],(pp,),4,2,(8,8,8),(2,1,1),xc='pz'),
-            DFT((14,14),np.eye(3)*9,[[.3,.4,.45],[.7,.6,.55]],(pp,),8,4,(12,12,12),(1,2,1),xc='libxc_pbe')]
+    models=[DFT((14,),np.eye(3)*8,[[.3,.4,.45]],(pp,),4,2,(8,8,8),(2,1,1),xc=args.xc or 'pz'),
+            DFT((14,14),np.eye(3)*9,[[.3,.4,.45],[.7,.6,.55]],(pp,),8,4,(12,12,12),(1,2,1),xc=args.xc or 'libxc_pbe')]
     context=SimpleNamespace(solver_comm=world,closed=False,_dependents=0)
-    backend=NativeGSBackend(args.build,args.output,decomposition=(1,world.size,1,1,1))
+    decomposition=(world.size,1,1,1,1) if args.xc=='hse06' else (1,world.size,1,1,1)
+    backend=NativeGSBackend(args.build,args.output,decomposition=decomposition)
     with backend.open(context) as session:
         states=[session.run(model,scf=SCFSettings(max_iterations=4),material_id=name)
                 for model,name in zip(models,('silicon-a','silicon-b'))]

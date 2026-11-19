@@ -1708,7 +1708,8 @@ folded into existing unittest/MPI tests; test-method count remains628.
 - [x] Fresh HSE-enabled build regression after the GS mixing metadata addition.
 - [x] Computed GS to ordinary RT lifecycle regression.
 - [x] Installed-wheel validation: sdist→wheel; source/installed628 (627 pass,1 skip); computed GS→current sample and spatial MPI6 direct resume exact.
-- [ ] HSE-enabled computed GS and final source-tree consolidation.
+- [x] HSE-enabled computed GS (new declared run capability, full-k/k-only native profile).
+- [ ] Final source-tree consolidation.
 
 ### Computed GS→ordinary RT continuation
 
@@ -1716,3 +1717,36 @@ folded into existing unittest/MPI tests; test-method count remains628.
 - [x] Direct 8→16 restart exact, no replay; transient RT checkpoint files removed.
 - [x] Existing retained_gs sample now supports --current-steps in computed mode, with three-component A drive; MPI2 execution passes.
 - [x] Fresh HSE-enabled build and all-object audit; full learned Taylor/reduced learned PT-CN MPI6 currents, energy and history match the fixed previous build exactly; direct restart exact.
+
+### Computed fast-PR HSE GS (2026-11-19)
+
+- [x] HSE06 DFT descriptor and declared native run capability; conventional-HSE fallback and unconnected batch HSE reports are not used.
+- [x] Explicit exx_pre_scf_threshold=0 in new HSE descriptors: run HSE itself, not unfinished PBE warmup. Nonconvergence warns.
+- [x] Darwin fast-HSE builder shares ordinary mpi_link_command; avoids NumPy Accelerate ZDOTC complex-return ABI collision. Failed release/debug binaries and logs retained.
+- [x] Fresh build, source/all-object audits, MPI6 full-k different-input retained owners, direct8→16 RT resume, interleaved SCF and output assembly in RAM. All independent arrays/currents exact.
+- [x] HSE GS info/eigen text output matches prior fixed fast standalone executable byte-for-byte. No GS restart/array dataset collected.
+- [x] HSE computed sample --xc hse06 --current-steps16 passes MPI2. Ordinary Libxc-PZ/PBE spatialMPI6 remains exact.
+- [x] Installed wheel/sampleMPI2/HSE MPI6 direct restart, source/installed628 (627 pass,1 skip), JP/EN/AI/tool byte parity; old-HSE RT with matched linking is exact.
+- [ ] Final current source-tree consolidation and batch-report migration.
+
+### Fast GS batch reports and optional restart output (2026-11-19)
+
+- [x] Fast-source fixed-ion non-DC GS status/force report migration, preserving numerical operation order.
+- [x] Public PZ/Libxc-PBE batch runs without restart arrays; fixed-fast energy difference0 and force print-precision comparison; SCF nonconvergence warns.
+- [x] Per-run save_restart=False, actual restart_saved metadata, backward saved=True default, warning-only unexpected output; clear missing-array admission to restart consumers.
+- [x] Existing lifecycle --batch controls and dft_si --no-restart/--max-iterations sample; source/installed8-atom4-iteration execution, no GS datasets collected.
+- [x] Fresh fast serial/no-HSE and MPI/HSE builds, source/object audits, HSE CLI report comparison, MPI6 retained GS→RT/direct restart and full/reduced learned-history regression.
+- [x] Source/installed628 tests (627pass,1skip), sdist→wheel, JP/EN/AI synchronization; no new unittest methods.
+- [ ] Batch HSE fast-PR provenance connection and final maintained source-tree consolidation.
+- [ ] Audit legacy SALMON eV/Hartree versus modern Python CODATA conventions without silently changing existing calculations.
+
+### NLCC parity gate before solver-source retirement (2026-11-19)
+
+- [x] Reproduce missing fast Libxc NLCC energy weighting (~0.122 derivative mismatch); port only the missing weight, retaining fast state/spin/gradient implementation.
+- [x] Port sampled-core force using owned species/PP boundary/Vxc, V1 cutoff and V2 full support/skew/periodic images; forward Vxc at all five callers.
+- [x] Scalar IEEE used-entry validation, V2 unused-padding acceptance; finite/NaN/Inf/overflow controls.
+- [x] Prescribed-density variation/force OMP1/2; MPI2/4 spatial + orbital-replica rejection. V2 compensation reduces1.82e-13 to2.50e-17 without loosening MPI1e-13 limit.
+- [x] No-NLCC PZ/PBE/HSE parity, independent GS/RT/direct restart, full/reduced learned/PT-CN history regression; fresh HSE-off/on source/object-audited builds.
+- [x] Builder adapter sources select prepared-tree files, not a hard-coded standard checkout. Preparation-level shared-file references remain.
+- [x] Source/installed628 (627pass,1skip), sdist→wheel, installed HSE MPI6, installed preparation736-file byte parity and JP/EN/AI synchronization.
+- [ ] Default fast-source preparation/provenance migration, remaining archive and runtime NLCC capability certification, canonical source placement and retirement of duplicate current trees.

@@ -68,6 +68,7 @@ class NativeGSBackend:
                 raise InputError('explicit fast GS import ABI declaration required')
         elif record.get('schema')!='salmonpy.embedded-tddft/1':
             raise InputError('verified embedded or declared fast GS build record required')
+        self._fast_hse=record.get('schema')=='salmonpy.fast-hse-mpi/1'
         self._supports_compute=not self._fast or 'run' in record.get('gs_abi',{}).get('modes',[])
         from ._gs_archive import record_profile
         self._io_profile=record_profile(record)
@@ -152,6 +153,11 @@ class NativeGSSession:
             if not getattr(self.backend,'_supports_compute',not getattr(self.backend,'_fast',False)):
                 raise InputError('this fast GS profile imports existing states; a declared compute-capable runtime is required')
             if not isinstance(calculation,DFT):raise InputTypeError('immutable DFT calculation required')
+            if calculation.xc=='hse06':
+                if not getattr(self.backend,'_fast_hse',False):
+                    raise InputError('HSE06 GS requires a declared fast-PR HSE runtime')
+                if self.backend.decomposition!=(self.comm.size,1,1,1,1):
+                    raise InputError('fast HSE GS requires k-only MPI decomposition')
             scf=SCFSettings() if scf is None else scf
             _identifier(material_id,'material_id')
             text=calculation.input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")

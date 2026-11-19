@@ -551,7 +551,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
        system%vec_Ac=rt%Ac_tot(:,0)
        call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
      endif
-     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald)
+     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald,Vxc)
      if(pbeh_mesh_md.and.ae_shape1=='Acos2')then
        do jj=1,system%nion
          system%Force(:,jj)=system%Force(:,jj)+pp%Zps(system%kion(jj))*rt%E_tot(:,0)

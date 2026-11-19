@@ -1888,7 +1888,11 @@ contains
       endif
 
       if (present(eexc)) then
-        eexc = eexc + reshape(exc_tmp_1d, (/nx, ny, nz/)) * rho
+        if(pp%flag_nlcc.and.present(rho_nlcc))then
+          eexc=eexc+reshape(exc_tmp_1d*rho_1d,(/nx,ny,nz/))
+        else
+          eexc = eexc + reshape(exc_tmp_1d, (/nx, ny, nz/)) * rho
+        endif
       endif
 
       if (present(vxc)) then

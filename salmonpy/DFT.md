@@ -92,3 +92,36 @@ TB-mBJの新規GS作成、分子・孤立系、応力、MPI起動はこの入口
 `model.run(engine, NEW_DIRECTORY, initial_guess=previous_gs)` は、セル・格子・k点・元素順・電子数・軌道数・汎関数・擬ポテンシャルの内容と局所チャンネル・実行ファイルのSHA256が一致する場合に利用できます。原子位置のみ変更可能です。不一致やファイル破損は本体を起動する前に拒否します。新しい保存先は元GSの外に置きます。
 
 `info.bin`、`occupation.bin`、`wfn.bin` を専用領域へコピーし、`read_gs_restart_data='wfn'` と反復数リセットを使います。旧原子位置や混合履歴は読み込みません。SCFは新しい原子位置で密度を再計算して始め、元のGSは変更しません。出力の `ground-state.json/initial_guess` に元GSとハッシュを記録します。warm startで必ず高速化するとは限らず、別の局所解への収束や物理量の収束確認は別途必要です。
+
+## 高速HSEのnative GS入口
+
+DFT(..., xc="hse06")は高速PR版のNativeGSBackend session.run用に使用できます。
+HSE06は全k点・k点方向のMPI分割が対象で、計算機能を宣言した新しいビルドが必要です。
+詳細はNATIVE_GS.mdを参照してください。バッチDFT.runのHSE出力は未接続です。
+HSE入力ではPBE予備SCFを無効にし、指定反復をHSEで実行します。未収束は警告です。
+
+## 再開用配列を保存せず、エネルギー・力を得る
+
+バッチDFT.runは既定で従来どおり再開データを保存します。エネルギーと力だけ必要なら
+実行時にsave_restart=Falseを指定します（モデル設定は変わりません）。
+
+```python
+gs = calculation.run(engine, "new-output", scf=SCFSettings(max_iterations=4),
+                     save_restart=False)
+print(gs.energy_hartree, gs.forces_hartree_per_bohr, gs.restart_saved)
+```
+
+対象はバッチ入口のPZ／Libxc-PZ／PBEです。4反復は接続確認用で、物理的な収束を保証しません。
+未収束でも警告とともに結果を返します。restart_savedは実際に再開用3ファイルが揃ったかを
+示し、省略した場合はFalseです。エネルギー・力の読み込みは可能ですが、バンド初期化、
+TDDFT初期化、warm start、GSアーカイブ出力には再開用配列を保存した結果が必要です。
+save_restartを記録していない従来の結果は保存ありとして扱います。
+ランタイムが保存省略を無視しても計算失敗にはせず、警告して実際の保存状態を記録します。
+
+高速版ソースもgs_status.dat（SALMONPY_GS_V1、Hartree）と
+gs_forces.dat（SALMONPY_FORCES_V1、Hartree/Bohr）を出します。SCFや力の計算順は変えません。
+HSEのnative入口とCLIもこのレポートを出しますが、DFT.runのHSE選択は
+高速PR版の来歴確認が未接続のため、引き続きNativeGSBackendを使います。
+
+Siサンプルは--no-restartと--max-iterationsに対応します。
+`python -m salmonpy.examples.dft_si EXECUTABLE SHA256 PSEUDO NEW_OUTPUT --no-restart --max-iterations 4`
