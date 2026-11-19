@@ -20,7 +20,7 @@
 
 subroutine main_tddft
 use tddft_worker
-use dip, only: subdip
+use dip, only: subdip,calc_dip
 use density_matrix, only: calc_current
 use hamiltonian, only: update_kvector_nonlocalpt
 #ifdef USE_HSE
@@ -72,7 +72,7 @@ type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 type(s_unfold) :: unfold
 
-real(8) :: worker_A(3),worker_current(3,2),worker_ne
+real(8) :: worker_A(3),worker_current(3,2),worker_ne,worker_density_integral(4)
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
@@ -116,6 +116,10 @@ if(worker_requested()) then
   call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   call calc_current(system,mg,stencil,info,srg,spsi_in,ppg,worker_current(:,1:system%nspin))
   spsi_in%update_zwf_overlap=.true.
+  if(worker_norm_requested())then
+    call calc_dip(info%icomm_r,lg,mg,system,rho_s,worker_density_integral)
+    worker_electron_number=worker_density_integral(4)*system%Hvol
+  endif
   call worker_reply(0,sum(worker_current(:,1:system%nspin),dim=2))
   end if
 end if
@@ -167,6 +171,10 @@ TE : do itt=Mit+1,nt
     if(worker_E_requested()) then
       call worker_reply_E(itt,rt%dDp_e(:,itt),rt%Dp_e(:,itt)+rt%Dp_i(:,itt))
     else
+      if(worker_norm_requested())then
+        call calc_dip(info%icomm_r,lg,mg,system,rho_s,worker_density_integral)
+        worker_electron_number=worker_density_integral(4)*system%Hvol
+      endif
       call worker_reply(itt,rt%curr(:,itt))
     end if
   end if

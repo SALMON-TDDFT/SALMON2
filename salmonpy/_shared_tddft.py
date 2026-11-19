@@ -167,6 +167,20 @@ class NativeTDDFTModel:
 # Import after model definitions: embedded_tddft exposes NativeTDDFTModel lazily.
 from .embedded_tddft import _NativeState
 class _SharedState(_NativeState):
+    @property
+    def electron_number(self):
+        """Collective read-only norm of this specific state handle."""
+        from .errors import NumericalError
+        if self.closed or self.failed:raise InputError('closed or failed native state')
+        fn=getattr(self.native.model.lib,'sp_tddft_handle_electron_number',None)
+        if fn is None:raise RuntimeFailure('runtime lacks measured electron-number ABI; explicitly rebuild/use a matching runtime')
+        fn.argtypes=[c.c_int64,c.POINTER(c.c_double)];fn.restype=c.c_int
+        value=c.c_double();code=self._call(fn,self.handle,c.byref(value))
+        codes=self.native.context.solver_comm.allgather(int(code))
+        if any(v==4 for v in codes):raise NumericalError('nonfinite/nonpositive measured electron number')
+        if any(codes):raise RuntimeFailure('electron-number query failed: '+str(codes))
+        return value.value
+
     def _refresh(self):
         step=c.c_int();A=np.zeros(3);j=np.zeros(3)
         model=self.native.model

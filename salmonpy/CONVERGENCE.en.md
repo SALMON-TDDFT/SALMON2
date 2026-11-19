@@ -7,35 +7,72 @@ and planning never compile, download or start a solver. An older native library
 without this ABI requires an explicit wheel update or kernel rebuild.
 
 `plan_grid_scan(cell_angstrom, radii=..., material_id=...)` starts at the smallest
-selected physical PP radius/3 and refines to0.1 angstrom by default. Finer limits
+selected physical PP radius/3, with0.1 angstrom as the default investigation limit.
+It stops earlier once adjacent SCF-converged grids meet the declared tolerance. Finer limits
 are allowed. Each species record requires radius_angstrom, an explicit definition
 and pp_sha256. Automatic radius extraction is not implemented: never substitute
 the radial table extent or mesh step. Existing ceiling-grid resolution reports
 actual spacings and removes duplicate effective grids. Keep a small fixed k mesh.
 
-`run_grid_scan(plan, evaluate, atol=..., rtol=...)` accepts a callback returning
-value (e.g. Hartree/atom), scf_converged (boolean) and optional metadata. Hold the
-observable, units, geometry, XC, PP, bands and SCF conditions fixed. Unconverged
-SCF warns and continues with provisional evidence. Adjacent-grid comparisons
-require explicit tolerances; no passing pair yields None, never automatic success
-at the finest grid. This stage establishes no k-point convergence.
+Use `run_current_grid_scan(plan, evaluate)` for the primary grid decision.
+For every grid, evaluate returns scf_converged and a dt_report from run_dt_scan.
+Only a completed trial at norm_acceptable_dt_au is used. Compare adjacent grids
+with the finer grid as reference. The default accepted error is **5% or less**:
+
+    relative RMS = sqrt(sum((j_coarse-j_fine)**2)) / sqrt(sum(j_fine**2)) <=0.05
+
+The sums cover common physical times and all three current components. This
+relative L2/RMS metric avoids pointwise division at zero crossings. Different
+dt values must have nested sample clocks; align by subsampling, never implicit
+interpolation. A zero reference has no relative decision; only an explicit
+positive absolute RMS tolerance enables an absolute-only decision.
+
+Hold material, PP/XC, k mesh, excitation and physical duration fixed. A grid
+without a norm-qualified dt is unresolved and excluded from comparison. SCF
+nonconvergence warns and continues with provisional evidence. A confirmed
+adjacent SCF-converged pair with error<=5% ends the scan before0.1 angstrom if
+possible. Set stop_when_converged=False for the full plan. No passing pair yields
+None. K-point convergence is separate. Scalar energy comparison via run_grid_scan
+remains supplementary; it is not the recommended current-based grid criterion.
+
+```python
+from salmonpy.convergence import run_current_grid_scan
+# evaluate_grid uses the Fortran/C backend and returns
+# {"scf_converged": bool, "dt_report": run_dt_scan_result}.
+report = run_current_grid_scan(spatial, evaluate_grid, rtol=0.05, atol=0.0)
+```
 
 ```python
 from salmonpy.convergence import plan_dt_scan, run_dt_scan
 plan = plan_dt_scan(material_id="silicon", duration_fs=3,
                     impulse=[1e-4,0,0], expected_electrons=8)
 report = run_dt_scan(plan, lambda dt: initial.new_state(dt=dt),
-                     electron_number=backend.measured_electron_number,
                      atol=0.0, rtol=1e-5)
 ```
 
-This is the connection contract, not a new method already attached to SALMONpy
-TDDFT states. The backend must provide a Fortran/C measurement of occupied
-wavefunction/density norm including weights and volume. Returning configured
-nelec cannot detect integration errors. Built-in native TDDFT measurement wiring
-and real-material validation are a subsequent stage. Each trial uses an independent
-state at t=0,A/c=0, with initial current and step(A/c) returning three-component
-charge current. States are closed explicitly.
+New explicitly built runtimes expose electron_number on process TDDFT states
+and ordinary native/shared/heterogeneous-registry states. It is measured in Fortran
+from occupied, k-weighted spin density and grid volume, not configured nelec.
+run_dt_scan uses this property by default. A custom Fortran/C backend may instead
+supply electron_number=callback. Native queries are collective: all internal MPI
+ranks call in the same order. Queries are read-only, state-handle-specific and
+measure restored density after restart. Supported profiles are crystalline
+A-driven PZ/TB-mBJ/Libxc-PZ/PBE. Fast PR HSE and isolated E-drive measurement
+are not connected yet. Legacy runtimes still support ordinary calculations;
+missing diagnostics fail explicitly rather than substituting an input count.
+Updating the wheel alone does not update an existing solver binary.
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.tddft_convergence BUILD_JSON NEW_OUTPUT --grid 16
+```
+
+The example retains GS in memory and explicitly disables GS restart output.
+Each dt creates independent material state from the same GS. SCF nonconvergence
+warns and continues with provisional evidence. This small low-k example does not
+certify optical convergence. The solver's existing order-of-magnitude electron
+count guard returns a recoverable numerical error in the recovery-capable API,
+restoring the accepted state and ending only that trial. This is distinct from
+exceeding the1e-5 diagnostic target.
 
 The grid and GS remain fixed. dt starts at0.2 au and halves; the physical duration
 is rounded up to a coarse step, then shared by every trial. The same weak jump

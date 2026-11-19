@@ -12,7 +12,7 @@ import numpy as np
 from .errors import InputError, NumericalError, RuntimeFailure
 from .structure import grid_from_spacing
 
-__all__ = ['plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan']
+__all__ = ['plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan','run_current_grid_scan']
 _AU_TIME_FS = .02418884326505  # SALMON input convention.
 
 
@@ -25,6 +25,8 @@ def _kernel():
         lib.sp_convergence_check.argtypes=[c.c_int,c.c_void_p,c.c_int]
         lib.sp_convergence_norm.argtypes=[c.c_int,c.c_void_p,c.c_double,c.c_double,c.c_double,c.c_void_p,c.POINTER(c.c_int)]
         lib.sp_convergence_compare.argtypes=[c.c_int,c.c_void_p,c.c_void_p,c.c_double,c.c_double,c.c_void_p,c.POINTER(c.c_int)]
+        lib.sp_convergence_waveforms.argtypes=lib.sp_convergence_compare.argtypes
+        lib.sp_convergence_waveforms.restype=c.c_int
         for name in ('sp_convergence_check','sp_convergence_norm','sp_convergence_compare'):
             getattr(lib,name).restype=c.c_int
     except AttributeError as exc:
@@ -120,7 +122,7 @@ def _tolerances(atol,rtol):
     return _number(atol,'atol'),_number(rtol,'rtol')
 
 
-def run_grid_scan(plan, evaluate, *, atol, rtol):
+def run_grid_scan(plan, evaluate, *, atol, rtol, stop_when_converged=True):
     """Evaluate a fixed scalar observable (e.g. GS Hartree/atom) on each grid.
 
     evaluate(trial) returns value and scf_converged; nonconvergence warns and
@@ -128,8 +130,9 @@ def run_grid_scan(plan, evaluate, *, atol, rtol):
     """
     atol,rtol=_tolerances(atol,rtol)
     if plan.get('schema')!='salmonpy.grid-scan/1':raise InputError('grid scan plan required')
+    if type(stop_when_converged) is not bool:raise InputError('stop_when_converged must be boolean')
     _kernel()
-    rows=[];selected=None;provisional=False
+    rows=[];selected=None;provisional=False;selected_provisional=False
     for trial in deepcopy(plan['trials']):
         row={**trial,'status':'complete','comparison':None}
         try:
@@ -143,16 +146,22 @@ def run_grid_scan(plan, evaluate, *, atol, rtol):
                 coarse=rows[-1]
                 row['comparison']={**_comparison([coarse['value']],[value],atol,rtol),
                     'coarse_index':coarse['index'],'provisional':not (coarse['scf_converged'] and row['scf_converged'])}
-                if selected is None and row['comparison']['within_tolerance']:
+                if row['comparison']['within_tolerance'] and (selected is None or
+                        (selected_provisional and not row['comparison']['provisional'])):
                     selected=max(coarse['grid']['actual_spacing_angstrom'])
+                    selected_provisional=row['comparison']['provisional']
         except (NumericalError,FloatingPointError) as exc:
             row.update(status='numerical_failure',value=None,error=str(exc))
         except (RuntimeFailure,OSError) as exc:
             row.update(status='runtime_failure',value=None,error=str(exc))
         rows.append(row)
+        if (stop_when_converged and row.get('comparison')
+                and row['comparison']['within_tolerance'] and not row['comparison']['provisional']):
+            break
     return {'schema':'salmonpy.grid-scan-report/1','plan':deepcopy(plan),'material_id':plan['material_id'],
             'atol':atol,'rtol':rtol,'trials':rows,'selected_spacing_angstrom':selected,
-            'provisional':provisional,'kpoint_convergence_established':False}
+            'provisional':provisional,'kpoint_convergence_established':False,
+            'stopped_early':len(rows)<len(plan['trials']),'selected_provisional':selected_provisional}
 
 
 def plan_dt_scan(*, duration_fs=3., levels=7, initial_dt=.2, material_id,
@@ -182,7 +191,7 @@ def plan_dt_scan(*, duration_fs=3., levels=7, initial_dt=.2, material_id,
             'expected_electrons':expected_electrons,'time_unit_fs':_AU_TIME_FS}
 
 
-def run_dt_scan(plan, new_state, *, electron_number, atol=0., rtol=1e-5,
+def run_dt_scan(plan, new_state, *, electron_number=None, atol=0., rtol=1e-5,
                 current_atol=None,current_rtol=None):
     """Stream independent states and stop a nonfinite trial at its first bad step.
 
@@ -203,7 +212,7 @@ def run_dt_scan(plan, new_state, *, electron_number, atol=0., rtol=1e-5,
     A=np.asarray(plan['impulse_A_over_c'],dtype=float);A.setflags(write=False)
     rows=[];nonbreaking=None;acceptable=None;current_choice=None
     def measured(state):
-        value=float(electron_number(state))
+        value=float(state.electron_number if electron_number is None else electron_number(state))
         _checked([value],positive=True)
         return value
     for trial in deepcopy(plan['trials']):
@@ -249,3 +258,89 @@ def run_dt_scan(plan, new_state, *, electron_number, atol=0., rtol=1e-5,
             'current_atol':current_atol,'current_rtol':current_rtol,'trials':rows,
             'nonbreaking_dt_au':nonbreaking,'norm_acceptable_dt_au':acceptable,
             'current_converged_dt_au':current_choice,'physical_accuracy_certified':False}
+
+
+def _waveform_comparison(coarse, fine, atol, rtol):
+    a=np.ascontiguousarray(coarse,dtype=np.float64)
+    b=np.ascontiguousarray(fine,dtype=np.float64)
+    if a.shape!=b.shape or a.ndim!=2 or a.shape[1]!=3 or not len(a):
+        raise InputError('current traces must share shape (time,3)')
+    stats=np.empty(4);accepted=c.c_int()
+    code=_kernel().sp_convergence_waveforms(a.size,a.ctypes.data,b.ctypes.data,
+                                           atol,rtol,stats.ctypes.data,c.byref(accepted))
+    if code:raise NumericalError('native current comparison rejected nonfinite arithmetic')
+    return {'absolute_rms_error':float(stats[0]),
+            'relative_rms_error':float(stats[1]) if stats[2]>0 else None,
+            'reference_rms':float(stats[2]),'maximum_absolute_error':float(stats[3]),
+            'within_tolerance':bool(accepted.value)}
+
+
+def run_current_grid_scan(plan, evaluate, *, rtol=.05, atol=0., stop_when_converged=True):
+    """Compare grid currents at norm-qualified dt, with5% relative RMS by default.
+
+    evaluate(trial) returns scf_converged and dt_report from run_dt_scan. Hold
+    material, excitation, k sampling and physical duration fixed. Nested endpoint
+    grids are aligned by subsampling; no interpolation changes the observables.
+    """
+    atol,rtol=_tolerances(atol,rtol)
+    if plan.get('schema')!='salmonpy.grid-scan/1':raise InputError('grid scan plan required')
+    if type(stop_when_converged) is not bool:raise InputError('stop_when_converged must be boolean')
+    _kernel()
+    rows=[];selected=None;selected_provisional=False;provisional=False
+    for trial in deepcopy(plan['trials']):
+        row={**trial,'status':'complete','comparison':None}
+        try:
+            value=evaluate(deepcopy(trial))
+            if type(value.get('scf_converged')) is not bool:raise InputError('explicit scf_converged boolean required')
+            report=deepcopy(value['dt_report'])
+            if report['material_id']!=plan['material_id']:raise InputError('grid and dt material IDs differ')
+            row.update(scf_converged=value['scf_converged'],dt_report=report)
+            if not row['scf_converged']:
+                provisional=True
+                warnings.warn('SCF not converged; current-grid evidence is provisional',UserWarning,stacklevel=2)
+            dt=report.get('norm_acceptable_dt_au')
+            eligible=[t for t in report['trials'] if t['dt_au']==dt and t['status']=='complete' and t.get('norm_within_tolerance')]
+            if not eligible:
+                row['status']='dt_unresolved'
+            else:
+                row['selected_dt_au']=dt
+                trace=np.asarray(eligible[0]['current'],dtype=float)
+                if trace.ndim!=2 or trace.shape[1]!=3 or len(trace)<2:raise InputError('current trace must include initial and final three-component samples')
+                if not math.isclose((len(trace)-1)*dt,report['duration_au'],rel_tol=1e-12):raise InputError('current samples do not span the declared duration')
+                row['current']=_checked(trace).tolist()
+                if rows and rows[-1]['status']=='complete':
+                    coarse=rows[-1];previous=coarse['dt_report']
+                    if (report['material_id']!=previous['material_id'] or
+                        report['impulse_A_over_c']!=previous['impulse_A_over_c'] or
+                        report['atol']!=previous['atol'] or report['rtol']!=previous['rtol'] or
+                        report['duration_au']!=previous['duration_au']):
+                        raise InputError('current grid comparison requires matching material, impulse, norm target and duration')
+                    a=np.asarray(coarse['current'],dtype=float);b=np.asarray(row['current'],dtype=float)
+                    if coarse['selected_dt_au']>=dt:
+                        ratio=coarse['selected_dt_au']/dt;stride=round(ratio)
+                        if stride<1 or not math.isclose(ratio,stride,rel_tol=1e-12):raise InputError('nested current sample times required')
+                        b=b[::stride]
+                    else:
+                        ratio=dt/coarse['selected_dt_au'];stride=round(ratio)
+                        if stride<1 or not math.isclose(ratio,stride,rel_tol=1e-12):raise InputError('nested current sample times required')
+                        a=a[::stride]
+                    row['comparison']={**_waveform_comparison(a,b,atol,rtol),
+                        'coarse_index':coarse['index'],'sample_count':len(a),
+                        'provisional':not (coarse['scf_converged'] and row['scf_converged'])}
+                    comparison=row['comparison']
+                    if comparison['within_tolerance'] and (selected is None or
+                        (selected_provisional and not comparison['provisional'])):
+                        selected=max(coarse['grid']['actual_spacing_angstrom'])
+                        selected_provisional=comparison['provisional']
+        except (NumericalError,FloatingPointError) as exc:
+            row.update(status='numerical_failure',error=str(exc))
+        except (RuntimeFailure,OSError) as exc:
+            row.update(status='runtime_failure',error=str(exc))
+        rows.append(row)
+        if (stop_when_converged and row.get('comparison') and
+            row['comparison']['within_tolerance'] and not row['comparison']['provisional']):break
+    return {'schema':'salmonpy.current-grid-report/1','plan':deepcopy(plan),'material_id':plan['material_id'],
+            'metric':'current relative RMS at common physical times','rtol':rtol,'atol':atol,
+            'trials':rows,'selected_spacing_angstrom':selected,'selected_provisional':selected_provisional,
+            'provisional':provisional,'stopped_early':len(rows)<len(plan['trials']),
+            'kpoint_convergence_established':False}

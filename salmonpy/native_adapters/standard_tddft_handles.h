@@ -32,6 +32,9 @@ int sp_tddft_handle_init(const char *input,double dt,int capacity,
                         int64_t *token,double j[3]);
 int sp_tddft_model_new(int64_t *token,double j[3]);
 int sp_tddft_handle_step(int64_t token,const double Aold[3],const double Anew[3],double j[3]);
+/* Additive read-only collective density integral; includes occupation/k weights and volume. */
+int sp_tddft_electron_number(double *value);
+int sp_tddft_handle_electron_number(int64_t token,double *value);
 int sp_tddft_handle_info(int64_t token,int *step,double A[3],double j[3]);
 /* Modes0 save,1 fresh load,2 stage,3 commit,4 cancel; paths are rank-local. */
 int sp_tddft_handle_checkpoint(int64_t token,const char *path,int mode);

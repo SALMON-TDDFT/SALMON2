@@ -19,6 +19,14 @@ class ConvergenceTests(unittest.TestCase):
    visited.append(trial['grid']['counts']);return {'value':-2.,'scf_converged':False}
   with self.assertWarns(UserWarning):result=run_grid_scan(plan,evaluate,atol=1e-8,rtol=0.)
   self.assertEqual(len(visited),len(counts));self.assertTrue(result['provisional'])
+  finite=[]
+  stopped=run_grid_scan(plan,lambda trial:(finite.append(trial) or {'value':-2.,'scf_converged':True}),atol=1e-8,rtol=0.)
+  self.assertEqual(len(finite),2)
+  self.assertTrue(stopped['stopped_early'])
+  self.assertGreater(stopped['selected_spacing_angstrom'],.1)
+  whole=run_grid_scan(plan,lambda trial:{'value':-2.,'scf_converged':True},atol=1e-8,rtol=0.,stop_when_converged=False)
+  self.assertEqual(len(whole['trials']),len(counts))
+  self.assertFalse(whole['stopped_early'])
   self.assertIsNotNone(result['selected_spacing_angstrom'])
   self.assertFalse(result['kpoint_convergence_established'])
   self.assertEqual(result['plan']['radii']['Si']['pp_sha256'],'a'*64)
@@ -73,3 +81,31 @@ class ConvergenceTests(unittest.TestCase):
    with self.subTest(norm=bad):
     broken=run_dt_scan(plan,State,electron_number=lambda s:bad if s.t>0 else 8.)
     self.assertTrue(all(t['status']=='numerical_failure' and t['failed_step']==1 and t['current'] is None for t in broken['trials']))
+
+ def test_current_grid_uses_norm_qualified_dt_and_five_percent_rms(self):
+  from salmonpy.convergence import plan_grid_scan,run_current_grid_scan
+  plan=plan_grid_scan(np.diag([4.,4.,4.]),material_id='si',radii={'Si':{'radius_angstrom':1.2,'definition':'explicit cutoff','pp_sha256':'a'*64}})
+  visits=[]
+  def evaluate(trial):
+   visits.append(trial['index']);i=trial['index']
+   dt=.1 if i==0 else .05;steps=2 if i==0 else 4
+   values=np.zeros((steps+1,3));values[:,0]=np.linspace(0,1,steps+1)*(1.1 if i==0 else 1.)
+   return {'scf_converged':True,'dt_report':{'material_id':'si','duration_au':.2,'impulse_A_over_c':[1e-4,0,0],
+      'atol':0.,'rtol':1e-5,'norm_acceptable_dt_au':dt,'trials':[{'dt_au':dt,'status':'complete','norm_within_tolerance':True,'current':values.tolist()}]}}
+  result=run_current_grid_scan(plan,evaluate)
+  self.assertEqual(visits,[0,1,2])
+  self.assertAlmostEqual(result['trials'][1]['comparison']['relative_rms_error'],.1)
+  self.assertFalse(result['trials'][1]['comparison']['within_tolerance'])
+  self.assertTrue(result['trials'][2]['comparison']['within_tolerance'])
+  self.assertTrue(result['stopped_early'])
+  self.assertEqual(result['rtol'],.05)
+  self.assertIsNotNone(result['selected_spacing_angstrom'])
+  # A waveform at zero crossings does not impose pointwise relative thresholds.
+  from salmonpy.convergence import _waveform_comparison
+  result=_waveform_comparison([[0,0,0],[1,0,0]],[[.01,0,0],[1,0,0]],0.,.05)
+  self.assertTrue(result['within_tolerance'])
+  boundary=_waveform_comparison([[.95,0,0]],[[1,0,0]],0.,.05)
+  self.assertTrue(boundary['within_tolerance'])
+  self.assertFalse(_waveform_comparison([[1.0501,0,0]],[[1,0,0]],0.,.05)['within_tolerance'])
+  zero=_waveform_comparison([[0,0,0]],[[0,0,0]],0.,.05)
+  self.assertFalse(zero['within_tolerance']);self.assertIsNone(zero['relative_rms_error'])

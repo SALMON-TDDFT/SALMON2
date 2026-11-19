@@ -2,9 +2,59 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## Latest actionable queue — 2026-11-18 (after functional test cleanup)
+## Current actionable queue — 2026-11-19 (measured norm/current-grid review)
 
-This section takes precedence over all earlier dated status/check counts below.
+This section takes precedence over historical dated checkboxes below. Historical
+unchecked scope statements are not independent tasks; retain them as evidence.
+Molecular work remains paused. Memory budgets warn; SCF nonconvergence warns and
+retains results. Do not collect GS datasets or dispatch routine CI.
+
+### Completed and verified
+
+- [x] One maintained fast-PR solver tree and shared default preparation/build path;
+  ordinary XC does not require HSE dependencies. Historical source evidence retained.
+- [x] Ordinary TDDFT measured electron number: read-only Fortran density integral,
+  process protocol and collective native/shared/heterogeneous-handle interfaces.
+  State independence, direct/replay restore and prior-current comparisons verified.
+- [x] dt campaigns: norm target1e-5; finite-value failures end only the failed trial.
+  Recovery-capable MPI returns the pre-existing gross-norm failure instead of STOP.
+- [x] Primary grid criterion: current relative RMS error<=5% at norm-qualified dt,
+  common physical times and finer-grid reference; confirmed SCF-converged pairs
+  stop before0.1A. Scalar energy comparison remains supplementary.
+- [x] Mac/internal-MPI2 Si16³/~2fs: SCF converged,dt0.2 fails at step8;dt0.1
+  completes with maximum relative electron loss4.22e-10. This is not an optical
+  or general-grid convergence certificate. Existing12³→16³ current error18.83%
+  does not pass5%;12³ SCF was unconverged, so that comparison is provisional.
+- [x] Source/installed633 tests:632pass,1skip. Fresh source/object audits,
+  sdist→wheel, installed examples, JP/EN/AI byte parity and guide sync verified.
+
+### Remaining groups (not a count of individual implementation patches)
+
+1. [ ] Extend measured-norm diagnostics to fast PR HSE. Isolated E-drive norm
+   wiring belongs to paused molecular work and is not the next active priority.
+2. [ ] Establish an actual current-grid campaign with two SCF-converged grids
+   passing5%, then separate k-point/response checks. Add unambiguous PP cutoff
+   extraction; explicit species/channel radius is required until that exists.
+3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
+   physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
+   silently changing existing results.
+4. [ ] Complete active SCF/mixing/cache continuation and portable checkpoint/version
+   migration, including changed-decomposition restore. Existing same-topology RT
+   direct restart is complete within measured scopes.
+5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
+   ABI and wider initialization/allocation/process-failure recovery. Existing
+   rollback does not guarantee arbitrary STOP/OOM/MPI-failure or threaded reentrancy.
+6. [ ] Larger grids/material counts, resource/communication calibration, matching
+   runtime distribution and Linux/Intel Mac/other-platform evidence. Respect the
+   Actions budget; no routine CI dispatch.
+
+Current evidence: calc2026/salmonpy-tddft-measured-norm-20261119 and
+calc2026/salmonpy-current-grid-criterion-20261119. Local writes are verified;
+cloud synchronization is not confirmed. Detailed historical records follow.
+
+## Historical queue — 2026-11-18 (after functional test cleanup)
+
+This was the active queue at that checkpoint; the current queue above supersedes it.
 Historical unchecked bullets are scope records, not additional independent tasks.
 Verified GS handoff/HSE registry/test cleanup committed as cd0841fe [skip ci].
 Ordinary HSE assembly2340787d and Gamma portable exportb66b97fd committed and
@@ -1775,7 +1825,29 @@ Final closure: source/installed628 (627pass,1skip), installed736-file and JP/EN/
 - [x] Independent dt trials from0.2au, fixed impulse and common physical duration; norm tolerance default1e-5 after user clarification.
 - [x] Fortran scalar-IEEE sample checks, norm loss/gain/error and optional trace comparisons. Python handles planning/dispatch/records.
 - [x] Tolerance exceedance reports without stopping; numerical breakdown stops only that trial; runtime/cleanup failure separated. SCF nonconvergence warns/provisional.
-- [ ] Wire actual built-in TDDFT electron-number measurement and existing GS/RT callbacks; execute material campaign within agreed resources without collecting GS datasets.
+- [x] Wire ordinary built-in TDDFT electron-number measurement and memory GS/RT callbacks; execute native MPI2 Si campaigns without collecting GS datasets. Fast-HSE/isolated measurement remain separate.
 - [ ] Automatic PP cutoff-radius selection remains deferred: require an explicit physical radius rather than guess channel semantics.
 
 Campaign verification: source and installed631 tests (630pass,1skip); final provenance update covered by3 affected tests in source/final wheel. Installed planning sample and Fortran below/above1e-5 loss/gain/NaN/Inf controls pass; old LD/SBE regressions remain passing. JP/EN/AI byte parity and sdist→wheel verified. No new GS/native TDDFT norm measurement campaign or CI. Evidence: calc2026/salmonpy-convergence-campaigns-20261119.
+
+### Measured TDDFT norm and early grid stopping (2026-11-19)
+
+- [x] Commit/push5ba6406d before continuing; skip-ci retained.
+- [x] Add read-only Fortran occupied-density integral to ordinary native lifetime and per-state-handle C ABI; collective internal-MPI calls. Process worker optional norm payload preserves old protocol.
+- [x] Default run_dt_scan reads state.electron_number; no configured-nelec substitution. Old runtime normal use remains valid, missing norm reports explicitly.
+- [x] Confirmed adjacent SCF-converged grid pair ends the scan before0.1A; full-scan override and provisional evidence retained.
+- [x] Real MPI2 Si8/grid12 andgrid16/2fs trials. Grid16 GS converged,dt0.2 fails step8; finer trials continue;dt0.1 max relative electron loss4.22e-10, meeting1e-5. Grid12 SCF unconverged stays provisional.
+- [x] Recover the existing gross-electron-count STOP as status21 in recovery-capable native stepping; thresholds unchanged, accepted state restored, failing trace excluded. Raw batch behavior unchanged.
+- [x] Six XC/decomposition controls: measured norm/query isolation/direct restart and independent current equality to fixed prior build; process current/replay norm exact.
+- [ ] Fast PR HSE/isolated E-drive measured-norm API, PP cutoff parser and broader physical/grid/k/response validation remain.
+
+Final measured-norm verification: source/installed632 tests (631pass,1skip), sdist→wheel and installed native-MPI example pass; JP/EN/AI and implementation byte parity. Si16³ GS converged, ~2fs:dt0.2 returns numerical error at step8 while remaining trials continue;dt0.1 max electron-loss fraction4.22e-10. No GS datasets or CI. Canonical evidence: calc2026/salmonpy-tddft-measured-norm-20261119.
+
+### Current-based grid criterion (user clarification)
+
+- [x] Primary grid API uses each grid's norm-qualified dt trace; default relative current RMS tolerance5%, finer-grid reference and common physical times. Fortran computes errors.
+- [x] Confirmed SCF-converged passing pair stops before0.1A; scalar-energy API remains supplementary, unresolved dt excluded.
+- [x] Synthetic10% rejection / passing pair / inclusive5% / zero-crossing / zero-reference controls. Existing Si12³→16³ trace comparison18.83%, not passing and provisional due coarse GS.
+- [ ] A physically converged current-grid campaign with two SCF-converged grids meeting5% is not established by the existing pair.
+
+Current-grid criterion verification: source/installed633 tests (632pass,1skip), sdist→wheel and JP/EN/AI/implementation byte parity. Error statistics use Fortran only. Existing Si12³/16³ waveforms differ by18.83%, provisional and not accepted at5%. No new GS data or CI. Evidence: calc2026/salmonpy-current-grid-criterion-20261119.

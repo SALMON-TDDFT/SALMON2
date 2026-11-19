@@ -4,13 +4,20 @@ module tddft_worker
   implicit none
   private
   public :: worker_requested, worker_configure, worker_initial_A, worker_next_A, worker_reply
-  public :: worker_E_requested, worker_reply_E
+  public :: worker_E_requested, worker_reply_E,worker_norm_requested,worker_electron_number
   ! Embedded mode is set only by the explicit host-MPI ABI, once per process.
   logical,public,save :: worker_embedded=.false.
   real(8),public,save :: embedded_dt
   integer,public,save :: embedded_steps,embedded_decomposition(5)
   real(8), save :: worker_initial_A(3)=0d0
+  real(8),save :: worker_electron_number=0d0
 contains
+  logical function worker_norm_requested()
+    character(8) :: value
+    integer :: status
+    call get_environment_variable("SALMONPY_TDDFT_NORM",value,status=status)
+    worker_norm_requested=status==0.and.trim(value)=="1"
+  end function
   logical function worker_requested()
     character(8) :: value
     integer :: status
@@ -142,9 +149,17 @@ contains
     real(8),intent(in) :: J(3)
     integer :: i
     do i=1,3
-      if(.not.ieee_is_finite(J(i))) error stop 'SALMONpy: nonfinite current'
+      if(.not.ieee_is_finite(J(i)))then
+        write(output_unit,'(a)') 'SALMONPY_NUMERICAL_FAILURE nonfinite current'
+        flush(output_unit)
+        error stop 'SALMONpy: nonfinite current'
+      endif
     end do
-    write(output_unit,'(a,1x,i0,3(1x,es26.17e3))') 'SALMONPY_TDDFT_V1',step,J
+    if(worker_norm_requested())then
+      write(output_unit,'(a,1x,i0,4(1x,es26.17e3))') 'SALMONPY_TDDFT_V1',step,J,worker_electron_number
+    else
+      write(output_unit,'(a,1x,i0,3(1x,es26.17e3))') 'SALMONPY_TDDFT_V1',step,J
+    endif
     flush(output_unit)
   end subroutine
   subroutine worker_reply_E(step,delta_dipole,total_dipole)

@@ -224,6 +224,14 @@ class TDDFTState(_SnapshotMixin):
         """Electric (charge) current density j = -J_matter at the current time."""
         return _frozen(-self._current)
     @property
+    def electron_number(self):
+        """Actual Fortran-integrated occupied electron density at this endpoint."""
+        if self._closed: raise RuntimeFailure("TDDFT state is closed")
+        value=getattr(self,"_electron_number",None)
+        if value is None: raise RuntimeFailure("runtime does not expose measured electron number; explicitly build/use a matching runtime")
+        return value
+
+    @property
     def matter_current(self):
         """SALMON electronic matter current J (internal representation)."""
         return _frozen(self._current)
@@ -244,7 +252,7 @@ class TDDFTState(_SnapshotMixin):
         self._events=queue.Queue()
         self._proc=subprocess.Popen([str(self._executable.path)],cwd=work,
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1,
-            env={**environment,'SALMONPY_TDDFT_WORKER':self._worker_mode,'OMP_NUM_THREADS':str(self._threads)})
+            env={**environment,'SALMONPY_TDDFT_WORKER':self._worker_mode,'SALMONPY_TDDFT_NORM':'1','OMP_NUM_THREADS':str(self._threads)})
         self._reader=threading.Thread(target=_read_output,args=(self._proc.stdout,self._events,work/'worker.log',self._reply_prefix),daemon=True)
         self._reader.start()
         self._send(self._input.rstrip()+'\n!SALMONPY_END_INPUT\n'+
@@ -283,8 +291,14 @@ class TDDFTState(_SnapshotMixin):
         except queue.Empty as exc: raise TimeoutError('SALMON TDDFT worker response timed out') from exc
         if line is None:
             log=Path(self._work.name)/'run/worker.log'
-            raise RuntimeFailure('SALMON TDDFT worker exited before reply:\n'+log.read_text()[-6000:])
+            message=log.read_text()[-6000:]
+            from .errors import NumericalError
+            if 'SALMONPY_NUMERICAL_FAILURE' in message: raise NumericalError(message)
+            raise RuntimeFailure('SALMON TDDFT worker exited before reply:\n'+message)
         fields=line.split()
+        self._electron_number=None
+        if self._reply_size==3 and len(fields)==6:
+            self._electron_number=float(fields[-1]);fields=fields[:-1]
         if len(fields)!=2+self._reply_size or int(fields[1])!=index: raise RuntimeFailure('TDDFT worker protocol sequence mismatch')
         return _array([float(x) for x in fields[2:]],'worker observables',(self._reply_size,))
 
@@ -328,6 +342,8 @@ class TDDFTState(_SnapshotMixin):
             except Exception as recovery:
                 self.close()
                 raise RuntimeFailure('TDDFT worker failed and recovery failed; state closed') from recovery
+            from .errors import NumericalError
+            if isinstance(exc,NumericalError): raise NumericalError('TDDFT numerical step failed; previous accepted state restored') from exc
             raise RuntimeFailure('TDDFT step failed; previous accepted state restored') from exc
         self._current=current;self._history.append(A.copy());self._curr_history.append(current.copy());self._steps+=1
         return self.current

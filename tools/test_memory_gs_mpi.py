@@ -78,7 +78,7 @@ def fast_controls(a):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('build');p.add_argument('fixture');p.add_argument('output');p.add_argument('--size',type=int,default=1);p.add_argument('--split',default='orbital');p.add_argument('--external-k',action='store_true');p.add_argument('--describe-input',action='store_true');p.add_argument('--fast-hse',action='store_true');p.add_argument('--control-build');p.add_argument('--interleave-fixture');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('build');p.add_argument('fixture');p.add_argument('output');p.add_argument('--size',type=int,default=1);p.add_argument('--split',default='orbital');p.add_argument('--external-k',action='store_true');p.add_argument('--describe-input',action='store_true');p.add_argument('--fast-hse',action='store_true');p.add_argument('--control-build');p.add_argument('--interleave-fixture');p.add_argument('--measure-norm',action='store_true');a=p.parse_args()
     if a.fast_hse:
         try:fast_controls(a)
         except BaseException:
@@ -150,8 +150,16 @@ def main():
        else:raise AssertionError('uncomputed import forces exposed')
        model=gs.tddft_model(dt=.003,max_steps=32)
        state=model.new_state('a');sibling=model.new_state('b')
+       norm_trace=[]
+       if a.measure_norm:
+        initial_norm=state.electron_number;sibling_norm=sibling.electron_number
+        assert initial_norm>0 and initial_norm==sibling_norm
        for i in range(1,9):
         trace.append(state.step(A(i)))
+        if a.measure_norm:
+         before=state.current.copy();norm_trace.append(state.electron_number)
+         np.testing.assert_array_equal(before,state.current)
+         if i==1:assert sibling.electron_number==sibling_norm
         np.testing.assert_array_equal(sibling.step(-A(i)),sibling.current)
        if getattr(session.backend,'_ordinary_rt',False):
         import shutil
@@ -177,15 +185,19 @@ def main():
         assert all(comm.allgather(caught))
         assert session.resources()==before
         np.testing.assert_array_equal(state.current,current)
+       if a.measure_norm:saved_norm=state.electron_number
        # An existing GS load while RT is active must preserve its inputs/caches.
        loaded=session.load(a.interleave_fixture or fixture,material_id='second');loaded.close();gs.close()
        if a.describe_input:assert gs.input_metadata().as_dict()==description.as_dict()
        for i in range(9,17):trace.append(state.step(A(i)))
        fresh=model.new_state('restore-after-GS-close')
        fresh.checkpoint(root/f'state-{comm.rank}.bin',restore=True)
+       if a.measure_norm:assert fresh.electron_number==saved_norm
        for i in range(9,17):np.testing.assert_array_equal(fresh.step(A(i)),trace[i-1])
        independent=model.new_state('independent')
        for i in range(1,17):np.testing.assert_array_equal(independent.step(A(i)),trace[i-1])
+       if a.measure_norm:
+        assert state.electron_number==fresh.electron_number==independent.electron_number
        for s in (state,sibling,fresh,independent):s.close()
        model.close()
        assert not list(root.glob('gs-*/**/wfn.bin'))
@@ -202,7 +214,7 @@ def main():
       np.testing.assert_allclose(values[0],values[a.size],rtol=3e-13,atol=3e-15)
      else:np.testing.assert_array_equal(values[0],values[a.size])
      if w.rank==0:
-      result={'status':'pass','size':a.size,'split':a.split,'file_route_exact':exact,'file_route_within_tolerance':True,'max_current_difference_au':difference,'independent_states_exact':True,'resume_exact':True,'SCF_calls':0,'replayed_steps':0,'input_metadata':a.describe_input,'external_k_table':a.external_k,'missing_asset_rejected_before_native':a.external_k}
+      result={'status':'pass','size':a.size,'split':a.split,'file_route_exact':exact,'file_route_within_tolerance':True,'max_current_difference_au':difference,'independent_states_exact':True,'resume_exact':True,'SCF_calls':0,'replayed_steps':0,'input_metadata':a.describe_input,'external_k_table':a.external_k,'missing_asset_rejected_before_native':a.external_k,'measured_norm_checked':a.measure_norm}
       (Path(a.output)/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(result,flush=True)
     except BaseException:
      import traceback;traceback.print_exc();w.Abort(1)

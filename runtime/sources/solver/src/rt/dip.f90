@@ -102,6 +102,11 @@ subroutine subdip(comm,itt,rt,lg,mg,system,rho_s,rNe,poisson,Etot,pp)
         write(*,*) nproc_id_global,"t=",itt
         write(*,*) nproc_id_global,"rbox1=",rbox1
         write(*,*) nproc_id_global,"Ne=",rNe
+        if(rt%recover_errors)then
+          rt%step_error=21
+          call nvtxEndRange
+          return
+        endif
         stop
      end if
   else 
@@ -111,6 +116,11 @@ subroutine subdip(comm,itt,rt,lg,mg,system,rho_s,rNe,poisson,Etot,pp)
         write(*,*) nproc_id_global,"t=",itt
         write(*,*) nproc_id_global,"rbox1=",rbox1
         write(*,*) nproc_id_global,"Ne=",rNe
+        if(rt%recover_errors)then
+          rt%step_error=21
+          call nvtxEndRange
+          return
+        endif
         stop
      end if
   end if

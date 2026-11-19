@@ -58,3 +58,19 @@ class TDDFTLoaderTests(unittest.TestCase):
             if state._proc.poll() is None: state._proc.kill()
             state._proc.wait()
             state._proc.stdin.close()
+
+    def test_optional_measured_electron_reply_preserves_legacy_protocol(self):
+        import queue
+        from salmonpy.tddft import TDDFTState
+        from salmonpy.errors import RuntimeFailure
+        state=object.__new__(TDDFTState)
+        state._closed=False;state._timeout=1;state._events=queue.Queue()
+        state._reply_size=3
+        state._events.put('SALMONPY_TDDFT_V1 0 0 0 0 7.99999')
+        self.assertEqual(state._receive(0).shape,(3,))
+        self.assertEqual(state.electron_number,7.99999)
+        state._events.put('SALMONPY_TDDFT_V1 1 0 0 0')
+        state._receive(1)
+        with self.assertRaisesRegex(RuntimeFailure,'electron'):
+            _=state.electron_number
+        state._closed=True

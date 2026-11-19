@@ -75,4 +75,57 @@ contains
     endif
     sp_convergence_compare=0
   end function
+  subroutine scaled_square(value,scale,ssq)
+    real(c_double),intent(in) :: value
+    real(c_double),intent(inout) :: scale,ssq
+    real(c_double) :: magnitude
+    magnitude=abs(value)
+    if(magnitude==0d0)return
+    if(scale<magnitude)then
+      ssq=1d0+ssq*(scale/magnitude)**2
+      scale=magnitude
+    else
+      ssq=ssq+(magnitude/scale)**2
+    endif
+  end subroutine
+
+  integer(c_int) function sp_convergence_waveforms(n,coarse,fine,atol,rtol,stats,accepted) bind(c)
+    integer(c_int),value :: n
+    real(c_double),intent(in) :: coarse(*),fine(*)
+    real(c_double),value :: atol,rtol
+    real(c_double),intent(out) :: stats(4)
+    integer(c_int),intent(out) :: accepted
+    real(c_double) :: difference,es,eq,rs,rq,limit
+    integer :: i
+    sp_convergence_waveforms=4;stats=0d0;accepted=0
+    if(sp_convergence_check(n,coarse,0_c_int)/=0)return
+    if(sp_convergence_check(n,fine,0_c_int)/=0)return
+    if(.not.ieee_is_finite(atol).or..not.ieee_is_finite(rtol))return
+    if(atol<0d0.or.rtol<0d0)return
+    es=0d0;eq=1d0;rs=0d0;rq=1d0
+    do i=1,n
+      difference=coarse(i)-fine(i)
+      if(.not.ieee_is_finite(difference))return
+      call scaled_square(difference,es,eq)
+      call scaled_square(fine(i),rs,rq)
+      stats(4)=max(stats(4),abs(difference))
+    enddo
+    stats(1)=es*sqrt(eq/dble(n))
+    stats(3)=rs*sqrt(rq/dble(n))
+    if(stats(3)>0d0)then
+      stats(2)=stats(1)/stats(3)
+      if(.not.ieee_is_finite(stats(2)))stats(2)=huge(1d0)
+    endif
+    do i=1,4
+      if(.not.ieee_is_finite(stats(i)))return
+    enddo
+    limit=atol+rtol*stats(3)
+    ! Inclusive boundary, allowing only machine rounding, not a physical margin.
+    limit=limit+8d0*epsilon(1d0)*max(stats(1),stats(3))
+    if(.not.ieee_is_finite(limit))return
+    if(stats(3)>0d0.or.atol>0d0)then
+      if(stats(1)<=limit)accepted=1
+    endif
+    sp_convergence_waveforms=0
+  end function
 end module

@@ -611,6 +611,31 @@ integer(c_int) function sp_tddft_handle_step(token,Aold,Anew,J) bind(C)
   sp_tddft_handle_step=sp_tddft_step(Aold,Anew,J);J=-J
   call handle_unselect(index)
 end function
+integer(c_int) function sp_tddft_handle_electron_number(token,value) bind(C)
+  integer(c_int64_t),value :: token
+  real(c_double),intent(out) :: value
+  integer :: index,status
+  value=0d0
+  call handle_select(token,index,status)
+  sp_tddft_handle_electron_number=status
+  if(status/=0)return
+  sp_tddft_handle_electron_number=sp_tddft_electron_number(value)
+  call handle_unselect(index)
+end function
+integer(c_int) function sp_tddft_electron_number(value) bind(C)
+  use dip,only:calc_dip
+  use, intrinsic :: ieee_arithmetic,only:ieee_is_finite
+  real(c_double),intent(out) :: value
+  real(8) :: integrals(4)
+  value=0d0;sp_tddft_electron_number=12
+  if(.not.associated(state))return
+  call calc_dip(state%info%icomm_r,state%lg,state%mg,state%system,state%rho_s,integrals)
+  value=integrals(4)*state%system%Hvol
+  sp_tddft_electron_number=4
+  if(.not.ieee_is_finite(value))return
+  if(value<=0d0)return
+  sp_tddft_electron_number=0
+end function
 integer(c_int) function sp_tddft_handle_info(token,step,A,J) bind(C)
   integer(c_int64_t),value::token
   integer(c_int),intent(out)::step

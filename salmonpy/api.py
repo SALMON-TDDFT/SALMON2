@@ -9,7 +9,7 @@ from types import MappingProxyType
 __all__ = ['PUBLIC_API']
 PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spectrum', 'spectrum'),
  'salmonpy.api': ('PUBLIC_API',),
- 'salmonpy.convergence': ('plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan'),
+ 'salmonpy.convergence': ('plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan','run_current_grid_scan'),
  'salmonpy.gs_input': ('GSInputMetadata','describe_gs_input'),
  'salmonpy.native_steps': ('native_step_targets',),
  'salmonpy.stepping': ('StepTarget','StepRecoveryError','guarded_step'),

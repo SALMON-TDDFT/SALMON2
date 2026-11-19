@@ -241,6 +241,21 @@ class _NativeState:
             return fn(*args)
         finally:os.chdir(previous)
 
+    @property
+    def electron_number(self):
+        """Collective read-only density integral; requires the additive norm ABI."""
+        import ctypes as c
+        if self.closed or self.failed: raise InputError('closed or failed native state')
+        function=getattr(self.lib,'sp_tddft_electron_number',None)
+        if function is None: raise RuntimeFailure('runtime lacks measured electron-number ABI; explicitly rebuild/use a matching runtime')
+        function.argtypes=[c.POINTER(c.c_double)];function.restype=c.c_int
+        value=c.c_double()
+        code=self._call(function,c.byref(value))
+        codes=self.native.context.solver_comm.allgather(int(code))
+        if any(v==4 for v in codes):raise NumericalError('nonfinite/nonpositive measured electron number')
+        if any(codes):raise RuntimeFailure('electron-number query failed: '+str(codes))
+        return value.value
+
     def advance(self,old,new):
         error=None
         try:

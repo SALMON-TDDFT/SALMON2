@@ -447,6 +447,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   call timer_begin(LOG_WRITE_ENERGIES)
   call subdip(info%icomm_r,itt,rt,lg,mg,system,rho_s,rNe,poisson,energy%E_tot,pp)
   call timer_end(LOG_WRITE_ENERGIES)
+  if(rt%recover_errors)then
+    call recovery_agree(info,21,rt%step_error/=0,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
 
   !(force)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then  ! and or rvf flag in future
