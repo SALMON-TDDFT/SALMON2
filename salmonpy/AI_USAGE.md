@@ -776,7 +776,7 @@ context_mpi_protocol1の新しい高速PRランタイムでは、rt_open初期�
 
 通常PZ/Libxc-PZ/PBEのSCFはsession.run(..., steps=K)で反復境界に停止し、continue_scf(steps=M)、snapshot()/restore()で混合履歴を保ったメモリ内継続ができます。実測した初期化／実行反復カウンタを確認し、波動関数だけのwarm startを完全なSCF復元と呼ばないでください。スナップショットは同じ生存状態・ビルド・MPI分割に限定し、ディスク／プロセス再開を実装済みと案内しないでください。新APIでもSCF未収束は警告して結果を保持します。
 
-高速PR版HSE06も同じSCFメモリ保存APIに対応します。全k点CPU・k点MPIでHSE対応ビルドを使い、低速HSEへ落とさないでください。混合履歴・PBE事前SCFの進捗・交換演算子の数値キャッシュを保持し、FFT/backend資源は複製しません。復元時の初期化／過去反復の再計算は0です。本来の将来のPBE→HSE切替処理と復元時の再計算を区別してください。HSE移行後の未収束は警告して保持します。対称性・SOC/+U/DC・ディスク再開は未対応です。
+高速PR版HSE06も同じSCFメモリ保存APIに対応します。全k点CPU・k点MPIでHSE対応ビルドを使い、低速HSEへ落とさないでください。混合履歴・PBE事前SCFの進捗・交換演算子の数値キャッシュを保持し、FFT/backend資源は複製しません。復元時の初期化／過去反復の再計算は0です。本来の将来のPBE→HSE切替処理と復元時の再計算を区別してください。HSE移行後の未収束は警告して保持します。対称性・ディスク再開の最新範囲はNATIVE_GS各節を参照してください。SOC/+U/DCは未対応です。
 
 SCFのcheckpoint_capability／checkpoint_targetを使うと、共通execute_checkpointから
 通常XC／高速PR版HSEのメモリ保存・直接復元を呼べます。互換性JSONだけを保持しても
@@ -808,7 +808,7 @@ SCFデータ保存時には残差履歴も確認します。新しいnative GS�
 
 native SCFの準備済み復元候補を使わない場合はclose/discardまたはwith文で破棄します。GS状態のcloseと元のsnapshotのcloseも、それぞれが所有するPython候補を先に破棄します。MPI各rankで同順に呼び、Cホストが直接作った予約やGCによる自動MPI終了まで保証すると説明しません。
 
-通常XCのSCFディスク再開では、対応ランタイムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSEのk／軌道分割変更は後述の対応protocolで扱います。通常XCの空間分割は後述の専用入口を使い、HSE空間GSは後述の専用入口を使い、混合配置は未対応です。既定と共通保護付き復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
+通常XCのSCFディスク再開では、対応ランタイムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSEのk／軌道分割変更は後述の対応protocolで扱います。通常XCの空間分割は後述の専用入口を使い、HSE空間GSと通常XCの混合配置は後述の専用入口を使い、HSEの混合配置は未対応です。既定と共通保護付き復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
 
 ## SCFのk点MPI数を変える再開
 
@@ -847,7 +847,7 @@ Fortranが密度・ポテンシャル・軌道／CG内部値と混合履歴を�
 周期haloは内部値からコピーします。新分割の静的FFT／通信資源と履歴を持たないXC／
 FFT作業バッファの準備を、GS再計算と混同しないでください。比較は格子内部で行います。
 サンプルは両側に `--spatial-parallel` を指定します。対象はPZ／Libxc-PZ／PBEで、
-HSE空間GSは後述の専用入口を使います。k／軌道との混合配置変更・別ランタイム移行は未対応です。
+HSE空間GSと通常XCの混合配置は後述の専用入口を使います。HSE混合配置変更・別ランタイム移行は未対応です。
 
 高速PR版HSEの空間SCF再開は、保存側・再開側とも
 `NativeGSBackend(..., decomposition=(1,1,nx,ny,nz), hse_spatial=True)` を使い、
@@ -859,3 +859,12 @@ Fortranが密なACEと交換作業配列の格子行を直接再配置し、SCF�
 同時に指定しません。サンプルは `--xc hse06 --spatial-parallel` を両側に指定します。
 複数k点／混合配置・packed/tiled/sparse表現・別ランタイム移行・空間HSE GS→RTを
 対応済みとは案内しません。これは実装検証で、物理収束の認定ではありません。
+
+通常XCの混合並列SCF再開はmixed-repartition protocol1の対応ランタイムで、
+`NativeGSBackend(..., decomposition=(k, orbital, nx, ny, nz))` と
+`run(restart=..., repartition=True)` を使います。積はMPI群のサイズに合わせますが、
+物理的なk点・格子やSCF条件を変えません。保存rankのgrid/orbital/k範囲を併せた
+5次元被覆でFortranが再配置します。密度・ポテンシャル・混合履歴はk／軌道群に
+複製済みなので二重に足しません。再初期軌道やSCF反復で状態を作り直しません。
+例は `--decomposition K O X Y Z` として公開し、物理k格子は固定です。
+対象はPZ／Libxc-PZ／PBEで、HSE混合・異なるランタイムへの移行は未対応です。

@@ -525,24 +525,59 @@ integer(c_int) function sp_gs_scf_r_repartition(token,path,old_size,boxes) bind(
  character(c_char),intent(in)::path(*)
  integer(c_int),value::old_size
  integer(c_int),intent(in)::boxes(6,*)
+ status=scf_grid_repartition(token,path,old_size,boxes)
+end function
+integer(c_int) function sp_gs_scf_m_repartition_protocol() bind(C)
+ sp_gs_scf_m_repartition_protocol=1
+end function
+integer(c_int) function sp_gs_scf_m_repartition(token,path,old_size,boxes) bind(C) result(status)
+ integer(c_int64_t),value::token
+ character(c_char),intent(in)::path(*)
+ integer(c_int),value::old_size
+ integer(c_int),intent(in)::boxes(10,*)
+ integer(c_int),allocatable::rboxes(:,:),tiles(:,:)
+ integer::index,group,rank,nproc,ios,reference
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ call comm_get_globalinfo(group,rank,nproc)
+ reference=old_size;call comm_bcast(reference,group)
+ if(old_size<1.or.reference/=old_size)status=11
+ call comm_get_max(status,group)
+ if(status/=0)return
+ allocate(rboxes(6,old_size),tiles(4,old_size),stat=ios)
+ if(ios/=0)status=4
+ call comm_get_max(status,group)
+ if(status/=0)return
+ rboxes=boxes(:6,:old_size);tiles=boxes(7:10,:old_size)
+ status=scf_grid_repartition(token,path,old_size,rboxes,tiles)
+end function
+integer(c_int) function scf_grid_repartition(token,path,old_size,boxes,tiles) result(status)
+ integer(c_int64_t),value::token
+ character(c_char),intent(in)::path(*)
+ integer(c_int),value::old_size
+ integer(c_int),intent(in)::boxes(6,*)
+ integer(c_int),optional,intent(in)::tiles(4,old_size)
  type(s_scf_payload),allocatable::value,donor
  character(4096)::directory,filename,reference_directory
  integer::index,group,rank,nproc,j,i,u,ios,cs,header(5),counters(2),reference,pair(6)
- integer::lo(3),hi(3),a(3),b(3),iteration
+ integer::lo(3),hi(3),a(3),b(3),iteration,ot(4),dst(4),c(4),pair_tile(4)
  integer(8)::limit,position
- logical::first
- logical,allocatable::covered(:,:,:)
+ logical::first,first_scalar,scalar_donor
+ logical,allocatable::covered(:,:,:),wave_covered(:,:,:,:,:)
  call gs_lookup(token,index,status)
  if(status/=0)return
  call comm_get_globalinfo(group,rank,nproc)
  associate(ctx=>gs_handles(index)%context)
- if(.not.scf_context_ok(ctx).or.ctx%info%isize_k/=1.or.ctx%info%isize_o/=1)status=15
+ if(.not.scf_context_ok(ctx))status=15
+ if(.not.present(tiles))then
+  if(ctx%info%isize_k/=1.or.ctx%info%isize_o/=1)status=15
+ endif
  if(allocated(ctx%scf_pending))status=11
  select case(trim(ctx%system%xc_input%xcname))
  case('pz','libxc_pz','libxc_pbe')
 #ifdef USE_HSE
  case('hse06')
-  if(.not.ctx%hse_bound.or..not.ctx%hse%orbital_scf)status=15
+  if(.not.ctx%hse_bound.or..not.ctx%hse%orbital_scf.or.present(tiles))status=15
 #endif
  case default
   status=15
@@ -562,6 +597,10 @@ integer(c_int) function sp_gs_scf_r_repartition(token,path,old_size,boxes) bind(
  do j=1,old_size
   pair=boxes(:,j);call comm_bcast(pair,group)
   if(any(pair/=boxes(:,j)))status=11
+  if(present(tiles))then
+   pair_tile=tiles(:,j);call comm_bcast(pair_tile,group)
+   if(any(pair_tile/=tiles(:,j)))status=11
+  endif
  enddo
  call comm_get_max(status,group)
  if(status/=0)return
@@ -570,16 +609,42 @@ integer(c_int) function sp_gs_scf_r_repartition(token,path,old_size,boxes) bind(
  if(ios/=0)status=4
  call comm_get_max(status,group)
  if(status/=0)return
- covered=.false.;first=.true.;iteration=-1
+ dst=[ctx%info%io_s,ctx%info%io_e,ctx%info%ik_s,ctx%info%ik_e]
+ if(present(tiles))then
+  allocate(wave_covered(ctx%mg%is(1):ctx%mg%ie(1),ctx%mg%is(2):ctx%mg%ie(2), &
+   ctx%mg%is(3):ctx%mg%ie(3),dst(1):dst(2),dst(3):dst(4)),stat=ios)
+  if(ios/=0)status=4
+  call comm_get_max(status,group)
+  if(status/=0)return
+  wave_covered=.false.
+ endif
+ covered=.false.;first=.true.;first_scalar=.true.;iteration=-1
  do j=1,old_size
   lo=boxes(1:6:2,j);hi=boxes(2:6:2,j)
   if(any(lo<1).or.any(hi<lo).or.any(hi>ctx%lg%num))then
    status=11;exit
   endif
+  scalar_donor=.true.
+  if(present(tiles))then
+   ot=tiles(:,j)
+   if(ot(1)<1.or.ot(2)<ot(1).or.ot(2)>ctx%system%no.or. &
+      ot(3)<1.or.ot(4)<ot(3).or.ot(4)>ctx%system%nk)then
+    status=11;exit
+   endif
+   scalar_donor=ot(1)==1.and.ot(3)==1
+   c=[max(ot(1),dst(1)),min(ot(2),dst(2)),max(ot(3),dst(3)),min(ot(4),dst(4))]
+  endif
   a=max(lo,ctx%mg%is);b=min(hi,ctx%mg%ie)
-  if(all(a<=b))then
+  if(all(a<=b).and.scalar_donor)then
    if(any(covered(a(1):b(1),a(2):b(2),a(3):b(3))))then
     status=11;exit
+   endif
+  endif
+  if(present(tiles).and.all(a<=b))then
+   if(c(1)<=c(2).and.c(3)<=c(4))then
+    if(any(wave_covered(a(1):b(1),a(2):b(2),a(3):b(3),c(1):c(2),c(3):c(4))))then
+     status=11;exit
+    endif
    endif
   endif
   allocate(donor,stat=ios)
@@ -621,15 +686,42 @@ integer(c_int) function sp_gs_scf_r_repartition(token,path,old_size,boxes) bind(
      donor%system%nk/=ctx%system%nk.or.donor%system%no/=ctx%system%no)then
    status=11;exit
   endif
-  call scf_merge_r_payload(value,donor,first,lo,hi,ctx%mg,ctx%lg%num,status)
+  if(present(tiles))then
+   if(allocated(donor%spsi%rwf))then
+    if(lbound(donor%spsi%rwf,5)/=ot(1).or.ubound(donor%spsi%rwf,5)/=ot(2).or. &
+       lbound(donor%spsi%rwf,6)/=ot(3).or.ubound(donor%spsi%rwf,6)/=ot(4))status=11
+   else if(allocated(donor%spsi%zwf))then
+    if(lbound(donor%spsi%zwf,5)/=ot(1).or.ubound(donor%spsi%zwf,5)/=ot(2).or. &
+       lbound(donor%spsi%zwf,6)/=ot(3).or.ubound(donor%spsi%zwf,6)/=ot(4))status=11
+   else
+    status=11
+   endif
+   call scf_merge_r_orbital(value%spsi,donor%spsi,first,lo,hi,ctx%mg,ctx%lg%num,status,dst)
+   call scf_merge_r_orbital(value%shpsi,donor%shpsi,first,lo,hi,ctx%mg,ctx%lg%num,status,dst)
+   call scf_merge_r_orbital(value%sttpsi,donor%sttpsi,first,lo,hi,ctx%mg,ctx%lg%num,status,dst)
+   call scf_merge_r_orbital(value%cg%pre_gk,donor%cg%pre_gk,first,lo,hi,ctx%mg,ctx%lg%num,status,dst)
+   call scf_merge_r_orbital(value%cg%pk,donor%cg%pk,first,lo,hi,ctx%mg,ctx%lg%num,status,dst)
+   call scf_merge_r_orbital(value%cg%hpk,donor%cg%hpk,first,lo,hi,ctx%mg,ctx%lg%num,status,dst)
+   if(scalar_donor)then
+    call scf_merge_r_payload(value,donor,first_scalar,lo,hi,ctx%mg,ctx%lg%num,status,.true.)
+    first_scalar=.false.
+   endif
+   if(all(a<=b).and.c(1)<=c(2).and.c(3)<=c(4)) &
+    wave_covered(a(1):b(1),a(2):b(2),a(3):b(3),c(1):c(2),c(3):c(4))=.true.
+  else
+   call scf_merge_r_payload(value,donor,first,lo,hi,ctx%mg,ctx%lg%num,status)
+  endif
 #ifdef USE_HSE
   if(ctx%hse_bound)call scf_merge_r_hse(value%hse,donor%hse,first,lo,hi,ctx%mg,status)
 #endif
   if(status/=0)exit
-  if(all(a<=b))covered(a(1):b(1),a(2):b(2),a(3):b(3))=.true.
+  if(all(a<=b).and.scalar_donor)covered(a(1):b(1),a(2):b(2),a(3):b(3))=.true.
   first=.false.;deallocate(donor)
  enddo
  if(status==0.and.(.not.all(covered).or..not.allocated(value)))status=11
+ if(present(tiles).and.status==0)then
+  if(.not.all(wave_covered).or.first_scalar)status=11
+ endif
  call comm_get_max(status,group)
  if(status/=0)return
  call value%continuation_inputs%parallel_from(ctx%inputs)
@@ -676,14 +768,15 @@ subroutine scf_merge_r_scalar(target,source,first,lo,hi,mg,status)
  if(all(a<=b))target%f(a(1):b(1),a(2):b(2),a(3):b(3))=source%f(a(1):b(1),a(2):b(2),a(3):b(3))
 end subroutine
 
-subroutine scf_merge_r_orbital(target,source,first,lo,hi,mg,n,status)
+subroutine scf_merge_r_orbital(target,source,first,lo,hi,mg,n,status,tile)
  type(s_orbital),intent(inout)::target
  type(s_orbital),intent(in)::source
  logical,intent(in)::first
  integer,intent(in)::lo(3),hi(3),n(3)
  type(s_rgrid),intent(in)::mg
  integer,intent(inout)::status
- integer::lb(7),ub(7),istat,x,y,z,g(3)
+ integer,optional,intent(in)::tile(4)
+ integer::lb(7),ub(7),istat,x,y,z,g(3),c(4)
  if(status/=0)return
  if(first)target%update_zwf_overlap=source%update_zwf_overlap
  if(first)then
@@ -691,6 +784,9 @@ subroutine scf_merge_r_orbital(target,source,first,lo,hi,mg,n,status)
   if(allocated(source%rwf))then
    lb=lbound(source%rwf);ub=ubound(source%rwf)
    lb(:3)=mg%is_array;ub(:3)=mg%ie_array
+   if(present(tile))then
+    lb(5:6)=tile(1:4:2);ub(5:6)=tile(2:4:2)
+   endif
    allocate(target%rwf(lb(1):ub(1),lb(2):ub(2),lb(3):ub(3),lb(4):ub(4), &
     lb(5):ub(5),lb(6):ub(6),lb(7):ub(7)),stat=istat)
    if(istat/=0)then
@@ -708,6 +804,9 @@ subroutine scf_merge_r_orbital(target,source,first,lo,hi,mg,n,status)
    status=11;return
   endif
   lb(:3)=mg%is_array;ub(:3)=mg%ie_array
+   if(present(tile))then
+    lb(5:6)=tile(1:4:2);ub(5:6)=tile(2:4:2)
+   endif
   if(any(lb/=lbound(target%rwf)).or.any(ub/=ubound(target%rwf)))then
    status=11;return
   endif
@@ -715,7 +814,14 @@ subroutine scf_merge_r_orbital(target,source,first,lo,hi,mg,n,status)
   do y=mg%is_array(2),mg%ie_array(2)
   do x=mg%is_array(1),mg%ie_array(1)
    g=1+modulo([x,y,z]-1,n)
-   if(all(g>=lo).and.all(g<=hi))target%rwf(x,y,z,:,:,:,:)=source%rwf(g(1),g(2),g(3),:,:,:,:)
+   if(all(g>=lo).and.all(g<=hi))then
+    c=[max(lbound(target%rwf,5),lbound(source%rwf,5)), &
+       min(ubound(target%rwf,5),ubound(source%rwf,5)), &
+       max(lbound(target%rwf,6),lbound(source%rwf,6)), &
+       min(ubound(target%rwf,6),ubound(source%rwf,6))]
+    if(c(1)<=c(2).and.c(3)<=c(4))target%rwf(x,y,z,:,c(1):c(2),c(3):c(4),:)= &
+     source%rwf(g(1),g(2),g(3),:,c(1):c(2),c(3):c(4),:)
+   endif
   enddo
   enddo
   enddo
@@ -725,6 +831,9 @@ subroutine scf_merge_r_orbital(target,source,first,lo,hi,mg,n,status)
   if(allocated(source%zwf))then
    lb=lbound(source%zwf);ub=ubound(source%zwf)
    lb(:3)=mg%is_array;ub(:3)=mg%ie_array
+   if(present(tile))then
+    lb(5:6)=tile(1:4:2);ub(5:6)=tile(2:4:2)
+   endif
    allocate(target%zwf(lb(1):ub(1),lb(2):ub(2),lb(3):ub(3),lb(4):ub(4), &
     lb(5):ub(5),lb(6):ub(6),lb(7):ub(7)),stat=istat)
    if(istat/=0)then
@@ -742,6 +851,9 @@ subroutine scf_merge_r_orbital(target,source,first,lo,hi,mg,n,status)
    status=11;return
   endif
   lb(:3)=mg%is_array;ub(:3)=mg%ie_array
+   if(present(tile))then
+    lb(5:6)=tile(1:4:2);ub(5:6)=tile(2:4:2)
+   endif
   if(any(lb/=lbound(target%zwf)).or.any(ub/=ubound(target%zwf)))then
    status=11;return
   endif
@@ -749,27 +861,40 @@ subroutine scf_merge_r_orbital(target,source,first,lo,hi,mg,n,status)
   do y=mg%is_array(2),mg%ie_array(2)
   do x=mg%is_array(1),mg%ie_array(1)
    g=1+modulo([x,y,z]-1,n)
-   if(all(g>=lo).and.all(g<=hi))target%zwf(x,y,z,:,:,:,:)=source%zwf(g(1),g(2),g(3),:,:,:,:)
+   if(all(g>=lo).and.all(g<=hi))then
+    c=[max(lbound(target%zwf,5),lbound(source%zwf,5)), &
+       min(ubound(target%zwf,5),ubound(source%zwf,5)), &
+       max(lbound(target%zwf,6),lbound(source%zwf,6)), &
+       min(ubound(target%zwf,6),ubound(source%zwf,6))]
+    if(c(1)<=c(2).and.c(3)<=c(4))target%zwf(x,y,z,:,c(1):c(2),c(3):c(4),:)= &
+     source%zwf(g(1),g(2),g(3),:,c(1):c(2),c(3):c(4),:)
+   endif
   enddo
   enddo
   enddo
  endif
 end subroutine
-subroutine scf_merge_r_payload(target,source,first,lo,hi,mg,n,status)
+subroutine scf_merge_r_payload(target,source,first,lo,hi,mg,n,status,skip_orbitals)
  type(s_scf_payload),intent(inout)::target
  type(s_scf_payload),intent(in)::source
  logical,intent(in)::first
  integer,intent(in)::lo(3),hi(3),n(3)
  type(s_rgrid),intent(in)::mg
  integer,intent(inout)::status
+ logical,optional,intent(in)::skip_orbitals
+ logical::skip
  integer::i,j,istat,a(3),b(3)
  if(status/=0)return
+ skip=.false.
+ if(present(skip_orbitals))skip=skip_orbitals
+ if(.not.skip)then
  call scf_merge_r_orbital(target%spsi,source%spsi,first,lo,hi,mg,n,status)
  call scf_merge_r_orbital(target%shpsi,source%shpsi,first,lo,hi,mg,n,status)
  call scf_merge_r_orbital(target%sttpsi,source%sttpsi,first,lo,hi,mg,n,status)
  call scf_merge_r_orbital(target%cg%pre_gk,source%cg%pre_gk,first,lo,hi,mg,n,status)
  call scf_merge_r_orbital(target%cg%pk,source%cg%pk,first,lo,hi,mg,n,status)
  call scf_merge_r_orbital(target%cg%hpk,source%cg%hpk,first,lo,hi,mg,n,status)
+ endif
  call scf_merge_r_scalar(target%rho,source%rho,first,lo,hi,mg,status)
  call scf_merge_r_scalar(target%rho_jm,source%rho_jm,first,lo,hi,mg,status)
  call scf_merge_r_scalar(target%Vh,source%Vh,first,lo,hi,mg,status)

@@ -159,6 +159,18 @@ class NativeGSTests(unittest.TestCase):
             with self.assertRaisesRegex(InputError,'protocol2'):_scf_r_repartition_api(local.lib,hse=True)
             local.lib.sp_gs_scf_r_repartition_protocol.return_value=2
             self.assertIs(_scf_r_repartition_api(local.lib,hse=True),local.lib.sp_gs_scf_r_repartition)
+            local.comm.size=8;local.backend.decomposition=(2,2,2,1,1)
+            local.lib.sp_gs_scf_m_repartition_protocol=Mock(return_value=1)
+            local.lib.sp_gs_scf_m_repartition=Mock()
+            mixed_text=text.replace('nproc_k=1','nproc_k=2').replace('nproc_ob=1','nproc_ob=2').replace('nproc_rgrid=1,1,1','nproc_rgrid=2,1,1')
+            _,saved=_scf_disk_manifest(checkpoint,local,mixed_text,assets,'Si',repartition=True)
+            self.assertEqual(saved['files'][0]['orbital_bounds'],[1,2])
+            local.lib.sp_gs_scf_m_repartition.assert_not_called()
+            manifest['input_text']=hse_text
+            (checkpoint/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(InputError,'ordinary XC'):
+                _scf_disk_manifest(checkpoint,local,mixed_text.replace("xc='pz'","xc='hse06'"),assets,'Si',repartition=True)
+
 
 
 

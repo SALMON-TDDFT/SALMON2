@@ -68,6 +68,13 @@ int sp_gs_hse_spatial_protocol(void);
  * new-layout FFT/communication resources and dead scratch remain live. */
 int sp_gs_scf_r_repartition_protocol(void);
 int sp_gs_scf_r_repartition(int64_t token,const char *directory,int old_size,const int *boxes);
+/* Optional mixed ordinary-XC repartition1. boxes has10*old_size integers:
+ * (xlo,xhi,ylo,yhi,zlo,zhi,olo,ohi,klo,khi) per old rank. Wavefunction/CG
+ * five-dimensional ownership must cover the target exactly. Scalar density,
+ * potentials and mixing use one replica per spatial box, never summed twice.
+ * Same runtime/physical input/assets; stage then publish. HSE mixed is excluded. */
+int sp_gs_scf_m_repartition_protocol(void);
+int sp_gs_scf_m_repartition(int64_t token,const char *directory,int old_size,const int *boxes);
 int sp_gs_scf_disk_protocol(void);
 int sp_gs_scf_bootstrap(const char *filename,int64_t *token);
 int sp_gs_scf_disk(int64_t token,const char *filename,int mode);

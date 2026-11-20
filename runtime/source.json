@@ -5,7 +5,7 @@
   "scope": "single maintained complete solver; ordinary XC/HSE are build settings",
   "source_tree": "sources/solver",
   "source_tree_manifest": "source-trees/solver.json",
-  "source_tree_sha256": "c5e2cc0af0adb1e393484a4d178d4ab4b8afbfcdeeed864b2455aaf8c694b7ec",
+  "source_tree_sha256": "31b0f867f574906c1e5f3aed287c28bed97840a05536f8d88101819d4cb66e2b",
   "patch_sha256_role": "historical identity only; source_tree_sha256 binds the current complete source",
   "source_profile": "fast-pr",
   "interface_revision": "salmonpy-runtime/2",

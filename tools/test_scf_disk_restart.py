@@ -13,8 +13,10 @@ def main():
     p.add_argument('--restore-size',type=int,help='pure k/orbital SCF checkpoint migration to a different rank count')
     p.add_argument('--repartition',action='store_true',help=argparse.SUPPRESS)
     p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='libxc_pbe')
-    p.add_argument('--split',choices=('k','orbital','spatial'),default='k')
+    p.add_argument('--split',choices=('k','orbital','spatial','mixed'),default='k')
     p.add_argument('--symmetry',action='store_true')
+    p.add_argument('--decomposition',type=int,nargs=5)
+    p.add_argument('--restore-decomposition',type=int,nargs=5)
     p.add_argument('--spatial-axis',choices=('x','y','z'),default='x')
     p.add_argument('--restore-axis',choices=('x','y','z'))
     p.add_argument('--rgrid',type=int,nargs=3)
@@ -37,7 +39,9 @@ def main():
             command+=['--grid',str(args.grid),'--spatial-axis',args.restore_axis if phase in ('resume','reject') and args.restore_axis else args.spatial_axis]
             layout=args.restore_rgrid if phase in ('resume','reject') and args.restore_rgrid else args.rgrid
             if layout:command+=['--rgrid',*map(str,layout)]
-            if (args.restore_size or args.restore_axis or args.restore_rgrid) and phase in ('resume','reject'):command+=['--repartition']
+            full=args.restore_decomposition if phase in ('resume','reject') and args.restore_decomposition else args.decomposition
+            if full:command+=['--decomposition',*map(str,full)]
+            if (args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition) and phase in ('resume','reject'):command+=['--repartition']
             if args.symmetry:command+=['--symmetry']
             if args.gamma:command+=['--gamma']
             if args.two_atoms:command+=['--two-atoms']
@@ -45,10 +49,10 @@ def main():
             with (args.output/(phase+'.log')).open('w') as log:
                 subprocess.run(command,env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'},stdout=log,stderr=subprocess.STDOUT,check=True)
         result={'status':'pass','fresh_processes':4,'MPI_size':args.size,'xc':args.xc,'split':args.split,
-                'symmetry':args.symmetry,'continuous_resume_arrays_exact':not bool(args.restore_size or args.restore_axis or args.restore_rgrid),'restore_MPI_size':args.restore_size or args.size,
-                'comparison_rtol':1e-9 if args.restore_size or args.restore_axis or args.restore_rgrid else 0.,'comparison_atol':1e-10 if args.restore_size or args.restore_axis or args.restore_rgrid else 0.,
+                'symmetry':args.symmetry,'continuous_resume_arrays_exact':not bool(args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition),'restore_MPI_size':args.restore_size or args.size,
+                'comparison_rtol':1e-9 if args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition else 0.,'comparison_atol':1e-10 if args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition else 0.,
                 'restored_accepted_iterations':3,'bootstrap_executed_iterations':0,
-                'resume_executed_iterations':5,'restored_k_slices_exact':args.split=='k','restored_orbital_slices_exact':args.split=='orbital','restored_spatial_interiors_exact':args.split=='spatial','corrupt_rank_rejected_before_creation':True,
+                'resume_executed_iterations':5,'restored_k_slices_exact':args.split=='k','restored_orbital_slices_exact':args.split=='orbital','restored_spatial_interiors_exact':args.split in ('spatial','mixed'),'restored_mixed_orbital_k_interiors_exact':args.split=='mixed','corrupt_rank_rejected_before_creation':True,
                 'native_read_failure_preserves_live_state':True,'pre_scf_threshold':args.pre_scf_threshold,
                 'GS_datasets_saved':True}
         report=json.loads((args.output/'checkpoint/diagnostics/report.json').read_text())
@@ -87,21 +91,33 @@ def main():
     dec=(args.size,1,1,1,1) if args.split=='k' else (1,args.size,1,1,1) if args.split=='orbital' else (1,1,args.size,1,1)
     if args.split=='spatial':
         axes=[1,1,1];axes['xyz'.index(args.spatial_axis)]=args.size;dec=(1,1,*(args.rgrid or axes))
+    if args.decomposition:dec=tuple(args.decomposition)
     backend=NativeGSBackend(args.build,work,decomposition=dec,hse_orbital=args.xc=='hse06' and args.split=='orbital',hse_spatial=args.xc=='hse06' and args.split=='spatial')
     checkpoint=args.output/'checkpoint'
     def spatial_expected(directory,array,lower):
-        result=np.empty_like(array);covered=np.zeros(array.shape[:3],dtype=bool)
+        wave=array.ndim==7
+        result=np.empty_like(array);covered=np.zeros(array.shape[:3]+(array.shape[4:6] if wave else ()),dtype=bool)
         for file in sorted(directory.glob('rank-*.npz')):
             with np.load(file) as old:
-                box=old['grid_bounds'];orig=old['orbital_lower'] if array.ndim==7 else old['density_lower']
+                box=old['grid_bounds'];orig=old['orbital_lower'] if wave else old['density_lower']
+                if not wave and (old['orbital_lower'][4]!=1 or old['orbital_lower'][5]!=1):continue
+                if wave:
+                    ol=max(lower[4],orig[4]);oh=min(lower[4]+array.shape[4],orig[4]+old['orbitals'].shape[4])
+                    kl=max(lower[5],orig[5]);kh=min(lower[5]+array.shape[5],orig[5]+old['orbitals'].shape[5])
+                    if ol>=oh or kl>=kh:continue
+                    to=slice(ol-lower[4],oh-lower[4]);tk=slice(kl-lower[5],kh-lower[5])
+                    so=slice(ol-orig[4],oh-orig[4]);sk=slice(kl-orig[5],kh-orig[5])
                 for z in range(array.shape[2]):
                     for y in range(array.shape[1]):
                         for x in range(array.shape[0]):
                             g=(np.array([x,y,z])+np.asarray(lower[:3])-1)%args.grid+1
                             if np.all(g>=box[:,0]) and np.all(g<=box[:,1]):
                                 q=g-orig[:3]
-                                src=old['orbitals'] if array.ndim==7 else old['density']
-                                result[x,y,z]=src[tuple(q)];covered[x,y,z]=True
+                                if wave:
+                                    result[x,y,z,:,to,tk,:]=old['orbitals'][q[0],q[1],q[2],:,so,sk,:]
+                                    covered[x,y,z,to,tk]=True
+                                else:
+                                    result[x,y,z]=old['density'][tuple(q)];covered[x,y,z]=True
         assert covered.all()
         return result
     def interior(value,state):
@@ -109,7 +125,7 @@ def main():
         start=np.asarray(rho.lower_indices)-np.asarray(orb.lower_indices[:3])
         return value[tuple(slice(int(a),int(a+n)) for a,n in zip(start,rho.values.shape))]
     def expected_orbitals(directory,orbital):
-        if args.split=='spatial':return spatial_expected(directory,orbital.values,orbital.lower_indices)
+        if args.split in ('spatial','mixed'):return spatial_expected(directory,orbital.values,orbital.lower_indices)
         # Test-only global-k assembly, never used by the production loader.
         dim=4 if args.split=='orbital' else 5
         combined=np.empty_like(orbital.values);covered=np.zeros(combined.shape[dim],dtype=bool)
@@ -278,7 +294,7 @@ def main():
                 if args.repartition:
                     with np.load(args.output/'save/rank-00000000.npz') as cut:
                         for q in ('density','occupations','eigenvalues','scf_history'):
-                            if args.split=='spatial' and q=='density':
+                            if args.split in ('spatial','mixed') and q=='density':
                                 density=state.array(q)
                                 np.testing.assert_array_equal(density.values,spatial_expected(args.output/'save',density.values,density.lower_indices))
                             else:np.testing.assert_array_equal(state.array(q).values,cut[q],err_msg='restored cut '+q)
@@ -304,11 +320,18 @@ def main():
                 assert state.scf_status['executed_iterations']==0
                 for q,value in before.items():np.testing.assert_array_equal(state.array(q).values,value)
                 if args.repartition:
-                    from salmonpy.native_gs import _scf_o_repartition_api,_scf_k_repartition_api,_scf_r_repartition_api
+                    from salmonpy.native_gs import _scf_o_repartition_api,_scf_k_repartition_api,_scf_r_repartition_api,_scf_m_repartition_api,_scf_saved_boxes,_scf_repartition_kind
                     saved=json.loads((checkpoint/'manifest.json').read_text())
-                    orbital=args.split=='orbital'
-                    bounds=np.asarray([entry['grid_bounds' if args.split=='spatial' else 'orbital_bounds' if orbital else 'k_bounds'] for entry in saved['files']],dtype=np.int32)
-                    migrate=_scf_r_repartition_api(session.lib,hse=args.xc=='hse06') if args.split=='spatial' else _scf_o_repartition_api(session.lib,hse=args.xc=='hse06') if orbital else _scf_k_repartition_api(session.lib,hse=args.xc=='hse06')
+                    kind=_scf_repartition_kind(saved['decomposition'],session.backend.decomposition)
+                    if kind=='m':
+                        bounds=np.asarray([_scf_saved_boxes(entry,True) for entry in saved['files']],dtype=np.int32)
+                        migrate=_scf_m_repartition_api(session.lib)
+                    else:
+                        key={'r':'grid_bounds','o':'orbital_bounds','k':'k_bounds'}[kind]
+                        bounds=np.asarray([entry[key] for entry in saved['files']],dtype=np.int32)
+                        migrate=(_scf_r_repartition_api(session.lib,hse=args.xc=='hse06') if kind=='r' else
+                                 _scf_o_repartition_api(session.lib,hse=args.xc=='hse06') if kind=='o' else
+                                 _scf_k_repartition_api(session.lib,hse=args.xc=='hse06'))
                     last=checkpoint/saved['files'][-1]['name'];withheld=last.with_suffix('.withheld')
                     if comm.rank==0:last.rename(withheld)
                     comm.Barrier()
@@ -342,10 +365,10 @@ def main():
                 # a separately initialized target layout with different guesses.
                 with np.load(args.output/'continuous/rank-00000000.npz') as expected:
                     for key,value in arrays.items():
-                        if key not in ('orbitals','orbital_lower','density_lower','grid_bounds') and not (args.split=='spatial' and key=='density'):
+                        if key not in ('orbitals','orbital_lower','density_lower','grid_bounds') and not (args.split in ('spatial','mixed') and key=='density'):
                             np.testing.assert_allclose(value,expected[key],rtol=1e-9,atol=1e-10,err_msg=key)
                 combined=expected_orbitals(args.output/'continuous',orbital)
-                if args.split=='spatial':
+                if args.split in ('spatial','mixed'):
                     np.testing.assert_allclose(arrays['density'],spatial_expected(args.output/'continuous',rho.values,rho.lower_indices),rtol=1e-9,atol=1e-10)
                     np.testing.assert_allclose(interior(arrays['orbitals'],state),interior(combined,state),rtol=1e-9,atol=1e-10)
                 else:np.testing.assert_allclose(arrays['orbitals'],combined,rtol=1e-9,atol=1e-10,err_msg='migrated orbitals')

@@ -981,7 +981,7 @@ The sample accepts `--orbital-parallel --save-scf NEW_CHECKPOINT`, followed by
 `--orbital-parallel --restart CHECKPOINT --repartition` on a fresh rank count.
 Its orbital layout uses a fixed Gamma mesh unless explicit symmetry is requested.
 Fast HSE orbital repartition uses the explicit protocol2 entry below. Changes between k-only and orbital-only layouts,
-Ordinary spatial restart uses the entry below; mixed repartition and changed-runtime migration remain unsupported.
+Ordinary spatial/mixed restart uses the entries below; changed-runtime migration remains unsupported.
 Default and common protected restore still require identical MPI layouts.
 
 ### Fast-PR HSE Gamma orbital SCF: same-layout direct restart
@@ -1083,8 +1083,8 @@ checks, not physical convergence certification. The sample uses
 `--spatial-parallel --save-scf NEW_CHECKPOINT` followed by
 `--spatial-parallel --restart CHECKPOINT --repartition` with a different rank count.
 Older saves without grid_bounds still support same-layout restoration.
-HSE spatial GS uses the explicit entry below. k/orbital/spatial mixed migration
-and changed-runtime portability remain unsupported; common protected restore still keeps the same layout.
+HSE spatial GS uses the explicit entry below. ordinary mixed migration uses the entry below;
+changed-runtime portability remains unsupported; common protected restore still keeps the same layout.
 
 ### Fast-PR HSE spatial rank-count restart
 
@@ -1123,3 +1123,47 @@ The profile is periodic scalar, orthogonal-cell, fully occupied integer spin pai
 fixed-ion, CPU, full-support Gamma with dense ACE and untiled gauges. Packed or
 distributed ACE, tiled gauges, sparse localization, multi-k or mixed layouts,
 changed-runtime migration and HSE spatial GS→RT remain outside this entry.
+
+### Ordinary-XC mixed k/orbital/spatial SCF rank-count restart
+
+A runtime declaring `sp_gs_scf_m_repartition_protocol()==1` supports ordinary
+PZ/Libxc-PZ/PBE pure-to-mixed and mixed-to-mixed layout changes through the same
+explicit `run(restart=..., repartition=True)` entry. The five decomposition
+values are `(k, orbital, x, y, z)` and their product must equal the new host MPI
+group size. Keep physical grid/k set, electrons/bands, SCF/mixing, material ID,
+assets and runtime identical. Do not derive the physical k mesh from rank count.
+
+```python
+# Example source layout: (2, 2, 2, 1, 1), eight ranks.
+# Example target layout: (1, 2, 1, 2, 1), four ranks.
+backend = NativeGSBackend(build_record, work_root,
+                         decomposition=(1, 2, 1, 2, 1))
+with backend.open(context) as session:
+    with session.run(calculation, scf=scf, material_id="Si",
+                     restart=checkpoint, repartition=True) as state:
+        assert state.scf_status["executed_iterations"] == 0
+        state.continue_scf(steps=5)
+```
+
+Fortran treats each saved rank as a five-dimensional interior box: global x/y/z,
+orbital and k indices from grid_bounds/orbital_bounds/k_bounds. All wavefunction/
+CG slices are copied into the new ownership, including periodic halo copies.
+Density, potential, Fourier density and mixing histories are already replicated
+over old orbital/k groups: exactly one replica per spatial domain is used,
+without adding it again. Native staging checks separate wave and scalar coverage
+and publishes only after collective success. Static new-layout resources and
+dead FFT/XC scratch follow the spatial contract; no density/eigenstate/SCF replay
+reconstructs the saved accepted state. Default same-layout restore is unchanged.
+
+Controls cover real/complex2→8,8→4,4→8 with two atoms, mixed4→2 and4→4 layout
+changes. Physical cut wave/density values are exact; bootstrap SCF work is zero;
+five new iterations match source-initialized continuous8 at the existing
+rtol1e-9/atol1e-10. A missing late donor preserves original arrays and source
+files. Independent mixed-layout owners and previous-runtime normal calculations
+are also checked. These are execution controls, not physical convergence.
+
+The existing sample accepts `--decomposition K O X Y Z` on both saving and
+restoring hosts; its explicit-layout path keeps a fixed2×2×2 physical k mesh.
+Use `--save-scf NEW_CHECKPOINT`, then `--restart CHECKPOINT --repartition` with
+the new MPI count/layout. HSE mixed migration, changed-runtime portability and
+common protected restore with changed topology remain outside this entry.

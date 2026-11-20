@@ -916,7 +916,7 @@ Pythonのローダーでは数値配列を並べ替えません。
 新しいランク数で `--orbital-parallel --restart CHECKPOINT --repartition` です。
 軌道配置は明示的な対称性指定がなければ固定Gamma格子を使います。高速HSEの軌道並列は後述の専用入口を使います。
 通常XCの空間分割は後述の入口を使います。k並列と軌道並列の相互変更、
-混合配置、別ランタイムへの移行は未対応です。
+通常XCの混合配置は後述の専用入口を使い、別ランタイムへの移行は未対応です。
 通常の復元と共通の保護付き復元は、従来どおり同一MPI配置で使います。
 
 ### 高速PR版HSEのGamma軌道並列SCF：同じ配置への直接再開
@@ -1006,7 +1006,7 @@ FFTの部分変換バッファとXCの再利用作業領域は履歴ではない
 `--spatial-parallel --save-scf NEW_CHECKPOINT`、ランク数を変えた再開側に
 `--spatial-parallel --restart CHECKPOINT --repartition` を指定します。
 grid_boundsがない旧保存も、同一配置では復元できます。HSEの空間分割は後述の専用入口を使います。
-k／軌道／空間の混合配置変更、別ランタイムへの可搬化は未対応です。
+通常XCの混合配置変更は後述の専用入口を使い、別ランタイムへの可搬化は未対応です。
 共通の保護付き復元は引き続き同じMPI分割で使います。
 
 ### 高速PR版HSEの空間並列数を変えるSCF再開
@@ -1046,3 +1046,46 @@ SCF実行数0、続く5反復は保存元と同じ初期状態からの連続8�
 全占有の整数スピン対・Gamma点・全支持・密なACE・タイルなしgaugeです。
 packed/distributed ACE、タイルgauge、局在疎表現、複数k点／混合配置、
 別ランタイム移行と空間HSE GS→RTは対象外です。
+
+### 通常XCのk点・軌道・空間を組み合わせた混合並列での再開
+
+`sp_gs_scf_m_repartition_protocol()==1` の対応ランタイムでは、PZ／Libxc-PZ／PBEの
+純粋分割から混合分割、混合分割同士を、同じ明示的な
+`run(restart=..., repartition=True)` で再開できます。decompositionは
+`(k, orbital, x, y, z)` の順で、積を新しいホストMPI群のランク数と一致させます。
+物理的な格子・k点集合・電子数／バンド数・SCF／混合条件・物質ID・資産・
+ランタイムは維持し、k点数をランク数から決め直さないでください。
+
+```python
+# 保存側の例：(2, 2, 2, 1, 1)、8ランク。
+# 再開側の例：(1, 2, 1, 2, 1)、4ランク。
+backend = NativeGSBackend(build_record, work_root,
+                         decomposition=(1, 2, 1, 2, 1))
+with backend.open(context) as session:
+    with session.run(calculation, scf=scf, material_id="Si",
+                     restart=checkpoint, repartition=True) as state:
+        assert state.scf_status["executed_iterations"] == 0
+        state.continue_scf(steps=5)
+```
+
+Fortranが各保存rankをglobal x/y/z・軌道・k点の5次元領域として扱い、
+grid_bounds／orbital_bounds／k_boundsから軌道とCG配列を再配置します。
+周期haloも内部値からコピーします。密度・ポテンシャル・Fourier密度・混合履歴は
+元からk点／軌道群の間で複製されているため、各空間領域から一つだけ取り込み、
+重複して加算しません。軌道とスカラー場を別々に被覆検査し、全rank成功後に公開します。
+静的資源と履歴を持たないFFT／XC作業領域は空間再開と同じ扱いで、
+保存状態を作り直すための密度評価・固有状態計算・SCF反復は行いません。
+通常の同一配置への復元は維持します。
+
+実軌道／複素軌道の2→8、8→4、2原子系の4→8、混合4→2、
+同じ4ランクでの分割変更を検証しています。内部の軌道・密度の復元値は完全一致し、
+SCF再計算0回、続く5反復は保存元と同じ初期状態からの連続8反復と
+既定rtol1e-9／atol1e-10で一致します。途中ファイル読込失敗でも元の配列と
+保存元を維持します。独立した混合状態と既存ランタイムとの通常計算の一致も確認します。
+物理収束の認定とは区別してください。
+
+既存サンプルは両側に `--decomposition K O X Y Z` を指定し、
+物理的なk格子は固定2×2×2を使います。保存側は `--save-scf NEW_CHECKPOINT`、
+新しいランク数・分割の再開側は `--restart CHECKPOINT --repartition` です。
+HSEの混合分割移行・異なるランタイムへの可搬化・共通保護付き復元でのMPI分割変更は
+この入口の対象外です。

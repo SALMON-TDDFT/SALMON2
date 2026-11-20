@@ -23,6 +23,7 @@ def main():
     parallel.add_argument('--k-parallel',action='store_true',help='k-only layout with a fixed 2x2x2 mesh')
     parallel.add_argument('--orbital-parallel',action='store_true',help='Gamma orbital layout for ordinary XC or explicit fast HSE')
     parallel.add_argument('--spatial-parallel',action='store_true',help='ordinary-XC x-domain layout with a fixed Gamma mesh')
+    parallel.add_argument('--decomposition',type=int,nargs=5,help='explicit k,orbital,x,y,z layout for mixed ordinary-XC restart')
     p.add_argument('--repartition',action='store_true',help='opt into a supported pure-layout restart with a new rank count')
     p.add_argument('--disk',action='store_true',help='exercise disk save/restore; requires --save-scf')
     p.add_argument('--protected',action='store_true',help='requires native SCF candidate protocol1')
@@ -34,7 +35,7 @@ def main():
     args=p.parse_args();comm=MPI.COMM_WORLD
     if args.disk and args.save_scf is None:p.error('--disk requires --save-scf')
     if args.repartition and args.restart is None:p.error('--repartition requires --restart')
-    if comm.size not in (1,2):p.error('one/two internal MPI ranks in this example')
+    if comm.size not in (1,2) and args.decomposition is None:p.error('use --decomposition for more than two ranks')
     if not 0<args.pause_at<args.iterations:p.error('pause-at must be between zero and total iterations')
     error=None
     if comm.rank==0:
@@ -51,13 +52,14 @@ def main():
     if args.symmetry!='none':
         ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3);ops[1,:2,:2]=-np.eye(2)
         symmetry=SymmetryOperations(ops,directions='yyn')
-    mesh=(2,2,2) if symmetry is not None or args.k_parallel or (args.repartition and not (args.orbital_parallel or args.spatial_parallel)) else (comm.size,1,1) if args.xc=='hse06' and not (args.orbital_parallel or args.spatial_parallel) else (1,1,1)
+    mesh=(2,2,2) if args.decomposition is not None or symmetry is not None or args.k_parallel or (args.repartition and not (args.orbital_parallel or args.spatial_parallel)) else (comm.size,1,1) if args.xc=='hse06' and not (args.orbital_parallel or args.spatial_parallel) else (1,1,1)
     calculation=InMemoryDFT((14,),np.diag([8.]*3),[[0,0,0]] if symmetry is not None else [[.3,.4,.45]],
         (pp,),4,2,(8,8,8),mesh,xc=args.xc,symmetry=symmetry)
     assert "write_gs_restart_data='no'" in calculation.input_text()
     context=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
     decomposition=(comm.size,1,1,1,1) if (args.xc=='hse06' and not (args.orbital_parallel or args.spatial_parallel)) or args.k_parallel or (args.repartition and not (args.orbital_parallel or args.spatial_parallel)) else (1,comm.size,1,1,1)
     if args.spatial_parallel:decomposition=(1,1,comm.size,1,1)
+    if args.decomposition:decomposition=tuple(args.decomposition)
     backend=NativeGSBackend(args.build,args.output,decomposition=decomposition,hse_orbital=args.xc=='hse06' and args.orbital_parallel,hse_spatial=args.xc=='hse06' and args.spatial_parallel)
     with backend.open(context) as session:
         if args.restart is not None:

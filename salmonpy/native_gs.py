@@ -99,6 +99,32 @@ def _scf_r_repartition_api(lib,*,hse=False):
     return fn
 
 
+def _scf_m_repartition_api(lib):
+    probe=getattr(lib,'sp_gs_scf_m_repartition_protocol',None)
+    if probe is None:raise InputError('mixed SCF repartition requires a matching explicitly built runtime')
+    probe.argtypes=[];probe.restype=c.c_int
+    if probe()!=1:raise InputError('unsupported SCF mixed repartition protocol')
+    fn=lib.sp_gs_scf_m_repartition
+    fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
+    return fn
+
+
+def _scf_repartition_kind(old,new):
+    if old[1:]==[1,1,1,1] and tuple(new[1:])==(1,1,1,1):return 'k'
+    if old[0]==1 and old[2:]==[1,1,1] and new[0]==1 and tuple(new[2:])==(1,1,1):return 'o'
+    if old[:2]==[1,1] and tuple(new[:2])==(1,1):return 'r'
+    return 'm'
+
+
+def _scf_saved_boxes(entry,mixed=False):
+    box=entry.get('grid_bounds')
+    if mixed and isinstance(box,list):box=box+[entry.get('orbital_bounds'),entry.get('k_bounds')]
+    if (not isinstance(box,list) or len(box)!=(5 if mixed else 3) or any(not isinstance(pair,list) or len(pair)!=2
+            or any(type(v) is not int or not 1<=v<2**31 for v in pair) or pair[1]<pair[0] for pair in box)):
+        raise InputError('SCF repartition requires valid saved grid_bounds and orbital/k bounds')
+    return box
+
+
 def _scf_k_input(text,decomposition):
     # Only the generated parallel block may differ. Every physical/input byte in
     # other groups is retained; do not ignore arbitrary parallel algorithm flags.
@@ -135,14 +161,20 @@ def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=F
                  and old_decomposition[:2]==[1,1] and math.prod(old_decomposition[2:])==old_size
                  and session.backend.decomposition[:2]==(1,1)
                  and math.prod(session.backend.decomposition[2:])==session.comm.size)
-        if not (orbital or k_only or spatial):
-            raise InputError('SCF repartition requires pure k-only, orbital-only or spatial layouts')
+        mixed=not (orbital or k_only or spatial)
+        if (not isinstance(old_decomposition,list) or len(old_decomposition)!=5
+                or any(type(v) is not int or v<1 for v in old_decomposition)
+                or math.prod(old_decomposition)!=old_size):
+            raise InputError('invalid saved MPI decomposition')
         new_groups=_scf_k_input(text,session.backend.decomposition)
         if _scf_k_input(record['input_text'],old_decomposition)!=new_groups:
             raise InputError('SCF repartition physical inputs differ')
         from .bands import _scalar
         hse=_scalar(new_groups['functional'],'xc','').lower()=='hse06'
-        if spatial:
+        if mixed:
+            if hse:raise InputError('mixed SCF repartition currently supports ordinary XC')
+            _scf_m_repartition_api(session.lib)
+        elif spatial:
             _scf_r_repartition_api(session.lib,hse=hse)
         elif orbital:
             _scf_o_repartition_api(session.lib,hse=hse)
@@ -152,18 +184,12 @@ def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=F
     for rank,entry in enumerate(files):
         if entry.get('name')!=f'rank-{rank:08d}.bin':raise InputError('invalid SCF rank filename')
     if migrating:
-        if spatial:
-            boxes=[]
-            for entry in files:
-                box=entry.get('grid_bounds')
-                if (not isinstance(box,list) or len(box)!=3 or any(not isinstance(pair,list) or len(pair)!=2
-                        or any(type(v) is not int or not 1<=v<2**31 for v in pair) or pair[1]<pair[0] for pair in box)):
-                    raise InputError('SCF spatial repartition requires saved interior grid_bounds')
-                boxes.append(box)
+        if spatial or mixed:
+            boxes=[_scf_saved_boxes(entry,mixed) for entry in files]
             for i,box in enumerate(boxes):
                 if any(all(max(x[0],y[0])<=min(x[1],y[1]) for x,y in zip(box,other)) for other in boxes[:i]):
                     raise InputError('SCF saved spatial domains overlap')
-            extent=[max(box[i][1] for box in boxes) for i in range(3)]
+            extent=[max(box[i][1] for box in boxes) for i in range(5 if mixed else 3)]
             if sum(math.prod(hi-lo+1 for lo,hi in box) for box in boxes)!=math.prod(extent):
                 raise InputError('SCF saved spatial domains have gaps')
         else:
@@ -495,11 +521,16 @@ class NativeGSSession:
             if restart is not None:
                 fn=_scf_disk_api(self.lib)
                 if repartition and saved['decomposition']!=list(self.backend.decomposition):
-                    spatial=math.prod(self.backend.decomposition[2:])>1 or math.prod(saved['decomposition'][2:])>1
-                    orbital=self.backend.decomposition[1]>1 or saved['decomposition'][1]>1
-                    key='grid_bounds' if spatial else 'orbital_bounds' if orbital else 'k_bounds'
-                    bounds=np.asarray([entry[key] for entry in saved['files']],dtype=np.int32)
-                    migrate=_scf_r_repartition_api(self.lib,hse=calculation.xc=='hse06') if spatial else _scf_o_repartition_api(self.lib,hse=calculation.xc=='hse06') if orbital else _scf_k_repartition_api(self.lib,hse=calculation.xc=='hse06')
+                    kind=_scf_repartition_kind(saved['decomposition'],self.backend.decomposition)
+                    if kind=='m':
+                        bounds=np.asarray([_scf_saved_boxes(entry,True) for entry in saved['files']],dtype=np.int32)
+                        migrate=_scf_m_repartition_api(self.lib)
+                    else:
+                        key={'r':'grid_bounds','o':'orbital_bounds','k':'k_bounds'}[kind]
+                        bounds=np.asarray([entry[key] for entry in saved['files']],dtype=np.int32)
+                        migrate=(_scf_r_repartition_api(self.lib,hse=calculation.xc=='hse06') if kind=='r' else
+                                 _scf_o_repartition_api(self.lib,hse=calculation.xc=='hse06') if kind=='o' else
+                                 _scf_k_repartition_api(self.lib,hse=calculation.xc=='hse06'))
                     self._check(migrate(state._token,os.fsencode(restart),saved['ranks'],bounds.ctypes.data))
                 else:
                     path=restart/f'rank-{self.comm.rank:08d}.bin'

@@ -2,7 +2,7 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## Current actionable queue — 2026-11-19 (measured norm/current-grid review)
+## Current actionable queue — 2026-11-20 (mixed SCF restart review)
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
@@ -11,7 +11,7 @@ retains results. GS saving/reuse and validation datasets in calc2026 are authori
 
 ### Completed and verified
 
-- [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC k-only1↔2 changed-rank restart is now measured; Spatial/orbital/changed-runtime migration remains open; dense fast-PR HSE k-only1↔2 is covered below.
+- [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC pure k/orbital/spatial and mixed-layout changed-rank restart are measured. Dense fast-PR HSE pure k/orbital and Gamma spatial restart are measured below; HSE mixed/multi-k spatial and changed-runtime migration remain open.
 
 - [x] One maintained fast-PR solver tree and shared default preparation/build path;
   ordinary XC does not require HSE dependencies. Historical source evidence retained.
@@ -35,9 +35,9 @@ retains results. GS saving/reuse and validation datasets in calc2026 are authori
 Active order:4→5→3. Groups1and2 are deferred at the user's request; do not
 prioritize fast-HSE norm wiring or a current-grid campaign now. Molecular work
 remains paused. Group6 follows separately with the existing CI budget constraint.
-First group4 step: retain SCF convergence history/progress in the owning mixing
-state without changing arithmetic, then complete numerical checkpoint and live
-continuation. GS saving/reuse and the approved validation datasets are authorized; keep results in calc2026.
+Group4 SCF history, numerical checkpoint/live continuation and ordinary mixed
+repartition are complete within the measured scopes. Next extend fast-PR HSE
+mixed-layout ownership and restart, starting with the existing dense profile. GS saving/reuse and the approved validation datasets are authorized; keep results in calc2026.
 
 ### Remaining groups (not a count of individual implementation patches)
 
@@ -49,7 +49,7 @@ continuation. GS saving/reuse and the approved validation datasets are authorize
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
    physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
    silently changing existing results.
-4. [ ] Extend measured ordinary-XC k/orbital/spatial and dense fast-PR HSE k/orbital/spatial SCF repartition to mixed layouts, multi-k HSE spatial and packed/tiled HSE states;
+4. [ ] Ordinary-XC mixed k/orbital/spatial repartition is implemented and measured below. Extend dense fast-PR HSE to mixed layouts, multi-k spatial and packed/tiled states;
    add portable/checkpoint-version migration across runtimes. Covered active-SCF
    and same-topology RT direct restart are complete within measured scopes.
 5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
@@ -59,7 +59,9 @@ continuation. GS saving/reuse and the approved validation datasets are authorize
    runtime distribution and Linux/Intel Mac/other-platform evidence. Respect the
    Actions budget; no routine CI dispatch.
 
-Current evidence: calc2026/salmonpy-tddft-measured-norm-20261119 and
+Latest restart evidence: calc2026/salmonpy-scf-mixed-record-20261120 and
+calc2026/salmonpy-hse-spatial-record-20261120. Convergence evidence:
+calc2026/salmonpy-tddft-measured-norm-20261119 and
 calc2026/salmonpy-current-grid-criterion-20261119. Local writes are verified;
 cloud synchronization is not confirmed. Detailed historical records follow.
 
@@ -2119,3 +2121,21 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 - [ ] Mixed layouts, multi-k spatial, packed/tiled/sparse HSE, changed-runtime
   migration and HSE spatial/orbital GS→RT remain separate.
 - Evidence: calc2026/salmonpy-hse-spatial-record-20261120. No routine CI.
+
+## 2026-11-20 Ordinary-XC mixed SCF repartition
+
+- [x] Prior HSE spatial changes committed/pushed as `dab2a990` with CI skipped.
+- [x] Protocol1 mixed native entry maps physical grid/orbital/k tiles; replicated
+  scalar fields and mixing history have a unique donor. PZ, Libxc-PZ/PBE only;
+  mixed HSE, changed runtime and unsupported spin/device profiles remain separate.
+- [x] User authorized this source/wheel campaign's GS/restart datasets.
+- [x] Source 4→2, 2→8, 8→4, two-atom 4→8, real-Gamma 4→2, same-size changed
+  layout 4→4 and multi-axis 16→8 passed: exact cut interiors, zero bootstrap SCF,
+  five new iterations agree with continuous eight at rtol1e-9/atol1e-10.
+- [x] Independent different-input states, protected failure/continue/retry and
+  previous-runtime normal controls pass; pure HSE spatial regression passes.
+- [x] JP/EN/AI guide, C contract and explicit-decomposition sample updated.
+- [x] Installed-wheel 8→4 migration and sample4→2 passed; source/installed
+ 637 tests each636pass/1skip. Source/wheel/docs/header/native-byte parity checked.
+- Evidence: calc2026/salmonpy-scf-mixed-record-20261120. No CI dispatched;
+ local OneDrive records do not establish cloud synchronization.

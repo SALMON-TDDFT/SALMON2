@@ -19,7 +19,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ('build','baseline','output'):p.add_argument(name,type=Path)
     p.add_argument('--size',type=int,default=2)
-    p.add_argument('--split',choices=('orbital','spatial','k'),default='orbital')
+    p.add_argument('--split',choices=('orbital','spatial','k','mixed'),default='orbital')
+    p.add_argument('--decomposition',type=int,nargs=5)
     p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='pz')
     p.add_argument('--initial-no-mix',type=int,default=3)
     p.add_argument('--current-steps',type=int,default=0)
@@ -39,6 +40,7 @@ def main():
     comm.Barrier()
     ctx=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
     dec=(1,args.size,1,1,1) if args.split=='orbital' else (1,1,args.size,1,1) if args.split=='spatial' else (args.size,1,1,1,1)
+    if args.decomposition:dec=tuple(args.decomposition)
     pp=Path(__file__).resolve().parents[1]/'salmonpy/examples/si_intro_data/Si_rps.dat'
     if not pp.exists():pp=Path(__file__).resolve().parents[1].parent/'examples/si_intro_data/Si_rps.dat'
     pseudo=Pseudopotential.from_file(pp,atomic_number=14,local_channel=2)
