@@ -27,7 +27,8 @@ module salmonpy_eh_context
   use fdtd_eh, only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize
   use lorentz_drude, only: s_ld_state,ld_finalize
   use sendrecv_grid, only: dealloc_cache
-  use communication, only: comm_summation,comm_bcast
+  use communication, only: comm_summation,comm_bcast,comm_get_max,comm_begin_children, &
+    comm_end_children,comm_resume_children,comm_release_children,comm_child_counts,comm_owner_child_count
   use parallelization, only: setup_parallel,nproc_group_global
   implicit none
   private
@@ -38,6 +39,7 @@ module salmonpy_eh_context
     type(s_ld_state) :: ld
     integer,allocatable :: points(:,:)
     real(8),allocatable :: current(:,:,:,:)
+    integer :: mpi_child_owner=0
     integer :: step=0,capacity
   end type
   type(field_context),allocatable,save :: state
@@ -54,7 +56,54 @@ module salmonpy_eh_context
 #ifdef SALMONPY_RECOVERY_TESTING
   integer,save :: fault_stage=0,fault_rank=-1
 #endif
+  interface accumulate_finite
+    module procedure accumulate_finite_1d,accumulate_finite_2d,accumulate_finite_3d,accumulate_finite_4d
+  end interface
 contains
+  subroutine accumulate_finite_1d(values,valid)
+    real(8),intent(in)::values(:)
+    logical,intent(inout)::valid
+    integer::i1
+    do i1=1,size(values,1)
+      if(.not.ieee_is_finite(values(i1)))valid=.false.
+    enddo
+  end subroutine
+  subroutine accumulate_finite_2d(values,valid)
+    real(8),intent(in)::values(:,:)
+    logical,intent(inout)::valid
+    integer::i1,i2
+    do i2=1,size(values,2)
+    do i1=1,size(values,1)
+      if(.not.ieee_is_finite(values(i1,i2)))valid=.false.
+    enddo
+    enddo
+  end subroutine
+  subroutine accumulate_finite_3d(values,valid)
+    real(8),intent(in)::values(:,:,:)
+    logical,intent(inout)::valid
+    integer::i1,i2,i3
+    do i3=1,size(values,3)
+    do i2=1,size(values,2)
+    do i1=1,size(values,1)
+      if(.not.ieee_is_finite(values(i1,i2,i3)))valid=.false.
+    enddo
+    enddo
+    enddo
+  end subroutine
+  subroutine accumulate_finite_4d(values,valid)
+    real(8),intent(in)::values(:,:,:,:)
+    logical,intent(inout)::valid
+    integer::i1,i2,i3,i4
+    do i4=1,size(values,4)
+    do i3=1,size(values,3)
+    do i2=1,size(values,2)
+    do i1=1,size(values,1)
+      if(.not.ieee_is_finite(values(i1,i2,i3,i4)))valid=.false.
+    enddo
+    enddo
+    enddo
+    enddo
+  end subroutine
 integer(c_int) function sp_eh_step_transaction_protocol() bind(C)
   sp_eh_step_transaction_protocol=1
 end function
@@ -109,27 +158,56 @@ integer(c_int) function sp_eh_checkpoint_protocol() bind(C)
 end function
 
   integer(c_int) function sp_eh_init(path,npoints,indices) bind(C)
-    use inputoutput, only: read_input
+    use inputoutput, only: read_input,s_input_parser
     use math_constants, only: set_math_constants
     use salmon_global, only: theory,nt_em,yn_restart
     character(c_char),intent(in) :: path(*)
     integer(c_int),value :: npoints
     integer(c_int),intent(in) :: indices(3,npoints)
     character(4096) :: filename
-    integer :: i,p,lo(3),hi(3)
+    integer :: i,p,lo(3),hi(3),child_status,admission
+    logical :: exists
+    type(s_input_parser) :: parser
     sp_eh_init=1
-    if(used.or.npoints<1) return
-    used=.true.;filename=''
+    ! All ranks reject preflight together, without consuming the native lifetime.
+    call setup_parallel
+    admission=0
+    if(used.or.npoints<1) admission=1
+    filename=''
     do i=1,len(filename)
       if(path(i)==c_null_char) exit
       filename(i:i)=path(i)
     end do
-    if(i>len(filename)) return
+    if(i>len(filename).or.len_trim(filename)==0) admission=1
+    exists=.false.
+    if(admission==0) inquire(file=resolve_path(trim(filename)),exist=exists)
+    if(.not.exists) admission=1
+    call comm_get_max(admission,nproc_group_global)
+    if(admission/=0) return
     call set_math_constants
-    call setup_parallel
-    call read_input(trim(filename))
-    if(theory/='maxwell'.or.yn_restart/='n') return
-    allocate(state)
+    ! Own parser files locally; a parsed-but-unsupported request is retryable.
+    call read_input(trim(filename),parser,admission)
+    call comm_get_max(admission,nproc_group_global)
+    if(admission/=0)return
+    admission=0
+    if(theory/='maxwell'.or.yn_restart/='n') admission=1
+    call comm_get_max(admission,nproc_group_global)
+    if(admission/=0) return
+    allocate(state,stat=admission)
+    call comm_get_max(admission,nproc_group_global)
+    if(admission/=0)then
+      if(allocated(state))deallocate(state)
+      return
+    endif
+    call comm_begin_children(state%mpi_child_owner,child_status)
+    call comm_get_max(child_status,nproc_group_global)
+    if(child_status/=0)then
+      call comm_end_children(state%mpi_child_owner)
+      call comm_release_children(state%mpi_child_owner)
+      deallocate(state);return
+    endif
+    ! Numerical initialization still consumes this process-local lifetime.
+    used=.true.
     call eh_init(state%fs,state%fe,state%ld)
     state%capacity=nt_em
     allocate(state%points(3,npoints))
@@ -139,6 +217,7 @@ end function
     lo=state%fs%mg%is_array;hi=state%fs%mg%ie_array
     allocate(state%current(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
     state%current=0d0
+    call comm_end_children(state%mpi_child_owner)
     sp_eh_init=0
   end function
 
@@ -169,6 +248,27 @@ end function
   end function
 
   integer function step_checked(npoints,J,E,A) result(status)
+    integer,intent(in)::npoints
+    real(8),intent(in)::J(3,npoints)
+    real(8),intent(in),optional::A(3,npoints)
+    real(8),intent(out)::E(3,npoints)
+    logical::entered
+    status=0;E=0d0
+    if(.not.allocated(state))status=12
+    call comm_get_max(status,nproc_group_global)
+    if(status/=0)return
+    call comm_resume_children(state%mpi_child_owner,status)
+    entered=status==0
+    call comm_get_max(status,nproc_group_global)
+    if(status==0)then
+      status=step_checked_impl(npoints,J,E,A)
+    else
+      status=16
+    endif
+    if(entered)call comm_end_children(state%mpi_child_owner)
+  end function
+
+  integer function step_checked_impl(npoints,J,E,A) result(status)
     use salmon_global,only:dt_em,obs_samp_em
     use ttm,only:use_ttm
     use communication,only:comm_get_max
@@ -179,6 +279,7 @@ end function
     type(restore_candidate) :: before
     real(8) :: local_E(3,npoints),reference(3,npoints)
     integer :: p,d,side,index(3),i,jj,k,error,mode
+    logical :: finite_input
     status=10;E=0d0;error=0
     if(.not.allocated(state))error=12
     call comm_get_max(error,nproc_group_global)
@@ -199,10 +300,10 @@ end function
     if(allocated(state%fe%iobs_num_ene))then
       if(any(state%fe%iobs_num_ene>0))error=15
     endif
-    if(.not.all(ieee_is_finite(J)))error=10
-    if(present(A))then
-      if(.not.all(ieee_is_finite(A)))error=10
-    endif
+    finite_input=.true.
+    call accumulate_finite(J,finite_input)
+    if(present(A))call accumulate_finite(A,finite_input)
+    if(.not.finite_input)error=10
     call comm_get_max(error,nproc_group_global)
     if(error/=0)then
       status=error;return
@@ -252,31 +353,37 @@ end function
       valid=.true.
       select case(stage)
       case(20)
-        valid=all(ieee_is_finite(state%fe%ex_y)).and.all(ieee_is_finite(state%fe%ex_z)) &
-          .and.all(ieee_is_finite(state%fe%ey_x)).and.all(ieee_is_finite(state%fe%ey_z)) &
-          .and.all(ieee_is_finite(state%fe%ez_x)).and.all(ieee_is_finite(state%fe%ez_y))
+        call accumulate_finite(state%fe%ex_y,valid)
+        call accumulate_finite(state%fe%ex_z,valid)
+        call accumulate_finite(state%fe%ey_x,valid)
+        call accumulate_finite(state%fe%ey_z,valid)
+        call accumulate_finite(state%fe%ez_x,valid)
+        call accumulate_finite(state%fe%ez_y,valid)
       case(21)
         if(state%ld%enabled)then
-          valid=valid.and.all(ieee_is_finite(state%ld%rjx_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%rjy_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%rjz_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%rjx_old_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%rjy_old_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%rjz_old_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%px_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%py_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%pz_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%rjx_fdtd_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%rjy_fdtd_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%rjz_fdtd_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%ex_old_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%ey_old_ld))
-          valid=valid.and.all(ieee_is_finite(state%ld%ez_old_ld))
+          call accumulate_finite(state%ld%rjx_ld,valid)
+          call accumulate_finite(state%ld%rjy_ld,valid)
+          call accumulate_finite(state%ld%rjz_ld,valid)
+          call accumulate_finite(state%ld%rjx_old_ld,valid)
+          call accumulate_finite(state%ld%rjy_old_ld,valid)
+          call accumulate_finite(state%ld%rjz_old_ld,valid)
+          call accumulate_finite(state%ld%px_ld,valid)
+          call accumulate_finite(state%ld%py_ld,valid)
+          call accumulate_finite(state%ld%pz_ld,valid)
+          call accumulate_finite(state%ld%rjx_fdtd_ld,valid)
+          call accumulate_finite(state%ld%rjy_fdtd_ld,valid)
+          call accumulate_finite(state%ld%rjz_fdtd_ld,valid)
+          call accumulate_finite(state%ld%ex_old_ld,valid)
+          call accumulate_finite(state%ld%ey_old_ld,valid)
+          call accumulate_finite(state%ld%ez_old_ld,valid)
         endif
       case(22)
-        valid=all(ieee_is_finite(state%fe%hx_y)).and.all(ieee_is_finite(state%fe%hx_z)) &
-          .and.all(ieee_is_finite(state%fe%hy_x)).and.all(ieee_is_finite(state%fe%hy_z)) &
-          .and.all(ieee_is_finite(state%fe%hz_x)).and.all(ieee_is_finite(state%fe%hz_y))
+        call accumulate_finite(state%fe%hx_y,valid)
+        call accumulate_finite(state%fe%hx_z,valid)
+        call accumulate_finite(state%fe%hy_x,valid)
+        call accumulate_finite(state%fe%hy_z,valid)
+        call accumulate_finite(state%fe%hz_x,valid)
+        call accumulate_finite(state%fe%hz_y,valid)
       case(23)
         local_E=0d0
         do p=1,npoints
@@ -291,10 +398,11 @@ end function
             +state%fe%ez_x(i,jj,k-1)+state%fe%ez_y(i,jj,k-1))
         enddo
         call comm_summation(local_E,E,3*npoints,nproc_group_global)
-        valid=all(ieee_is_finite(E))
-        if(present(A))valid=valid.and.all(ieee_is_finite(A-dt_em*E))
+        call accumulate_finite(E,valid)
+        if(present(A))call accumulate_finite(A-dt_em*E,valid)
         h_status=sp_eh_sample_h(npoints,H)
-        valid=valid.and.h_status==0.and.all(ieee_is_finite(H))
+        valid=valid.and.h_status==0
+        call accumulate_finite(H,valid)
         ! Verify the ordinary point-output/maxima arithmetic before any append.
         ! Keep the actual output path and its arithmetic unchanged.
         if(state%fe%flag_obs.and.mod(state%step,obs_samp_em)==0)then
@@ -307,8 +415,8 @@ end function
             hv=[(state%fe%hx_s(ix,iy,iz)+(state%fe%hx_y(ix,iy,iz)+state%fe%hx_z(ix,iy,iz)))/2d0, &
                 (state%fe%hy_s(ix,iy,iz)+(state%fe%hy_z(ix,iy,iz)+state%fe%hy_x(ix,iy,iz)))/2d0, &
                 (state%fe%hz_s(ix,iy,iz)+(state%fe%hz_x(ix,iy,iz)+state%fe%hz_y(ix,iy,iz)))/2d0]
-            valid=valid.and.all(ieee_is_finite(ev*state%fe%uVperm_from_au)) &
-              .and.all(ieee_is_finite(hv*state%fe%uAperm_from_au))
+            call accumulate_finite(ev*state%fe%uVperm_from_au,valid)
+            call accumulate_finite(hv*state%fe%uAperm_from_au,valid)
             valid=valid.and.ieee_is_finite(sqrt(sum(ev**2))*state%fe%uVperm_from_au) &
               .and.ieee_is_finite(sqrt(sum(hv**2))*state%fe%uAperm_from_au)
           enddo
@@ -927,13 +1035,43 @@ end function
     endif
   end subroutine checkpoint_r4
 
+  integer(c_int) function sp_eh_mpi_resources(values) bind(C)
+    integer(c_int),intent(out)::values(3)
+    values=0
+    call comm_child_counts(values(1),values(2))
+    if(allocated(state))call comm_owner_child_count(state%mpi_child_owner,values(3))
+    sp_eh_mpi_resources=0
+  end function
+  integer(c_int) function sp_eh_resources(values) bind(C)
+    integer(c_int),intent(out)::values(3)
+    values=0
+    if(allocated(state))values(1)=1
+    if(allocated(step_saved))values(2)=1
+    if(allocated(pending))values(3)=1
+    sp_eh_resources=0
+  end function
   integer(c_int) function sp_eh_close() bind(C)
+    integer::status
+    logical::entered
     sp_eh_close=1
-    if(.not.allocated(state)) return
+    if(allocated(state))then
+      call comm_resume_children(state%mpi_child_owner,status)
+      entered=status==0
+      call comm_get_max(status,nproc_group_global)
+      if(status/=0)then
+        if(entered)call comm_end_children(state%mpi_child_owner)
+        return
+      endif
+    endif
+    if(allocated(pending))deallocate(pending)
     if(allocated(step_saved))deallocate(step_saved)
+    step_restored=.false.
+    if(.not.allocated(state))return
     if(state%step==state%capacity) call eh_finalize(state%fs,state%fe,state%ld)
     call ld_finalize(state%ld)
     call dealloc_cache(state%fs%srg_ng)
+    call comm_end_children(state%mpi_child_owner)
+    call comm_release_children(state%mpi_child_owner)
     deallocate(state)
     sp_eh_close=0
   end function

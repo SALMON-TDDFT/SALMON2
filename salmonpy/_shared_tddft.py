@@ -166,6 +166,25 @@ class NativeTDDFTModel:
 from .embedded_tddft import _NativeState
 class _SharedState(_NativeState):
     @property
+    def timing_seconds(self):
+        """Rank-local completed native intervals; not checkpointed diagnostics."""
+        if self.closed or self.failed:raise InputError('closed or failed native state')
+        lib=self.native.model.lib;comm=self.native.context.solver_comm;error=None
+        try:
+            probe=getattr(lib,'sp_tddft_timer_protocol',None)
+            if probe is None:raise RuntimeFailure('runtime lacks state-owned timer protocol')
+            probe.argtypes=[];probe.restype=c.c_int
+            if probe()!=1:raise RuntimeFailure('unsupported TDDFT timer protocol')
+            fn=lib.sp_tddft_handle_timers
+            fn.argtypes=[c.c_int64,c.c_void_p];fn.restype=c.c_int
+        except Exception as exc:error=str(exc)
+        _agree(comm,error,runtime=True)
+        values=np.zeros(4,dtype=np.float64)
+        code=self._call(fn,self.handle,values.ctypes.data)
+        _agree(comm,'native timer query failed' if code else None,runtime=True)
+        return dict(zip(('total','initialization','density','hartree'),map(float,values)))
+
+    @property
     def electron_number(self):
         """Collective read-only norm of this specific state handle."""
         from .errors import NumericalError

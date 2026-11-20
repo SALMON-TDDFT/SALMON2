@@ -9,11 +9,13 @@ module salmonpy_fast_hse_mpi
  use sym_sub,only:s_hse_symmetry_workspace,swap_hse_symmetry_workspace
  use sym_rho_sub,only:s_hse_density_workspace,swap_hse_density_workspace
  use iso_c_binding
+ use timer,only:s_timer_context,timer_context_swap,timer_context_get,timer_initialize, &
+   LOG_TOTAL,LOG_INIT_RT,LOG_CALC_RHO,LOG_CALC_HARTREE
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  use communication,only:comm_is_attached,comm_get_globalinfo,comm_get_max,comm_bcast
  use parallelization,only:setup_parallel,nproc_group_global,nproc_size_global
  use salmonpy_tddft_context,only:tddft_context,rt_open,rt_step,rt_close,rt_input_config, &
-   rt_history_info,rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_vector_potential,rt_model_settings
+   rt_history_info,rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_vector_potential,s_rt_model_settings,rt_model_settings
  use salmonpy_gs_seed,only:s_gs_seed
  use salmonpy_gs_context,only:gs_seed_from_handle
  use structures,only:s_rt_run_config
@@ -26,7 +28,10 @@ module salmonpy_fast_hse_mpi
  real(8),save::accepted_A(3)=0d0
  ! Registry owns numerical contexts; the legacy selector is installed only
  ! during one synchronous call. Registry assignment copies pointers, not owners.
+ type(s_timer_context),save::legacy_timers,legacy_host_timers
+ type(s_timer_context),save::handle_host_timers
  type handle_slot
+  type(s_timer_context)::timers
   integer::model_index=0
   type(tddft_context),pointer::context=>null()
   integer(c_int64_t)::generation=0_c_int64_t
@@ -38,7 +43,9 @@ module salmonpy_fast_hse_mpi
  integer(c_int64_t),parameter::handle_stride=2147483648_c_int64_t
  logical,save::handle_mode=.false.,model_symmetry=.false.
  integer,save::handle_group=0
+ type(s_rt_model_settings),save::shared_settings
  type model_slot
+   type(s_rt_model_settings)::init_settings
    type(s_gs_seed),allocatable::memory_gs
    type(s_hse_model_inputs),allocatable::values
    type(s_hse_symmetry_workspace)::symmetry
@@ -131,16 +138,24 @@ end function
  real(c_double),value::timestep
  integer(c_int),value::capacity
  real(c_double),intent(out)::J(3)
+ sp_fast_hse_init=1;J=0d0
+ if(.not.attached_main_thread())return
+ call legacy_timer_enter()
  sp_fast_hse_init=initialize(path,timestep,capacity,J,.false.)
+ call legacy_timer_leave()
  end function
  integer(c_int) function sp_fast_hse_init_symmetry(path,timestep,capacity,J) bind(C)
  character(c_char),intent(in)::path(*)
  real(c_double),value::timestep
  integer(c_int),value::capacity
  real(c_double),intent(out)::J(3)
+ sp_fast_hse_init_symmetry=1;J=0d0
+ if(.not.attached_main_thread())return
+ call legacy_timer_enter()
  sp_fast_hse_init_symmetry=initialize(path,timestep,capacity,J,.true.)
+ call legacy_timer_leave()
  end function
- integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry,registered,output_name,memory_gs)
+ integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry,registered,output_name,memory_gs,model_settings)
  use inputoutput,only:read_input,s_input_parser
  use math_constants,only:set_math_constants
  use plusU_global,only:read_Hubbard_parameters
@@ -151,6 +166,7 @@ end function
  use exx_worker_service,only:service_enabled
 #endif
  type(s_gs_seed),optional,intent(in)::memory_gs
+ type(s_rt_model_settings),optional,intent(inout)::model_settings
  logical,intent(in)::allow_symmetry
  character(*),optional,intent(in)::output_name
  character(80)::selected_name
@@ -210,7 +226,8 @@ end function
  config%delta_t=timestep;config%max_steps=capacity
  selected_name='native_fast_hse'
  if(present(output_name))selected_name=output_name
- call rt_open(state,trim(selected_name),status,config=config,allow_symmetry=allow_symmetry,memory_gs=memory_gs)
+ call rt_open(state,trim(selected_name),status,config=config,allow_symmetry=allow_symmetry, &
+   memory_gs=memory_gs,model_settings=model_settings)
  call agree(status)
  if(status/=0)then
   failed=.true.;return
@@ -245,7 +262,9 @@ end function
  if(any(reference/=[Aold,Anew]))status=1
  call agree(status)
  if(status/=0)return
+ if(.not.handle_mode)call legacy_timer_enter()
  call rt_step(state,Anew,J,energy,status)
+ if(.not.handle_mode)call legacy_timer_leave()
  call agree(status)
  if(status/=0)then
   select case(status)
@@ -328,12 +347,30 @@ end function
  if(status/=0)return
  ! Output/native resources close before the host releases its attachment.
  ! Never call end_parallel here: MPI belongs to the host application.
+ if(.not.handle_mode)call legacy_timer_enter()
  call rt_close(state)
+ if(.not.handle_mode)call legacy_timer_leave()
  ready=.false.
  sp_fast_hse_close=0
  end function
 ! Versioned, synchronous handle entry. Numerical operations retain the legacy
 ! implementation; only the selected pointer/accepted field/failure flags vary.
+integer(c_int) function sp_fast_hse_timer_protocol() bind(C)
+ sp_fast_hse_timer_protocol=1
+end function
+integer(c_int) function sp_fast_hse_handle_timers(token,values) bind(C)
+ integer(c_int64_t),value::token
+ real(c_double),intent(out)::values(4)
+ integer::index,status
+ values=0d0
+ call handle_lookup(token,index,status)
+ sp_fast_hse_handle_timers=status
+ if(status/=0)return
+ values=[timer_context_get(handles(index)%timers,LOG_TOTAL), &
+         timer_context_get(handles(index)%timers,LOG_INIT_RT), &
+         timer_context_get(handles(index)%timers,LOG_CALC_RHO), &
+         timer_context_get(handles(index)%timers,LOG_CALC_HARTREE)]
+end function
 integer(c_int) function sp_fast_hse_handle_protocol() bind(C)
  sp_fast_hse_handle_protocol=1
 end function
@@ -370,6 +407,7 @@ subroutine handle_reserve(index,token,status)
  integer,intent(out)::index,status
  integer(c_int64_t),intent(out)::token
  type(handle_slot),allocatable::grown(:)
+ type(s_timer_context)::empty_timers
  integer::i,old,count,allocation_status,group,rank,n,reference(2),parts(2)
  status=0;index=0;token=0;old=0
  if(allocated(handles))then
@@ -402,6 +440,7 @@ subroutine handle_reserve(index,token,status)
  if(status/=0)return
  handles(index)%generation=handles(index)%generation+1_c_int64_t
  token=handles(index)%generation*handle_stride+int(index,c_int64_t)
+ handles(index)%timers=empty_timers
  handles(index)%field=0d0;handles(index)%broken=.false.
 end subroutine
 subroutine handle_select(token,index,status)
@@ -411,10 +450,43 @@ subroutine handle_select(token,index,status)
  if(status/=0)return
  if(handles(index)%model_index>0)call select_model(handles(index)%model_index)
  state=>handles(index)%context
+ call handle_timer_enter(index)
  accepted_A=handles(index)%field;failed=handles(index)%broken;ready=.true.
+end subroutine
+subroutine legacy_timer_enter()
+ call timer_context_swap(legacy_host_timers)
+ call timer_context_swap(legacy_timers)
+ call timer_initialize
+end subroutine
+subroutine legacy_timer_leave()
+ call timer_context_swap(legacy_timers)
+ call timer_context_swap(legacy_host_timers)
+end subroutine
+integer(c_int) function sp_fast_hse_legacy_timer_protocol() bind(C)
+ sp_fast_hse_legacy_timer_protocol=1
+end function
+integer(c_int) function sp_fast_hse_legacy_timers(values) bind(C)
+ real(c_double),intent(out)::values(4)
+ values=0d0;sp_fast_hse_legacy_timers=12
+ if(handle_mode.or..not.ready.or..not.associated(state))return
+ values=[timer_context_get(legacy_timers,LOG_TOTAL),timer_context_get(legacy_timers,LOG_INIT_RT), &
+         timer_context_get(legacy_timers,LOG_CALC_RHO),timer_context_get(legacy_timers,LOG_CALC_HARTREE)]
+ sp_fast_hse_legacy_timers=0
+end function
+subroutine handle_timer_enter(index)
+ integer,intent(in)::index
+ call timer_context_swap(handle_host_timers)
+ call timer_context_swap(handles(index)%timers)
+ call timer_initialize
+end subroutine
+subroutine handle_timer_leave(index)
+ integer,intent(in)::index
+ call timer_context_swap(handles(index)%timers)
+ call timer_context_swap(handle_host_timers)
 end subroutine
 subroutine handle_unselect(index)
  integer,intent(in)::index
+ call handle_timer_leave(index)
  handles(index)%context=>state
  handles(index)%field=accepted_A;handles(index)%broken=failed
  nullify(state);accepted_A=0d0;failed=.false.;ready=.false.
@@ -454,12 +526,15 @@ integer(c_int) function sp_fast_hse_handle_init(path,timestep,capacity,symmetry,
  if(status/=0)then
   sp_fast_hse_handle_init=status;return
  endif
- status=initialize(path,timestep,capacity,J,symmetry==1)
+ call handle_timer_enter(index)
+ status=initialize(path,timestep,capacity,J,symmetry==1,model_settings=shared_settings)
  if(status==0)then
   handles(index)%label='native_fast_hse'
   handle_mode=.true.;handle_group=group;model_symmetry=symmetry==1
   call handle_unselect(index)
   token=candidate
+ else
+  call handle_timer_leave(index)
  endif
  sp_fast_hse_handle_init=status
 end function
@@ -542,15 +617,19 @@ integer(c_int) function create_model_state(timestep,capacity,token,J)
  endif
  write(handles(index)%label,'(a,i0,a,i0)')'native_hse_h',index,'_g',handles(index)%generation
  call rt_input_config(config);config%delta_t=timestep;config%max_steps=capacity
+ call handle_timer_enter(index)
  if(active_model>0)then
   if(allocated(models(active_model)%memory_gs))then
    call rt_open(fresh,trim(handles(index)%label),status,config=config, &
-     allow_symmetry=model_symmetry,memory_gs=models(active_model)%memory_gs)
+     allow_symmetry=model_symmetry,memory_gs=models(active_model)%memory_gs, &
+     model_settings=models(active_model)%init_settings)
   else
-   call rt_open(fresh,trim(handles(index)%label),status,config=config,allow_symmetry=model_symmetry)
+   call rt_open(fresh,trim(handles(index)%label),status,config=config,allow_symmetry=model_symmetry, &
+     model_settings=models(active_model)%init_settings)
   endif
  else
-  call rt_open(fresh,trim(handles(index)%label),status,config=config,allow_symmetry=model_symmetry)
+  call rt_open(fresh,trim(handles(index)%label),status,config=config,allow_symmetry=model_symmetry, &
+    model_settings=shared_settings)
  endif
  call agree(status)
  if(status==0)call rt_current(fresh,J,status)
@@ -564,6 +643,7 @@ integer(c_int) function create_model_state(timestep,capacity,token,J)
  else if(associated(fresh))then
   call rt_close(fresh)
  endif
+ call handle_timer_leave(index)
  create_model_state=status
 end function
 integer(c_int) function sp_fast_hse_handle_step(token,Aold,Anew,J,energy) bind(C)
@@ -676,7 +756,6 @@ subroutine select_model(index)
  call swap_hse_symmetry_workspace(models(index)%symmetry)
  call swap_hse_density_workspace(models(index)%density_symmetry)
  model_symmetry=models(index)%symmetric
- call rt_model_settings(.false.)
  active_model=index
 end subroutine
 subroutine release_model(index)
@@ -783,7 +862,8 @@ integer(c_int) function register_model(path,timestep,capacity,symmetry,model_tok
  integer::status,index,slot,i,group,rank,n,previous,ref_int(2)
  real(8)::ref_dt
  integer(c_int64_t)::candidate
- logical::exists
+ logical::exists,timer_entered
+ timer_entered=.false.
  model_token=0;state_token=0;J=0d0;register_model=12
  if(.not.attached_main_thread())return
  call comm_get_globalinfo(group,rank,n)
@@ -815,16 +895,18 @@ integer(c_int) function register_model(path,timestep,capacity,symmetry,model_tok
  call park_model()
  allocate(models(index)%values)
  models(index)%generation=models(index)%generation+1
+ call rt_model_settings(.true.,models(index)%init_settings)
  if(present(memory_gs))then
   allocate(models(index)%memory_gs)
   models(index)%memory_gs=memory_gs
  endif
  models(index)%children=0;models(index)%closed=.false.;models(index)%symmetric=symmetry==1
- call rt_model_settings(.true.)
  call handle_reserve(slot,candidate,status)
  if(status==0)then
   write(handles(slot)%label,'(a,i0,a,i0)')'native_hse_m',index,'_g',models(index)%generation
-  status=initialize(path,timestep,capacity,J,symmetry==1,.true.,trim(handles(slot)%label),memory_gs)
+  call handle_timer_enter(slot);timer_entered=.true.
+  status=initialize(path,timestep,capacity,J,symmetry==1,.true.,trim(handles(slot)%label), &
+    memory_gs,models(index)%init_settings)
  endif
  call agree(status)
  if(status==0)then
@@ -838,6 +920,7 @@ integer(c_int) function register_model(path,timestep,capacity,symmetry,model_tok
   state_token=candidate
  else
   if(associated(state))call rt_close(state)
+  if(timer_entered)call handle_timer_leave(slot)
   nullify(state);ready=.false.;failed=.false.
   active_model=index;models(index)%closed=.true.
   call release_model(index)

@@ -15,7 +15,7 @@ import unicodedata
 from .config import _copy_json, resolve_materials
 from .errors import InputError
 
-__all__ = ['prepare_inputs', 'verify_inputs']
+__all__ = ['prepare_inputs', 'verify_inputs', 'preflight_inputs']
 _SCHEMA = 'salmonpy.input-bundle/1'
 _GENERATED = {'materials.json', 'resolved.json', 'manifest.json'}
 _DIGEST = re.compile(r'[0-9a-f]{64}\Z')
@@ -215,14 +215,65 @@ def verify_inputs(directory, *, manifest_sha256=None):
     return data
 
 
+def preflight_inputs(directory, *, manifest_sha256=None, registry=None):
+    """Return a JSON-ready input-only report, without running a solver.
+
+    With an explicit trusted registry, re-resolve the staged material recipe
+    and compare it with the prepared definitions. No registry means file
+    integrity only. This does not validate native namelist semantics, runtime
+    availability, MPI layout, GS compatibility, convergence or memory capacity.
+    """
+    root = Path(directory).absolute()
+    report = {'schema': 'salmonpy.input-preflight/1', 'verified': False,
+              'directory': str(root), 'status': 'failed', 'files': 0,
+              'scope': 'file integrity only' if registry is None else
+                       'file integrity and registered material parameters',
+              'errors': [], 'solver_started': False,
+              'limitations': ['Native parser/runtime and MPI layout are not checked.',
+                              'GS compatibility, physical convergence and memory capacity are not checked.']}
+    phase = 'integrity'
+    try:
+        manifest = verify_inputs(root, manifest_sha256=manifest_sha256)
+        report['files'] = len(manifest['files'])
+        report['manifest_sha256'] = _hash(root/'manifest.json')[0]
+        if registry is not None:
+            phase = 'materials'
+            catalog = resolve_materials(_read(root/'materials.json'),
+                                        registry=registry, base_directory=root)
+            if catalog.as_dict() != _read(root/'resolved.json'):
+                raise InputError('material definitions differ from prepared resolved.json; prepare a new bundle')
+        report['verified'] = True
+        report['status'] = 'passed'
+    except Exception as exc:
+        report['errors'].append({'phase': phase, 'type': type(exc).__name__,
+                                 'message': str(exc)})
+    return report
+
+
 def _main():
-    parser = argparse.ArgumentParser(description='Verify a transferred input bundle without network access.')
+    parser = argparse.ArgumentParser(description='Check staged inputs before submission or after offline transfer; no solver launch.')
     parser.add_argument('directory')
     parser.add_argument('--manifest-sha256')
+    parser.add_argument('--resolve-builtins', action='store_true',
+                        help='Recheck built-in material parameters with local files; no solver execution')
+    parser.add_argument('--report', type=Path, help='New JSON report outside the immutable input bundle')
     args = parser.parse_args()
-    record = verify_inputs(args.directory, manifest_sha256=args.manifest_sha256)
-    print(json.dumps({'verified': True, 'files': len(record['files']),
-                      'scope': 'file integrity only'}, sort_keys=True))
+    if args.report is not None:
+        root = Path(args.directory).resolve()
+        if args.report.resolve().is_relative_to(root):
+            parser.error('--report must be outside the input bundle')
+    registry = None
+    if args.resolve_builtins:
+        from .builtin_materials import builtin_material_registry
+        registry = builtin_material_registry()
+    report = preflight_inputs(args.directory, manifest_sha256=args.manifest_sha256,
+                              registry=registry)
+    text = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + '\n'
+    if args.report is not None:
+        with args.report.open('x', encoding='utf-8') as stream:
+            stream.write(text)
+    print(text, end='')
+    raise SystemExit(0 if report['verified'] else 2)
 
 
 if __name__ == '__main__':

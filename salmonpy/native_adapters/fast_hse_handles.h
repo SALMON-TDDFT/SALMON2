@@ -26,6 +26,11 @@ extern "C" {
  * every handle is closed, then detach before host MPI finalization. */
 int sp_attach(int64_t fortran_communicator);
 int sp_detach(void);
+/* Optional protocol1, rank-local completed total/init/density/Hartree seconds. */
+int sp_fast_hse_legacy_timer_protocol(void);
+int sp_fast_hse_legacy_timers(double seconds[4]);
+int sp_fast_hse_timer_protocol(void);
+int sp_fast_hse_handle_timers(int64_t token,double seconds[4]);
 int sp_fast_hse_handle_protocol(void); /* version 1 */
 int sp_fast_hse_handle_init(const char *path, double dt, int capacity,
                           int allow_symmetry, int64_t *handle, double j[3]);

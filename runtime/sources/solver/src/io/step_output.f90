@@ -32,7 +32,8 @@ contains
       inquire(unit=value%units(i),opened=value%opened(i),name=actual,iostat=ios)
       if(ios/=0.or..not.value%opened(i))then
         status=90
-      else if(trim(actual)/=trim(value%names(i)))then
+      else if(trim(actual)/=trim(value%names(i)).and. &
+              trim(actual)/=trim(resolve_path(value%names(i))))then
         status=max(status,15)
       endif
     enddo

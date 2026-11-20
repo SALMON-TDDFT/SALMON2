@@ -143,3 +143,29 @@ class PreparationTests(unittest.TestCase):
             'size': alias.stat().st_size, 'provenance': {}}
         p.write_text(json.dumps(data))
         with self.assertRaises(InputError): self.api.verify_inputs(dest)
+
+
+class JobPreflightTests(unittest.TestCase):
+    setUp = PreparationTests.setUp
+    prepare = PreparationTests.prepare
+    def test_report_distinguishes_scope_and_failures(self):
+        dest = self.prepare()
+        result = self.api.preflight_inputs(dest, registry=self.registry)
+        self.assertTrue(result['verified'])
+        self.assertFalse(result['solver_started'])
+        self.assertEqual(result['errors'], [])
+        (dest/'assets/input.dat').write_text('corrupt')
+        result = self.api.preflight_inputs(dest, registry=self.registry)
+        self.assertFalse(result['verified'])
+        self.assertEqual(result['errors'][0]['phase'], 'integrity')
+
+    def test_changed_resolver_rejected_without_modifying_inputs(self):
+        dest = self.prepare()
+        before = {str(p): p.read_bytes() for p in dest.rglob('*') if p.is_file()}
+        registry = MaterialRegistry()
+        registry.register('local', version='2', models=['test'],
+                          resolve_parameters=lambda model, parameters, **kw: parameters)
+        result = self.api.preflight_inputs(dest, registry=registry)
+        self.assertFalse(result['verified'])
+        self.assertEqual(result['errors'][0]['phase'], 'materials')
+        self.assertEqual(before, {str(p): p.read_bytes() for p in dest.rglob('*') if p.is_file()})

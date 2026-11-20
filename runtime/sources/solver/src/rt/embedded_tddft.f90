@@ -143,7 +143,13 @@ logical,save :: registry_mode=.false.,registering=.false.,model_spawning=.false.
 logical,save :: used=.false.,handle_mode=.false.,model_timers_alive=.false.,handle_initializing=.false.
 integer,save :: handle_group=0
 integer(c_int64_t),parameter :: handle_stride=2147483648_c_int64_t
+type(s_timer_context),save :: legacy_timers,legacy_host_timers
+logical,save :: legacy_timers_alive=.false.,legacy_host_alive=.false.,handle_timer_active=.false.
+type(s_timer_context),save :: handle_host_timers
+logical,save :: handle_host_timer_alive=.false.
 type handle_slot
+  type(s_timer_context) :: timers
+  logical :: timers_alive=.false.
   type(rt_context),pointer :: context=>null()
   integer(c_int64_t) :: generation=0_c_int64_t
   character(len(sysname)) :: label=''
@@ -454,6 +460,7 @@ subroutine handle_reserve(index,token,status)
   integer,intent(out)::index,status
   integer(c_int64_t),intent(out)::token
   type(handle_slot),allocatable::grown(:)
+  type(s_timer_context) :: empty_timers
   integer::i,old,n,allocation_status,group,rank,parts(2),reference(2)
   index=0;status=0;token=0;old=0
   if(allocated(handles))then
@@ -482,6 +489,8 @@ subroutine handle_reserve(index,token,status)
   if(status/=0)return
   handles(index)%generation=handles(index)%generation+1_c_int64_t
   token=handles(index)%generation*handle_stride+int(index,c_int64_t)
+  handles(index)%timers=empty_timers
+  handles(index)%timers_alive=.false.
 end subroutine
 subroutine handle_lookup(token,index,status)
   use communication,only:comm_get_globalinfo
@@ -518,11 +527,56 @@ subroutine handle_select(token,index,status)
   integer,intent(out)::index,status
   call handle_lookup(token,index,status)
   if(status==0)call select_model(handles(index)%context%model,.false.,status)
-  if(status==0)state=>handles(index)%context
+  if(status==0)then
+    state=>handles(index)%context
+    call handle_timer_enter(index)
+  endif
+end subroutine
+subroutine legacy_timer_enter()
+  call timer_context_swap(legacy_host_timers)
+  call timer_context_swap(legacy_timers)
+  call timer_initialize
+  legacy_host_alive=model_timers_alive
+  model_timers_alive=legacy_timers_alive
+end subroutine
+subroutine legacy_timer_leave()
+  legacy_timers_alive=model_timers_alive
+  model_timers_alive=legacy_host_alive
+  call timer_context_swap(legacy_timers)
+  call timer_context_swap(legacy_host_timers)
+end subroutine
+integer(c_int) function sp_tddft_legacy_timer_protocol() bind(C)
+  sp_tddft_legacy_timer_protocol=1
+end function
+integer(c_int) function sp_tddft_legacy_timers(values) bind(C)
+  real(c_double),intent(out)::values(4)
+  values=0d0;sp_tddft_legacy_timers=12
+  if(handle_mode.or..not.associated(state))return
+  values=[timer_context_get(legacy_timers,LOG_TOTAL),timer_context_get(legacy_timers,LOG_INIT_RT), &
+          timer_context_get(legacy_timers,LOG_CALC_RHO),timer_context_get(legacy_timers,LOG_CALC_HARTREE)]
+  sp_tddft_legacy_timers=0
+end function
+subroutine handle_timer_enter(index)
+  integer,intent(in) :: index
+  call timer_context_swap(handle_host_timers)
+  call timer_context_swap(handles(index)%timers)
+  call timer_initialize
+  handle_timer_active=.true.
+  handle_host_timer_alive=model_timers_alive
+  model_timers_alive=handles(index)%timers_alive
+end subroutine
+subroutine handle_timer_leave(index)
+  integer,intent(in) :: index
+  handles(index)%timers_alive=model_timers_alive
+  model_timers_alive=handle_host_timer_alive
+  call timer_context_swap(handles(index)%timers)
+  call timer_context_swap(handle_host_timers)
+  handle_timer_active=.false.
 end subroutine
 subroutine handle_unselect(index)
   integer,intent(in)::index
   handles(index)%context=>state
+  call handle_timer_leave(index)
   nullify(state)
 end subroutine
 integer(c_int) function sp_tddft_handle_init(path,timestep,capacity,A,decomposition,token,J) bind(C)
@@ -538,7 +592,7 @@ integer(c_int) function sp_tddft_handle_init(path,timestep,capacity,A,decomposit
   real(c_double),intent(out)::J(3)
   integer::index,status,group,rank,n,ignored
   integer(c_int64_t)::candidate
-  token=0;J=0d0;sp_tddft_handle_init=12
+  token=0;candidate=0;J=0d0;sp_tddft_handle_init=12
   if(.not.handle_main())return
   status=0
   if(associated(state))status=12
@@ -547,6 +601,7 @@ integer(c_int) function sp_tddft_handle_init(path,timestep,capacity,A,decomposit
   if(status/=0)return
   call handle_reserve(index,candidate,status)
   if(status==0)then
+    call handle_timer_enter(index)
     handle_initializing=.true.
     status=sp_tddft_init(path,timestep,capacity,A,decomposition,J)
     handle_initializing=.false.
@@ -574,6 +629,8 @@ integer(c_int) function sp_tddft_handle_init(path,timestep,capacity,A,decomposit
     handles(index)%label=trim(sysname)
     call comm_get_globalinfo(group,rank,n);handle_group=group;handle_mode=.true.
     call handle_unselect(index);token=candidate;J=-J
+  else if(candidate>0_c_int64_t)then
+    call handle_timer_leave(index)
   endif
   sp_tddft_handle_init=status
 end function
@@ -596,9 +653,13 @@ integer(c_int) function sp_tddft_model_new(token,J) bind(C)
     sp_tddft_model_new=status;return
   endif
   write(handles(index)%label,'(a,i0,a,i0)')'native_tddft_h',index,'_g',handles(index)%generation
+  call handle_timer_enter(index)
+  call timer_initialize
   call open_initial_state(model,J,status,trim(handles(index)%label))
   if(status==0)then
     call handle_unselect(index);token=candidate;J=-J
+  else
+    call handle_timer_leave(index)
   endif
   sp_tddft_model_new=status
 end function
@@ -612,6 +673,22 @@ integer(c_int) function sp_tddft_handle_step(token,Aold,Anew,J) bind(C)
   if(status/=0)return
   sp_tddft_handle_step=sp_tddft_step(Aold,Anew,J);J=-J
   call handle_unselect(index)
+end function
+integer(c_int) function sp_tddft_timer_protocol() bind(C)
+  sp_tddft_timer_protocol=1
+end function
+integer(c_int) function sp_tddft_handle_timers(token,values) bind(C)
+  integer(c_int64_t),value :: token
+  real(c_double),intent(out) :: values(4)
+  integer :: index,status
+  values=0d0
+  call handle_lookup(token,index,status)
+  sp_tddft_handle_timers=status
+  if(status/=0)return
+  values=[timer_context_get(handles(index)%timers,LOG_TOTAL), &
+          timer_context_get(handles(index)%timers,LOG_INIT_RT), &
+          timer_context_get(handles(index)%timers,LOG_CALC_RHO), &
+          timer_context_get(handles(index)%timers,LOG_CALC_HARTREE)]
 end function
 integer(c_int) function sp_tddft_handle_electron_number(token,value) bind(C)
   integer(c_int64_t),value :: token
@@ -801,7 +878,18 @@ integer(c_int) function sp_tddft_checkpoint_protocol() bind(C)
   sp_tddft_checkpoint_protocol=1
 end function
 
-integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition, J) bind(C)
+integer(c_int) function sp_tddft_init(path,timestep,capacity,A,decomposition,J) bind(C)
+  character(c_char),intent(in)::path(*)
+  real(c_double),value::timestep
+  integer(c_int),value::capacity
+  real(c_double),intent(in)::A(3)
+  integer(c_int),intent(in)::decomposition(5)
+  real(c_double),intent(out)::J(3)
+  if(.not.handle_timer_active)call legacy_timer_enter()
+  sp_tddft_init=tddft_init_impl(path,timestep,capacity,A,decomposition,J)
+  if(.not.handle_timer_active)call legacy_timer_leave()
+end function
+integer(c_int) function tddft_init_impl(path, timestep, capacity, A, decomposition, J)
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use communication, only: comm_get_max, comm_get_globalinfo
   use inputoutput, only: read_input
@@ -825,7 +913,7 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   if(used.and..not.registering)status=12
   call comm_get_max(status,admission_group)
   if(status/=0)then
-    sp_tddft_init=status;return
+    tddft_init_impl=status;return
   endif
   filename=''
   do i=1,len(filename)
@@ -845,7 +933,7 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   endif
   call comm_get_max(status,admission_group)
   if(status/=0)then
-    sp_tddft_init=status;return
+    tddft_init_impl=status;return
   endif
   reference_dt=timestep;reference_capacity=capacity;reference_A=A
   reference_decomposition=decomposition;reference_filename=filename
@@ -858,7 +946,7 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
      any(reference_decomposition/=decomposition).or.reference_filename/=filename)status=11
   call comm_get_max(status,admission_group)
   if(status/=0)then
-    sp_tddft_init=status;return
+    tddft_init_impl=status;return
   endif
   ! Only actual initialization consumes the process-owned lifetime.
   first_init=.not.used
@@ -892,7 +980,7 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   if(first_init)call timer_initialize
   model%initial_A=worker_initial_A
   call open_initial_state(model,J,status,'')
-  sp_tddft_init=status
+  tddft_init_impl=status
 end function
 subroutine open_initial_state(owner,J,status,name)
   use communication,only:comm_get_max
@@ -975,6 +1063,29 @@ end if
   status=0
 end subroutine
 integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
+  use communication,only:comm_resume_children,comm_end_children,comm_get_max
+  real(c_double),intent(in) :: Aold(3),Anew(3)
+  real(c_double),intent(out) :: J(3)
+  integer :: status
+  logical :: entered
+  J=0d0;status=0
+  if(.not.associated(state))status=12
+  call comm_get_max(status,nproc_group_global)
+  sp_tddft_step=status
+  if(status/=0)return
+  call comm_resume_children(state%mpi_child_owner,status)
+  entered=status==0
+  call comm_get_max(status,nproc_group_global)
+  if(status==0)then
+    if(.not.handle_timer_active)call legacy_timer_enter()
+    sp_tddft_step=tddft_step_impl(Aold,Anew,J)
+    if(.not.handle_timer_active)call legacy_timer_leave()
+  else
+    sp_tddft_step=16
+  endif
+  if(entered)call comm_end_children(state%mpi_child_owner)
+end function
+integer(c_int) function tddft_step_impl(Aold,Anew,J)
   use pseudo_pt_plusU_sub,only:PLUS_U_ON
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use communication, only: comm_get_max, comm_get_globalinfo
@@ -990,7 +1101,7 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   if(.not.associated(state))status=12
   call comm_get_max(status,admission_group)
   if(status/=0)then
-    sp_tddft_step=status;return
+    tddft_step_impl=status;return
   endif
   do i=1,3
     if(.not.ieee_is_finite(Aold(i)).or..not.ieee_is_finite(Anew(i)))status=10
@@ -1000,7 +1111,7 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   if(allocated(state%pending))status=14
   call comm_get_max(status,admission_group)
   if(status/=0)then
-    sp_tddft_step=status;return
+    tddft_step_impl=status;return
   endif
   reference_old=Aold;reference_new=Anew;reference_step=state%itt
   call comm_bcast(reference_old,admission_group)
@@ -1009,7 +1120,7 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   if(any(reference_old/=Aold).or.any(reference_new/=Anew).or.reference_step/=state%itt)status=11
   call comm_get_max(status,admission_group)
   if(status/=0)then
-    sp_tddft_step=status;return
+    tddft_step_impl=status;return
   endif
   ! The transaction covers fixed-ion periodic scalar semilocal propagation.
   select case(trim(xc))
@@ -1024,7 +1135,7 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   if(yn_out_rvf_rt/='n'.or.PLUS_U_ON.or.gram_schmidt_interval>=1)status=15
   call comm_get_max(status,admission_group)
   if(status/=0)then
-    sp_tddft_step=status;return
+    tddft_step_impl=status;return
   endif
   call checkpoint_copy(before_step,.false.)
   saved_xc_cval=state%xc_func%cval
@@ -1057,18 +1168,23 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
     ! The complete in-memory wavefunctions include their accepted halo bytes
     ! and original overlap flags; disk LOAD's normalization is not appropriate.
     state%system%xc_payload=saved_xc_payload
-    sp_tddft_step=status
+    tddft_step_impl=status
     return
   endif
   J=state%rt%curr(:,state%itt)
 
   state%accepted_A=Anew
-  sp_tddft_step=0
+  tddft_step_impl=0
 end function
 integer(c_int) function sp_tddft_close() bind(C)
+  if(.not.handle_timer_active)call legacy_timer_enter()
+  sp_tddft_close=tddft_close_impl()
+  if(.not.handle_timer_active)call legacy_timer_leave()
+end function
+integer(c_int) function tddft_close_impl()
   integer::output_status
   type(rt_model),pointer :: owner
-  sp_tddft_close=1
+  tddft_close_impl=1
   if(.not.associated(state)) return
   if(comm_is_root(nproc_id_global))then
     if(allocated(state%step_saved))then
@@ -1080,15 +1196,13 @@ integer(c_int) function sp_tddft_close() bind(C)
   endif
   if(allocated(state%step_saved))deallocate(state%step_saved,state%step_saved_xc)
   if(allocated(state%pending))deallocate(state%pending)
-  if(.not.handle_mode.or.live_contexts()==1)then
-    if(model_timers_alive)then
+  if(model_timers_alive)then
       call timer_end(LOG_RT_ITERATION)
       call timer_disable_sub
-      if(handle_mode)call timer_end(LOG_TOTAL)
+      call timer_end(LOG_TOTAL)
       model_timers_alive=.false.
-    endif
-    close(030)
   endif
+  ! The embedded path never opens laser unit30; it may belong to the host.
   call dealloc_cache(state%srg)
   call dealloc_cache(state%srg_scalar)
   call finalize_xc(state%xc_func)
@@ -1097,7 +1211,7 @@ integer(c_int) function sp_tddft_close() bind(C)
   deallocate(state);nullify(state)
   call release_model(owner)
   ! Other SALMON module configuration remains process-owned. Do not reopen.
-  sp_tddft_close=0
+  tddft_close_impl=0
 end function
 
 ! Native ABI checkpoint v2. Caller authenticates the file, binary, GS and configuration.

@@ -153,3 +153,7 @@ SCFの閾値未達は `RuntimeWarning` として通知し、有限で読み出�
 `state.input_metadata()` で不変の宣言入力を参照できます。任意のmetadata extraは
 明示呼び出し時だけ読み込み、source_idは物理的GS同一性や復元互換性を証明しません。
 詳細は保持GSガイドを参照してください。
+
+`salmonpy.preparation.preflight_inputs(directory, manifest_sha256=None, registry=None)`は、
+計算を開始せずJSON化可能な入力受付レポートを返します。信頼する検証関数の登録は任意で、
+省略時はファイル整合性だけが対象です。ジョブの終了コードとランク別記録はPREPARATION.mdを参照してください。

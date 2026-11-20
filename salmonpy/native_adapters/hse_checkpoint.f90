@@ -821,8 +821,19 @@ contains
  end function
  logical function valid_history(value) result(ok)
   type(s_factor_history),intent(in)::value
+  integer::i,j
   ok=value%interval>=1.and.value%n_teach>=0.and.value%count>=0.and.value%teachers>=0
-  ok=ok.and.all(ieee_is_finite(value%g)).and.all(ieee_is_finite(value%b)).and.all(ieee_is_finite(value%coeff))
+  do j=lbound(value%g,2),ubound(value%g,2)
+    do i=lbound(value%g,1),ubound(value%g,1)
+      if(.not.ieee_is_finite(value%g(i,j)))ok=.false.
+    enddo
+  enddo
+  do i=lbound(value%b,1),ubound(value%b,1)
+    if(.not.ieee_is_finite(value%b(i)))ok=.false.
+  enddo
+  do i=lbound(value%coeff,1),ubound(value%coeff,1)
+    if(.not.ieee_is_finite(value%coeff(i)))ok=.false.
+  enddo
  end function
  subroutine io_numeric(unit,reading,value,limit,status)
   integer,intent(in)::unit

@@ -59,6 +59,47 @@ class SharedTDDFTTests(unittest.TestCase):
         a.sp_tddft_step.argtypes=['compatibility ABI'];a.sp_tddft_step(1);b.sp_tddft_step(2)
         self.assertEqual(calls,[(31,1),(32,2)]);self.assertEqual(fn.argtypes,['native ABI'])
 
+    def test_state_owned_timer_query_and_old_runtime(self):
+        from salmonpy._shared_tddft import _SharedState
+        from salmonpy.errors import RuntimeFailure
+        import ctypes as c
+        def probe():return 1
+        def timers(token, address):
+            self.assertEqual(token,17)
+            values=c.cast(address,c.POINTER(c.c_double))
+            for i in range(4):values[i]=float(i+1)
+            return 0
+        lib=SimpleNamespace(sp_tddft_timer_protocol=probe,sp_tddft_handle_timers=timers)
+        state=object.__new__(_SharedState);state.closed=False;state.failed=False;state.handle=17
+        state.native=SimpleNamespace(model=SimpleNamespace(lib=lib),
+            context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=lambda x:[x])))
+        state._call=lambda fn,*args:fn(*args)
+        self.assertEqual(state.timing_seconds,dict(total=1.,initialization=2.,density=3.,hartree=4.))
+        del lib.sp_tddft_timer_protocol
+        with self.assertRaisesRegex(RuntimeFailure,'timer'): _=state.timing_seconds
+        from salmonpy.fast_hse_mpi import _State
+        hse=object.__new__(_State);hse.closed=False;hse.failed=False;hse.handle=17
+        hse._native=SimpleNamespace(context=state.native.context)
+        hse.lib=SimpleNamespace(sp_fast_hse_timer_protocol=probe,sp_fast_hse_handle_timers=timers)
+        hse._call=state._call
+        self.assertEqual(hse.timing_seconds,dict(total=1.,initialization=2.,density=3.,hartree=4.))
+        del hse.lib.sp_fast_hse_timer_protocol
+        with self.assertRaisesRegex(RuntimeFailure,'timer'): _=hse.timing_seconds
+        from salmonpy.embedded_tddft import _NativeState
+        def legacy_timers(address):return timers(17,address)
+        legacy=object.__new__(_NativeState);legacy.closed=False;legacy.failed=False
+        legacy.native=state.native;legacy._call=state._call
+        legacy.lib=SimpleNamespace(sp_tddft_legacy_timer_protocol=probe,sp_tddft_legacy_timers=legacy_timers)
+        self.assertEqual(legacy.timing_seconds,dict(total=1.,initialization=2.,density=3.,hartree=4.))
+        del legacy.lib.sp_tddft_legacy_timer_protocol
+        with self.assertRaisesRegex(RuntimeFailure,'timer'): _=legacy.timing_seconds
+        hse_legacy=object.__new__(_State);hse_legacy.closed=False;hse_legacy.failed=False
+        hse_legacy._native=hse._native;hse_legacy._call=state._call
+        hse_legacy.lib=SimpleNamespace(sp_fast_hse_legacy_timer_protocol=probe,sp_fast_hse_legacy_timers=legacy_timers)
+        self.assertEqual(hse_legacy.timing_seconds,dict(total=1.,initialization=2.,density=3.,hartree=4.))
+        del hse_legacy.lib.sp_fast_hse_legacy_timer_protocol
+        with self.assertRaisesRegex(RuntimeFailure,'timer'): _=hse_legacy.timing_seconds
+
     def test_unsupported_output_and_unsafe_paths_reject_before_attach(self):
         from salmonpy._shared_tddft import _profile
         with tempfile.TemporaryDirectory() as d:

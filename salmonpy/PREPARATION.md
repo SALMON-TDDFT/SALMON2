@@ -80,3 +80,58 @@ python -m salmonpy.preparation new-inputs
 入力準備と整合性の例であり、Si/DFT計算ではありません。
 
 構造・格子を事前検証する明示登録例は[STRUCTURE.md](STRUCTURE.md)と`examples.prepare_structure`です。汎用収集器が構造を自動解釈するわけではありません。
+
+## ユーザーが任意で行う投入前検査と開始時のエラー記録
+
+投入前検査は、ユーザーが施設の規則に従って管理・ログインノードなどで独自に実行する任意の手順です。
+SALMONpyがそのノードへ接続して自動実行したり、検査レポートをジョブ投入の必須条件にしたり、ジョブを投入したりはしません。
+この手順を省いても通常の計算は実行できます。ユーザーがファイルと材料設定を確認したい場合のコマンドです。
+
+```sh
+python -m salmonpy.preparation new-inputs --resolve-builtins --report preflight.json
+```
+
+`--resolve-builtins`は組み込み材料のレシピ用です。自作バックエンドではPythonから
+`preflight_inputs(bundle, registry=your_explicit_registry)`を呼びます。
+結果は`status`、エラーの段階・種類・メッセージ、manifestのhash、検査範囲を持つJSON化可能な辞書です。
+検証関数は前述の「計算起動・ダウンロードをしない」契約を守ります。registryを省くとファイル整合性だけを確認します。
+ランタイム・MPIの適合、native namelistの意味、GS互換性、収束、メモリ容量の保証ではありません。
+
+CLIはJSONを表示し、成功は終了コード0、不正入力は2を返します。`--report`は入力一式の外側に新規ファイルを作り、
+既存レポートは上書きしません。記録失敗もコマンドの失敗になります。投入したジョブと一緒にレポートを保管してください。
+CLIの表示形式は変わりますが、`verify_inputs`自体の例外とmanifest辞書を返す契約は維持します。
+
+転送後、計算開始前にも確認するジョブスクリプトの例です。
+
+```sh
+set -eu
+python -m salmonpy.preparation transferred-inputs --manifest-sha256 RECORDED_SHA256 --report job-input-check.json
+# 上のコマンドが成功した場合だけ、ここで計算を起動します。
+```
+
+各ランクから見えるファイルを確認する実行可能サンプルも用意しました。
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.mpi_input_preflight transferred-inputs job-ranks-check.json --manifest-sha256 RECORDED_SHA256
+```
+
+このサンプルは入力検査だけで、ソルバーを起動しません。全ランクの結果を集約してから成否を決め、同じ終了コードで終了します。
+一部ランクのファイル欠損でも、ジョブ全体でソルバーの作成へ進みません。本番スクリプトでも状態作成の前に同じ流れを置きます。
+不正入力は記録を見てジョブ外で修正し、再投入します。自動入力修正や対話的な再試行は必要ありません。
+SCF未収束や助言用メモリ予算超過は従来どおり警告とし、新しい数値停止しきい値は設けません。
+
+### 通常の混在計算への接続
+
+`examples.mpi_mixed_native`に任意の`--input-check STAGED_INPUT_BUNDLE`と
+`--input-manifest-sha256 RECORDED_SHA256`を追加しました。worldの全ランクがソルバー状態を作る前に
+入力一式を照合し、新規出力先へ`input-preflight.json`を保存します。不正入力なら全ランクが終了コード2で終了します。
+出力先の作成失敗もbarrierより前に共有し、他ランクを待たせません。既存の出力先は上書きしません。
+
+開始時の確認はファイル整合性だけです。入力一式から計算引数を自動設定したり、別途指定する`--layers`、
+ランタイム、GSがレシピと一致することを保証したりはしません。準備した参照と実行引数を揃え、材料設定の検査は投入前に行ってください。
+それより後のランタイム・数値異常の扱いは、サンプルの既存の終了／トランザクション方針を維持します。
+
+通常の混在サンプルは、`--input-check`を指定しない場合も、明示指定した層配置・モデル群・TDDFT材料カタログの
+読み込み結果を各ランクで確認します。`OUTPUT/startup-inputs.json`へランク、入力の段階、パス、例外の種類と原因を残します。
+読込・JSONエラーは全ランクで集約し、ソルバー状態を作る前に終了コード2で終了します。成功の記録はこの読み込みの成功だけを表し、
+native検査や計算全体の成功を保証しません。管理ノードでの操作や事前レポートは不要です。その他のnative・ランタイム異常には別の方針が残ります。

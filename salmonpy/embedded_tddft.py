@@ -237,6 +237,25 @@ class _NativeState:
         return _directory_call(self.lib,self.native.context.solver_comm,self.work,fn,*args,minimum_protocol=2)
 
     @property
+    def timing_seconds(self):
+        """Completed rank-local legacy native intervals; not checkpoint data."""
+        import ctypes as c
+        if self.closed or self.failed:raise InputError('closed or failed native state')
+        comm=self.native.context.solver_comm;error=None
+        try:
+            probe=getattr(self.lib,'sp_tddft_legacy_timer_protocol',None)
+            if probe is None:raise RuntimeFailure('runtime lacks legacy state-owned timer protocol')
+            probe.argtypes=[];probe.restype=c.c_int
+            if probe()!=1:raise RuntimeFailure('unsupported legacy timer protocol')
+            fn=self.lib.sp_tddft_legacy_timers;fn.argtypes=[c.c_void_p];fn.restype=c.c_int
+        except Exception as exc:error=str(exc)
+        from ._shared_tddft import _agree
+        _agree(comm,error,runtime=True)
+        values=np.zeros(4,dtype=np.float64);code=self._call(fn,values.ctypes.data)
+        _agree(comm,'legacy timer query failed' if code else None,runtime=True)
+        return dict(zip(('total','initialization','density','hartree'),map(float,values)))
+
+    @property
     def electron_number(self):
         """Collective read-only density integral; requires the additive norm ABI."""
         import ctypes as c

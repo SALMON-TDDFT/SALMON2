@@ -177,3 +177,8 @@ For explicit sequential heterogeneous standard-model switching in one process, s
 `state.input_metadata()` expose immutable declared-input descriptions. The optional
 metadata extra is loaded only on explicit use; source fingerprints do not certify
 physical GS identity or native restore compatibility. See the retained-GS guide.
+
+`salmonpy.preparation.preflight_inputs(directory, manifest_sha256=None, registry=None)`
+returns a JSON-ready input-admission report without starting a solver. Explicit
+trusted resolvers are optional; without one the scope is file integrity only.
+See PREPARATION.en.md for batch-job exit codes and per-rank startup reports.

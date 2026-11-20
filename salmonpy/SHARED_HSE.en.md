@@ -288,3 +288,15 @@ folder as a native file-resolution base without host chdir. Failure paths releas
 the scope. Older runtimes, including scope1, retain the prior route. This shares
 GS call-admission/cleanup code and does not enable concurrent threaded execution.
 The numerical direct-checkpoint layout is unchanged.
+
+Shared/registered fast-PR HSE states expose `state.timing_seconds` with optional timer protocol1: completed rank-local total, initialization, density and Hartree intervals in seconds. Query collectively on the material communicator. Each handle excludes parked, sibling and host work; unfinished intervals are absent, so total may be zero. Timing is not a numerical checkpoint payload, and restore does not erase spent work. Only the new query needs a matching runtime; older runtimes retain ordinary operations. Singleton timing has a separate legacy timer protocol1; threaded concurrency remains unsupported.
+
+New runtimes also give the fixed-settings initialization guard an explicit model owner: one per registered model or same-material shared factory. Switching models no longer overwrites a process-wide guard. Only successful initialization commits it; failed creation preserves it. Validation predicates, C entry points and numerical checkpoint representation remain unchanged. The standalone legacy path retains its compatibility guard; this does not complete all shared-state isolation.
+
+Reusing a closed model slot for a different material starts a fresh initialization guard for that slot, preserving every other live model.
+
+Checkpoint array-size validation now uses call-local scratch, passed explicitly to each serializer. The existing state-derived bound, malformed-size checks and stream format remain unchanged. This does not add threaded concurrent native execution.
+
+Fast-PR HSE singleton runtimes with legacy timer protocol1 isolate initialization (with or without symmetry), propagation and close timing from the host. `state.timing_seconds` returns the same four completed counters as shared states. Old runtimes retain ordinary calculations; only the query requires this capability. Timing is not numerical checkpoint data, and MPI/update order/lifetime restrictions remain unchanged.
+
+Checkpoint history g, b and coeff now use scalar IEEE inquiries over every element, retaining the existing metadata checks, rejection and format. Finite/NaN/positive- and negative-infinity tests use synthetic history; they are not new real-electronic-state disk-restart or Fujitsu compiler evidence.

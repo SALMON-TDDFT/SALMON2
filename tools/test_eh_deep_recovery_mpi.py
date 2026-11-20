@@ -22,6 +22,11 @@ def main():
     build,destination=sys.argv[1:3]
     split='--split' in sys.argv;faults='--faults' in sys.argv
     no_chdir='--no-chdir' in sys.argv
+    pending_close='--pending-on-close' in sys.argv;saved_close='--saved-on-close' in sys.argv
+    inspect_mpi='--inspect-mpi' in sys.argv
+    inspect_close='--inspect-close' in sys.argv or pending_close or saved_close or inspect_mpi
+    stop=int(sys.argv[sys.argv.index('--stop-at')+1]) if '--stop-at' in sys.argv else 32
+    if not 1<=stop<=32 or (pending_close and saved_close):raise ValueError('invalid close probe configuration')
     stride=int(sys.argv[sys.argv.index('--observation-stride')+1]) if '--observation-stride' in sys.argv else 1
     world=MPI.COMM_WORLD
     if split:assert world.size==4
@@ -39,12 +44,73 @@ def main():
     from unittest.mock import patch
     guard=patch('os.chdir',side_effect=AssertionError('FDTD host chdir forbidden')) if no_chdir else None
     if guard:guard.start()
+    mpi_before=None;mpi_initialized=None;mpi_after_native=None;mpi_after_detach=None;host_mpi=None
+    if inspect_mpi:
+        import hashlib
+        receipt=json.loads(Path(build).read_text())
+        assert hashlib.sha256(Path(receipt['library']).read_bytes()).hexdigest()==receipt['sha256']
+        probe_lib=c.CDLL(receipt['library'],mode=c.RTLD_GLOBAL)
+        mpi_query=getattr(probe_lib,'sp_eh_mpi_resources',None)
+        old_query=getattr(probe_lib,'sp_tddft_resources',None)
+        def mpi_counts():
+            values=np.zeros(3 if mpi_query else 4,dtype=np.int32)
+            fn=mpi_query or old_query;fn.argtypes=[c.c_void_p];fn.restype=c.c_int
+            assert fn(values.ctypes.data)==0
+            return values[:3].tolist() if mpi_query else [int(values[0]),int(values[1]),None]
+        mpi_before=mpi_counts();assert mpi_before[:2]==[0,0]
+        if '--host-mpi-library' in sys.argv:
+            directory=Path(sys.argv[sys.argv.index('--host-mpi-library')+1])
+            hr=json.loads((directory/'result.json').read_text())
+            assert hr['runtime_sha256']==receipt['sha256']
+            assert hashlib.sha256(Path(hr['library']).read_bytes()).hexdigest()==hr['sha256']
+            host_mpi=c.CDLL(hr['library']).test_host_mpi;host_mpi.argtypes=[c.c_int];host_mpi.restype=c.c_int
     grid=Grid((40,40,40),(2.,2.,2.));dt=.003;steps=32
     ld=(LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[0.],damping=[2.]),
         LorentzDrude(plasma_frequency=15.,strength=[.7,.3],resonance=[25.,35.],damping=[2.,3.]))
     geometry=Geometry(grid,(Shape('box',(2.,4.,4.),(7.,1.,1.),material=1),Shape('box',(2.,4.,4.),(9.,1.,1.),material=2)))
     calc=FDTD(geometry,ld,dt,steps,source=PlaneWave(AcosPulse(.001,20.,.15),0,-16.),observations=((1.,1.,1.),),observation_stride=stride)
-    f=NativeEHField(ctx,calc,build,out/'field',points={1:(20,20,20)},grid=(1,comm.size,1))
+    admission_cases=[]
+    original_call=NativeEHField._call
+    def admission_call(self,function,*args):
+        if getattr(function,'__name__','')=='sp_eh_init':
+            path,count,indices=args
+            trials=[('rank-local-zero-points',path,0 if comm.rank==0 else count),
+                    ('rank-local-missing-input',b'nonexistent-admission-input' if comm.rank==0 else path,count),
+                    ('rank-local-long-path',b'x'*4096 if comm.rank==0 else path,count)]
+            for name,trial_path,trial_count in trials:
+                code=original_call(self,function,trial_path,trial_count,indices)
+                assert comm.allgather(int(code))==[1]*comm.size
+                if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                admission_cases.append(name)
+            if '--parsed-admission' in sys.argv:
+                rejected=self.directory/'restart-rejected-input'
+                if comm.rank==0:
+                    text=(self.directory/'inputfile').read_text()
+                    rejected.write_text(text.replace('&control',"&control\n yn_restart = 'y'",1))
+                comm.Barrier()
+                for attempt in range(2):
+                    code=original_call(self,function,b'restart-rejected-input',count,indices)
+                    assert comm.allgather(int(code))==[1]*comm.size
+                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    admission_cases.append('parsed-restart-rejected-'+str(attempt))
+            if '--malformed-admission' in sys.argv:
+                rejected=self.directory/'malformed-rejected-input'
+                if comm.rank==0:
+                    text=(self.directory/'inputfile').read_text()
+                    rejected.write_text(text.replace('&maxwell',"&maxwell\n nt_em = 'not-an-integer'",1))
+                comm.Barrier()
+                for attempt in range(2):
+                    code=original_call(self,function,b'malformed-rejected-input',count,indices)
+                    assert all(value!=0 for value in comm.allgather(int(code)))
+                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    admission_cases.append('malformed-integer-rejected-'+str(attempt))
+        return original_call(self,function,*args)
+    with patch.object(NativeEHField,'_call',admission_call) if '--admission' in sys.argv or '--parsed-admission' in sys.argv or '--malformed-admission' in sys.argv else patch.object(NativeEHField,'_call',original_call):
+        f=NativeEHField(ctx,calc,build,out/'field',points={1:(20,20,20)},grid=(1,comm.size,1))
+    if inspect_mpi:
+        mpi_initialized=mpi_counts();assert mpi_initialized[0]>0
+        if mpi_query:assert mpi_initialized[2]==mpi_initialized[0]
+        if host_mpi:assert host_mpi(0)==0
     if not baseline:
         f.lib.sp_eh_recovery_protocol.restype=c.c_int
         assert f.lib.sp_eh_recovery_protocol()==1
@@ -65,8 +131,20 @@ def main():
         assert code==11
         assert save('mixed-entry-after')==before
         cases.append(('admission','mixed-entry'))
-    for step in range(1,steps+1):
+    for step in range(1,stop+1):
         J=np.array([[0.,.002*np.sin(.2*step),0.]]) if step>1 else np.zeros((1,3))
+        if not baseline and step==4:
+            before=save('scalar-admission-before');outputs=files()
+            for label,bad in [('nan',float('nan')),('positive-inf',float('inf')),('negative-inf',-float('inf'))]:
+                for which in ('J','A'):
+                    trial_J=J.copy();trial_A=f.A.copy()
+                    if comm.rank==comm.size-1:
+                        (trial_J if which=='J' else trial_A)[0,2]=bad
+                    E=np.empty_like(f.A)
+                    assert f._call(f.lib.sp_eh_step_checked,1,trial_J,trial_A,E)==10
+                    assert save('scalar-'+which+'-'+label+'-after')==before
+                    assert files()==outputs and f.step_index==step-1
+                    cases.append(('scalar-admission',which,label))
         if not baseline and step in (1,12,32):
             attempts=list(range(20,24)) if faults else []
             for stage in attempts:
@@ -93,17 +171,59 @@ def main():
                 np.testing.assert_array_equal(f.E,E);f.A=A
                 cases.append((step,'integrated-A-overflow'))
         rows.append(np.r_[f.advance(J).ravel(),f.E.ravel(),f.sample_magnetic_field().values.ravel()])
-    if not baseline:
+    if not baseline and f.step_index==steps:
         before=save('capacity-before');E=np.empty_like(f.A)
         code=f._call(f.lib.sp_eh_step,1,np.zeros_like(f.A),E)
         assert code==13 and save('capacity-after')==before
         cases.append(('admission','capacity'))
     np.save(out/f'fields-{comm.rank}.npy',rows)
+    allocation_before=None;allocation_after=None
+    if inspect_close:
+        resources=getattr(f.lib,'sp_eh_resources',None)
+        if resources is None:raise RuntimeError('matching native field-resource diagnostics required')
+        resources.argtypes=[c.c_void_p];resources.restype=c.c_int
+        def flags():
+            values=np.zeros(3,dtype=np.int32);assert resources(values.ctypes.data)==0
+            return values.tolist()
+        assert flags()==[1,0,0]
+        if pending_close:
+            save('close-candidate')
+            outputs=files()
+            assert f._call(cp,str(out/f'close-candidate-{comm.rank}.bin').encode(),2)==0
+            assert files()==outputs
+        if saved_close:
+            transaction=f.lib.sp_eh_step_transaction;transaction.argtypes=[c.c_int];transaction.restype=c.c_int
+            assert f._call(transaction,0)==0
+        allocation_before=flags()
+        assert allocation_before==[1,int(saved_close),int(pending_close)]
+        outputs_before_close=files()
+    if inspect_mpi:
+        original_call=f._call
+        def watched(fn,*args):
+            nonlocal mpi_after_native
+            status=original_call(fn,*args)
+            if getattr(fn,'__name__','')=='sp_eh_close' and status==0:
+                mpi_after_native=mpi_counts()
+                (out/f'mpi-native-close-{comm.rank}.json').write_text(json.dumps(mpi_after_native))
+                assert mpi_after_native[0]==int(host_mpi is not None),'field children survived native close'
+                if mpi_query:assert mpi_after_native[2]==0
+                comm.Barrier()  # Caller parent must remain valid before detach.
+                if host_mpi:
+                    assert host_mpi(1)==0 and mpi_counts()[0]==0
+            return status
+        f._call=watched
     f.close()
+    if inspect_mpi:
+        mpi_after_detach=mpi_counts();assert mpi_after_detach[:2]==[0,0]
+        comm.Barrier()
+    if inspect_close:
+        allocation_after=flags();assert allocation_after==[0,0,0]
+        assert f.lib.sp_eh_close()==1 and flags()==[0,0,0]
+        if stop<steps:assert files()==outputs_before_close
     assert Path.cwd()==anchor
     if guard:guard.stop()
     if comm.rank==0:
-        (out/'validation.json').write_text(json.dumps(dict(status='passed',new_runtime_no_chdir=no_chdir,cases=cases,ranks=comm.size,steps=steps,replayed_steps=0),indent=2)+'\n')
+        (out/'validation.json').write_text(json.dumps(dict(status='passed',new_runtime_no_chdir=no_chdir,admission_cases=admission_cases,cases=cases,ranks=comm.size,steps=stop,capacity=steps,replayed_steps=0,allocation_before_close=allocation_before,allocation_after_close=allocation_after,mpi_before=mpi_before,mpi_initialized=mpi_initialized,mpi_after_native_close=mpi_after_native,mpi_after_detach=mpi_after_detach,other_owner_preserved=bool(host_mpi)),indent=2)+'\n')
         print('E/H deep recovery PASS',cases)
 
 

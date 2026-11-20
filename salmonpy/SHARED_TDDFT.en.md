@@ -256,3 +256,5 @@ omitted XC/k/pulse/mixing defaults, two interleaved scratch sources and closed
 connections. Diagnostic logs match fresh-process legacy parsing exactly; existing
 named temporary-file sentinels remain unchanged. Repeat at MPI1/2. No GS data is
 needed. Native old/new XC/MPI/direct/mixed comparisons verify numerical parity.
+
+With standard TDDFT timer protocol1, `state.timing_seconds` returns rank-local completed total, initialization, density and Hartree intervals in seconds. Each handle owns its timer bank; parked intervals and host/sibling work are excluded. The total excludes an unfinished running interval and may be zero while a state is live. Query collectively on the material communicator. Diagnostics are not checkpoint payloads and numerical restore does not erase spent work. Older runtimes retain normal calculations but this optional query needs an explicitly built matching runtime. This describes the standard handle capability; the separate standard singleton capability is documented in COUPLED.en.md. Threaded concurrency remains unsupported.

@@ -31,8 +31,12 @@ module salmonpy_tddft_context
   character(32)::functional,propagation,factor
   character(1)::predictor
  end type
- type(fixed_settings),save::process_settings
- logical,save::settings_pinned=.false.
+ type,public::s_rt_model_settings
+  private
+  type(fixed_settings)::values
+  logical::pinned=.false.
+ end type
+ type(s_rt_model_settings),save::legacy_settings
 type :: checkpoint_payload
   type(s_orbital) :: spsi_in,spsi_out,tpsi
   type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
@@ -85,12 +89,17 @@ type(s_unfold) :: unfold
  logical::step_restored=.false.
  integer::Mit=0,accepted=0
  end type
-integer(8),save::checkpoint_array_limit=0_8
 contains
- subroutine rt_model_settings(reset)
+ subroutine rt_model_settings(reset,owner)
  logical,intent(in)::reset
- settings_pinned=.not.reset
- if(.not.reset)process_settings=capture_settings()
+ type(s_rt_model_settings),optional,intent(inout)::owner
+ if(present(owner))then
+  owner%pinned=.not.reset
+  if(.not.reset)owner%values=capture_settings()
+ else
+  legacy_settings%pinned=.not.reset
+  if(.not.reset)legacy_settings%values=capture_settings()
+ endif
  end subroutine
  subroutine rt_step_transaction(ctx,mode,status)
  use communication,only:comm_get_max
@@ -211,7 +220,7 @@ contains
  if(any(Binv/=transpose(ctx%system%primitive_a)/(2d0*acos(-1d0))))return
  ok=.true.
  end function
- subroutine rt_open(ctx,name,status,delta_t,openmp_mode,config,allow_symmetry,memory_gs)
+ subroutine rt_open(ctx,name,status,delta_t,openmp_mode,config,allow_symmetry,memory_gs,model_settings)
  type(tddft_context),pointer,intent(inout)::ctx
  character(*),intent(in)::name
  integer,intent(out)::status
@@ -220,10 +229,14 @@ contains
  type(s_rt_run_config),optional,intent(in)::config
  type(s_gs_seed),optional,intent(in)::memory_gs
  logical,optional,intent(in)::allow_symmetry
+ type(s_rt_model_settings),optional,intent(inout)::model_settings
+ type(s_rt_model_settings)::owner_settings
  type(s_rt_run_config)::selected
  character(len(sysname))::saved_name
  logical::exists
  integer::i,child_owner
+ owner_settings=legacy_settings
+ if(present(model_settings))owner_settings=model_settings
  status=1
 #if defined(USE_OPENACC) || defined(USE_FFTW)
  goto 900
@@ -247,8 +260,8 @@ contains
  if(selected%max_steps<1.or.selected%max_steps>=huge(0))goto 900
  if(.not.valid_mode(selected%stencil_mode).or..not.valid_mode(selected%current_mode).or. &
     .not.valid_mode(selected%force_mode))goto 900
- if(settings_pinned)then
-  if(.not.settings_match(process_settings))then
+ if(owner_settings%pinned)then
+  if(.not.settings_match(owner_settings%values))then
    status=2;goto 900
   endif
  endif
@@ -327,11 +340,47 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
 #endif
  ctx%run_settings=selected
  ctx%settings=capture_settings()
- process_settings=ctx%settings;settings_pinned=.true.
+ owner_settings%values=ctx%settings;owner_settings%pinned=.true.
+ if(present(model_settings))then
+  model_settings=owner_settings
+ else
+  legacy_settings=owner_settings
+ endif
  ctx%accepted=ctx%Mit
  status=0
  end subroutine
  subroutine rt_step(ctx,ac,current,total_energy,status)
+#ifdef USE_MPI
+ use communication,only:comm_resume_children,comm_end_children,comm_get_max
+#endif
+ type(tddft_context),pointer,intent(inout)::ctx
+ real(8),intent(in)::ac(3)
+ real(8),intent(out)::current(3),total_energy
+ integer,intent(out)::status
+#ifdef USE_MPI
+ logical::entered
+#endif
+ current=0d0;total_energy=0d0;status=0
+ if(.not.associated(ctx))status=1
+#ifdef USE_MPI
+ call comm_get_max(status,nproc_group_global)
+#endif
+ if(status/=0)return
+#ifdef USE_MPI
+ call comm_resume_children(ctx%mpi_child_owner,status)
+ entered=status==0
+ call comm_get_max(status,nproc_group_global)
+ if(status/=0)then
+  if(entered)call comm_end_children(ctx%mpi_child_owner)
+  return
+ endif
+#endif
+ call rt_step_impl(ctx,ac,current,total_energy,status)
+#ifdef USE_MPI
+ if(entered)call comm_end_children(ctx%mpi_child_owner)
+#endif
+ end subroutine
+ subroutine rt_step_impl(ctx,ac,current,total_energy,status)
  type(tddft_context),pointer,intent(inout)::ctx
  real(8),intent(in)::ac(3)
  real(8),intent(out)::current(3),total_energy
@@ -535,6 +584,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  type(s_rt_run_config)::saved_run
  integer::u,ios,closing,allocation_status,header(32),expected(32)
  integer::hse_position,need_kernel,finite_i,finite_j
+ integer(8)::checkpoint_array_limit
  logical::opened
  real(8)::cell(3,3),spacing(3),saved_initial_energy
  character(32)::magic
@@ -631,7 +681,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  else
   write(u,iostat=ios)magic,header,saved_settings,saved_run,cell,spacing,saved_initial_energy
  endif
- if(ios==0)call checkpoint_io(u,restore,copy,ios)
+ if(ios==0)call checkpoint_io(u,restore,copy,ios,checkpoint_array_limit)
  if(ios==0.and.restore)then
   if(copy%Mit/=ctx%Mit.or.copy%accepted<copy%Mit.or.copy%accepted>ctx%rt%max_steps)ios=1
   do finite_j=1,4
@@ -975,40 +1025,41 @@ subroutine checkpoint_copy(ctx,copy,restore)
     copy%fields(:,4)=ctx%system%vec_E_ext
   endif
 end subroutine
-subroutine checkpoint_io(unit,reading,value,ios)
+subroutine checkpoint_io(unit,reading,value,ios,array_limit)
   integer,intent(in)::unit
   logical,intent(in)::reading
   type(checkpoint_payload),intent(inout)::value
   integer,intent(inout)::ios
+  integer(8),intent(in)::array_limit
   logical::present_array
   integer::lo(7),hi(7),i1,i2,k,allocation_status
   integer(8)::elements,extent
   if(ios/=0)return
-  call checkpoint_io_s_orbital(unit,reading,value%spsi_in,ios)
+  call checkpoint_io_s_orbital(unit,reading,value%spsi_in,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_orbital(unit,reading,value%spsi_out,ios)
+  call checkpoint_io_s_orbital(unit,reading,value%spsi_out,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_orbital(unit,reading,value%tpsi,ios)
+  call checkpoint_io_s_orbital(unit,reading,value%tpsi,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_scalar(unit,reading,value%rho,ios)
+  call checkpoint_io_s_scalar(unit,reading,value%rho,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_scalar(unit,reading,value%rho_jm,ios)
+  call checkpoint_io_s_scalar(unit,reading,value%rho_jm,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_scalar(unit,reading,value%Vh,ios)
+  call checkpoint_io_s_scalar(unit,reading,value%Vh,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_scalar(unit,reading,value%Vh_stock1,ios)
+  call checkpoint_io_s_scalar(unit,reading,value%Vh_stock1,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_scalar(unit,reading,value%Vh_stock2,ios)
+  call checkpoint_io_s_scalar(unit,reading,value%Vh_stock2,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_scalar(unit,reading,value%Vbox,ios)
+  call checkpoint_io_s_scalar(unit,reading,value%Vbox,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_scalar(unit,reading,value%Vpsl,ios)
+  call checkpoint_io_s_scalar(unit,reading,value%Vpsl,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_rt(unit,reading,value%rt,ios)
+  call checkpoint_io_s_rt(unit,reading,value%rt,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_poisson(unit,reading,value%poisson,ios)
+  call checkpoint_io_s_poisson(unit,reading,value%poisson,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_dft_energy(unit,reading,value%energy,ios)
+  call checkpoint_io_s_dft_energy(unit,reading,value%energy,ios,array_limit)
   if(ios/=0)return
   present_array=allocated(value%rho_s)
   if(reading)then
@@ -1027,11 +1078,11 @@ subroutine checkpoint_io(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1053,7 +1104,7 @@ subroutine checkpoint_io(unit,reading,value,ios)
       if(ios/=0)return
     endif
     do i1=lbound(value%rho_s,1),ubound(value%rho_s,1)
-    call checkpoint_io_s_scalar(unit,reading,value%rho_s(i1),ios)
+    call checkpoint_io_s_scalar(unit,reading,value%rho_s(i1),ios,array_limit)
     if(ios/=0)return
     enddo
   endif
@@ -1074,11 +1125,11 @@ subroutine checkpoint_io(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1100,7 +1151,7 @@ subroutine checkpoint_io(unit,reading,value,ios)
       if(ios/=0)return
     endif
     do i1=lbound(value%V_local,1),ubound(value%V_local,1)
-    call checkpoint_io_s_scalar(unit,reading,value%V_local(i1),ios)
+    call checkpoint_io_s_scalar(unit,reading,value%V_local(i1),ios,array_limit)
     if(ios/=0)return
     enddo
   endif
@@ -1121,11 +1172,11 @@ subroutine checkpoint_io(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1147,7 +1198,7 @@ subroutine checkpoint_io(unit,reading,value,ios)
       if(ios/=0)return
     endif
     do i1=lbound(value%Vxc,1),ubound(value%Vxc,1)
-    call checkpoint_io_s_scalar(unit,reading,value%Vxc(i1),ios)
+    call checkpoint_io_s_scalar(unit,reading,value%Vxc(i1),ios,array_limit)
     if(ios/=0)return
     enddo
   endif
@@ -1170,11 +1221,12 @@ subroutine checkpoint_io(unit,reading,value,ios)
   endif
   if(ios/=0)return
 end subroutine
-subroutine checkpoint_io_s_scalar(unit,reading,value,ios)
+subroutine checkpoint_io_s_scalar(unit,reading,value,ios,array_limit)
   integer,intent(in)::unit
   logical,intent(in)::reading
   type(s_scalar),intent(inout)::value
   integer,intent(inout)::ios
+  integer(8),intent(in)::array_limit
   logical::present_array
   integer::lo(7),hi(7),i1,i2,k,allocation_status
   integer(8)::elements,extent
@@ -1196,11 +1248,11 @@ subroutine checkpoint_io_s_scalar(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1229,11 +1281,12 @@ subroutine checkpoint_io_s_scalar(unit,reading,value,ios)
     if(ios/=0)return
   endif
 end subroutine
-subroutine checkpoint_io_s_vector(unit,reading,value,ios)
+subroutine checkpoint_io_s_vector(unit,reading,value,ios,array_limit)
   integer,intent(in)::unit
   logical,intent(in)::reading
   type(s_vector),intent(inout)::value
   integer,intent(inout)::ios
+  integer(8),intent(in)::array_limit
   logical::present_array
   integer::lo(7),hi(7),i1,i2,k,allocation_status
   integer(8)::elements,extent
@@ -1255,11 +1308,11 @@ subroutine checkpoint_io_s_vector(unit,reading,value,ios)
       elements=1_8
       do k=1,4
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1288,11 +1341,12 @@ subroutine checkpoint_io_s_vector(unit,reading,value,ios)
     if(ios/=0)return
   endif
 end subroutine
-subroutine checkpoint_io_s_orbital(unit,reading,value,ios)
+subroutine checkpoint_io_s_orbital(unit,reading,value,ios,array_limit)
   integer,intent(in)::unit
   logical,intent(in)::reading
   type(s_orbital),intent(inout)::value
   integer,intent(inout)::ios
+  integer(8),intent(in)::array_limit
   logical::present_array
   integer::lo(7),hi(7),i1,i2,k,allocation_status
   integer(8)::elements,extent
@@ -1314,11 +1368,11 @@ subroutine checkpoint_io_s_orbital(unit,reading,value,ios)
       elements=1_8
       do k=1,7
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1364,11 +1418,11 @@ subroutine checkpoint_io_s_orbital(unit,reading,value,ios)
       elements=1_8
       do k=1,7
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1404,11 +1458,12 @@ subroutine checkpoint_io_s_orbital(unit,reading,value,ios)
   endif
   if(ios/=0)return
 end subroutine
-subroutine checkpoint_io_s_dft_energy(unit,reading,value,ios)
+subroutine checkpoint_io_s_dft_energy(unit,reading,value,ios,array_limit)
   integer,intent(in)::unit
   logical,intent(in)::reading
   type(s_dft_energy),intent(inout)::value
   integer,intent(inout)::ios
+  integer(8),intent(in)::array_limit
   logical::present_array
   integer::lo(7),hi(7),i1,i2,k,allocation_status
   integer(8)::elements,extent
@@ -1430,11 +1485,11 @@ subroutine checkpoint_io_s_dft_energy(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1517,11 +1572,12 @@ subroutine checkpoint_io_s_dft_energy(unit,reading,value,ios)
   endif
   if(ios/=0)return
 end subroutine
-subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
+subroutine checkpoint_io_s_poisson(unit,reading,value,ios,array_limit)
   integer,intent(in)::unit
   logical,intent(in)::reading
   type(s_poisson),intent(inout)::value
   integer,intent(inout)::ios
+  integer(8),intent(in)::array_limit
   logical::present_array
   integer::lo(7),hi(7),i1,i2,k,allocation_status
   integer(8)::elements,extent
@@ -1561,11 +1617,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1610,11 +1666,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1659,11 +1715,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1708,11 +1764,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1757,11 +1813,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1806,11 +1862,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1861,11 +1917,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1910,11 +1966,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -1959,11 +2015,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2008,11 +2064,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2057,11 +2113,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2106,11 +2162,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2155,11 +2211,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2204,11 +2260,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2253,11 +2309,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2302,11 +2358,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2351,11 +2407,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2400,11 +2456,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2449,11 +2505,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2498,11 +2554,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2547,11 +2603,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2596,11 +2652,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2645,11 +2701,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2694,11 +2750,11 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2727,11 +2783,12 @@ subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
     if(ios/=0)return
   endif
 end subroutine
-subroutine checkpoint_io_s_rt(unit,reading,value,ios)
+subroutine checkpoint_io_s_rt(unit,reading,value,ios,array_limit)
   integer,intent(in)::unit
   logical,intent(in)::reading
   type(s_rt),intent(inout)::value
   integer,intent(inout)::ios
+  integer(8),intent(in)::array_limit
   logical::present_array
   integer::lo(7),hi(7),i1,i2,k,allocation_status
   integer(8)::elements,extent
@@ -2759,11 +2816,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2808,11 +2865,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2857,11 +2914,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2906,11 +2963,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,3
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -2955,11 +3012,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3004,11 +3061,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3053,11 +3110,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3102,11 +3159,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3151,11 +3208,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3200,11 +3257,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3249,11 +3306,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3298,11 +3355,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3347,11 +3404,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3396,11 +3453,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3422,7 +3479,7 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       if(ios/=0)return
     endif
     do i1=lbound(value%vloc_t,1),ubound(value%vloc_t,1)
-    call checkpoint_io_s_scalar(unit,reading,value%vloc_t(i1),ios)
+    call checkpoint_io_s_scalar(unit,reading,value%vloc_t(i1),ios,array_limit)
     if(ios/=0)return
     enddo
   endif
@@ -3443,11 +3500,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3469,7 +3526,7 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       if(ios/=0)return
     endif
     do i1=lbound(value%vloc_new,1),ubound(value%vloc_new,1)
-    call checkpoint_io_s_scalar(unit,reading,value%vloc_new(i1),ios)
+    call checkpoint_io_s_scalar(unit,reading,value%vloc_new(i1),ios,array_limit)
     if(ios/=0)return
     enddo
   endif
@@ -3490,11 +3547,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,2
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3517,7 +3574,7 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
     endif
     do i1=lbound(value%vloc_old,1),ubound(value%vloc_old,1)
     do i2=lbound(value%vloc_old,2),ubound(value%vloc_old,2)
-    call checkpoint_io_s_scalar(unit,reading,value%vloc_old(i1,i2),ios)
+    call checkpoint_io_s_scalar(unit,reading,value%vloc_old(i1,i2),ios,array_limit)
     if(ios/=0)return
     enddo
     enddo
@@ -3539,11 +3596,11 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       elements=1_8
       do k=1,1
         extent=int(hi(k),8)-int(lo(k),8)+1_8
-        if(extent<0_8.or.extent>checkpoint_array_limit)then
+        if(extent<0_8.or.extent>array_limit)then
           ios=1;return
         endif
         if(extent>0_8)then
-          if(elements>checkpoint_array_limit/extent)then
+          if(elements>array_limit/extent)then
             ios=1;return
           endif
         endif
@@ -3565,13 +3622,13 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
       if(ios/=0)return
     endif
     do i1=lbound(value%rho0_s,1),ubound(value%rho0_s,1)
-    call checkpoint_io_s_scalar(unit,reading,value%rho0_s(i1),ios)
+    call checkpoint_io_s_scalar(unit,reading,value%rho0_s(i1),ios,array_limit)
     if(ios/=0)return
     enddo
   endif
-  call checkpoint_io_s_scalar(unit,reading,value%vonf,ios)
+  call checkpoint_io_s_scalar(unit,reading,value%vonf,ios,array_limit)
   if(ios/=0)return
-  call checkpoint_io_s_vector(unit,reading,value%j_e,ios)
+  call checkpoint_io_s_vector(unit,reading,value%j_e,ios,array_limit)
   if(ios/=0)return
   if(reading)then
     read(unit,iostat=ios) value%E_old

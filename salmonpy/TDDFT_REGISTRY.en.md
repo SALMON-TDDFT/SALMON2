@@ -131,3 +131,5 @@ model/state work folder for relative files and releases the scope after exceptio
 or rank-local admission failure. Older runtimes, including scope1, retain the
 legacy switch. Main-thread sequential calls remain required. Numerical checkpoint
 fields and update order are unchanged.
+
+Standard registered-model states also expose `state.timing_seconds` with timer protocol1, under the same contract as [shared TDDFT](SHARED_TDDFT.en.md).

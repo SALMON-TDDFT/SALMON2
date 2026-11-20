@@ -2,7 +2,7 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## Current actionable queue — 2026-11-20 (native directory scope3 review)
+## Current actionable queue — 2026-11-20 (bounded resource inventory)
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
@@ -27,7 +27,7 @@ retains results. GS saving/reuse is the normal workflow. Collected GS validation
   completes with maximum relative electron loss4.22e-10. This is not an optical
   or general-grid convergence certificate. Existing12³→16³ current error18.83%
   does not pass5%;12³ SCF was unconverged, so that comparison is provisional.
-- [x] Source/installed637 tests:636pass,1skip. Fresh source/object audits,
+- [x] Latest source/installed640 tests:639pass,1skip. Fresh source/object audits,
   sdist→wheel, installed examples, JP/EN/AI byte parity and guide sync verified.
 
 ### User-directed execution order (2026-11-19)
@@ -40,6 +40,8 @@ repartition are complete within the measured scopes. Fast-PR HSE dense Gamma orb
 measured below, together with full/reduced-k orbital/spatial mixed restart and limited rebuilt/source-pair compatibility. Packed/tiled formats and optimized distributed exchange FFT remain separate extensions. The next active group is5, then3; do not manufacture new storage formats merely to extend group4. Keep authorized validation results in calc2026.
 
 ### Remaining groups (not a count of individual implementation patches)
+
+Group5 now has concrete R0–R4 scope in [resource inventory](2026-11-20-group5-resource-inventory.md). R0 scalar IEEE compliance is implemented and GNU-tested (Fujitsu untested). R0–R2 are implemented and verified within documented profiles; remaining group5 milestones are the still-unhandled R3 unit/coordinate/semantic/numerical-init failures and R4 native ABI stability. R3 preflight, parsed admission and detected namelist read errors are verified; scheduled-job startup declaration errors now record and exit collectively. Management-node checking remains an optional independent user action. Do not treat every process-scoped selector as a new isolation task.
 
 1. [ ] DEFERRED by user: extend measured-norm diagnostics to fast PR HSE. Isolated E-drive norm
    wiring belongs to paused molecular work and is not the next active priority.
@@ -60,8 +62,11 @@ measured below, together with full/reduced-k orbital/spatial mixed restart and l
    are isolated below. Retained GS now uses a native path scope without host chdir.
    Standard/shared/registered TDDFT and fast-PR HSE now use scope2 through one
    common helper, including GS→RT setup; native FDTD now uses scope3 without host
-   chdir. Remaining initialization/
-   other I/O/TDDFT-timer/MPI ownership, stable public native
+   chdir. HSE initialization compatibility guards are now model-owned below.
+   Remaining initialization/
+   other I/O/MPI ownership (native unit30 fixed; propagation MPI child ownership
+   is now state-scoped below). Standard TDDFT/fast-PR HSE singleton and
+   handle timers are owner-scoped. Remaining stable public native
    ABI and wider initialization/allocation/process-failure recovery. Existing
    rollback does not guarantee arbitrary STOP/OOM/MPI-failure or threaded reentrancy.
 6. [ ] Larger grids/material counts, resource/communication calibration, matching
@@ -2408,3 +2413,311 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
   SCF computations; no CI. OneDrive cloud synchronization unconfirmed.
   Changes are included in the 2026-11-20 native ownership commit.
   Native main-thread/one-field-lifetime limits remain.
+
+### 2026-11-20 — Standard TDDFT handle timer ownership
+
+- [x] Reused GS timer-bank moves for standard RT handle slots, including
+  initialization, rejected creation, selection/unselection and close. Host latch
+  restored, reused generations start fresh; no numerical/checkpoint field change.
+- [x] Added optional timer protocol1 and shared/registered Python timing_seconds.
+  Rank-local completed counters only; parked/sibling time excluded, numerical
+  rollback does not erase already spent time. Old runtime operations remain.
+- [x] Failure-first Python API test and deterministic native host/thread/running/
+  subrange fixture. Source638 tests:637pass/1skip; installed638:637pass/1skip.
+- [x] PBE/rgrid2 and TB-mBJ/orbital2, three MPI groups: alternating two-handle
+  currents exactly match prior independent singleton controls.64 sibling timer
+  checks, memory rollback, sibling close/reopen and failed creation preserve
+  other owners. Existing GS referenced only; no GS copies, SCF or disk
+  electronic checkpoints. New executable source/object audits passed.
+- [x] Corrected step-output identity admission to accept the native-resolved
+  path as well as the legacy relative path. Pre-fix protected staging rejected
+  status15; corrected memory rollback matches independent controls.
+- [x] JP/EN/AI synced; one existing MPI probe extended instead of another tool.
+- Evidence: calc2026/salmonpy-rt-timers-record-20261120. No CI dispatched;
+  cloud sync unconfirmed. Changes uncommitted. Fast-PR HSE/legacy timers,
+  wider MPI/I/O/initialization ownership and native fatal recovery remain open.
+
+### 2026-11-20 — Fast-PR HSE handle timer ownership
+
+- [x] Timer banks per fast-PR handle generation; shared/registered initialization,
+  selected calls, close and returned creation failures restore the host bank.
+  No exchange arithmetic, symmetry/history, numerical payload or codec changes.
+- [x] Optional timer protocol1 and timing_seconds for shared/registered Python
+  states. Legacy singleton normal calculations remain compatible; its timing
+  ownership is separate. Completed rank-local counters, not restart data.
+- [x] Existing API test extended for HSE (test count unchanged). Source638:
+  637pass1skip. Native source/application-object audits passed.
+- [x] MPI2/group,3 groups: full-k learned Taylor shared handles and reduced-k
+  learned PT-CN registered handles match old independent current/energy/history
+  exactly.64 sibling timer checks per case, memory rollback with no replay,
+  sibling close/reused generation and rejected creation preserve other counters.
+  Existing GS references only: GS copies0, SCF0, disk electronic checkpoints0.
+- [x] JP/EN/AI updated; existing symmetry probe extended, no new module/tool.
+- [x] Final sdist→wheel installed638:637pass1skip. Installed reduced-k
+  PT-CN registered probe also passes; source/code/header/guide/tool parity checked.
+- Evidence: calc2026/salmonpy-hse-timers-record-20261120. No CI; cloud sync
+  unconfirmed. Uncommitted. Legacy timers and wider MPI/I/O/initialization
+  ownership, stable public ABI/fatal recovery remain open.
+
+### 2026-11-20 — Native RT preserves host file lifetime
+
+- [x] Reproduced old last-state shutdown disconnecting host Fortran unit30.
+  Embedded initialization/worker never opens that laser unit; removed only its
+  unowned native close. Historical standalone path and owned RT/MPI cleanup
+  retained; no numerical/checkpoint/ABI change.
+- [x] Existing I/O fixture extended with test-only host bridge; source/object
+  audits before linking, helper receipt SHA checked before reuse. Existing
+  synthetic IO outputs and directory context regression still pass.
+- [x] MPI2/group,3groups: source PBE/rgrid currents exact vs prior independent
+  controls; memory rollback and64 sibling timer checks pass. Host stays writable
+  after last shared state close and attachment retirement.
+- [x] Installed TB-mBJ/orbital2 with all3 groups using current runtime: host
+  files on all6 ranks preserved through shared and legacy singleton shutdown;
+  independent currents and rollback match. GS references only, no copies/SCF.
+- [x] Source/installed638:637pass1skip each; JP/EN/AI and source/wheel
+  code/guide/native-fixture/tool parity checked. No routine CI.
+- Evidence: calc2026/salmonpy-rt-host-file-record-20261120. Cloud sync
+  unconfirmed; changes uncommitted. Wider initialization/MPI/IO ownership,
+  stable public native ABI and fatal-error recovery remain open.
+
+### 2026-11-20 — State-owned MPI children during propagation
+
+- [x] Internal resume of the existing state child-owner token during standard
+  embedded TDDFT and fast-PR HSE propagation. On returned paths, only a scope
+  actually entered by this call is released; conflicts are collective before
+  numerical work. No split/state payload/codec/Python caller changes.
+- [x] Existing native directory fixture extended: two owners gain late children,
+  conflicting activation rejects, releasing A preserves B, repeated A release
+  preserves reused attachment slots, and host MPI survives detach. Old module
+  cannot compile this probe; new source and installed fixture pass.
+- [x] MPI2/group,3groups: PBE/rgrid currents match prior controls exactly; host
+  files and sibling timers survive. Full-k learned Taylor shared and reduced-k
+  learned PT-CN registered HSE current/energy/history match prior independent
+  controls. Protected memory rollback stays exact, no replay.
+- [x] Source and installed638:637pass1skip. Installed reduced-HSE and MPI
+  late-child fixture pass. Source/object audits and source/prepared/installed
+  code/adapter/guide/tool parity checked. JP/EN/AI synchronized.
+- Evidence: calc2026/salmonpy-rt-mpi-owner-record-20261120. Existing GS
+  references only, copies0/SCF0/disk electronic checkpoints0/CI0. Cloud sync
+  unconfirmed; uncommitted. One native attachment/process and sequential main
+  thread remain; initialization/other I/O ownership, stable native ABI and
+  arbitrary allocation/process/MPI-failure recovery remain open.
+
+### 2026-11-20 — HSE model-owned initialization guard
+
+- [x] Explicit fixed-settings/latch owner per registered HSE model and same-model
+  factory; selection no longer overwrites a shared guard. Legacy standalone
+  fallback retained. Validation predicate/C ABI/numerical stream unchanged.
+- [x] Only successful initialization commits the guard; a reused model generation
+  resets that slot only. Failure-first slot-reuse probe exposed the missing
+  reset in intermediate code; corrected runtime passes, failed evidence retained.
+- [x] MPI2/group,3groups: full-k learned Taylor and reduced-k learned PT-CN
+  interleaved in one process match prior independent current/energy/history
+  exactly. Memory rollback, failed generation, sibling timer preservation,
+  fresh state after model switching and A-slot reuse for B all pass.
+- [x] Final installed heterogeneous and same-model shared probes pass. Source
+  and installed638:637pass1skip; source/object audits passed, checkpoint tail
+  and fixed-settings record bytes/source unchanged. JP/EN/AI/list synced.
+- Evidence: calc2026/salmonpy-hse-model-guard-record-20261120. Existing GS
+  references only: copies0/SCF0/disk electronic checkpoints0/CI0. Cloud sync
+  unconfirmed; uncommitted. Wider initialization/legacy settings, remaining
+  I/O/MPI ownership and public native ABI/fatal recovery remain open.
+
+### 2026-11-20 — Call-local HSE checkpoint sizing scratch
+
+- [x] Removed module-SAVE array-size scratch; rt_checkpoint computes the same
+  bound locally and passes it explicitly through all7 serializer procedures.
+  Same extent/product checks and stream instructions; no new capacity policy.
+- [x] Existing synthetic I/O fixture extracts/compiles actual serializer code:
+  small/large/small scalar and vector roundtrips preserve values/lower bounds;
+  oversize rejects before allocation. All3 old/new stream files exactly match.
+  Procedure tails normalize exactly to prior code after argument threading.
+- [x] MPI2/group heterogeneous full-Taylor/reduced-PT-CN current/energy/history
+  match prior independent controls; memory rollback, fresh states/model-slot
+  reuse and sibling timers remain exact. No real electronic disk checkpoint
+  written or claimed; GS references only, no copies/SCF.
+- [x] Source/installed638:637pass1skip. Installed synthetic serializer parity
+  also passes, native source/object audits retained, JP/EN/AI/list synced.
+- Evidence: calc2026/salmonpy-hse-checkpoint-scope-record-20261120. No CI;
+  cloud sync unconfirmed; uncommitted. Broader initialization/I/O ownership,
+  native ABI/fatal recovery and platform/scaling work remain open.
+
+### 2026-11-20 — Standard singleton native timer ownership
+
+- [x] Standard singleton init/step/close borrow a dedicated timer bank and
+  restore host counters/latch; shared handle bank bypasses the legacy wrapper,
+  including internal first-init cleanup. Numerical routine bodies unchanged
+  except ending their owned total timer at close. MPI scoping remains intact.
+- [x] Additive legacy timer protocol1 and timing_seconds; old operations valid,
+  only query needs capability. Existing API test extended, count unchanged.
+- [x] Fixed test-helper macOS linkage/visibility. Earlier loader failures were
+  harness errors, not proof of host-counter mutation. Corrected old-runtime
+  probe reproduces actual mutation; new runtime passes36 host-counter checks.
+- [x] Source PBE/rgrid2 and installed TB-mBJ/orbital2 legacy currents exactly
+  match prior independent controls; stale-A rejection/retry and shutdown keep
+  host counters. Shared TB-mBJ regression/rollback/sibling counters still pass.
+- [x] Source/installed638:637pass1skip, source/application-object audits and
+  source/prepared/installed parity checked; JP/EN/AI/list synchronized.
+- Evidence: calc2026/salmonpy-standard-legacy-timer-record-20261120. GS
+  references only, copies0/SCF0/disk electronic checkpoints0/CI0. Cloud sync
+  unconfirmed; uncommitted. Fast-HSE singleton timing, other initialization/
+  I/O ownership, native ABI/fatal recovery/platform scaling remain open.
+
+### 2026-11-20 — Fast-PR singleton native timer ownership
+
+- [x] Dedicated legacy timer bank around init/init_symmetry, propagation and
+  close; shared/registered handle calls retain their own bank. Existing kernel,
+  checkpoint stream and MPI ownership unchanged; old operations remain valid.
+- [x] Additive legacy timer protocol1 and timing_seconds dispatch, tested with
+  old-capability rejection; existing API test extended, test count unchanged.
+- [x] Correct host fixture reproduces old HSE initialization counter mutation.
+  Full learned Taylor and reduced learned PT-CN MPI2/group,3groups preserve
+  host counters across36 checks including stale-A reject/retry and detach.
+  Current/energy/history exactly match prior independent controls.
+- [x] Final wheel legacy and heterogeneous registered-model regression passes,
+  including memory rollback, fresh/reused models and sibling timer independence.
+  Source/installed638:637pass1skip; source/application-object audits and
+  installed adapter/header/guide/tool parity checked. JP/EN/AI/list synced.
+- Evidence: calc2026/salmonpy-hse-legacy-timer-record-20261120. Existing GS
+  references only, copies0/SCF0/disk electronic checkpoints0/CI0. Cloud sync
+  unconfirmed; uncommitted. Wider initialization/I/O/MPI ownership, public
+  native ABI/fatal recovery and platform/scaling evidence remain open.
+
+### 2026-11-20 — Group5 bounded resource inventory
+
+- [x] Source inventory distinguishes numerical owners, sequential borrowed
+  views, connection registries and unsupported legacy feature state. No blanket
+  removal of SAVE or extra user restrictions. See paired resource inventory.
+- [x] R0: scalar IEEE inquiries in embedded_eh and HSE valid_history; GNU/Mac verified, Fujitsu compilation remains untested.
+- [x] R1: field close releases pending/step-saved payloads; supported early/full native E/H+LD output behavior verified.
+- [x] R2: field-owned child communicators; 1/2-rank native-close-before-detach counts and other-owner/parent survival verified.
+- [ ] R3: enumerate recoverable initialization stages/cleanup; arbitrary STOP/
+  OOM/MPI-failure recovery remains outside the promised scope.
+- [ ] R4: stabilize the experimental native ABI with explicit host contracts.
+- Group5 remains open. This audit is source-only, not new numerical or Fujitsu
+  evidence. No builds/calculations/CI; no GS collection.
+
+### 2026-11-20 — R0 scalar IEEE validation
+
+- [x] Field input/stage guards scan rank1–4 arrays through explicit scalar
+  IEEE loops; history g/b/coeff use scalar element loops. No early exit within
+  an array scan, unchanged precision/thresholds/MPI rejection/stream format.
+- [x] Actual extracted native routines: finite,NaN,+Inf,-Inf at all positions,
+  empty arrays, accumulated false result and history metadata cases pass.
+  Old source fails the policy precheck; source and installed probes pass.
+- [x] Field MPI2: rank-local nonfinite J/A rejected collectively with complete
+  checkpoint bytes and ordinary outputs preserved. Overflow recovery/capacity
+  cases still pass. Source/wheel normal A/E/H exactly match prior field traces.
+- [x] HSE MPI2/group full-Taylor/reduced-PT-CN mixed registry currents/energy/
+  history exactly match prior independent controls; memory rollback, sibling
+  timing and model-generation reuse remain correct. No new electronic disk
+  restart claim; no GS copies/SCF.
+- [x] Source/installed638:637pass1skip, native source/object audits and installed
+  parity pass; JP/EN/AI/list synced. Fujitsu compiler unavailable, not claimed.
+- Evidence: calc2026/salmonpy-r0-scalar-record-20261120. CI0, cloud sync
+  unconfirmed; uncommitted. Next R1 then R2; group5 remains open.
+
+### 2026-11-20 — R1 native field candidate cleanup
+
+- [x] Actual old close body leaves pending allocated (synthetic STOP12). New
+  close deallocates pending/step_saved and clears restoration flag before the
+  existing state-availability check; existing empty-close status1 preserved.
+  Completion-only eh_finalize remains conditional on reaching capacity.
+- [x] Existing extracted native lifecycle fixture passes8 combinations of
+  early/full,candidate/no candidate,transaction/no transaction and repeated close.
+- [x] Real field+two-LD MPI2 cases: early/full empty/pending and early protected
+  copy all report allocation flags0 after close. Every field trace equals the
+  prior trajectory/prefix; early close changes no ordinary data output, full
+  output files are byte-identical to prior accepted output.
+- [x] Final wheel native fixture and pending early-close path pass. Source/
+  installed638:637pass1skip; audits and installed source/guide/tool parity pass.
+  Optional sp_eh_resources is allocation flags only, not total RAM/MPI diagnostics.
+- Evidence: calc2026/salmonpy-r1-field-close-record-20261120. No GS copies/
+  SCF/CI; cloud sync unconfirmed; uncommitted. Next R2, group5 remains open.
+
+### 2026-11-20 — R2 field-owned MPI children
+
+- [x] Live field context owns child token; init/step/finalization scope it and
+  close retires communication cache before releasing its child groups. Token
+  is not numerical checkpoint state. Existing close allocation cleanup retained.
+- [x] Old native close leaves field children before detach (expected failing
+  MPI probe). New1/2rank × early/full × empty/pending/protected-copy10cases
+  release all field children before parent detach, preserve a separate native
+  owner and caller barrier, then detach leaves zero live children/slots.
+- [x] Example2rank counts: initialized9live/9field-owned; native close leaves
+  only1other-owner child,0field-owned; other-owner release/detach reaches0.
+  Registry slots retained before detach are reusable metadata, not live groups.
+- [x] Old/new fields and complete ordinary outputs exact at matching rank count;
+  pending checkpoint files byte-identical. R1 allocation/candidate cleanup stays
+  correct. Final wheel full-pending MPI case and lifecycle fixture pass.
+- [x] Installed LD2+SBE2 MPI4 protected-restore failure preserves all originals,
+  retry3future steps exact/replay0. Source/installed638:637pass1skip; audits
+  and source/prepared/installed parity verified; JP/EN/AI/list synced.
+- Evidence: calc2026/salmonpy-r2-field-mpi-record-20261120. GS copies0/
+  SCF0/CI0, cloud sync unconfirmed, uncommitted. Group5 remains open for
+  explicit R3/R4, not an unbounded instruction to remove every global.
+
+### 2026-11-20 — R3 field admission (bounded first stage)
+
+- Native E/H admission now collectively rejects invalid point counts and
+  empty/overlong/missing input paths before consuming `used`. File lookup uses
+  the existing native directory scope, without host `chdir`.
+- See [stage scope and validation](2026-11-20-r3-field-admission.md).
+- R3 remains open: malformed parser input and failures after numerical
+  initialization begins are outside this first admission change.
+
+### 2026-11-20 — R3 parsed field admission
+
+- [x] Parsed unsupported theory/restart requests reject collectively before
+  consuming the field lifetime; invocation-owned parser closes scratch units.
+- [x] Empty context allocation/owner admission precedes numerical lifetime;
+  collective allocation rejection releases allocated peer contexts.
+- [x] Repeated parsed restart rejection then normal initialization verified on
+  1/2 ranks; 32-step A/E/H and `.data` outputs exactly match R2. Existing source
+  tests: 637 pass/1 skip. No GS collected and no Actions run.
+- [ ] R3 remains open for malformed parsing and failures inside `eh_init`.
+  Allocation/owner rejection cleanup is implemented; no real OOM was injected.
+
+### 2026-11-20 — R3 detected namelist I/O errors
+
+- [x] Native FDTD requests status-returning namelist diagnostics; detected read
+  errors no longer finalize MPI. Scratch parser units close before returning.
+  Callers without the optional status retain their previous standalone behavior.
+- [x] Invalid integer rejection twice, followed by normal calculation, verified
+  on 1/2 ranks. All 32 A/E/H samples and `.data` bytes match R2 exactly.
+  Source tests: 637 pass/1 skip; no GS collected and no Actions run.
+- [ ] R3 remains open: earlier unit selection/coordinate parsing, semantic
+  validation and numerical initialization still have separate fatal paths.
+
+### 2026-11-20 — batch-job input admission priority
+
+- [x] `preparation.preflight_inputs` reports integrity/material-resolver failures
+  before submission. CLI JSON reports preserve phase/type/message and scope.
+- [x] MPI startup example checks local file views, gathers per-rank errors and
+  exits all ranks before solver creation; valid 1/2-rank, rank1-only missing
+  file and modified-input failures verified. No automatic input repair/retry.
+- Native semantic/parser/deep-init failure handling remains separately scoped.
+  Preflight success does not certify runtime, MPI layout, GS or convergence.
+
+### 2026-11-20 — ordinary mixed sample startup checks
+
+- [x] Optional `--input-check`/manifest hash gates the ordinary native mixed
+  sample before solver state creation; per-rank errors record and exit2.
+- [x] Output mkdir failure is broadcast before the first barrier; existing
+  directories are preserved, without leaving peers waiting.
+- [x] 4-rank LD/SBE/native FDTD protected continuation parity and invalid-input/
+  existing-output exits verified. Fresh-wheel ordinary 64-step A/E/j exactly
+  equal with/without preflight. No GS data collected; no Actions runs.
+- Integrity gate does not claim native semantic/runtime/MPI/GS certification or
+  automatic correspondence between the bundle and independent command flags.
+
+### 2026-11-20 — startup failures without optional preflight
+
+- [x] Ordinary mixed sample records explicit layer/model-group/TDDFT catalog
+  reads on every rank, without requiring --input-check or management-node work.
+- [x] Missing layers, malformed JSON and rank1-only read failure produce
+  startup-inputs.json and collective exit2 before solver creation; parent MPI
+  survived the caught test failure. Existing native/deep failure policy remains.
+- [x] 4-rank LD/SBE/native field protected continuation is exactly equal to the
+  prior sample. No GS data collected and no Actions run.
+- Scope is declaration reads, not complete native/runtime/physical validation.

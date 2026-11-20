@@ -92,3 +92,76 @@ This example has an explicit custom resolver and records a synthetic scalar
 response file. It demonstrates staging and integrity, not a Si/DFT calculation.
 
 For an explicitly registered structure/grid resolver see [STRUCTURE.en.md](STRUCTURE.en.md) and `examples.prepare_structure`. The generic collector does not automatically interpret structures.
+
+## Batch jobs: optional user-run checks and startup failures
+
+The user may explicitly run this optional check on a management/login node only
+where facility policy allows it. SALMONpy does not access that node, arrange the
+check automatically, require its report for submission, or submit the job.
+Skipping this optional step does not prevent an ordinary calculation. To check
+local files and registered material parameters manually:
+
+```sh
+python -m salmonpy.preparation new-inputs --resolve-builtins --report preflight.json
+```
+
+`--resolve-builtins` is for built-in material recipes only. For your own backend,
+call `preflight_inputs(bundle, registry=your_explicit_registry)` in Python; it
+returns a JSON-ready report with `status`, errors (`phase`, `type`, `message`),
+manifest hash and declared limitations. Trusted resolvers must follow the
+no-solver/no-download preparation contract above. With no registry, the check
+is file integrity only. Runtime/MPI compatibility, native namelist semantics,
+GS compatibility, convergence and memory capacity are not certified.
+
+The CLI prints a JSON report and exits 0 on success or 2 on invalid input.
+`--report` creates a new file outside the immutable bundle; it never overwrites
+an existing report. Report-writing errors also fail the command. Keep this
+report with the submitted job records. This changes the CLI reporting format;
+`verify_inputs` itself retains its exception and manifest-return contracts.
+
+For a batch script, check after transfer before launching the calculation:
+
+```sh
+set -eu
+python -m salmonpy.preparation transferred-inputs --manifest-sha256 RECORDED_SHA256 --report job-input-check.json
+# Launch your calculation here only if the previous command succeeded.
+```
+
+If every rank needs to check its local filesystem view, the runnable example is:
+
+```sh
+mpiexec -n 2 python -m salmonpy.examples.mpi_input_preflight transferred-inputs job-ranks-check.json --manifest-sha256 RECORDED_SHA256
+```
+
+This example only checks inputs; it starts no solver. It gathers all rank
+reports before deciding success/failure and exits every rank with the same
+status. A missing file on one rank prevents solver creation for the whole job.
+Use the same pattern before state creation in a production MPI script. Invalid
+input is recorded, fixed outside the job, then resubmitted. No automatic input
+editing or interactive retry is needed. Numerical warnings such as unconverged
+SCF or an exceeded advisory memory budget remain warnings under their existing
+policies; this check introduces no new numerical stopping thresholds.
+
+### Ordinary mixed calculation
+
+`examples.mpi_mixed_native` accepts optional `--input-check STAGED_INPUT_BUNDLE`
+and `--input-manifest-sha256 RECORDED_SHA256`. Every world rank verifies the
+bundle before creating solver states, and the new output directory receives
+`input-preflight.json`. Failure exits every rank with code2. Output-directory
+creation failures are also agreed before any barrier, so peers do not wait for
+a rank that could not create it. Existing output directories are preserved.
+
+This startup check is integrity-only. It does not automatically take calculation
+arguments from the bundle or prove that separate `--layers`, runtime and GS
+arguments match its recipe. Keep staged references and command arguments aligned;
+use the material-resolver check before submission. Later runtime/numerical
+failures retain the sample's existing fatal/transaction policies.
+
+The ordinary mixed sample also records startup declaration reads even when no
+`--input-check` is supplied. Each rank reads its explicitly selected layers,
+model-group and TDDFT material-catalog files; `OUTPUT/startup-inputs.json` records
+rank, input phase, path, exception type and message. Read/JSON errors are gathered
+and every rank exits2 before solver creation. Successful startup records describe
+these reads only, not later native validation or overall calculation success.
+This requires no management-node action or prior report. Other native/runtime
+failures retain their separate policies.

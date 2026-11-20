@@ -31,7 +31,8 @@ module communication
   integer, private, save :: embedded_comm = MPI_COMM_NULL
   integer, allocatable, private :: embedded_children(:),embedded_child_owner(:)
   integer, private :: active_child_owner=0,next_child_owner=0
-  public :: comm_begin_children,comm_end_children,comm_release_children,comm_child_counts
+  public :: comm_begin_children,comm_end_children,comm_release_children,comm_child_counts,comm_resume_children
+  public :: comm_owner_child_count
   public :: comm_select_application,comm_attach,comm_detach,comm_is_attached
   public :: comm_init
   public :: comm_finalize
@@ -397,6 +398,17 @@ contains
     owner=next_child_owner;active_child_owner=owner
   end subroutine
 
+  subroutine comm_resume_children(owner,status)
+    integer,intent(in) :: owner
+    integer,intent(out) :: status
+    status=0
+    if(embedded_comm==MPI_COMM_NULL)return
+    if(owner<=0.or.owner>next_child_owner.or.active_child_owner/=0)then
+      status=1;return
+    endif
+    active_child_owner=owner
+  end subroutine
+
   subroutine comm_end_children(owner)
     integer,intent(in) :: owner
     if(active_child_owner==owner)active_child_owner=0
@@ -412,6 +424,14 @@ contains
       group=embedded_children(i)
       if(group/=MPI_COMM_NULL)call comm_free_group(group)
     enddo
+  end subroutine
+
+  subroutine comm_owner_child_count(owner,live)
+    integer,intent(in)::owner
+    integer,intent(out)::live
+    live=0
+    if(owner<=0.or..not.allocated(embedded_children))return
+    live=count(embedded_children/=MPI_COMM_NULL.and.embedded_child_owner==owner)
   end subroutine
 
   subroutine comm_child_counts(live,slots)

@@ -76,12 +76,16 @@ module inputoutput
     module procedure finite_real_1d
   end interface
 contains
-  subroutine read_input(input_path,workspace)
+  subroutine read_input(input_path,workspace,status)
     use tddft_worker, only: worker_configure,worker_embedded
     implicit none
     character(*),optional,intent(in) :: input_path
     type(s_input_parser),optional,target,intent(inout) :: workspace
     type(s_input_parser),pointer :: parser
+    integer,optional,intent(out) :: status
+    integer :: parse_status
+
+    if(present(status))status=0
 
     if(present(workspace))then
       parser=>workspace
@@ -94,7 +98,16 @@ contains
     call read_input_common(parser)
     if(.not.worker_embedded) call worker_configure()
     call read_atomic_coordinates(parser)
-    call dump_input_common(parser)
+    if(present(status))then
+      call dump_input_common(parser,parse_status)
+      if(parse_status/=0)then
+        status=parse_status
+        call close_parser_workspace(parser)
+        return
+      endif
+    else
+      call dump_input_common(parser)
+    endif
     call check_bad_input
     if(parser%isolated)then
       call parser%values%capture()
@@ -2251,7 +2264,7 @@ contains
   end subroutine read_atomic_coordinates
 
 
-  subroutine dump_input_common(parser)
+  subroutine dump_input_common(parser,status)
     use parallelization
     use communication
     use filesystem, only: get_filehandle
@@ -2259,6 +2272,8 @@ contains
     implicit none
     type(s_input_parser),intent(inout) :: parser
     integer :: i,j,ierr_nml
+    integer,optional,intent(out) :: status
+    if(present(status))status=0
     ierr_nml = 0
 
     if (comm_is_root(nproc_id_global)) then
@@ -2924,6 +2939,10 @@ contains
 
     call comm_bcast(ierr_nml,nproc_group_global)
     if(ierr_nml > 0)then
+      if(present(status))then
+        status=ierr_nml
+        return
+      endif
       if (comm_is_root(nproc_id_global)) write(*,"(I4,2x,A)")ierr_nml,'error(s) in input.'
       call end_parallel
       stop

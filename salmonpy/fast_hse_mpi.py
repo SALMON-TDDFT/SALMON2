@@ -415,6 +415,26 @@ class _State:
         self.timing = _response_timing(dt,'native fast-PR HSE '+propagator+'; k-only MPI; charge current j')
 
     @property
+    def timing_seconds(self):
+        """Collective rank-local completed intervals for this native handle."""
+        if self.closed or self.failed:raise InputError('closed or failed native state')
+        comm=self._native.context.solver_comm;error=None
+        handled=hasattr(self,'handle')
+        try:
+            probe=getattr(self.lib,'sp_fast_hse_timer_protocol' if handled else 'sp_fast_hse_legacy_timer_protocol',None)
+            if probe is None:raise RuntimeFailure('runtime/state lacks state-owned timer protocol')
+            probe.argtypes=[];probe.restype=c.c_int
+            if probe()!=1:raise RuntimeFailure('unsupported HSE timer protocol')
+            fn=getattr(self.lib,'sp_fast_hse_handle_timers' if handled else 'sp_fast_hse_legacy_timers')
+            fn.argtypes=([c.c_int64] if handled else [])+[c.c_void_p];fn.restype=c.c_int
+        except Exception as exc:error=str(exc)
+        _agree(comm,error,runtime=True)
+        values=np.zeros(4,dtype=np.float64)
+        code=self._call(fn,*([self.handle] if handled else []),values.ctypes.data)
+        _agree(comm,'native HSE timer query failed' if code else None,runtime=True)
+        return dict(zip(('total','initialization','density','hartree'),map(float,values)))
+
+    @property
     def time(self):
         return self.steps*self.dt
 
