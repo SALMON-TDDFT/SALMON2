@@ -106,6 +106,12 @@ class NativeGSTests(unittest.TestCase):
 
 
 
+            kspace_lib.sp_gs_hse_kspace_protocol.return_value=2
+            session=NativeGSSession(SimpleNamespace(_supports_compute=True,_fast_hse=True,
+                hse_kspace=True,decomposition=(1,2,1,1,1)),native2,kspace_lib)
+            with self.assertRaisesRegex(ValueError,'full mesh'):session.run(hybrid)
+            kspace_lib.sp_gs_create.assert_not_called()
+
             malformed=json.loads(receipt.read_text());malformed.pop('gs_abi');receipt.write_text(json.dumps(malformed))
             from salmonpy.errors import InputError
             with self.assertRaises(InputError):NativeGSBackend(receipt,root)

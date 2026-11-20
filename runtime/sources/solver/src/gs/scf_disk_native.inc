@@ -508,7 +508,7 @@ end subroutine
 
 integer(c_int) function sp_gs_hse_kspace_protocol() bind(C)
 #ifdef USE_HSE
- sp_gs_hse_kspace_protocol=2
+ sp_gs_hse_kspace_protocol=3
 #else
  sp_gs_hse_kspace_protocol=0
 #endif
@@ -589,7 +589,7 @@ integer(c_int) function scf_grid_repartition(token,path,old_size,boxes,tiles) re
 #ifdef USE_HSE
  case('hse06')
   if(.not.ctx%hse_bound)status=15
-  if(.not.ctx%hse%orbital_scf.and.(product(ctx%system%kmesh)<=1.or.ctx%info%isize_o/=1))status=15
+  if(.not.ctx%hse%orbital_scf.and.product(ctx%system%kmesh)<=1)status=15
 #endif
  case default
   status=15

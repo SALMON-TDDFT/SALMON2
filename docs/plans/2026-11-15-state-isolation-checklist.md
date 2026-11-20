@@ -49,9 +49,11 @@ measured below, together with the explicit full-k spatial bridge. Packed/tiled f
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
    physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
    silently changing existing results.
-4. [ ] Ordinary-XC mixed k/orbital/spatial repartition is implemented and measured below. Dense fast-PR HSE Gamma orbital/spatial mixing is also measured below. Full-k spatial SCF bridge is measured below; extend HSE to packed/tiled states and orbital multi-k spatial; symmetry-reduced spatial bridge is measured below;
-   add portable/checkpoint-version migration across runtimes. Covered active-SCF
-   and same-topology RT direct restart are complete within measured scopes.
+4. [ ] Dense ordinary-XC and fast-PR HSE full/reduced-k orbital/spatial direct
+   SCF repartition is measured below. Remaining: packed/tiled/sparse state
+   migration and portable/checkpoint-version migration across runtimes. Current
+   built-in SCF generates dense ACE; do not add an artificial format switch only
+   to fill a checkpoint checklist. Same-topology RT remains complete in scope.
 5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
    ABI and wider initialization/allocation/process-failure recovery. Existing
    rollback does not guarantee arbitrary STOP/OOM/MPI-failure or threaded reentrancy.
@@ -59,7 +61,8 @@ measured below, together with the explicit full-k spatial bridge. Packed/tiled f
    runtime distribution and Linux/Intel Mac/other-platform evidence. Respect the
    Actions budget; no routine CI dispatch.
 
-Latest restart evidence: calc2026/salmonpy-hse-symspace-record-20261120,
+Latest restart evidence: calc2026/salmonpy-hse-korspace-record-20261120,
+calc2026/salmonpy-hse-symspace-record-20261120,
 calc2026/salmonpy-hse-kspace-record-20261120,
 calc2026/salmonpy-hse-mixed-record-20261120,
 calc2026/salmonpy-scf-mixed-record-20261120 and
@@ -2206,3 +2209,24 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 - [ ] Built-in SCF still generates dense ACE. Packed/tiled/sparse migrations,
   orbital full/reduced-k spatial, changed-runtime portability, spatial/orbital
   GS→RT and distributed exchange-FFT scaling remain separate. No routine CI.
+
+## 2026-11-20 Fast-PR HSE multi-k orbital/spatial SCF restart
+
+- [x] Previous reduced-k spatial changes committed/pushed as7e506ecb [skip ci].
+- [x] Compute3 enables occupied orbital groups with hse_kspace; Fortran gathers
+  rows/columns over r/o, preserves fast k exchange and applies dense ACE per k.
+  Migration3 directly remaps wave/ACE/cache/history; no accepted-state replay.
+- [x] Campaign-specific source/wheel GS/restart export explicitly authorized
+  after automatic approval treated orbital splitting as a new campaign.
+- [x] Full2→4/2→8/8→4,orbital2→4,uneven6→4,reduced2→8/8→4,pre-PBE2→8:
+  exact cut interiors,bootstrap0,continuation within unchanged1e-9/1e-10.
+  Late donor failures preserve originals/files.
+- [x] Protected full/reduced different-input owners: failed stage, original
+  continuation and retry exact. Previous full/reduced spatial/Gamma/ordinary
+  results exact. Source/installed637 tests each636pass/1skip; wheel reduced8→4
+  and public sample8→4 pass. Source/wheel/docs/header/audited-native bytes match.
+- Evidence: calc2026/salmonpy-hse-korspace-record-20261120. No CI dispatched;
+  local OneDrive records do not establish cloud synchronization.
+- [ ] Packed/tiled/sparse, changed-runtime portability and spatial/orbital
+  GS→RT remain separate. Replicated full-grid/all-orbital EXX scratch is not a
+  distributed exchange-FFT speedup. No routine CI.

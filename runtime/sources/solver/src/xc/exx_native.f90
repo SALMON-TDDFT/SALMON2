@@ -271,12 +271,12 @@ contains
         maxval(abs(offdiag))<=1d-12.and.maxval(abs(system%vec_k))<=1d-12.and. &
         exx_local_backend=='cpu'.and.exx_pair_screening=='off'
     endif
-    kspace_gs=theory=='dft'.and.product(system%kmesh)>1.and.info%isize_o==1.and. &
+    kspace_gs=theory=='dft'.and.product(system%kmesh)>1.and.info%isize_o>=1.and.info%isize_o<=system%no.and. &
       yn_hse_wannier=='n'.and. &
       maxval(abs(offdiag))<=1d-12
     ok=system_functional(system)=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
       yn_dc=='n'.and.(yn_hse_wannier=='n'.or.orbital_gs).and.temperature<0d0.and. &
-      (info%isize_r==1.or.orbital_gs.or.kspace_gs).and.(info%isize_o==1.or.orbital_gs).and. &
+      (info%isize_r==1.or.orbital_gs.or.kspace_gs).and.(info%isize_o==1.or.orbital_gs.or.kspace_gs).and. &
       info%isize_k>=1.and.info%numm==1.and. &
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.exx_kpoint_backend=='cpu'
     if(.not.ok)return
@@ -389,7 +389,6 @@ contains
     n=mg%num
     if(present(info))then
       if(theory=='dft'.and.product(system%kmesh)>1.and.info%isize_r>1)then
-        if(info%isize_o/=1)return
         dims=[info%isize_x,info%isize_y,info%isize_z]
         coords=[info%id_x,info%id_y,info%id_z]
         if(any(dims<1).or.any(coords<0).or.any(coords>=dims))return
@@ -1374,7 +1373,7 @@ contains
       endif
       return
     endif
-    if(theory=='dft'.and.product(system%kmesh)>1.and.info%isize_r>1.and. &
+    if(theory=='dft'.and.product(system%kmesh)>1.and.(info%isize_r>1.or.info%isize_o>1).and. &
        exx_state_owner%native_resources_enabled)then
       call refresh_kspace(system,mg,info,psi,exx_state_owner)
       return
@@ -1574,12 +1573,14 @@ contains
     integer::ng,j,k,x,y,z,g,f,status,total
     whole=mg;whole%is=1;whole%ie=num_rgrid;whole%num=num_rgrid
     ki=info;ki%isize_r=1;ki%id_r=0;ki%if_divide_rspace=.false.
+    ki%isize_o=1;ki%id_o=0;ki%if_divide_orbit=.false.
+    ki%io_s=1;ki%io_e=system%no;ki%numo=system%no
     ng=product(mg%num)
     allocate(local(ng,info%numo,info%numk))
     call exx_pack(psi,mg,info,local)
     call gather(local)
     allocate(fullpsi%zwf(1:num_rgrid(1),1:num_rgrid(2),1:num_rgrid(3),1, &
-      info%io_s:info%io_e,info%ik_s:info%ik_e,1))
+      1:system%no,info%ik_s:info%ik_e,1))
     call exx_unpack(local,fullpsi,whole,ki)
     call gather(owner%cached_source)
     call gather(owner%cached_action)
@@ -1606,31 +1607,31 @@ contains
       complex(8),allocatable,intent(inout)::a(:,:,:)
       complex(8),allocatable::part(:,:,:),full(:,:,:)
       if(.not.allocated(a))return
-      allocate(part(product(num_rgrid),size(a,2),size(a,3)),source=(0d0,0d0))
+      allocate(part(product(num_rgrid),system%no,size(a,3)),source=(0d0,0d0))
       do z=mg%is(3),mg%ie(3)
       do y=mg%is(2),mg%ie(2)
       do x=mg%is(1),mg%ie(1)
         g=1+x-mg%is(1)+mg%num(1)*(y-mg%is(2)+mg%num(2)*(z-mg%is(3)))
         f=x+num_rgrid(1)*(y-1+num_rgrid(2)*(z-1))
-        part(f,:,:)=a(g,:,:)
+        part(f,info%io_s:info%io_e,:)=a(g,:,:)
       enddo
       enddo
       enddo
       allocate(full,mold=part)
-      call comm_summation(part,full,size(part),info%icomm_r)
+      call comm_summation(part,full,size(part),info%icomm_ro)
       call move_alloc(full,a)
     end subroutine
     subroutine scatter(a)
       complex(8),allocatable,intent(inout)::a(:,:,:)
       complex(8),allocatable::part(:,:,:)
       if(.not.allocated(a))return
-      allocate(part(ng,size(a,2),size(a,3)))
+      allocate(part(ng,info%numo,size(a,3)))
       do z=mg%is(3),mg%ie(3)
       do y=mg%is(2),mg%ie(2)
       do x=mg%is(1),mg%ie(1)
         g=1+x-mg%is(1)+mg%num(1)*(y-mg%is(2)+mg%num(2)*(z-mg%is(3)))
         f=x+num_rgrid(1)*(y-1+num_rgrid(2)*(z-1))
-        part(g,:,:)=a(f,:,:)
+        part(g,:,:)=a(f,info%io_s:info%io_e,:)
       enddo
       enddo
       enddo
@@ -2076,7 +2077,20 @@ contains
     subroutine apply_endpoint(state)
       implicit none
       type(s_exx_ace),intent(in) :: state
-      if(info%isize_o>1.or.state%packed.or.exx_state_owner%orbital_scf)then
+      type(s_exx_ace)::slice
+      integer::ik
+      if(info%isize_o>1.and.info%numk>1.and..not.state%packed)then
+        ierr=1
+        if(.not.allocated(state%factors))return
+        if(size(state%factors,3)/=info%numk)return
+        slice%dv=state%dv;slice%condition=state%condition
+        do ik=1,info%numk
+          slice%factors=state%factors(:,:,ik:ik)
+          call orbital_ace_apply(slice,exx_state_owner%target_work(:,:,ik:ik), &
+            exx_state_owner%action_work(:,:,ik:ik),info%icomm_r,info%icomm_o,ierr)
+          if(ierr/=0)return
+        enddo
+      else if(info%isize_o>1.or.state%packed.or.exx_state_owner%orbital_scf)then
         call orbital_ace_apply(state,exx_state_owner%target_work,exx_state_owner%action_work,info%icomm_r,info%icomm_o,ierr)
       else if(info%isize_r>1)then
         call exx_ace_apply(state,exx_state_owner%target_work,exx_state_owner%action_work,ierr,sum_spatial,exx_blas_thread_control)

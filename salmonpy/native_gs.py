@@ -455,7 +455,8 @@ class NativeGSSession:
                     if probe is None:raise InputError('multi-k spatial HSE needs a matching explicit runtime')
                     probe.argtypes=[];probe.restype=c.c_int
                     version=probe()
-                    if (version not in (1,2) or self.backend.decomposition[1]!=1 or math.prod(calculation.kmesh)<=1
+                    if (version not in (1,2,3) or (self.backend.decomposition[1]!=1 and version<3)
+                            or self.backend.decomposition[1]>calculation.states or math.prod(calculation.kmesh)<=1
                             or (calculation.symmetry is not None and version<2) or calculation.electrons!=2*calculation.states):
                         raise InputError('multi-k spatial HSE requires full mesh, occupied spin pairs and no orbital split')
                 elif spatial_profile or getattr(self.backend,'hse_orbital',False) or self.backend.decomposition!=(self.comm.size,1,1,1,1):

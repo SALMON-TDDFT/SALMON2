@@ -1203,10 +1203,10 @@ spatial HSE and ordinary-XC controls verify the retained arithmetic.
 
 Select `NativeGSBackend(..., decomposition=(K,1,X,Y,Z), hse_kspace=True)` on
 both hosts, including a one-rank source. The explicit runtime must declare
-`sp_gs_hse_kspace_protocol()` version1 or2; changed-layout restore additionally requires
+`sp_gs_hse_kspace_protocol()` version1,2 or3; changed-layout restore additionally requires
 `sp_gs_scf_m_repartition_protocol()==3`. Use a fixed full uniform k mesh with
 more than one point, CPU, scalar full occupied spin pairs and an orthogonal
-cell. Symmetry reduction requires compute2 below; orbital splitting remains separate.
+cell. Symmetry reduction requires compute2 below; orbital splitting requires compute3 below.
 Do not set hse_spatial/hse_orbital or request the Gamma Wannier exchange path.
 
 Accepted wavefunctions, dense ACE/cache rows and SCF/mixing history remain local.
@@ -1236,7 +1236,7 @@ These are execution regressions, not physical convergence certification.
 `hse_kspace=True` with compute protocol2 additionally accepts the existing
 `DFT(..., symmetry=SymmetryOperations(...))` inputs. Keep the underlying uniform
 physical k mesh and exact symmetry asset/weights fixed between saving and
-restoring. Use one/two k groups and no orbital splitting. Source and target may
+restoring. Use one/two k groups; orbital splitting requires compute3 below. Source and target may
 change Cartesian space and k layout through mixed-repartition3.
 
 Local boxes are checked against the global cell, spacing and grid count; full
@@ -1257,3 +1257,30 @@ and five new iterations agree with source-initialized continuous8 within the
 existing rtol1e-9/atol1e-10. Late donor read failures preserve originals/files.
 Different-input protected owners agree exactly after failure/continue/retry;
 previous pure reduced-k and full-k/Gamma/ordinary controls retain their results.
+
+### Full/reduced-k × orbital × spatial SCF restart
+
+Compute protocol3 extends `hse_kspace=True` to `decomposition=(K,O,X,Y,Z)`
+with O>1. Each orbital group must own at least one of the occupied spin-pair
+bands. Keep the existing CPU, integer/full-occupation, orthogonal-cell and
+same-runtime/input/assets scope. Reduced-k still uses one/two k groups and the
+existing symmetry/representative-weight contract. No extra selector is needed.
+
+Fortran gathers grid rows and orbital columns over each r/o group, calls the
+same fast k-distributed exchange and retains local accepted rows/columns. Dense
+ACE is applied one local k slice at a time using the existing orbital overlap
+collectives. This does not introduce another exchange approximation. Full-grid
+and all-orbital exchange scratch is replicated across r/o ranks; do not promise
+peak-memory or exchange-FFT speedup from increasing those rank counts.
+
+Use the same explicit `run(restart=..., repartition=True)` with migration3.
+SCF mixing, wavefunctions, ACE and source/action/work slices move directly by
+global grid/orbital/representative indices. No accepted density, exchange or SCF
+is replayed. The existing example accepts `--hse-kspace --decomposition K O X Y Z`
+and optionally `--symmetry c2z` for reduced k; save/restart into fresh directories.
+
+Controls cover full-k2→4,2→8,8→4, pure orbital2→4, uneven orbital6→4,
+reduced-k2→8/8→4 and pre-PBE2→8. Restored physical wave/density interiors
+are exact; bootstrap SCF work is zero; five new iterations match source-initialized
+continuous8 at unchanged rtol1e-9/atol1e-10. Late donor failures preserve originals
+and saved files. These are execution checks, not a physical convergence certificate.
