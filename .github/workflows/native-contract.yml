@@ -47,6 +47,10 @@ jobs:
         run: python tools/test_io_ownership.py "$RUNNER_TEMP/host-build/build.json" "$RUNNER_TEMP/query" --abi-contract
       - name: Explicit parser scope with caller-owned MPI
         working-directory: ${{ runner.temp }}/export
+        # Hosted runners may expose one physical MPI slot despite two vCPUs.
+        # This GS-free parser contract is not a production solver allocation.
+        env:
+          OMPI_MCA_rmaps_base_oversubscribe: '1'
         run: python tools/test_io_ownership.py "$RUNNER_TEMP/host-build/build.json" "$RUNNER_TEMP/parser" --parser-host --ranks 2
       - uses: actions/upload-artifact@v4
         if: always()
