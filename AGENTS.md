@@ -19,3 +19,9 @@ outside the repository. Run Python tests and the source-distribution-to-wheel
 check after changing packaging or layout. Historical docs/plans and validation
 records may reference the old full-SALMON layout; current instructions are in
 README.md and runtime/README.md.
+
+After changing bundled source layout/inventories, verify every manifest asset is
+Git-tracked and prepare/build a Git-only export before considering the import
+complete. Local ignored assets must not mask a broken clone. Preserve nested
+upstream .gitignore bytes; force-stage only hash-verified manifest paths, never
+an entire work directory. Heavy CI avoidance does not replace this check.

@@ -117,3 +117,8 @@ __pycache__/
 
 # Fixed, licensed Si starter input; other calculation outputs remain ignored.
 !salmonpy/examples/si_intro_data/Si_rps.dat
+
+# Root rules must not hide vendored inventories. Nested upstream .gitignore
+# files stay byte-exact: stage manifest-listed additions explicitly with -f.
+!runtime/sources/**
+!runtime/source-trees/**

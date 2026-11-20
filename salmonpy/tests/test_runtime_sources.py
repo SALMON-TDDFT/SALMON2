@@ -18,6 +18,14 @@ class RuntimeSources(unittest.TestCase):
    self.assertEqual(other['source_tree_sha256'],profile['source_tree_sha256'])
   files=store.manifest(root/'runtime',profile,'source_tree_manifest','source_tree_sha256','salmonpy.source-tree/1')
   store.check_tree(store.path_in(root/'runtime',profile['source_tree']),files)
+  # A populated local checkout can hide ignored, never-committed source assets.
+  if (root/'.git').exists():
+   import subprocess
+   prefix='runtime/'+profile['source_tree']+'/'
+   tracked=set(subprocess.check_output(['git','ls-files','-z','--',prefix],cwd=root).decode().split('\0'))
+   self.assertEqual(sorted(prefix+n for n in files if prefix+n not in tracked),[],
+                    'manifest files must be tracked, not merely present locally')
+
   effective=store.inventory(root/'runtime')['profiles']['fast_hse']
   self.assertEqual(set(effective),set(files))
   for kernel,external in [('sbe_types.f90','src/ssbe/sbe_types.f90'),
