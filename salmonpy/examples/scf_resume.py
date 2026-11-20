@@ -24,6 +24,7 @@ def main():
     parallel.add_argument('--orbital-parallel',action='store_true',help='Gamma orbital layout for ordinary XC or explicit fast HSE')
     parallel.add_argument('--spatial-parallel',action='store_true',help='ordinary-XC x-domain layout with a fixed Gamma mesh')
     parallel.add_argument('--decomposition',type=int,nargs=5,help='explicit k,orbital,x,y,z layout; fast HSE uses Gamma orbital/spatial mixing')
+    p.add_argument('--hse-kspace',action='store_true',help='full multi-k HSE spatial bridge; use explicit decomposition')
     p.add_argument('--repartition',action='store_true',help='opt into a supported pure-layout restart with a new rank count')
     p.add_argument('--disk',action='store_true',help='exercise disk save/restore; requires --save-scf')
     p.add_argument('--protected',action='store_true',help='requires native SCF candidate protocol1')
@@ -52,7 +53,7 @@ def main():
     if args.symmetry!='none':
         ops=np.zeros((2,3,4));ops[:,:,:3]=np.eye(3);ops[1,:2,:2]=-np.eye(2)
         symmetry=SymmetryOperations(ops,directions='yyn')
-    mesh=(1,1,1) if args.xc=='hse06' and args.decomposition is not None else (2,2,2) if args.decomposition is not None or symmetry is not None or args.k_parallel or (args.repartition and not (args.orbital_parallel or args.spatial_parallel)) else (comm.size,1,1) if args.xc=='hse06' and not (args.orbital_parallel or args.spatial_parallel) else (1,1,1)
+    mesh=(1,1,1) if args.xc=='hse06' and args.decomposition is not None and not args.hse_kspace else (2,2,2) if args.decomposition is not None or symmetry is not None or args.k_parallel or (args.repartition and not (args.orbital_parallel or args.spatial_parallel)) else (comm.size,1,1) if args.xc=='hse06' and not (args.orbital_parallel or args.spatial_parallel) else (1,1,1)
     calculation=InMemoryDFT((14,),np.diag([8.]*3),[[0,0,0]] if symmetry is not None else [[.3,.4,.45]],
         (pp,),4,2,(8,8,8),mesh,xc=args.xc,symmetry=symmetry)
     assert "write_gs_restart_data='no'" in calculation.input_text()
@@ -60,7 +61,7 @@ def main():
     decomposition=(comm.size,1,1,1,1) if (args.xc=='hse06' and not (args.orbital_parallel or args.spatial_parallel)) or args.k_parallel or (args.repartition and not (args.orbital_parallel or args.spatial_parallel)) else (1,comm.size,1,1,1)
     if args.spatial_parallel:decomposition=(1,1,comm.size,1,1)
     if args.decomposition:decomposition=tuple(args.decomposition)
-    backend=NativeGSBackend(args.build,args.output,decomposition=decomposition,hse_orbital=args.xc=='hse06' and args.orbital_parallel,hse_spatial=args.xc=='hse06' and (args.spatial_parallel or args.decomposition is not None))
+    backend=NativeGSBackend(args.build,args.output,decomposition=decomposition,hse_orbital=args.xc=='hse06' and args.orbital_parallel,hse_spatial=args.xc=='hse06' and (args.spatial_parallel or args.decomposition is not None) and not args.hse_kspace,hse_kspace=args.hse_kspace)
     with backend.open(context) as session:
         if args.restart is not None:
             with session.run(calculation,scf=SCFSettings(max_iterations=args.iterations,tolerance=1e-30),

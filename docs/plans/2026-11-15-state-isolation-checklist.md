@@ -11,7 +11,7 @@ retains results. GS saving/reuse and validation datasets in calc2026 are authori
 
 ### Completed and verified
 
-- [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC pure k/orbital/spatial and mixed-layout changed-rank restart are measured. Dense fast-PR HSE pure k/orbital and Gamma spatial/orbital×spatial mixed restart are measured below; multi-k spatial, packed/tiled/sparse formats and changed-runtime migration remain open.
+- [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC pure k/orbital/spatial and mixed-layout changed-rank restart are measured. Dense fast-PR HSE pure k/orbital and Gamma spatial/orbital×spatial mixed restart are measured below; Full-k spatial SCF bridge/restart is measured below; symmetry/orbital multi-k spatial, packed/tiled/sparse formats and changed-runtime migration remain open.
 
 - [x] One maintained fast-PR solver tree and shared default preparation/build path;
   ordinary XC does not require HSE dependencies. Historical source evidence retained.
@@ -37,7 +37,7 @@ prioritize fast-HSE norm wiring or a current-grid campaign now. Molecular work
 remains paused. Group6 follows separately with the existing CI budget constraint.
 Group4 SCF history, numerical checkpoint/live continuation and ordinary mixed
 repartition are complete within the measured scopes. Fast-PR HSE dense Gamma orbital/spatial mixed ownership and restart are also
-measured below; multi-k spatial and packed/tiled formats remain next. GS saving/reuse and the approved validation datasets are authorized; keep results in calc2026.
+measured below, together with the explicit full-k spatial bridge. Packed/tiled formats and optimized distributed exchange FFT remain separate. GS saving/reuse and the approved validation datasets are authorized; keep results in calc2026.
 
 ### Remaining groups (not a count of individual implementation patches)
 
@@ -49,7 +49,7 @@ measured below; multi-k spatial and packed/tiled formats remain next. GS saving/
 3. [ ] Certify the new maintained runtime's NLCC-force capability with appropriate
    physical evidence; audit legacy SALMON eV/Hartree versus Python CODATA without
    silently changing existing results.
-4. [ ] Ordinary-XC mixed k/orbital/spatial repartition is implemented and measured below. Dense fast-PR HSE Gamma orbital/spatial mixing is also measured below. Extend HSE to multi-k spatial and packed/tiled states;
+4. [ ] Ordinary-XC mixed k/orbital/spatial repartition is implemented and measured below. Dense fast-PR HSE Gamma orbital/spatial mixing is also measured below. Full-k spatial SCF bridge is measured below; extend HSE to packed/tiled states and symmetry/orbital multi-k spatial;
    add portable/checkpoint-version migration across runtimes. Covered active-SCF
    and same-topology RT direct restart are complete within measured scopes.
 5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
@@ -2161,3 +2161,24 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
   cloud synchronization is not confirmed.
 - [ ] Multi-k spatial, packed/tiled/sparse HSE, changed-runtime portability and
   orbital/spatial GS→RT remain separate. No CI dispatched.
+
+## 2026-11-20 Fast-PR HSE full-k × spatial SCF bridge/restart
+
+- [x] Previous Gamma mixed changes committed/pushed as9d3f87ce [skip ci].
+- [x] Explicit hse_kspace compute1/mixed migration3; row-local dense accepted
+  state and full-grid exchange scratch replicated within spatial groups. Reuses
+  the fast k-distributed algorithm; not a distributed exchange-FFT speedup.
+- [x] Input check no longer auto-switches attached full-k spatial SCF to Gamma
+  Wannier. CLI and Gamma profiles retain their route; no-MPI guard retained.
+- [x] Campaign-specific source/wheel GS/restart export explicitly authorized.
+- [x] Source2↔4,2→1,4→8,changed-axis4→4,pre-PBE2→4: exact cut interiors,
+  bootstrap0, five new iterations within existing1e-9/1e-10 of continuous8,
+  late donor failure keeps originals/source hashes.
+- [x] Final source/object audits; independent different-input/protected late
+  failure/continue/retry exact. Previous k-HSE/Gamma-mixed/ordinary results exact.
+  Source/installed637 tests each636pass/1skip; wheel4→2 and fixed8k public
+  sample4→2 pass. Source/wheel/docs/header/audited-native bytes match.
+- Evidence: calc2026/salmonpy-hse-kspace-record-20261120. No CI dispatched;
+  local OneDrive records do not establish cloud synchronization.
+- [ ] Symmetry/orbital full-k spatial, packed/tiled/sparse, changed-runtime
+  portability, spatial/orbital GS→RT and exchange-FFT scaling remain separate.

@@ -254,9 +254,13 @@ contains
     type(s_parallel_info),intent(in)::info
     integer :: nelec,nstate,j
     real(8) :: temperature,offdiag(3,3)
-    logical :: orbital_gs
+    logical :: orbital_gs,kspace_gs
     call hse_occupation_input(system,nelec,temperature,nstate)
     orbital_gs=.false.
+    offdiag=system%primitive_a
+    do j=1,3
+      offdiag(j,j)=0d0
+    enddo
     if(theory=='dft'.and.(info%isize_o>1.or.info%isize_r>1.or.yn_hse_wannier=='y'))then
       offdiag=system%primitive_a
       do j=1,3
@@ -267,9 +271,12 @@ contains
         maxval(abs(offdiag))<=1d-12.and.maxval(abs(system%vec_k))<=1d-12.and. &
         exx_local_backend=='cpu'.and.exx_pair_screening=='off'
     endif
+    kspace_gs=theory=='dft'.and.product(system%kmesh)>1.and.info%isize_o==1.and. &
+      .not.system%kpoint_input%use_symmetry.and.yn_hse_wannier=='n'.and. &
+      maxval(abs(offdiag))<=1d-12
     ok=system_functional(system)=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
       yn_dc=='n'.and.(yn_hse_wannier=='n'.or.orbital_gs).and.temperature<0d0.and. &
-      (info%isize_r==1.or.orbital_gs).and.(info%isize_o==1.or.orbital_gs).and. &
+      (info%isize_r==1.or.orbital_gs.or.kspace_gs).and.(info%isize_o==1.or.orbital_gs).and. &
       info%isize_k>=1.and.info%numm==1.and. &
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.exx_kpoint_backend=='cpu'
     if(.not.ok)return
@@ -1270,7 +1277,7 @@ contains
     psi%update_zwf_overlap=.false.
   end subroutine
 
-  subroutine exx_refresh(system,mg,info,psi,rt_context,rt_status)
+  recursive subroutine exx_refresh(system,mg,info,psi,rt_context,rt_status)
     use exx_functional, only: is_global_hybrid
     implicit none
     type(s_exx_rt_state),target,optional,intent(inout)::rt_context
@@ -1349,6 +1356,11 @@ contains
         call refresh_wannier(system,mg,info,psi, &
       & rt_context=exx_state_owner)
       endif
+      return
+    endif
+    if(theory=='dft'.and.system%nk>1.and.info%isize_r>1.and. &
+       exx_state_owner%native_resources_enabled)then
+      call refresh_kspace(system,mg,info,psi,exx_state_owner)
       return
     endif
     if(theory=='dft'.and.exx_state_owner%orbital_scf)then
@@ -1527,6 +1539,86 @@ contains
       logical,intent(in)::automatic
       integer,intent(inout)::status
       call agree_fft_layout(times,contiguous,status,info%icomm_k,automatic)
+    end subroutine
+  end subroutine
+
+  ! Explicit SCF bridge: distributed accepted rows, replicated full-grid FFT
+  ! scratch per spatial rank. This is the existing fast k kernel, not a second
+  ! exchange approximation. k ranks retain their normal distributed ring.
+  subroutine refresh_kspace(system,mg,info,psi,owner)
+    type(s_dft_system),intent(in)::system
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    type(s_orbital),intent(in)::psi
+    type(s_exx_rt_state),target,intent(inout)::owner
+    type(s_rgrid)::whole
+    type(s_parallel_info)::ki
+    type(s_orbital)::fullpsi
+    complex(8),allocatable::local(:,:,:)
+    integer::ng,j,k,x,y,z,g,f,status,total
+    whole=mg;whole%is=1;whole%ie=num_rgrid;whole%num=num_rgrid
+    ki=info;ki%isize_r=1;ki%id_r=0;ki%if_divide_rspace=.false.
+    ng=product(mg%num)
+    allocate(local(ng,info%numo,info%numk))
+    call exx_pack(psi,mg,info,local)
+    call gather(local)
+    allocate(fullpsi%zwf(1:num_rgrid(1),1:num_rgrid(2),1:num_rgrid(3),1, &
+      info%io_s:info%io_e,info%ik_s:info%ik_e,1))
+    call exx_unpack(local,fullpsi,whole,ki)
+    call gather(owner%cached_source)
+    call gather(owner%cached_action)
+    call gather(owner%full_source)
+    call gather(owner%initial_source)
+    call gather(owner%ace%factors)
+    call gather(owner%scf_damped_ace%factors)
+    call gather(owner%initial_ace%factors)
+    call gather(owner%midpoint_ace%factors)
+    call exx_refresh(system,whole,ki,fullpsi,rt_context=owner,rt_status=status)
+    call comm_summation(status,total,info%icomm_rko)
+    ! Always restore row-local ownership, including a handled failure.
+    call scatter(owner%cached_source)
+    call scatter(owner%cached_action)
+    call scatter(owner%full_source)
+    call scatter(owner%initial_source)
+    call scatter(owner%ace%factors)
+    call scatter(owner%scf_damped_ace%factors)
+    call scatter(owner%initial_ace%factors)
+    call scatter(owner%midpoint_ace%factors)
+    if(total/=0)error stop 'Native k/spatial SCF exchange refresh failed'
+  contains
+    subroutine gather(a)
+      complex(8),allocatable,intent(inout)::a(:,:,:)
+      complex(8),allocatable::part(:,:,:),full(:,:,:)
+      if(.not.allocated(a))return
+      allocate(part(product(num_rgrid),size(a,2),size(a,3)),source=(0d0,0d0))
+      do z=mg%is(3),mg%ie(3)
+      do y=mg%is(2),mg%ie(2)
+      do x=mg%is(1),mg%ie(1)
+        g=1+x-mg%is(1)+mg%num(1)*(y-mg%is(2)+mg%num(2)*(z-mg%is(3)))
+        f=x+num_rgrid(1)*(y-1+num_rgrid(2)*(z-1))
+        part(f,:,:)=a(g,:,:)
+      enddo
+      enddo
+      enddo
+      allocate(full,mold=part)
+      call comm_summation(part,full,size(part),info%icomm_r)
+      call move_alloc(full,a)
+    end subroutine
+    subroutine scatter(a)
+      complex(8),allocatable,intent(inout)::a(:,:,:)
+      complex(8),allocatable::part(:,:,:)
+      if(.not.allocated(a))return
+      allocate(part(ng,size(a,2),size(a,3)))
+      do z=mg%is(3),mg%ie(3)
+      do y=mg%is(2),mg%ie(2)
+      do x=mg%is(1),mg%ie(1)
+        g=1+x-mg%is(1)+mg%num(1)*(y-mg%is(2)+mg%num(2)*(z-mg%is(3)))
+        f=x+num_rgrid(1)*(y-1+num_rgrid(2)*(z-1))
+        part(g,:,:)=a(f,:,:)
+      enddo
+      enddo
+      enddo
+      call move_alloc(part,a)
     end subroutine
   end subroutine
 

@@ -91,12 +91,19 @@ class NativeGSTests(unittest.TestCase):
                 decomposition=(1,2,1,1,1)),native2,orbital_lib)
             with self.assertRaisesRegex(ValueError,'matching runtime'):session.run(gamma)
             orbital_lib.sp_gs_create.assert_not_called()
+            kspace_lib=SimpleNamespace(sp_gs_hse_kspace_protocol=Mock(return_value=0),sp_gs_create=Mock())
+            session=NativeGSSession(SimpleNamespace(_supports_compute=True,_fast_hse=True,
+                hse_kspace=True,decomposition=(1,1,2,1,1)),native2,kspace_lib)
+            with self.assertRaisesRegex(ValueError,'full mesh'):session.run(hybrid)
+            kspace_lib.sp_gs_hse_kspace_protocol.assert_called_once()
+            kspace_lib.sp_gs_create.assert_not_called()
+
 
             malformed=json.loads(receipt.read_text());malformed.pop('gs_abi');receipt.write_text(json.dumps(malformed))
             from salmonpy.errors import InputError
             with self.assertRaises(InputError):NativeGSBackend(receipt,root)
             for name,value in [('decomposition',(1,2,1,1,1)),('library',Path('/tmp/other')),
-                               ('work_root',Path('/tmp/other')),('hse_orbital',True),('hse_spatial',True),('sha256','different')]:
+                               ('work_root',Path('/tmp/other')),('hse_orbital',True),('hse_spatial',True),('hse_kspace',True),('sha256','different')]:
                 with self.assertRaises(AttributeError):setattr(backend,name,value)
 
             # A k-only repartition must reject an empty target k owner before
@@ -174,6 +181,9 @@ class NativeGSTests(unittest.TestCase):
             with self.assertRaisesRegex(InputError,"protocol"):_scf_m_repartition_api(local.lib,hse=True)
             local.lib.sp_gs_scf_m_repartition_protocol.return_value=2
             self.assertIs(_scf_m_repartition_api(local.lib,hse=True),local.lib.sp_gs_scf_m_repartition)
+            with self.assertRaisesRegex(InputError,'protocol'):_scf_m_repartition_api(local.lib,hse=True,kspace=True)
+            local.lib.sp_gs_scf_m_repartition_protocol.return_value=3
+            self.assertIs(_scf_m_repartition_api(local.lib,hse=True,kspace=True),local.lib.sp_gs_scf_m_repartition)
 
 
 

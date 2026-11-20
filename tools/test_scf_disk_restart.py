@@ -92,7 +92,7 @@ def main():
     if args.split=='spatial':
         axes=[1,1,1];axes['xyz'.index(args.spatial_axis)]=args.size;dec=(1,1,*(args.rgrid or axes))
     if args.decomposition:dec=tuple(args.decomposition)
-    backend=NativeGSBackend(args.build,work,decomposition=dec,hse_orbital=args.xc=='hse06' and args.split=='orbital',hse_spatial=args.xc=='hse06' and args.split in ('spatial','mixed'))
+    backend=NativeGSBackend(args.build,work,decomposition=dec,hse_orbital=args.xc=='hse06' and args.split=='orbital',hse_spatial=args.xc=='hse06' and (args.split=='spatial' or (args.split=='mixed' and args.gamma)),hse_kspace=args.xc=='hse06' and args.split=='mixed' and not args.gamma)
     checkpoint=args.output/'checkpoint'
     def spatial_expected(directory,array,lower):
         wave=array.ndim==7

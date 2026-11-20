@@ -857,7 +857,7 @@ Fortranが密なACEと交換作業配列の格子行を直接再配置し、SCF�
 検証済みは1↔2、PBE準備段階、16³2↔4と二方向分割です。CPU・全支持・Gamma・
 直交セル・固定イオン・全占有スピン対・タイルなしgaugeの範囲です。hse_orbitalとは
 同時に指定しません。サンプルは `--xc hse06 --spatial-parallel` を両側に指定します。
-複数k点×空間・packed/tiled/sparse表現・別ランタイム移行・空間HSE GS→RTを
+複数k点×空間は後述のhse_kspace経路を参照し、packed/tiled/sparse表現・別ランタイム移行・空間HSE GS→RTを
 対応済みとは案内しません。これは実装検証で、物理収束の認定ではありません。
 
 通常XCの混合並列SCF再開はmixed-repartition protocol1の対応ランタイムで、
@@ -877,5 +877,14 @@ Fortranが密なACEと交換作業配列の格子行を直接再配置し、SCF�
 ACE／交換作用キャッシュを直接移し、`executed_iterations==0` で読み戻した後に
 continue_scfする。再初期化した波動関数や交換作用で置き換えない。
 サンプルは `--xc hse06 --decomposition 1 O X Y Z` と
-`--save-scf`／`--restart --repartition`。複数k点×空間・圧縮／分割形式・
+`--save-scf`／`--restart --repartition`。複数k点×空間は後述のhse_kspace経路を参照し、圧縮／分割形式・
 異なるruntime間の移行まで対応したと解釈しない。詳細はNATIVE_GS日英ガイド。
+
+高速PR版HSEの全k点×空間SCF接続は、両側でhse_kspace=Trueと
+decomposition=(K,1,X,Y,Z)を明示する。compute sp_gs_hse_kspace_protocol1と
+mixed-repartition3を要求する。全一様k格子・CPU・完全占有スピン対・直交セル、
+対称性縮約／軌道分割なし。hse_spatial／hse_orbitalやΓ点Wannier入力と混ぜない。
+受理済み状態は空間局所だが、交換更新の全格子FFT作業は空間ランクで複製される。
+メモリ削減や交換FFTの空間高速化と説明しない。既存の高速k点カーネルを使い、
+低速HSEには戻さない。再開はrun(restart=...,repartition=True)、過去SCF／交換の
+再計算0を確認する。サンプルは--xc hse06 --hse-kspace --decomposition K 1 X Y Z。

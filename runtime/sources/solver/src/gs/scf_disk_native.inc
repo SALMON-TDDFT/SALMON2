@@ -506,6 +506,13 @@ contains
 end subroutine
 #endif
 
+integer(c_int) function sp_gs_hse_kspace_protocol() bind(C)
+#ifdef USE_HSE
+ sp_gs_hse_kspace_protocol=1
+#else
+ sp_gs_hse_kspace_protocol=0
+#endif
+end function
 integer(c_int) function sp_gs_hse_spatial_protocol() bind(C)
 #ifdef USE_HSE
  sp_gs_hse_spatial_protocol=2
@@ -529,7 +536,7 @@ integer(c_int) function sp_gs_scf_r_repartition(token,path,old_size,boxes) bind(
 end function
 integer(c_int) function sp_gs_scf_m_repartition_protocol() bind(C)
 #ifdef USE_HSE
- sp_gs_scf_m_repartition_protocol=2
+ sp_gs_scf_m_repartition_protocol=3
 #else
  sp_gs_scf_m_repartition_protocol=1
 #endif
@@ -581,7 +588,8 @@ integer(c_int) function scf_grid_repartition(token,path,old_size,boxes,tiles) re
  case('pz','libxc_pz','libxc_pbe')
 #ifdef USE_HSE
  case('hse06')
-  if(.not.ctx%hse_bound.or..not.ctx%hse%orbital_scf)status=15
+  if(.not.ctx%hse_bound)status=15
+  if(.not.ctx%hse%orbital_scf.and.(ctx%system%nk<=1.or.ctx%info%isize_o/=1))status=15
 #endif
  case default
   status=15
@@ -718,7 +726,7 @@ integer(c_int) function scf_grid_repartition(token,path,old_size,boxes,tiles) re
 #ifdef USE_HSE
   if(ctx%hse_bound)then
    if(present(tiles))then
-    call scf_merge_r_hse(value%hse,donor%hse,first,lo,hi,ctx%mg,status,[ot(1),ot(2),dst(1),dst(2)])
+    call scf_merge_r_hse(value%hse,donor%hse,first,lo,hi,ctx%mg,status,[ot(1),ot(2),dst(1),dst(2)],[ot(3),ot(4),dst(3),dst(4)])
    else
     call scf_merge_r_hse(value%hse,donor%hse,first,lo,hi,ctx%mg,status)
    endif
@@ -1044,15 +1052,15 @@ subroutine scf_merge_r_payload(target,source,first,lo,hi,mg,n,status,skip_orbita
 end subroutine
 
 #ifdef USE_HSE
-subroutine scf_merge_r_complex3(target,source,first,lo,hi,mg,status,orbitals)
+subroutine scf_merge_r_complex3(target,source,first,lo,hi,mg,status,orbitals,kpoints)
  complex(8),allocatable,intent(inout)::target(:,:,:)
  complex(8),allocatable,intent(in)::source(:,:,:)
  logical,intent(in)::first
  integer,intent(in)::lo(3),hi(3)
  type(s_rgrid),intent(in)::mg
  integer,intent(inout)::status
- integer,optional,intent(in)::orbitals(4) ! source and target global orbital bounds
- integer::lb(3),ub(3),istat,a(3),b(3),x,y,z,old_row,new_row,width(3),ol,oh,sl,tl,nt
+ integer,optional,intent(in)::orbitals(4),kpoints(4) ! source/target global bounds
+ integer::lb(3),ub(3),istat,a(3),b(3),x,y,z,old_row,new_row,width(3),ol,oh,sl,tl,nt,kl,kh,sk,tk,nk
  if(status/=0)return
  if(first)then
   if(allocated(target))deallocate(target)
@@ -1060,7 +1068,9 @@ subroutine scf_merge_r_complex3(target,source,first,lo,hi,mg,status,orbitals)
    lb=lbound(source);ub=ubound(source)
    nt=size(source,2)
    if(present(orbitals))nt=orbitals(4)-orbitals(3)+1
-   allocate(target(1:product(mg%num),lb(2):lb(2)+nt-1,lb(3):ub(3)),stat=istat)
+   nk=size(source,3)
+   if(present(kpoints))nk=kpoints(4)-kpoints(3)+1
+   allocate(target(1:product(mg%num),lb(2):lb(2)+nt-1,lb(3):lb(3)+nk-1),stat=istat)
    if(istat/=0)then
     status=4;return
    endif
@@ -1074,7 +1084,7 @@ subroutine scf_merge_r_complex3(target,source,first,lo,hi,mg,status,orbitals)
  width=hi-lo+1;lb=lbound(source);ub=ubound(source)
  if(lb(1)/=1.or.size(source,1)/=product(width).or. &
     lbound(target,2)/=lb(2).or. &
-    lbound(target,3)/=lb(3).or.ubound(target,3)/=ub(3))then
+    lbound(target,3)/=lb(3))then
   status=11;return
  endif
  if(present(orbitals))then
@@ -1089,19 +1099,31 @@ subroutine scf_merge_r_complex3(target,source,first,lo,hi,mg,status,orbitals)
   endif
   ol=1;oh=size(source,2);sl=lb(2);tl=lbound(target,2)
  endif
- if(ol>oh)return
+ if(present(kpoints))then
+  if(size(source,3)/=kpoints(2)-kpoints(1)+1.or.size(target,3)/=kpoints(4)-kpoints(3)+1)then
+   status=11;return
+  endif
+  kl=max(kpoints(1),kpoints(3));kh=min(kpoints(2),kpoints(4))
+  sk=lb(3)+kl-kpoints(1);tk=lbound(target,3)+kl-kpoints(3)
+ else
+  if(size(target,3)/=size(source,3))then
+   status=11;return
+  endif
+  kl=1;kh=size(source,3);sk=lb(3);tk=lbound(target,3)
+ endif
+ if(ol>oh.or.kl>kh)return
  a=max(lo,mg%is);b=min(hi,mg%ie)
  do z=a(3),b(3)
  do y=a(2),b(2)
  do x=a(1),b(1)
   old_row=1+x-lo(1)+width(1)*(y-lo(2)+width(2)*(z-lo(3)))
   new_row=1+x-mg%is(1)+mg%num(1)*(y-mg%is(2)+mg%num(2)*(z-mg%is(3)))
-  target(new_row,tl:tl+oh-ol,:)=source(old_row,sl:sl+oh-ol,:)
+  target(new_row,tl:tl+oh-ol,tk:tk+kh-kl)=source(old_row,sl:sl+oh-ol,sk:sk+kh-kl)
  enddo
  enddo
  enddo
 end subroutine
-subroutine scf_merge_r_hse(target,source,first,lo,hi,mg,status,orbitals)
+subroutine scf_merge_r_hse(target,source,first,lo,hi,mg,status,orbitals,kpoints)
  type(s_exx_rt_state),intent(inout)::target
  type(s_exx_rt_state),intent(in)::source
  logical,intent(in)::first
@@ -1109,10 +1131,10 @@ subroutine scf_merge_r_hse(target,source,first,lo,hi,mg,status,orbitals)
  type(s_rgrid),intent(in)::mg
  integer,intent(inout)::status
  complex(8),allocatable::buffer(:,:,:),merged(:,:,:)
- integer,optional,intent(in)::orbitals(4)
+ integer,optional,intent(in)::orbitals(4),kpoints(4)
  integer::istat
  if(status/=0)return
- if(.not.source%orbital_scf.or.allocated(source%spatial%gauge_tiles%matrix).or. &
+ if(allocated(source%spatial%gauge_tiles%matrix).or. &
     allocated(source%spatial%sparse_source%offset).or.allocated(source%factor_history).or. &
     allocated(source%ptcn_history))then
   status=15;return
@@ -1121,13 +1143,13 @@ subroutine scf_merge_r_hse(target,source,first,lo,hi,mg,status,orbitals)
  call merge_ace(target%scf_damped_ace,source%scf_damped_ace)
  call merge_ace(target%initial_ace,source%initial_ace)
  call merge_ace(target%midpoint_ace,source%midpoint_ace)
- call scf_merge_r_complex3(target%cached_source,source%cached_source,first,lo,hi,mg,status,orbitals)
- call scf_merge_r_complex3(target%cached_action,source%cached_action,first,lo,hi,mg,status,orbitals)
- call scf_merge_r_complex3(target%full_source,source%full_source,first,lo,hi,mg,status,orbitals)
- call scf_merge_r_complex3(target%initial_source,source%initial_source,first,lo,hi,mg,status,orbitals)
- call scf_merge_r_complex3(target%target_work,source%target_work,first,lo,hi,mg,status,orbitals)
- call scf_merge_r_complex3(target%action_work,source%action_work,first,lo,hi,mg,status,orbitals)
- call scf_merge_r_complex3(target%spatial%previous,source%spatial%previous,first,lo,hi,mg,status,orbitals)
+ call scf_merge_r_complex3(target%cached_source,source%cached_source,first,lo,hi,mg,status,orbitals,kpoints)
+ call scf_merge_r_complex3(target%cached_action,source%cached_action,first,lo,hi,mg,status,orbitals,kpoints)
+ call scf_merge_r_complex3(target%full_source,source%full_source,first,lo,hi,mg,status,orbitals,kpoints)
+ call scf_merge_r_complex3(target%initial_source,source%initial_source,first,lo,hi,mg,status,orbitals,kpoints)
+ call scf_merge_r_complex3(target%target_work,source%target_work,first,lo,hi,mg,status,orbitals,kpoints)
+ call scf_merge_r_complex3(target%action_work,source%action_work,first,lo,hi,mg,status,orbitals,kpoints)
+ call scf_merge_r_complex3(target%spatial%previous,source%spatial%previous,first,lo,hi,mg,status,orbitals,kpoints)
  if(status/=0)return
  if(allocated(source%spatial%source))then
   allocate(buffer(size(source%spatial%source,1),size(source%spatial%source,2),1),stat=istat)
@@ -1143,7 +1165,7 @@ subroutine scf_merge_r_hse(target,source,first,lo,hi,mg,status,orbitals)
   endif
   merged(:,:,1)=target%spatial%source
  endif
- call scf_merge_r_complex3(merged,buffer,first,lo,hi,mg,status,orbitals)
+ call scf_merge_r_complex3(merged,buffer,first,lo,hi,mg,status,orbitals,kpoints)
  if(status/=0)return
  if(allocated(target%spatial%source))deallocate(target%spatial%source)
  if(allocated(merged))then
@@ -1161,7 +1183,7 @@ contains
    status=15;return
   endif
   if(.not.first)left%condition=max(left%condition,right%condition)
-  call scf_merge_r_complex3(left%factors,right%factors,first,lo,hi,mg,status,orbitals)
+  call scf_merge_r_complex3(left%factors,right%factors,first,lo,hi,mg,status,orbitals,kpoints)
  end subroutine
 end subroutine
 #endif

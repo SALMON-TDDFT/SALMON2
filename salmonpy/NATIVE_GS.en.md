@@ -1198,3 +1198,35 @@ bootstrap SCF work is zero, and five new iterations agree with source-initialize
 continuous8 at unchanged rtol1e-9/atol1e-10. Late donor read failures preserve
 original state/files. Independent mixed owners and previous-runtime pure orbital/
 spatial HSE and ordinary-XC controls verify the retained arithmetic.
+
+### Fast-PR HSE full-k × spatial SCF bridge
+
+Select `NativeGSBackend(..., decomposition=(K,1,X,Y,Z), hse_kspace=True)` on
+both hosts, including a one-rank source. The explicit runtime must declare
+`sp_gs_hse_kspace_protocol()==1`; changed-layout restore additionally requires
+`sp_gs_scf_m_repartition_protocol()==3`. Use a fixed full uniform k mesh with
+more than one point, CPU, scalar full occupied spin pairs and an orthogonal
+cell. Symmetry reduction and orbital splitting belong to other profiles.
+Do not set hse_spatial/hse_orbital or request the Gamma Wannier exchange path.
+
+Accepted wavefunctions, dense ACE/cache rows and SCF/mixing history remain local.
+For exchange refresh only, Fortran gathers full-grid scratch within each spatial
+group and calls the existing fast k-distributed kernel, then keeps local rows.
+Exchange FFT/work is replicated across spatial ranks: this is a compatibility
+bridge, not spatial FFT acceleration or a promise of reduced peak memory.
+Account for full-grid exchange scratch and communication when choosing a scale.
+No slow-HSE fallback is used.
+
+Restore with `run(restart=checkpoint, repartition=True)`. Saved global grid,
+orbital and k bounds map physical rows and k slices directly; scalar/mixing
+replicas are copied once. The runtime retains new-layout FFT/communication
+resources and loads the accepted numerical state without rebuilding density,
+exchange or SCF history. Check executed_iterations==0 before continuing.
+The example uses `--xc hse06 --hse-kspace --decomposition K 1 X Y Z`; its
+physical2×2×2 mesh stays fixed when changing MPI rank count.
+
+Fresh-process controls cover2↔4,2→1,4→8,changed-axis4→4 and a PBE pre-stage
+2→4. Restored physical wave/density interiors are exact; bootstrap SCF work is
+zero; five new iterations match source-initialized continuous8 within unchanged
+rtol1e-9/atol1e-10. Late donor failure preserves originals and source files.
+These are execution regressions, not physical convergence certification.

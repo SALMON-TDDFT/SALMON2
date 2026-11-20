@@ -3220,7 +3220,7 @@ contains
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf
-    logical :: global_symmetry_route,global_native_k_route
+    logical :: global_symmetry_route,global_native_k_route,native_kspace_scf
 
     ! The giant-Gamma source/SR algorithms remain on the development branches.
     ! Reject their inputs before any restart or pseudopotential data is loaded.
@@ -3755,10 +3755,18 @@ contains
       (yn_hse_wannier=='y'.or.product(nproc_rgrid)>1.or.nproc_ob>1).and. &
       (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
       yn_conventional_from_dcdft=='y')
+    native_kspace_scf=.false.
+#ifdef USE_MPI
+    native_kspace_scf=comm_is_attached().and.xc=='hse06'.and.theory=='dft'.and. &
+      product(num_kgrid)>1.and.nproc_ob==1.and.yn_hse_wannier=='n'.and. &
+      yn_dc=='n'.and.yn_md=='n'.and.yn_opt=='n'.and.temperature<0d0.and. &
+      index(yn_symmetry,'y')==0.and.trim(file_kw)=='none'.and.exx_kpoint_backend=='cpu'.and. &
+      exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.all(hse_q_reduction==1)
+#endif
     hybrid_spatial_scf=(is_hybrid(xc)).and.theory=='dft'.and. &
       (product(nproc_rgrid)>1.or.nproc_ob>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))
     if(hybrid_spatial_scf)then
-      yn_hse_wannier='y'
+      if(.not.native_kspace_scf)yn_hse_wannier='y'
       if(yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)) &
         error stop 'Spatial hybrid SCF: occupied spin pairs required'
       if(yn_restart=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &

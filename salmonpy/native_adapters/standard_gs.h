@@ -61,6 +61,8 @@ int sp_gs_hse_orbital_protocol(void);
  * Explicit full-support CPU Gamma profile, selected on both hosts including1 rank.
  * Spatial-repartition2 additionally maps dense ACE/workspace physical grid rows. */
 int sp_gs_hse_spatial_protocol(void);
+/* Explicit CPU full-mesh SCF bridge: local accepted rows, replicated FFT scratch. */
+int sp_gs_hse_kspace_protocol(void);
 /* Spatial repartition1: ordinary XC;2 also dense full-support Gamma HSE.
  * boxes is 6*old_size integers:
  * (xlo,xhi,ylo,yhi,zlo,zhi) for each old rank's physical interior. Pure r-grid
@@ -72,7 +74,7 @@ int sp_gs_scf_r_repartition(int64_t token,const char *directory,int old_size,con
  * (xlo,xhi,ylo,yhi,zlo,zhi,olo,ohi,klo,khi) per old rank. Wavefunction/CG
  * five-dimensional ownership must cover the target exactly. Scalar density,
  * potentials and mixing use one replica per spatial box, never summed twice.
- * Same runtime/physical input/assets; stage then publish. Protocol2 also maps dense Gamma fast-PR HSE orbital/spatial state. */
+ * Same runtime/physical input/assets; stage then publish. Protocol2 maps dense Gamma orbital/spatial HSE; protocol3 also maps full-k/spatial HSE. */
 int sp_gs_scf_m_repartition_protocol(void);
 int sp_gs_scf_m_repartition(int64_t token,const char *directory,int old_size,const int *boxes);
 int sp_gs_scf_disk_protocol(void);
