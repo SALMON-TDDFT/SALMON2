@@ -1121,8 +1121,8 @@ The existing sample uses `--xc hse06 --spatial-parallel` on both sides; save wit
 new rank count. Existing default k/orbital and legacy CLI behavior is preserved.
 The profile is periodic scalar, orthogonal-cell, fully occupied integer spin pairs,
 fixed-ion, CPU, full-support Gamma with dense ACE and untiled gauges. Packed or
-distributed ACE, tiled gauges, sparse localization, multi-k or mixed layouts,
-changed-runtime migration and HSE spatial GS→RT remain outside this entry.
+distributed ACE, tiled gauges, sparse localization and multi-k layouts; mixed orbital/spatial support requires the protocol2 entry below.
+Changed-runtime migration and HSE spatial GS→RT remain outside this entry.
 
 ### Ordinary-XC mixed k/orbital/spatial SCF rank-count restart
 
@@ -1165,5 +1165,36 @@ are also checked. These are execution controls, not physical convergence.
 The existing sample accepts `--decomposition K O X Y Z` on both saving and
 restoring hosts; its explicit-layout path keeps a fixed2×2×2 physical k mesh.
 Use `--save-scf NEW_CHECKPOINT`, then `--restart CHECKPOINT --repartition` with
-the new MPI count/layout. HSE mixed migration, changed-runtime portability and
+the new MPI count/layout. Fast HSE uses the Gamma protocol2 entry below; changed-runtime portability and
 common protected restore with changed topology remain outside this entry.
+
+### Fast-PR HSE Gamma orbital × spatial SCF restart
+
+Use `hse_spatial=True` for both source and target hosts. Compute protocol
+`sp_gs_hse_spatial_protocol()==2` permits simultaneous orbital and Cartesian
+spatial decomposition, e.g. `(1,2,2,1,1)` (four ranks). The physical k mesh stays
+Gamma `(1,1,1)`, without symmetry reduction, and every orbital group owns at
+least one fully occupied spin-pair band. This extends the dense, full-support,
+CPU, scalar, orthogonal-cell profile; it does not enable multi-k spatial HSE.
+
+With mixed-repartition protocol2, use the existing explicit
+`run(restart=checkpoint, repartition=True)` on a new rank group. Fortran maps
+wavefunctions/CG history, dense ACE columns, cached exchange source/action and
+spatial source/previous buffers by global orbital index and physical grid row.
+Replicated gauge/occupation and scalar mixing state are retained without summing
+replicas; communication handles belong to the new host. Restoration loads the
+accepted numerical state without SCF/density/exchange reconstruction.
+
+The existing example accepts `--xc hse06 --decomposition 1 O X Y Z` on both
+sides; this path uses Gamma independently of MPI size. Save with `--save-scf`,
+then resume with `--restart ... --repartition` into a new output directory.
+Packed/distributed ACE, tiled gauges, sparse support, changed-runtime migration
+and orbital/spatial GS→RT remain separate capabilities. Do not treat restart
+regressions as physical convergence certification.
+
+Measured controls cover2↔4,4→8,4→4 with changed spatial axes, uneven
+orbital6→4 and pre-PBE cuts2↔4. Saved physical wave/density interiors are exact,
+bootstrap SCF work is zero, and five new iterations agree with source-initialized
+continuous8 at unchanged rtol1e-9/atol1e-10. Late donor read failures preserve
+original state/files. Independent mixed owners and previous-runtime pure orbital/
+spatial HSE and ordinary-XC controls verify the retained arithmetic.

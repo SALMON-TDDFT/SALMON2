@@ -99,11 +99,12 @@ def _scf_r_repartition_api(lib,*,hse=False):
     return fn
 
 
-def _scf_m_repartition_api(lib):
+def _scf_m_repartition_api(lib,*,hse=False):
     probe=getattr(lib,'sp_gs_scf_m_repartition_protocol',None)
     if probe is None:raise InputError('mixed SCF repartition requires a matching explicitly built runtime')
     probe.argtypes=[];probe.restype=c.c_int
-    if probe()!=1:raise InputError('unsupported SCF mixed repartition protocol')
+    version=probe()
+    if version not in (1,2) or (hse and version<2):raise InputError('unsupported SCF mixed repartition protocol')
     fn=lib.sp_gs_scf_m_repartition
     fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
     return fn
@@ -172,8 +173,9 @@ def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=F
         from .bands import _scalar
         hse=_scalar(new_groups['functional'],'xc','').lower()=='hse06'
         if mixed:
-            if hse:raise InputError('mixed SCF repartition currently supports ordinary XC')
-            _scf_m_repartition_api(session.lib)
+            if hse and (old_decomposition[0]!=1 or session.backend.decomposition[0]!=1):
+                raise InputError('mixed HSE SCF repartition requires Gamma k groups')
+            _scf_m_repartition_api(session.lib,hse=hse)
         elif spatial:
             _scf_r_repartition_api(session.lib,hse=hse)
         elif orbital:
@@ -447,12 +449,12 @@ class NativeGSSession:
                     if probe is None:raise InputError('fast HSE GS requires k-only MPI or a matching explicitly selected Gamma runtime')
                     probe.argtypes=[];probe.restype=c.c_int
                     version=probe()
-                    valid_layout=self.backend.decomposition[:2]==(1,1) if spatial_profile else self.backend.decomposition==(1,self.comm.size,1,1,1)
-                    if (version not in ((1,) if spatial_profile else (1,2)) or not valid_layout
+                    valid_layout=(self.backend.decomposition[0]==1 and (version>=2 or self.backend.decomposition[1]==1)) if spatial_profile else self.backend.decomposition==(1,self.comm.size,1,1,1)
+                    if (version not in (1,2) or not valid_layout
                             or (getattr(self.backend,'hse_orbital',False) and version<2)
                             or tuple(calculation.kmesh)!=(1,1,1) or calculation.symmetry is not None
                             or calculation.electrons!=2*calculation.states):
-                        raise InputError('fast HSE GS requires k-only MPI or a Gamma pure layout and a matching runtime')
+                        raise InputError('fast HSE GS requires k-only MPI or a Gamma orbital/spatial layout and a matching runtime')
             if type(repartition) is not bool or (repartition and restart is None):
                 raise InputError('repartition is an explicit boolean option requiring restart')
             if restart is not None and steps is not None:
@@ -524,7 +526,7 @@ class NativeGSSession:
                     kind=_scf_repartition_kind(saved['decomposition'],self.backend.decomposition)
                     if kind=='m':
                         bounds=np.asarray([_scf_saved_boxes(entry,True) for entry in saved['files']],dtype=np.int32)
-                        migrate=_scf_m_repartition_api(self.lib)
+                        migrate=_scf_m_repartition_api(self.lib,hse=calculation.xc=='hse06')
                     else:
                         key={'r':'grid_bounds','o':'orbital_bounds','k':'k_bounds'}[kind]
                         bounds=np.asarray([entry[key] for entry in saved['files']],dtype=np.int32)

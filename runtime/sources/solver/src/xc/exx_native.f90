@@ -263,7 +263,6 @@ contains
         offdiag(j,j)=0d0
       enddo
       orbital_gs=info%isize_k==1.and.info%isize_o<=system%no.and. &
-        (info%isize_o==1.or.info%isize_r==1).and. &
         all(system%kmesh==1).and..not.system%kpoint_input%use_symmetry.and. &
         maxval(abs(offdiag))<=1d-12.and.maxval(abs(system%vec_k))<=1d-12.and. &
         exx_local_backend=='cpu'.and.exx_pair_screening=='off'
