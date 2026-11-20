@@ -149,6 +149,7 @@ class DFT:
     kmesh: tuple
     xc: str='pz'
     symmetry: SymmetryOperations | None=None
+    cval: float | None=None
 
     def __post_init__(self):
         if self.symmetry is not None and not isinstance(self.symmetry,SymmetryOperations):
@@ -168,7 +169,19 @@ class DFT:
         grid=tuple(_integer(n,'grid',8,2**20) for n in self.grid)
         kmesh=tuple(_integer(n,'kmesh',1,2**20) for n in self.kmesh)
         if len(grid)!=3 or len(kmesh)!=3: raise InputError('three grid and kmesh dimensions required')
-        if self.xc.lower() not in ('pz','libxc_pz','libxc_pbe','hse06'): raise InputError('supported xc: pz, libxc_pz, libxc_pbe, hse06 (fast native GS)')
+        if self.xc.lower() not in ('pz','tbmbj','libxc_pz','libxc_pbe','hse06'): raise InputError('supported xc: pz, tbmbj, libxc_pz, libxc_pbe, hse06 (fast native GS)')
+        cval=self.cval
+        if cval is not None:
+            value=np.asarray(cval)
+            if value.shape!=() or value.dtype.kind not in 'iuf' or not np.isfinite(value):
+                raise InputError('cval must be a finite real scalar or None')
+            cval=float(value)
+            if self.xc.lower()!='tbmbj':
+                warnings.warn('cval is only used by TB-mBJ; ignoring it for '+self.xc,RuntimeWarning,stacklevel=2)
+                cval=None
+            elif cval<=1e-10:
+                cval=None  # Native automatic-c sentinel, normalized for restart identity.
+        object.__setattr__(self,'cval',cval)
         for name,value in [('numbers',numbers),('pseudopotentials',pseudos),('cell',cell),('fractional_positions',positions),
                            ('electrons',electrons),('states',states),('grid',grid),('kmesh',kmesh),('xc',self.xc.lower())]:
             object.__setattr__(self,name,value)
@@ -191,6 +204,7 @@ class DFT:
         atoms='\n'.join(f"'Z{z}' "+' '.join(f'{v:.17e}' for v in row)+f' {index[z]}'
                         for z,row in zip(self.numbers,self.fractional_positions))
         hybrid_options=', exx_pre_scf_threshold=0' if self.xc=='hse06' else ''
+        if self.cval is not None:hybrid_options+=f', cval={self.cval:.17e}'
         return f"""&calculation
  theory='dft'
 /
@@ -232,6 +246,7 @@ class DFT:
                 'pseudopotentials': [{'atomic_number': p.atomic_number,
                                      'sha256': p.sha256, 'local_channel': p.local_channel}
                                     for p in self.pseudopotentials]}
+        if self.xc=='tbmbj':value['cval']=self.cval
         if self.symmetry is not None:value['symmetry']={'directions':self.symmetry.directions,'sha256':self.symmetry.sha256}
         return value
 
@@ -242,6 +257,9 @@ class DFT:
         if self.xc=='hse06':
             raise InputError('HSE06 GS uses NativeGSBackend with a declared fast-PR compute runtime; batch HSE selection requires fast-PR provenance')
         if type(save_restart) is not bool:raise InputTypeError('save_restart must be boolean')
+        if self.xc=='tbmbj':
+            warnings.warn('TB-mBJ is a model potential for states/bands/response; total energy and forces '
+                          'are unvalidated diagnostics, not an ASE optimization capability.',RuntimeWarning,stacklevel=2)
         text=self.input_text(scf)
         if not save_restart:text=text.replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
         threads=_integer(threads,'threads',1,2**31-1);timeout=_positive(timeout,'timeout')
@@ -267,6 +285,9 @@ class DFT:
                 'cell_bohr':self.cell.tolist(),'fractional_positions':self.fractional_positions.tolist(),'numbers':self.numbers,
                 'pseudopotentials':[{'atomic_number':p.atomic_number,'sha256':p.sha256,'local_channel':p.local_channel} for p in self.pseudopotentials],
                 'max_iterations':scf.max_iterations,'tolerance':scf.tolerance,'threads':threads,'restart_saved':save_restart}
+        if self.xc=='tbmbj':
+            record.update(cval=self.cval,cval_mode='automatic' if self.cval is None else 'fixed',
+                          observable_scope='states/bands/response; energy/forces are unvalidated diagnostics')
         if self.symmetry is not None:record['symmetry']=self._restart_signature()['symmetry']
         manifest=dest/'ground-state.json'
         try:
@@ -337,6 +358,15 @@ class GroundStateResult:
             if path.is_absolute() or PureWindowsPath(name).drive or '..' in path.parts or '\\' in name or not (root/path).resolve().is_relative_to(root):
                 raise InputError('invalid manifest path')
             if _digest(root/path)!=digest: raise InputError('GS checksum mismatch: '+name)
+        if record.get('xc')=='tbmbj':
+            from .bands import _input_groups,_scalar
+            functional=_input_groups((root/'native/gs.inp').read_text()).get('functional','')
+            try:value=float(_scalar(functional,'cval','-1').replace('d','e'))
+            except ValueError as exc:raise InputError('invalid TB-mBJ cval input') from exc
+            expected=None if value<=1e-10 else value
+            if (_scalar(functional,'xc')!='tbmbj' or not np.isfinite(value)
+                    or record.get('cval')!=expected):
+                raise InputError('TB-mBJ cval/XC metadata differs from GS input')
         status=_read_status(root/'native/gs_status.dat')
         if status['energy_hartree']!=record['energy_hartree'] or status['iterations']!=record['iterations']:
             raise InputError('inconsistent GS metadata')

@@ -21,6 +21,14 @@ class FDTDTests(unittest.TestCase):
         self.assertIn("unit_system = 'au'",text)
         self.assertIn('omega_p_ld(1) = 1',text)
         self.assertIn('obs_samp_em = 1',text)
+        from dataclasses import replace
+        periodic=Boundaries(('pml','pml','periodic','periodic','periodic','periodic'))
+        mixed=replace(c,boundaries=periodic)
+        self.assertIn("boundary_em(2,1) = 'periodic'",mixed.input_text())
+        self.assertIn("yn_periodic = 'n'",mixed.input_text())
+        with self.assertRaisesRegex(ValueError,'pairs'):
+            Boundaries(('pml','pml','periodic','pec','pml','pml'))
+
         with self.assertRaises(AttributeError): c.dt=.5
         with self.assertRaises(ValueError): FDTD(c.geometry,c.materials,dt=1.,steps=10)
 
@@ -39,7 +47,10 @@ class FDTDTests(unittest.TestCase):
                 run.return_value.returncode=0
                 with self.assertRaises(RuntimeError): runner.run(self.calculation(),target)
                 self.assertFalse(run.call_args.kwargs.get('shell',False))
-            with self.assertRaises(FileExistsError): runner.run(self.calculation(),target)
+            with self.assertRaisesRegex(FileExistsError,'Choose a new directory') as caught:
+                runner.run(self.calculation(),target)
+            self.assertEqual(caught.exception.filename,str(target.resolve()))
+            self.assertEqual(caught.exception.errno,17)
             exe.write_bytes(b'changed')
             with self.assertRaises(ValueError): runner.run(self.calculation(),Path(d)/'other')
             self.assertFalse((Path(d)/'other').exists())
@@ -83,6 +94,25 @@ class FDTDTests(unittest.TestCase):
             with patch('salmonpy.fdtd.subprocess.run',side_effect=old_run):
                 with self.assertRaisesRegex(RuntimeError,'material-ID-independent'):
                     engine.run(c,Path(tmp)/'result')
+
+    def test_ld_background_and_fastest_cell_cfl(self):
+        from dataclasses import replace
+        from salmonpy.ld import LDModelConfig
+        base=self.calculation()
+        cfg=LDModelConfig(1.,(1.,),(0.,),(.1,),epsilon_infinity=2.25)
+        calc=replace(base,materials=(cfg,),source=PlaneWave(AcosPulse(.001,10.,2.),0,-12.),boundaries=Boundaries(('pec',)*6))
+        self.assertEqual(calc.materials[0].epsilon_infinity,2.25)
+        with self.assertWarnsRegex(RuntimeWarning,'raw data continue'):
+            kicked=replace(base,materials=(cfg,))
+        self.assertIsInstance(kicked.source,Impulse)
+
+        self.assertIn('epsilon_em(1) = 2.25',calc.input_text())
+        # Slower matter cannot loosen the vacuum/PML timestep limit.
+        with self.assertRaisesRegex(ValueError,'CFL'):
+            replace(calc,dt=.009)
+        fast=replace(calc,materials=(replace(cfg,epsilon_infinity=.25),))
+        with self.assertRaisesRegex(ValueError,'CFL'):
+            replace(fast,dt=.005)
 
     def test_mpi_grid_configuration(self):
         import salmonpy.fdtd as f

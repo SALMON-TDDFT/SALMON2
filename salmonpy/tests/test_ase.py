@@ -89,6 +89,9 @@ class ASEBridgeTest(unittest.TestCase):
         pseudo=Pseudopotential(14,2,'_rps.dat',b'2000 .01 2 4.0\n')
         args=dict(pseudopotentials=[pseudo],electrons=4,states=8,grid=[12]*3,kmesh=[2]*3)
         model=dft_from_atoms(atoms,**args)
+        tb=dft_from_atoms(atoms,**args,xc='tbmbj',cval=1.2)
+        self.assertEqual(tb.cval,1.2)
+        self.assertIn("xc='tbmbj'",tb.input_text())
         atoms.positions[0,0]=1
         np.testing.assert_array_equal(model.fractional_positions,[[0,0,0]])
         np.testing.assert_allclose(model.cell,np.eye(3)*5/BOHR_ANGSTROM)

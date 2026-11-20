@@ -192,3 +192,7 @@ checks above. Do not add a pure-Python numerical fallback, compile on import or
 silently skip those numerical tests. A missing ABI is an environment/version
 mismatch, not evidence that the convergence algorithm failed. Full fast-HSE
 runtime builds additionally require FFTW; see runtime/README.md in the checkout.
+
+## Required source-integrity CI
+
+Changes to `runtime/sources/**`, `runtime/source-trees/**`, `packaging/**` or `pyproject.toml` must not use `[skip ci]`. `native-contract.yml` checks source inventories with pytest, exports tracked Git files only, prepares/builds the MPI library from that export, and runs GS-free C/Fortran query and explicit-parser contracts. The query itself is short; preparing its full runtime still costs a build. Ordinary pushes also retain the Linux sdist/wheel job. OS wheel matrices remain on PR/manual triggers. Full runtime campaigns, TDDFT solver comparisons and NLCC physics checks are manual-only; real-material observable reproduction is not required CI. This respects the Actions budget without skipping source-integrity checks. No workflow is manually dispatched by input preparation or imports. CI configuration is not evidence that a run passed; attach the actual run result when available.

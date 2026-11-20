@@ -311,7 +311,8 @@ def _write(gs,destination,block,waves,occ,eigen,info,model):
         eigenvalues=eigen,occupations=occ,kpoints=points,weights=weights,
         cell_bohr=model.cell,fractional_positions=model.fractional_positions,
         atomic_numbers=list(model.numbers),electrons=model.electrons,energy_hartree=energy,
-        xc=model.xc,pseudopotentials=references,orbital_block=block,provenance=provenance)
+        xc=model.xc,pseudopotentials=references,orbital_block=block,provenance=provenance,
+        xc_parameters={'cval':model.cval} if model.xc=='tbmbj' else None)
 
 
 def export_retained(gs,directory,orbital_block):
@@ -422,7 +423,7 @@ def _model_and_input(source,record,multi_k=False):
         potentials.append(potential);refs.append(dict(atomic_number=potential.atomic_number,filename=path.name,
             sha256=potential.sha256,source='verified native GS/1'))
     model=DFT(record['numbers'],record['cell_bohr'],record['fractional_positions'],potentials,
-              record['electrons'],record['states'],record['grid'],record['kmesh'],record['xc'])
+              record['electrons'],record['states'],record['grid'],record['kmesh'],record['xc'],cval=record.get('cval'))
     if multi_k and (not np.array_equal(model.cell,np.diag(np.diag(model.cell))) or np.any(np.diag(model.cell)<=0)):
         raise InputError('multi-k native export requires aligned orthogonal cell')
     settings=SCFSettings(record['max_iterations'],record['tolerance'])
@@ -514,7 +515,8 @@ def export_gamma(converter,result,directory,*,orbital_block=16,timeout=300.):
             return save_ground_state(root,wavefunctions=waves,density=density,eigenvalues=eigen,
                 occupations=occ,kpoints=points,weights=weights,cell_bohr=model.cell,
                 fractional_positions=model.fractional_positions,atomic_numbers=list(model.numbers),electrons=model.electrons,
-                energy_hartree=source.energy_hartree,xc=model.xc,pseudopotentials=refs,orbital_block=orbital_block,provenance=provenance)
+                energy_hartree=source.energy_hartree,xc=model.xc,pseudopotentials=refs,orbital_block=orbital_block,provenance=provenance,
+                xc_parameters={'cval':model.cval} if model.xc=='tbmbj' else None)
         finally:
             # Explicitly release mapping handles before TemporaryDirectory cleanup.
             for mapping in reversed(mappings):mapping._mmap.close()

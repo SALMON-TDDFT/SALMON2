@@ -43,6 +43,10 @@ class RuntimeTests(unittest.TestCase):
         engine = self.install()
         self.assertEqual(engine.path, (self.root/'installed/bin/salmon').resolve())
         self.assertEqual(runtime.load_runtime(self.root/'installed', host=self.host).sha256, engine.sha256)
+        from salmonpy.fdtd import SalmonExecutable
+        verified=SalmonExecutable.from_runtime(self.root/'installed',required=['tddft'],host=self.host)
+        self.assertEqual(verified.sha256,engine.sha256)
+        self.assertEqual(SalmonExecutable.from_runtime(self.root/'installed',host=self.host).sha256,engine.sha256)
         engine.path.write_bytes(b'changed')
         with self.assertRaisesRegex(ValueError, 'checksum'):
             runtime.load_runtime(self.root/'installed', host=self.host)

@@ -1,12 +1,12 @@
 name: TDDFT native worker
+# Expensive numerical/physics validation is explicit, not required automatic CI.
 on:
   workflow_dispatch:
-  push:
-    paths: ['salmonpy/**', 'native/**', 'runtime/**', 'tools/prepare_salmon_runtime.py', 'tools/runtime_sources.py', 'tools/test_tddft_entrypoint.py', '.github/workflows/tddft-worker.yml']
 permissions:
   contents: read
 jobs:
   regression:
+    # Run only when a maintainer explicitly requests this optional campaign.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4

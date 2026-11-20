@@ -171,7 +171,7 @@ def run_bands(initial,atoms,path,directory,*,reference_ev,**run_options):
 
 
 def dft_from_atoms(atoms,*,pseudopotentials,states,kmesh,grid=None,
-                   grid_spacing=None,grid_spacing_unit=None,electrons=None,xc='pz'):
+                   grid_spacing=None,grid_spacing_unit=None,electrons=None,xc='pz',cval=None):
     """Copy ASE geometry into an independent DFT model; no calculation is launched.
 
     ASE cell/positions use Å. Electrons default to the neutral pseudopotential
@@ -209,7 +209,7 @@ def dft_from_atoms(atoms,*,pseudopotentials,states,kmesh,grid=None,
         raise InputError(f'electrons must equal neutral pseudopotential valence sum ({neutral}); charged ASE systems are unsupported')
     electrons = neutral
     return DFT(atoms.numbers,atoms.cell.array/BOHR_ANGSTROM,atoms.get_scaled_positions(wrap=False),
-               pseudopotentials,electrons=electrons,states=states,grid=grid,kmesh=kmesh,xc=xc)
+               pseudopotentials,electrons=electrons,states=states,grid=grid,kmesh=kmesh,xc=xc,cval=cval)
 
 
 def tddft_from_atoms(atoms, directory, *, executable, pseudopotentials, states,

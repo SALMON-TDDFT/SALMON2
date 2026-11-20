@@ -63,6 +63,16 @@ class GSExportTests(unittest.TestCase):
         self.assertEqual(a.metadata['provenance']['local_channels'][0]['local_channel'],0)
         self.assertEqual((self.source/'ground-state.json').read_bytes(),original)
         GroundStateResult.open(self.source)
+        from dataclasses import replace
+        self.dft=replace(self.dft,xc='tbmbj',cval=1.2)
+        native=self.source/'native'
+        (native/'gs.inp').write_text(self.dft.input_text())
+        self.record.update(xc='tbmbj',cval=1.2,input_sha256=hashlib.sha256((native/'gs.inp').read_bytes()).hexdigest())
+        self.rehash();tb=self.export('tb-export')
+        self.assertEqual(tb.metadata['xc_parameters']['cval'],1.2)
+        converted=self.converter.write_bundle(tb,Path(self.tmp.name)/'tb-roundtrip',
+            executable=self.model.executable,pseudopotentials=[self.potential])
+        self.assertIn('cval=1.19999999999999996e+00',(converted/'rt.inp').read_text())
 
     def test_missing_eigen_units_and_occ_mismatch_no_output(self):
         p=self.source/'native/gs_eigen.data';original=p.read_text()

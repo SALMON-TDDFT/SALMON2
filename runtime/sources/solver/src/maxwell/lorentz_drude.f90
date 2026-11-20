@@ -85,11 +85,13 @@ contains
     ld%ez_old_ld=0.0d0
   end subroutine ld_allocate
   subroutine ld_coefficients(media_ld,pole_num_ld,gamma_ld,omega_ld,f_ld,omega_p_ld,dt_em,pi, &
-                             tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld)
+                             tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld,epsilon_infinity)
     integer, intent(in) :: media_ld(:),pole_num_ld(0:)
     real(8), intent(in) :: gamma_ld(0:,:),omega_ld(0:,:),f_ld(0:,:),omega_p_ld(0:),dt_em,pi
     real(8), intent(inout) :: tmp_c0_ld(:,:),tmp_c1_ld(:,:),tmp_c2_ld(:,:),tmp_c3_ld(:,:)
     real(8), intent(inout) :: tmp_c4_ld(:),tmp_c5_ld(:)
+    real(8),optional,intent(in) :: epsilon_infinity(0:)
+    real(8) :: background
     integer :: ii,ij
       do ii = 1,size(media_ld)
         do ij = 1,pole_num_ld(media_ld(ii))
@@ -106,8 +108,10 @@ contains
           tmp_c4_ld(ii) = tmp_c4_ld(ii) + tmp_c2_ld(ij,ii)
           tmp_c5_ld(ii) = tmp_c5_ld(ii) + tmp_c2_ld(ij,ii)
         end do
-        tmp_c4_ld(ii) = 1.0d0 + 2.0d0*pi*dt_em*tmp_c4_ld(ii)
-        tmp_c5_ld(ii) = 1.0d0 - 2.0d0*pi*dt_em*tmp_c5_ld(ii)
+        background=1.0d0
+        if(present(epsilon_infinity))background=epsilon_infinity(media_ld(ii))
+        tmp_c4_ld(ii) = background + 2.0d0*pi*dt_em*tmp_c4_ld(ii)
+        tmp_c5_ld(ii) = background - 2.0d0*pi*dt_em*tmp_c5_ld(ii)
       end do
       
   end subroutine ld_coefficients

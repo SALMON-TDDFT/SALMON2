@@ -9,7 +9,7 @@ class PublicAPI(unittest.TestCase):
     def test_version_and_inventory(self):
         import salmonpy
         from salmonpy.api import PUBLIC_API
-        self.assertEqual(salmonpy.__version__, '0.1.0a5')
+        self.assertEqual(salmonpy.__version__, '0.1.0a6')
         for module, names in PUBLIC_API.items():
             if module == 'salmonpy.ase_calculator' and importlib.util.find_spec('ase') is None:
                 continue
@@ -73,7 +73,7 @@ import salmonpy
 from salmonpy.api import native_contract
 assert native_contract('fast_hse', route='legacy')['known']
 assert not any(x in sys.modules for x in ('mpi4py', 'matplotlib.pyplot', 'ase'))
-assert salmonpy.__version__ == '0.1.0a5'
+assert salmonpy.__version__ == '0.1.0a6'
 # Import contracts formerly repeated in six module test files. Keep per-module
 # diagnostics, including ASE/f90nml laziness and the missing-MPI checkpoint path.
 import importlib

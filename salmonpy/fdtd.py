@@ -29,13 +29,19 @@ def _vector(v): return ', '.join(_number(x) for x in v)
 
 @dataclass(frozen=True,slots=True)
 class Boundaries:
-    """Faces in x-,x+,y-,y+,z-,z+ order. PML thickness is fixed by SALMON (8 cells)."""
+    """Faces in x-,x+,y-,y+,z-,z+ order; periodic faces occur in opposite pairs.
+
+    Coordinates remain centered, including mixed periodic/PML domains.
+    PML thickness is fixed by SALMON (8 cells)."""
     faces: tuple=('pml',)*6
 
     def __post_init__(self):
         faces=tuple(self.faces)
-        if len(faces)!=6 or any(x not in ('pml','pec') for x in faces):
-            raise InputError('six pml/pec faces required; periodic support is not yet exposed')
+        if len(faces)!=6 or any(x not in ('pml','pec','periodic') for x in faces):
+            raise InputError('six pml/pec/periodic faces required')
+        for axis in range(3):
+            if (faces[2*axis]=='periodic')!=(faces[2*axis+1]=='periodic'):
+                raise InputError('periodic faces must be specified in opposite pairs')
         object.__setattr__(self,'faces',faces)
 
 
@@ -105,20 +111,25 @@ class FDTD:
         for m in materials:
             if isinstance(m,LDModelConfig):
                 LorentzDrude(plasma_frequency=m.plasma_frequency,strength=m.strength,
-                             resonance=m.resonance,damping=m.damping)
+                             resonance=m.resonance,damping=m.damping,epsilon_infinity=m.epsilon_infinity)
                 if len(m.strength)>100: raise InputError('at most 100 LD poles supported by SALMON')
         materials=tuple(LorentzDrude(plasma_frequency=m.plasma_frequency,strength=m.strength,
-                                    resonance=m.resonance,damping=m.damping).config
+                                    resonance=m.resonance,damping=m.damping,epsilon_infinity=m.epsilon_infinity).config
                         if isinstance(m,LDModelConfig) else m for m in materials)
         object.__setattr__(self,'materials',materials)
         if isinstance(self.source,Impulse) and any(isinstance(m,Dielectric) for m in materials):
             raise InputError('SALMON impulse excitation requires LD materials; use PlaneWave for dielectrics')
+        if isinstance(self.source,Impulse) and any(isinstance(m,LDModelConfig) and m.epsilon_infinity!=1.0 for m in materials):
+            import warnings
+            warnings.warn('Non-unit LD background: impulse remains a dispersive-pole current kick. Time evolution and raw data continue, but legacy normalized optical spectra are omitted; use PlaneWave for optical response.',RuntimeWarning,stacklevel=2)
         dt=_positive(self.dt,'dt');object.__setattr__(self,'dt',dt)
         for key in ('steps','observation_stride'):
             object.__setattr__(self,key,_integer(getattr(self,key),key))
         if self.observation_stride>self.steps: raise InputError('observation_stride exceeds steps')
         cfl=1/(137.035999084*np.sqrt(sum(1/d**2 for d in self.geometry.grid.spacing)))
-        if dt>=cfl: raise InputError(f'dt must be below vacuum CFL limit {cfl:.17g} a.u.')
+        fastest=min([1.0]+[m.epsilon_infinity if isinstance(m,LDModelConfig) else m.epsilon*m.mu for m in materials])
+        cfl*=np.sqrt(fastest)
+        if dt>=cfl: raise InputError(f'dt must be below whole-domain CFL limit {cfl:.17g} a.u.')
         if any(s.material>len(materials) for s in self.geometry.shapes):
             raise InputError('shape refers to an undefined material')
         contacts=self.geometry.boundary_contacts(self.boundaries.faces)
@@ -183,6 +194,8 @@ class FDTD:
                               f' f_ld({i},1:{n}) = '+_vector(m.strength),
                               f' omega_ld({i},1:{n}) = '+_vector(m.resonance),
                               f' gamma_ld({i},1:{n}) = '+_vector(m.damping)])
+                if m.epsilon_infinity!=1.0:
+                    lines.append(f' epsilon_em({i}) = '+_number(m.epsilon_infinity))
         for i,p in enumerate(self.observations,1): lines.append(f' obs_loc_em({i},:) = '+_vector(p))
         return '\n\n'.join(parts+['\n'.join(lines+['/'])])+'\n'
 
@@ -241,6 +254,7 @@ def _run_fdtd_mpi(command,inp,*,cwd,log,env,timeout):
 class SalmonExecutable:
     """An externally built/validated SALMON executable identified by SHA256.
 
+    If a runtime bundle is available, use load_runtime or from_runtime to verify all files.
     A hash identifies the binary; it does not replace source/object build audits.
     """
     path: Path
@@ -257,6 +271,12 @@ class SalmonExecutable:
         object.__setattr__(self,'path',Path(self.path).expanduser().resolve())
         if type(self.mpi_enabled) is not bool: raise InputTypeError('mpi_enabled must be boolean')
         if not re.fullmatch(r'[0-9a-f]{64}',self.sha256): raise InputError('expected lowercase SHA256')
+
+    @classmethod
+    def from_runtime(cls,directory,*,required=(),host=None):
+        """Delegate bundle integrity/capability checks to runtime.load_runtime."""
+        from .runtime import load_runtime
+        return load_runtime(directory,required=required,host=host)
 
     @classmethod
     def from_mpi_build(cls,build_record):
@@ -289,7 +309,10 @@ class SalmonExecutable:
                 raise InputError('launch FDTD MPI from a fresh serial Python process, not inside an MPI rank or initialized MPI')
         inp=calculation.input_text() if mpi is None else mpi.input_text(calculation)
         command=[str(self.path)] if mpi is None else [*mpi.launcher,'-n',str(mpi.ranks),str(self.path)]
-        directory=Path(directory).expanduser().resolve();directory.mkdir(parents=True,exist_ok=False)
+        directory=Path(directory).expanduser().resolve()
+        try:directory.mkdir(parents=True,exist_ok=False)
+        except FileExistsError as exc:
+            raise FileExistsError(exc.errno,'Output directory already exists. Choose a new directory.',str(directory)) from exc
         (directory/'inputfile').write_text(inp)
         record=dict(config=asdict(calculation),units='atomic_gaussian',executable=str(self.path),
                     executable_sha256=self.sha256,input_sha256=hashlib.sha256(inp.encode()).hexdigest(),

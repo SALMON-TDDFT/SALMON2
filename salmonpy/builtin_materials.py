@@ -22,14 +22,14 @@ def _keys(parameters, required, optional=()):
 
 def _ld(parameters):
     from .ld import LorentzDrude
-    _keys(parameters, _LD_KEYS)
+    _keys(parameters, _LD_KEYS, {"epsilon_infinity"})
     if parameters['units'] != 'atomic_gaussian':
         raise InputError('LD units must explicitly be atomic_gaussian')
     model = LorentzDrude(**{k: v for k, v in parameters.items() if k != 'units'})
     c = model.config
     return model, {'units': 'atomic_gaussian', 'plasma_frequency': c.plasma_frequency,
                    'strength': list(c.strength), 'resonance': list(c.resonance),
-                   'damping': list(c.damping)}
+                   'damping': list(c.damping), **({'epsilon_infinity':c.epsilon_infinity} if c.epsilon_infinity!=1.0 else {})}
 
 
 def _hash(path):
@@ -89,7 +89,7 @@ def _dft(parameters, base_directory):
     from .ase import dft_from_atoms
     from .dft import Pseudopotential
     from .structure import StructureInput, grid_from_spacing
-    _keys(parameters, {'structure', 'pseudopotentials', 'xc', 'states', 'kmesh', 'grid'}, {'electrons'})
+    _keys(parameters, {'structure', 'pseudopotentials', 'xc', 'states', 'kmesh', 'grid'}, {'electrons','cval'})
     structure_ref = parameters['structure']
     _keys(structure_ref, {'path', 'format'}, {'index'})
     refs = parameters['pseudopotentials']
@@ -127,7 +127,7 @@ def _dft(parameters, base_directory):
         raise InputError('xc must be explicit string')
     model = dft_from_atoms(atoms, pseudopotentials=pseudos, states=parameters['states'],
                            grid=counts, kmesh=parameters['kmesh'], xc=parameters['xc'],
-                           electrons=parameters.get('electrons'))
+                           electrons=parameters.get('electrons'),cval=parameters.get('cval'))
     if before != {name: _hash(path) for name, path in paths.items()}:
         raise InputError('DFT files changed while reading')
     resolved = {**parameters, 'structure': {**structure_ref, 'index': structure_ref.get('index', 0)},
@@ -135,6 +135,7 @@ def _dft(parameters, base_directory):
                 'xc': model.xc, 'file_sha256': before, 'structure_record': structure.record(),
                 'grid_resolution': selection.as_dict() if selection is not None else
                 {'mode': 'explicit_counts', 'counts': list(model.grid)}}
+    if model.xc=='tbmbj':resolved['cval']=model.cval
     return model, resolved
 
 

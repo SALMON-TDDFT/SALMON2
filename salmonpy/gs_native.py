@@ -116,8 +116,13 @@ class GammaRestartConverter:
         if 'provenance' in m:
             channels={c['atomic_number']:c['local_channel'] for c in m['provenance']['local_channels']}
             if {p.atomic_number:p.local_channel for p in potentials}!=channels:raise InputError('local channels differ from source GS')
+        if m['xc']!='tbmbj' and m.get('xc_parameters'):
+            raise InputError('this native bridge does not interpret these XC parameters; archive arrays remain available')
+        if m['xc']=='tbmbj' and 'xc_parameters' not in m:
+            raise InputError('TB-mBJ archive must declare xc_parameters.cval (None for automatic)')
         model=DFT(tuple(map(int,archive.array('atomic_numbers'))),archive.array('cell_bohr'),archive.array('fractional_positions'),
-                  potentials,int(n),m['n_bands'],tuple(reversed(m['grid_zyx'])),(1,1,1),m['xc'])
+                  potentials,int(n),m['n_bands'],tuple(reversed(m['grid_zyx'])),(1,1,1),m['xc'],
+                  cval=m.get('xc_parameters',{}).get('cval'))
         from .bands import _input_groups
         groups=_input_groups(model.input_text());groups['calculation']="\n theory='tddft_pulse'\n"
         groups['control']="\n sysname='rt', base_directory='./', directory_read_data='./data_for_restart/', yn_restart='n', yn_self_checkpoint='n'\n"

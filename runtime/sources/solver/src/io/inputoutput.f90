@@ -76,15 +76,19 @@ module inputoutput
     module procedure finite_real_1d
   end interface
 contains
-  subroutine read_input(input_path,workspace,status)
+  subroutine read_input(input_path,workspace,status,native_host)
     use tddft_worker, only: worker_configure,worker_embedded
     implicit none
     character(*),optional,intent(in) :: input_path
     type(s_input_parser),optional,target,intent(inout) :: workspace
     type(s_input_parser),pointer :: parser
     integer,optional,intent(out) :: status
+    logical,optional,intent(in) :: native_host
+    logical :: host
     integer :: parse_status
 
+    host=.false.
+    if(present(native_host))host=native_host
     if(present(status))status=0
 
     if(present(workspace))then
@@ -96,14 +100,14 @@ contains
     endif
     call read_stdin(input_path,parser)
     if(present(status))then
-      call read_input_common(parser,parse_status)
+      call read_input_common(parser,parse_status,native_host=host)
       if(parse_status/=0)then
         status=parse_status
         call close_parser_workspace(parser)
         return
       endif
     else
-      call read_input_common(parser)
+      call read_input_common(parser,native_host=host)
     endif
     if(.not.worker_embedded) call worker_configure()
     if(present(status))then
@@ -127,14 +131,14 @@ contains
       call dump_input_common(parser)
     endif
     if(present(status))then
-      call check_bad_input(parse_status)
+      call check_bad_input(parse_status,native_host=host)
       if(parse_status/=0)then
         status=parse_status
         call close_parser_workspace(parser)
         return
       endif
     else
-      call check_bad_input
+      call check_bad_input(native_host=host)
     endif
     if(parser%isolated)then
       call parser%values%capture()
@@ -277,7 +281,7 @@ contains
     return
   end subroutine read_stdin
 
-  subroutine read_input_common(parser,status)
+  subroutine read_input_common(parser,status,native_host)
     use parallelization
     use communication
     use filesystem, only: get_filehandle
@@ -288,6 +292,7 @@ contains
     type(s_input_parser),intent(inout) :: parser
     integer :: ii
     integer,optional,intent(out) :: status
+    logical,optional,intent(in) :: native_host
     logical :: native_maxwell
     real(8) :: norm
     ! Read-only compatibility aliases; computational modules use EXX names.
@@ -723,6 +728,8 @@ contains
       & nq_mom, &
       & dq_mom
 
+    native_maxwell=.false.
+    if(present(native_host))native_maxwell=native_host
     if(present(status))status=0
 !! == default for &unit ==
     unit_system='au'
@@ -864,7 +871,7 @@ contains
     call string_lowercase(spin)
     call string_lowercase(yn_spinorbit)
     if(comm_is_root(nproc_id_global))then
-      if(.not.(present(status).and.theory=='maxwell')) &
+      if(.not.(native_maxwell.and.theory=='maxwell')) &
         call resolve_ky_spin_inputs(file_pseudo,nelem,spin,yn_spinorbit)
     endif
     call string_lowercase(xc)
@@ -910,7 +917,7 @@ contains
 ! Broad cast
 !! == bcast for &calculation
     call comm_bcast(theory             ,nproc_group_global)
-    native_maxwell=present(status).and.theory=='maxwell'
+    native_maxwell=native_maxwell.and.theory=='maxwell'
     call comm_bcast(yn_md              ,nproc_group_global)
     call comm_bcast(yn_opt             ,nproc_group_global)
     call comm_bcast(yn_dc              ,nproc_group_global)
@@ -3048,22 +3055,30 @@ contains
 
   end subroutine dump_input_common
 
-  subroutine check_bad_input(status)
+  subroutine check_bad_input(status,native_host)
     use ieee_finite_check, only: ieee_is_finite => is_finite
     use parallelization
     use communication
     use exx_functional, only: is_global_hybrid,is_hybrid
     implicit none
-    integer :: i,round_phi,exx_grid(3)
+    integer :: i,round_phi,exx_grid(3),native_status
+    logical,optional,intent(in) :: native_host
     integer,optional,intent(out) :: status
     real(8) :: udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf
     logical :: global_symmetry_route,global_native_k_route,native_kspace_scf
 
-    if(present(status))then
-      status=0
-      if(theory=='maxwell')then
-        call check_native_maxwell_flags(status)
+    if(present(status))status=0
+    ! Scope is explicit; requesting returned errors alone keeps legacy checks.
+    if(present(native_host))then
+      if(native_host.and.theory=='maxwell')then
+        call check_native_maxwell_flags(native_status)
+        if(present(status))then
+          status=native_status
+        else if(native_status/=0)then
+          call end_parallel
+          stop 'invalid native Maxwell flags'
+        endif
         return
       endif
     endif

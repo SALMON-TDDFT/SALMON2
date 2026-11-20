@@ -49,6 +49,17 @@ class BuiltinMaterialsTests(unittest.TestCase):
     def build(self,catalog,key):
         return self.api.material_from_catalog(catalog,key,base_directory=self.root)
 
+    def test_ld_background_recipe_and_provider(self):
+        from salmonpy.material_response import LDMaterialProvider
+        recipe=ld_recipe();recipe['materials']['metal-A']['parameters']['epsilon_infinity']=2.25
+        model=self.build(self.resolve(recipe),'metal-A')
+        self.assertEqual(model.config.epsilon_infinity,2.25)
+        baseline=self.build(self.resolve(ld_recipe()),'metal-A')
+        self.assertNotEqual(model.definition_digest,baseline.definition_digest)
+        self.assertNotEqual(LDMaterialProvider(model.model).identity,LDMaterialProvider(baseline.model).identity)
+        provider=LDMaterialProvider(model.model)
+        self.assertEqual(provider.prepare(None).config.epsilon_infinity,2.25)
+
     def test_resolution_does_not_open_native(self):
         with (patch('salmonpy.ld._handles_api',side_effect=AssertionError('native call')),
               patch('salmonpy.sbe._handles_api',side_effect=AssertionError('native call'))):

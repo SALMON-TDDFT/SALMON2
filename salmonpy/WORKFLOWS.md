@@ -33,7 +33,7 @@ replace earlier material IDs. Only axis-aligned boxes/ellipsoids are exposed.
 The preview was compared to SALMON's emitted cube files, including mixed odd/even
 noncubic grids. Use material IDs 1..len(materials); 0 is vacuum.
 
-`Boundaries` specifies six faces in x-,x+,y-,y+,z-,z+ order, each PML or PEC.
+`Boundaries` specifies six faces in x-,x+,y-,y+,z-,z+ order: PML, PEC, or paired periodic faces. See [transverse-periodic slabs](FDTD_MATERIALS.en.md).
 The legacy solver's PML is fixed at eight cells; clearance includes the interface
 plane that receives its coefficients. Material/PML overlap is rejected because
 this initial interface assumes vacuum PML. Periodic structures, rotated geometry,
@@ -272,3 +272,46 @@ Portable caller-supplied GS arrays (GS/2), separate from native GS/1; explicit p
 DFT-generated serial Gamma GS/1 export: GroundStateResult.export_archive with a new paired exporter; real/complex orbitals retained, density reconstructed and provenance recorded. See GS_ARCHIVE.en.md.
 
 SerialRestartConverter opts into aligned orthogonal multi-k native/portable GS conversion with explicit verified k-point files and weighted density; GammaRestartConverter stays Gamma-only. See GS_ARCHIVE.en.md for regular-source vs explicit-import scope and current tolerances.
+
+### Serial TB-mBJ ground states
+
+Use `DFT(..., xc="tbmbj", cval=None)` or `dft_from_atoms(..., xc="tbmbj", cval=1.2)`. Material JSON recipes accept xc and optional cval. None selects the automatic coefficient; a finite value greater than 1e-10 selects a fixed coefficient. The coefficient is retained in GS records, warm-start compatibility checks and TDDFT inputs. TB-mBJ is a model potential: total energies and forces are unvalidated diagnostics, with a warning rather than a run prohibition. ASE Calculator optimization and native parallel SCF support are unchanged. Run `python -m salmonpy.examples.dft_tbmbj --help` for the serial example. Validation here covers synthetic native XC evaluation and interface contracts, not real-material accuracy.
+
+## Optical conductivity and dielectric response: one polarization
+
+Use `analysis.optical_conductivity(time, charge_current_x, total_E_x,
+current_convention="charge", field_kind="total", units="atomic_gaussian",
+window="hann", drive_rtol=1e-8, metadata={"material_id":"Si","polarization":"x"})`.
+Then call `analysis.dielectric_function(sigma)`. Results have omega, values,
+valid and config. Inputs are simultaneous scalar time series; A is not E.
+For A-driven crystals the caller must provide E with consistent differentiation
+and time placement. Convert SALMON matter current J explicitly using j=-J.
+Only Gaussian atomic units are accepted. One selected drive gives a single
+polarization response, not a complete tensor; one circularly polarized run does
+not determine all tensor elements.
+
+The existing compiled NumPy FFT uses exp(+i omega t), normalized by dt. With
+exp(-i omega t), sigma=j/E and epsilon=1+4*pi*i*sigma/omega. Fortran computes
+ratios and diagnostics. Drive bins at or below drive_rtol times the maximum,
+and nonfinite conversion results, carry NaN with valid=False. Dielectric DC is
+undefined. An all-zero drive yields masked output rather than stopping a solver.
+External-field ratios are not silently treated as bulk dielectric functions.
+The same window is applied to both signals; window, time range, dt, peak E and
+caller provenance are retained. Windowed finite-time ratios are estimates;
+check duration/window dependence, especially for broadband drives.
+
+`optical_linearity(reference, candidate, rtol=...)` compares supplied normalized
+conductivities on common valid frequencies, reporting relative RMS. The caller
+must ensure matching material, polarization and drive shape. Zero reference
+response has undefined relative error/acceptance. `optical_sum_rule(sigma,
+expected_weight=..., normalization="...")` integrates Re sigma between adjacent
+valid bins with the trapezoidal rule. For an all-electron Gaussian-AU system,
+the positive-frequency f-sum reference is pi*n/2. Pseudopotentials, nonlocal
+current operators and missing bands require an appropriate caller-specified
+reference. Masked gaps and unobserved frequency ranges are not extrapolated.
+Neither diagnostic is a physical accuracy certificate or launches another run.
+
+Run `python -m salmonpy.examples.optical_response` for synthetic data, not a
+converged real-material optical calculation.
+
+LD accepts optional epsilon_infinity (default1), retained by material JSON/providers and checkpoint identity. P/J remain dispersive poles; displacement and background_energy explicitly include the instantaneous background. See LD.en.md for field coupling and optical-current conventions.

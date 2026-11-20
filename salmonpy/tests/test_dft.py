@@ -22,6 +22,20 @@ class DFTTest(unittest.TestCase):
             from dataclasses import replace
             hybrid=replace(model,xc='hse06')
             self.assertIn("xc='hse06'",hybrid.input_text())
+            auto=replace(model,xc='tbmbj')
+            fixed=replace(auto,cval=1.2)
+            self.assertIn("xc='tbmbj'",auto.input_text())
+            self.assertNotIn('cval=',auto.input_text())
+            self.assertIn('cval=1.19999999999999996e+00',fixed.input_text())
+            self.assertNotEqual(auto._restart_signature(),fixed._restart_signature())
+            self.assertEqual(replace(auto,cval=-1.)._restart_signature(),auto._restart_signature())
+            self.assertEqual(replace(auto,cval=0.)._restart_signature(),auto._restart_signature())
+            for bad in (float('nan'),float('inf'),True,[1.2],1+2j):
+                with self.subTest(cval=bad),self.assertRaises(ValueError):replace(auto,cval=bad)
+            with self.assertWarnsRegex(RuntimeWarning,'only used by TB-mBJ'):
+                ignored=replace(model,cval=1.2)
+            self.assertEqual(ignored.input_text(),model.input_text())
+
             from salmonpy.fdtd import SalmonExecutable
             import hashlib
             binary=Path(tmp)/'solver';binary.write_bytes(b'not executable')
@@ -166,6 +180,38 @@ class WarmStartTest(unittest.TestCase):
                         replace(model, **change).run(engine, root/'rejected', initial_guess=source)
                     run.assert_not_called()
                     self.assertFalse((root/'rejected').exists())
+            # Synthetic file fixtures verify coefficient identity without running GS.
+            import warnings
+            tb=replace(model,xc='tbmbj',cval=1.2)
+            with patch('subprocess.run',side_effect=native),warnings.catch_warnings(record=True) as seen:
+                warnings.simplefilter('always')
+                tb_result=tb.run(engine,root/'tb')
+            self.assertTrue(any('TB-mBJ' in str(w.message) for w in seen))
+            tb_record=json.loads((tb_result.directory/'ground-state.json').read_text())
+            self.assertEqual(tb_record['cval'],1.2)
+            self.assertEqual(tb_record['cval_mode'],'fixed')
+            tb_manifest=tb_result.directory/'ground-state.json'
+            original_tb=tb_manifest.read_bytes()
+            tb_manifest.write_text(json.dumps(dict(tb_record,cval=1.3)))
+            with self.assertRaisesRegex(ValueError,'cval'):GroundStateResult.open(tb_result.directory)
+            tb_manifest.write_bytes(original_tb)
+
+            from salmonpy._gs_archive import _model_and_input
+            restored,_=_model_and_input(tb_result,tb_record,multi_k=True)
+            self.assertEqual(restored.cval,1.2)
+            def load_tb(bundle,name,**options):
+                text=(Path(bundle)/name).read_text()
+                self.assertIn("xc='tbmbj'",text)
+                self.assertIn('cval=1.19999999999999996e+00',text)
+                return object()
+            with patch('salmonpy.tddft.TDDFTInitialState.from_salmon',side_effect=load_tb):
+                tb_result.tddft_initial_state(executable=engine)
+            for value in (None,1.3):
+                with patch('subprocess.run') as run,warnings.catch_warnings():
+                    warnings.simplefilter('ignore')
+                    with self.assertRaisesRegex(ValueError,'initial guess'):
+                        replace(tb,cval=value).run(engine,root/'tb-wrong-c',initial_guess=tb_result)
+                    run.assert_not_called()
             (source.directory/'native/data_for_restart/wfn.bin').write_bytes(b'tamper')
             with patch('subprocess.run') as run, self.assertRaisesRegex(ValueError, 'checksum'):
                 displaced.run(engine, root/'tampered', initial_guess=source)

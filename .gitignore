@@ -122,3 +122,6 @@ __pycache__/
 # files stay byte-exact: stage manifest-listed additions explicitly with -f.
 !runtime/sources/**
 !runtime/source-trees/**
+
+# Published native-host input starter (not generated calculation output).
+!salmonpy/examples/pz_host_gs.inp

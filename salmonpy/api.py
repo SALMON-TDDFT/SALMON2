@@ -7,7 +7,8 @@ private names and incidental imports are not public APIs.
 from types import MappingProxyType
 
 __all__ = ['PUBLIC_API', 'native_contract']
-PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spectrum', 'spectrum'),
+PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spectrum', 'spectrum', 'OpticalSpectrum',
+ 'optical_conductivity', 'dielectric_function', 'optical_linearity', 'optical_sum_rule'),
  'salmonpy.api': ('PUBLIC_API', 'native_contract'),
  'salmonpy.doctor': ('diagnose', 'probe_native_protocols'),
  'salmonpy.convergence': ('plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan','run_current_grid_scan'),

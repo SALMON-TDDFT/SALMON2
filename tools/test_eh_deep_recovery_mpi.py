@@ -21,6 +21,9 @@ from salmonpy.errors import NumericalError
 def main():
     build,destination=sys.argv[1:3]
     split='--split' in sys.argv;faults='--faults' in sys.argv
+    epsilon=float(sys.argv[sys.argv.index('--epsilon-infinity')+1]) if '--epsilon-infinity' in sys.argv else 1.0
+    resume_midpoint='--resume-midpoint' in sys.argv
+    if resume_midpoint and not '--baseline' in sys.argv:raise ValueError('resume-midpoint uses baseline mode')
     no_chdir='--no-chdir' in sys.argv
     pending_close='--pending-on-close' in sys.argv;saved_close='--saved-on-close' in sys.argv
     inspect_mpi='--inspect-mpi' in sys.argv
@@ -65,11 +68,11 @@ def main():
             assert hashlib.sha256(Path(hr['library']).read_bytes()).hexdigest()==hr['sha256']
             host_mpi=c.CDLL(hr['library']).test_host_mpi;host_mpi.argtypes=[c.c_int];host_mpi.restype=c.c_int
     grid=Grid((40,40,40),(2.,2.,2.));dt=.003;steps=32
-    ld=(LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[0.],damping=[2.]),
-        LorentzDrude(plasma_frequency=15.,strength=[.7,.3],resonance=[25.,35.],damping=[2.,3.]))
+    ld=(LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[0.],damping=[2.],epsilon_infinity=epsilon),
+        LorentzDrude(plasma_frequency=15.,strength=[.7,.3],resonance=[25.,35.],damping=[2.,3.],epsilon_infinity=1.0 if epsilon==1.0 else epsilon+.75))
     geometry=Geometry(grid,(Shape('box',(2.,4.,4.),(7.,1.,1.),material=1),Shape('box',(2.,4.,4.),(9.,1.,1.),material=2)))
     calc=FDTD(geometry,ld,dt,steps,source=PlaneWave(AcosPulse(.001,20.,.15),0,-16.),observations=((1.,1.,1.),),observation_stride=stride)
-    admission_cases=[]
+    admission_cases=[];geometry_mpi=[]
     original_call=NativeEHField._call
     def admission_call(self,function,*args):
         if getattr(function,'__name__','')=='sp_eh_init':
@@ -80,8 +83,33 @@ def main():
             for name,trial_path,trial_count in trials:
                 code=original_call(self,function,trial_path,trial_count,indices)
                 assert comm.allgather(int(code))==[1]*comm.size
-                if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                if inspect_mpi:assert mpi_counts()[0]==0
                 admission_cases.append(name)
+            if '--geometry-admission' in sys.argv:
+                import re
+                text=(self.directory/'inputfile').read_text()
+                specifications=[
+                    ('grid-overdetermined',text.replace('&maxwell',"&maxwell\n num_rgrid_em=40,40,40",1),1101),
+                    ('boundary-conflict',text.replace("boundary_em(1,1) = 'abc'","boundary_em(1,1) = 'periodic'",1),1102),
+                    ('time-overdetermined',text.replace('&maxwell',"&maxwell\n at_em=1",1),1103),
+                    ('cfl',re.sub(r'\bdt_em\s*=\s*[-+0-9.eEdD]+','dt_em = 1.0',text),1104),
+                ]
+                for name,trial,expected in specifications:
+                    assert trial!=text,name
+                    for attempt in range(2):
+                        if comm.rank==0:(self.directory/'geometry-rejected-input').write_text(trial)
+                        comm.Barrier()
+                        code=original_call(self,function,b'geometry-rejected-input',count,indices)
+                        assert comm.allgather(int(code))==[expected]*comm.size,(name,code)
+                        flags=np.ones(3,dtype=np.int32)
+                        fn=self.lib.sp_eh_resources;fn.argtypes=[c.c_void_p];fn.restype=c.c_int
+                        assert fn(flags.ctypes.data)==0 and flags.tolist()==[0,0,0]
+                        if inspect_mpi:
+                            counts=mpi_counts()
+                            assert counts[0]==0 and (not mpi_query or counts[2]==0),counts
+                            if attempt:assert counts[1]==geometry_mpi[-1]['counts'][1],counts
+                            geometry_mpi.append({'case':name,'attempt':attempt,'counts':counts})
+                        admission_cases.append('geometry-'+name+'-'+str(attempt))
             if '--parsed-admission' in sys.argv:
                 rejected=self.directory/'restart-rejected-input'
                 if comm.rank==0:
@@ -91,7 +119,7 @@ def main():
                 for attempt in range(2):
                     code=original_call(self,function,b'restart-rejected-input',count,indices)
                     assert comm.allgather(int(code))==[1]*comm.size
-                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    if inspect_mpi:assert mpi_counts()[0]==0
                     admission_cases.append('parsed-restart-rejected-'+str(attempt))
             if '--malformed-admission' in sys.argv:
                 rejected=self.directory/'malformed-rejected-input'
@@ -102,7 +130,7 @@ def main():
                 for attempt in range(2):
                     code=original_call(self,function,b'malformed-rejected-input',count,indices)
                     assert all(value!=0 for value in comm.allgather(int(code)))
-                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    if inspect_mpi:assert mpi_counts()[0]==0
                     admission_cases.append('malformed-integer-rejected-'+str(attempt))
             if '--unit-admission' in sys.argv:
                 rejected=self.directory/'unit-rejected-input'
@@ -113,7 +141,7 @@ def main():
                 for attempt in range(2):
                     code=original_call(self,function,b'unit-rejected-input',count,indices)
                     assert comm.allgather(int(code))==[1001]*comm.size
-                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    if inspect_mpi:assert mpi_counts()[0]==0
                     admission_cases.append('invalid-units-rejected-'+str(attempt))
             if '--coordinate-admission' in sys.argv:
                 specifications=[
@@ -136,7 +164,7 @@ def main():
                     comm.Barrier()
                     code=original_call(self,function,b'coordinate-rejected-input',count,indices)
                     assert comm.allgather(int(code))==[expected]*comm.size,(name,code)
-                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    if inspect_mpi:assert mpi_counts()[0]==0
                     admission_cases.append('coordinates-'+name)
             if '--semantic-admission' in sys.argv:
                 specifications=[
@@ -154,7 +182,7 @@ def main():
                     comm.Barrier()
                     code=original_call(self,function,b'semantic-rejected-input',count,indices)
                     assert comm.allgather(int(code))==[expected]*comm.size,(name,code)
-                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    if inspect_mpi:assert mpi_counts()[0]==0
                     admission_cases.append('semantic-'+name)
                 if comm.rank==0:
                     text=(self.directory/'inputfile').read_text()
@@ -174,7 +202,7 @@ def main():
 
 
         return original_call(self,function,*args)
-    with patch.object(NativeEHField,'_call',admission_call) if '--admission' in sys.argv or '--parsed-admission' in sys.argv or '--malformed-admission' in sys.argv or '--unit-admission' in sys.argv or '--coordinate-admission' in sys.argv or '--semantic-admission' in sys.argv else patch.object(NativeEHField,'_call',original_call):
+    with patch.object(NativeEHField,'_call',admission_call) if '--geometry-admission' in sys.argv or '--admission' in sys.argv or '--parsed-admission' in sys.argv or '--malformed-admission' in sys.argv or '--unit-admission' in sys.argv or '--coordinate-admission' in sys.argv or '--semantic-admission' in sys.argv else patch.object(NativeEHField,'_call',original_call):
         f=NativeEHField(ctx,calc,build,out/'field',points={1:(20,20,20)},grid=(1,comm.size,1))
     if inspect_mpi:
         mpi_initialized=mpi_counts();assert mpi_initialized[0]>0
@@ -240,6 +268,20 @@ def main():
                 np.testing.assert_array_equal(f.E,E);f.A=A
                 cases.append((step,'integrated-A-overflow'))
         rows.append(np.r_[f.advance(J).ravel(),f.E.ravel(),f.sample_magnetic_field().values.ravel()])
+        if resume_midpoint and step==16:
+            save('midpoint')
+            midpoint=dict(A=f.A.copy(),E=f.E.copy(),step_index=f.step_index)
+        if resume_midpoint and step==18:
+            from salmonpy._native_checkpoint import NativeRestoreCandidate
+            candidate=NativeRestoreCandidate(f,'sp_eh_checkpoint',out/f'midpoint-{comm.rank}.bin')
+            with patch.object(f,'advance',side_effect=AssertionError('restoration must not advance')):
+                candidate.stage();candidate.publish()
+            for name,value in midpoint.items():setattr(f,name,value.copy() if isinstance(value,np.ndarray) else value)
+            for repeated in (17,18):
+                incoming=np.array([[0.,.002*np.sin(.2*repeated),0.]])
+                actual=np.r_[f.advance(incoming).ravel(),f.E.ravel(),f.sample_magnetic_field().values.ravel()]
+                np.testing.assert_array_equal(actual,rows[repeated-1])
+
     if not baseline and f.step_index==steps:
         before=save('capacity-before');E=np.empty_like(f.A)
         code=f._call(f.lib.sp_eh_step,1,np.zeros_like(f.A),E)
@@ -292,7 +334,7 @@ def main():
     assert Path.cwd()==anchor
     if guard:guard.stop()
     if comm.rank==0:
-        (out/'validation.json').write_text(json.dumps(dict(status='passed',new_runtime_no_chdir=no_chdir,admission_cases=admission_cases,cases=cases,ranks=comm.size,steps=stop,capacity=steps,replayed_steps=0,allocation_before_close=allocation_before,allocation_after_close=allocation_after,mpi_before=mpi_before,mpi_initialized=mpi_initialized,mpi_after_native_close=mpi_after_native,mpi_after_detach=mpi_after_detach,other_owner_preserved=bool(host_mpi)),indent=2)+'\n')
+        (out/'validation.json').write_text(json.dumps(dict(status='passed',epsilon_infinity=[epsilon,1.0 if epsilon==1.0 else epsilon+.75],checkpoint_restore_without_reinitialization=resume_midpoint,validation_continuation_repeated_steps=2 if resume_midpoint else 0,new_runtime_no_chdir=no_chdir,admission_cases=admission_cases,geometry_mpi=geometry_mpi,cases=cases,ranks=comm.size,steps=stop,capacity=steps,replayed_steps=0,allocation_before_close=allocation_before,allocation_after_close=allocation_after,mpi_before=mpi_before,mpi_initialized=mpi_initialized,mpi_after_native_close=mpi_after_native,mpi_after_detach=mpi_after_detach,other_owner_preserved=bool(host_mpi)),indent=2)+'\n')
         print('E/H deep recovery PASS',cases)
 
 

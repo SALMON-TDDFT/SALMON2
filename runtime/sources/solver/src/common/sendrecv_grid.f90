@@ -509,7 +509,7 @@ module sendrecv_grid
 
   end subroutine update_overlap_complex8
 
-  subroutine create_sendrecv_neig(neig, info)
+  subroutine create_sendrecv_neig(neig, info, periodic)
     use structures, only: s_parallel_info
     use communication, only: comm_proc_null
     use salmon_global, only: yn_periodic
@@ -517,6 +517,7 @@ module sendrecv_grid
     integer, intent(out) :: neig(1:2, 1:3)
     type(s_parallel_info), intent(in) :: info
     !
+    logical,optional,intent(in) :: periodic(3)
     integer :: idir,iside,idisp,iret
 
     do idir=1,3
@@ -526,9 +527,13 @@ module sendrecv_grid
         case(2); idisp = -1
       end select
 
-      iret = get_neighbour_rank(info, idir, idisp)
+      if(present(periodic))then
+        iret = get_neighbour_rank(info, idir, idisp, periodic(idir))
+      else
+        iret = get_neighbour_rank(info, idir, idisp)
+      endif
 
-      if (iret < 0 .and. yn_periodic == 'n') then
+      if (iret < 0) then
         neig(iside,idir) = comm_proc_null
       else
         neig(iside,idir) = iret

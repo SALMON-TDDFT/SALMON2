@@ -53,6 +53,28 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(resolved['materials']['layer-A']['parameters']['input'], 'assets/input.dat')
         with self.assertRaises(InputError): self.api.verify_inputs(moved, manifest_sha256='0'*64)
 
+        # Native-host fixture preparation is an explicit, nonexecuting reference operation.
+        package=Path(self.api.__file__).resolve().parent
+        sdk=package/'_runtime_source' if (package/'_runtime_source').is_dir() else package.parent
+        spec=importlib.util.spec_from_file_location('pz_fixture_tool',sdk/'tools/prepare_pz_state_fixture.py')
+        tool=importlib.util.module_from_spec(spec);spec.loader.exec_module(tool)
+        gs=self.root/'existing-gs';gs.mkdir()
+        for name in ('info.bin','occupation.bin','wfn.bin'):(gs/name).write_bytes(b'unit-test sentinel')
+        pseudo=self.root/'Si.dat';pseudo.write_text('unit-test pseudo sentinel')
+        inp=self.root/'gs.inp'
+        inp.write_text("&calculation theory='dft' /\n&system yn_periodic='y', nelem=1, nstate=2 /\n"
+                       "&functional xc='pz' /\n&pseudo file_pseudo(1)='Si.dat', izatom(1)=14 /\n"
+                       "&parallel nproc_ob=99 /\n&atomic_red_coor\n Si 0 0 0 1\n/\n")
+        fixture=self.root/'pz-host'
+        tool.prepare(inp,gs,pseudo,fixture)
+        text=(fixture/'rt.inp').read_text()
+        self.assertIn("theory='tddft_pulse'",text)
+        self.assertNotIn('&parallel',text)
+        self.assertEqual((fixture/'data_for_restart').resolve(),gs.resolve())
+        self.assertEqual((fixture/'pseudo1_rps.dat').resolve(),pseudo.resolve())
+        self.assertEqual((gs/'wfn.bin').read_bytes(),b'unit-test sentinel')
+        with self.assertRaises(FileExistsError):tool.prepare(inp,gs,pseudo,fixture)
+
     def test_missing_files_reported_without_output(self):
         with self.assertRaisesRegex(InputError, 'missing.one.*missing.two'):
             self.prepare(files={'a': 'missing.one', 'b': 'missing.two'})

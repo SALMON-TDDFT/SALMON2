@@ -53,6 +53,11 @@ class DFTMaterialConfigTests(unittest.TestCase):
         p=self.root/'Si_rps.dat';p.write_text(p.read_text()+'# changed\n')
         with self.assertRaisesRegex(InputError,'changed|match'):self.build(catalog)
 
+        self.recipe['materials']['si-film']['parameters'].update(xc='tbmbj',cval=1.2)
+        tb=self.build(self.resolve())
+        self.assertEqual(tb.cval,1.2)
+        self.assertIn("xc='tbmbj'",tb.input_text())
+
     def test_paths_units_conflicting_grid_and_unknown_fields(self):
         import copy
         for key,value in [('grid',{'counts':[8,8,8],'spacing':{'value':.4,'unit':'angstrom'}}),

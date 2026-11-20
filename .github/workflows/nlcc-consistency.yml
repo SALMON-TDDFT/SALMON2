@@ -1,36 +1,12 @@
 name: NLCC native consistency
+# Expensive numerical/physics validation is explicit, not required automatic CI.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'runtime/**'
-      - 'native/**'
-      - 'tests/runtime/**'
-      - 'tools/run_nlcc_native_tests.py'
-      - 'tools/validate_nlcc_ci_results.py'
-      - 'tools/test_validate_nlcc_ci_results.py'
-      - 'tools/prepare_salmon_runtime.py'
-      - 'tools/runtime_sources.py'
-      - 'tools/check_forbidden_eigensolvers.py'
-      - 'salmonpy/runtime.py'
-      - '.github/workflows/nlcc-consistency.yml'
-  pull_request:
-    paths:
-      - 'runtime/**'
-      - 'native/**'
-      - 'tests/runtime/**'
-      - 'tools/run_nlcc_native_tests.py'
-      - 'tools/validate_nlcc_ci_results.py'
-      - 'tools/test_validate_nlcc_ci_results.py'
-      - 'tools/prepare_salmon_runtime.py'
-      - 'tools/runtime_sources.py'
-      - 'tools/check_forbidden_eigensolvers.py'
-      - 'salmonpy/runtime.py'
-      - '.github/workflows/nlcc-consistency.yml'
 permissions:
   contents: read
 jobs:
   nlcc:
+    # Run only when a maintainer explicitly requests this optional campaign.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:

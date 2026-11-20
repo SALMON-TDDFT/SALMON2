@@ -7,7 +7,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
 Molecular work remains paused. Memory budgets warn; SCF nonconvergence warns and
-retains results. GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not dispatch routine CI.
+retains results. GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
 ### Completed and verified
 
@@ -41,7 +41,7 @@ measured below, together with full/reduced-k orbital/spatial mixed restart and l
 
 ### Remaining groups (not a count of individual implementation patches)
 
-Group5 now has concrete R0–R4 scope in [resource inventory](2026-11-20-group5-resource-inventory.md). R0 scalar IEEE compliance is implemented and GNU-tested (Fujitsu untested). R0–R2 are implemented and verified within documented profiles; remaining group5 milestones are the still-unhandled R3 wider semantic/numerical-init failures (including allocation failures outside the verified coordinate-return path) and R4 native ABI stability. R3 preflight, parsed admission and detected namelist read errors are verified; scheduled-job startup declaration errors now record and exit collectively. R4 declared contracts and explicit isolated protocol probes are implemented. C/ISO_C_BINDING Fortran host state lifecycles are verified for standard PZ and fast-PR HSE full/reduced-k on Mac MPI1/2, including independent-state controls and rejected-call state preservation. Stable ABI negotiation, broader profiles/platforms and the remaining host operations are still open; lifecycle success is not blanket ABI certification. Management-node checking remains an optional independent user action. Do not treat every process-scoped selector as a new isolation task.
+Group5 now has concrete R0–R4 scope in [resource inventory](2026-11-20-group5-resource-inventory.md). R0 scalar IEEE compliance is implemented and GNU-tested (Fujitsu untested). R0–R2 are implemented and verified within documented profiles; remaining group5 milestones are the still-unhandled R3 wider semantic/numerical-init failures (including allocation failures outside the verified coordinate-return path) and R4 native ABI stability. R3 preflight, parsed admission, detected namelist read errors and early eh_init grid/boundary/time/CFL returns are verified; scheduled-job startup declaration errors now record and exit collectively. R4 declared contracts and explicit isolated protocol probes are implemented. C/ISO_C_BINDING Fortran host state lifecycles are verified for standard PZ and fast-PR HSE full/reduced-k on Mac MPI1/2, including independent-state controls and rejected-call state preservation. Stable ABI negotiation, broader profiles/platforms and the remaining host operations are still open; lifecycle success is not blanket ABI certification. Management-node checking remains an optional independent user action. Do not treat every process-scoped selector as a new isolation task.
 
 1. [ ] DEFERRED by user: extend measured-norm diagnostics to fast PR HSE. Isolated E-drive norm
    wiring belongs to paused molecular work and is not the next active priority.
@@ -2912,3 +2912,51 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 - R4 measured lifecycle: standard PZ and fast-PR HSE full/reduced-k, Mac MPI1/2, independent controls and rejected-call state preservation. JP/EN/AI guides and packaged host fixtures synchronized. Historical 'uncommitted' notes above describe their recording time and are superseded by this commit.
 - Next active work remains group5: R3 later initialization/allocation failure returns/cleanup, then R4 remaining operation/negotiation and platform coverage. Group3 NLCC runtime certification and legacy unit audit follows. Group1/2 deferred; group4 portable/packed migration and group6 scaling/distribution are separate extensions.
 - Routine Actions remain disabled by commit skip marker; no new GS collection or production-job changes.
+
+### 2026-11-20 — R3 early native E/H initialization returns
+
+- [x] Existing grid/boundary/time/CFL failures return1101–1104 with optional status; standalone termination remains unchanged. Clean up communication caches before owned children, destroy failed context and permit corrected native retry. No new restrictions or numerical changes.
+- [x] Old build reproduces grid-error host termination. MPI1/2 repeats all4 failures twice; contexts/live children absent after returns, registry slots reused; successful32-step A/E/H and .data outputs exactly match the previous build.
+- [ ] R3 still open for failures inside grid/MPI setup and later specialized initialization, I/O and allocation stages; arbitrary STOP/OOM/MPI recovery is outside the guarantee.
+- Record: calc2026/salmonpy-r3-geometry-record-v2-20261120 (cloud sync unconfirmed). No GS data collected; no Actions dispatched.
+
+- Distribution verification: source and sdist-built installed-wheel suites each641 tests (640pass/1skip). Installed FDTD MPI1/2 repeats the11 admission attempts and normal32-step propagation; all A/E/H samples and .data bytes match the unchanged reference. Standalone executable preserves all4 original diagnostics. Installed solver/host test/JP/EN/AI bytes match source. Native audits and guide-sync/diff checks pass. Changes remain uncommitted.
+
+### 2026-11-20 — external review follow-up
+
+- [x] Separate explicit native_host from optional returned status; default/explicit false preserve ordinary validation. GS-free MPI1/2 regression covers all3 routes.
+- [x] Add existing-GS-only PZ host fixture preparation, small GS input starter and exact theory/files/decomposition documentation. No GS generation/copy/download; host MPI1/2 controls pass.
+- [x] Expose verified from_runtime delegation, move the simple FDTD example to load_runtime, provide FDTD reading order and actionable existing-output messages. Existing load_runtime callers retain their entry.
+- [x] One-time legacy-settings fallback warning; explicit owners stay quiet, compatibility stays allowed. MPI1/2 tests use no GS or numerical state. Keep new instance state in contexts/slots.
+- [x] Expose paired per-axis periodic boundaries and native neighbor communication, retaining centered coordinates. Dielectric/LD slab Fresnel references run in C; MPI1/2 and transverse-probe comparisons pass (max relative complex error0.0554%/0.0375%). Existing isolated32-step PML/LD output matches previous bytes.
+- [x] Fix three whitespace typos and accept build-record directories with clear missing-build.json diagnostics.
+- [x] Configure required inventory + Git-only build + GS-free ABI/parser CI for critical paths; no skip marker for those commits. Keep Linux sdist automatic, heavy OS/physics campaigns PR/manual. No Actions dispatched here; CI outcome remains unmeasured until a push/run.
+- [ ] Common grid/MPI setup minimum-domain and later initialization failures remain R3 work; thin MPI trial used too few cells and hit the existing grid initializer STOP. Retain the failure record; do not claim arbitrary init recovery.
+
+- Final review evidence: Git-index-only export inventory8/8, prepare/build and C/Fortran query contracts pass. Source/installed suites641 tests (640pass/1skip), final alias/output-attribute targeted checks pass; wheel critical sources/JP/EN/AI/examples match bytes. New PZ fixture MPI1/2 all8 cases, GS-free parser/warning MPI1/2, periodic dielectric/LD Fresnel MPI1/2, old isolated FDTD and fast-HSE current parity pass. CI YAML checked locally; no remote Actions run or GS collection. Record: calc2026/salmonpy-review-followup-record-20261120 (cloud sync unconfirmed). Uncommitted; next critical commit must not use skip-ci.
+
+### 2026-11-20 — optical-feature request and CI scope
+
+- [x] Record the new feature request separately from the preceding bug/operations review. Physical reproduction/convergence is not required automated CI. NLCC/TDDFT/full-runtime campaigns are manual-only; retain automatic inventory, tracked-only build, packaging and GS-free host/API checks. No Actions dispatched.
+- [x] Transverse-periodic FDTD/Fresnel validation from the earlier review is already implemented and recorded; do not schedule its physical reproduction in CI.
+- [ ] New optical queue: public TB-mBJ interface -> conductivity/dielectric observable contracts -> linearity/sum-rule diagnostics -> epsilon_infinity in native LD -> constrained fitting/provenance -> time/window sensitivity, post-hoc k contribution and measured cost advice. See 2026-11-20-optical-observables-plan.md for dependencies and exclusions.
+- [ ] Subpixel smoothing is a separate design/validation phase after the periodic reference. Do not promise second-order convergence or a coefficient-only implementation before checking tensor/dispersive requirements. FEM/DG replacement, automatic nstate/k planners and copyrighted optical tables are excluded.
+
+- [x] 2026-11-20: public serial TB-mBJ DFT/cval, ASE structure bridge and material JSON; coefficient preserved through GS/TDDFT/archive and restart checks. Synthetic native XC probes agree bitwise with Libxc ON/OFF. No new GS collected; real-material precision and native parallel TB-mBJ SCF are not claimed. Optical observable work remains next.
+
+### 2026-11-20 — HPC readiness review (baseline 05827a7e)
+
+The external Linux review reports host-MPI evidence up to five ranks. Larger-scale correctness, site MPI compatibility and scaling remain unverified; an inherited SALMON kernel is not by itself proof for the embedded Python workflow. These are queued tasks, not newly validated capabilities. Finish the current serial TB-mBJ work first; prioritize job-scoped validation receipts before GPU work.
+
+- [ ] **Job-scoped runtime validation receipt (first HPC task):** inspect current runtime loading/reuse paths; perform one full bundle integrity validation per job, then let workers reuse an explicitly supplied receipt bound to the validated bundle identity and job ID/nonce. Define trust, lifetime, invalidation and changed-file handling before implementing. Do not silently bypass executable SHA256 or mandatory eigensolver build/link audits. Measure bytes read, metadata operations and startup time with many workers on a shared filesystem.
+- [ ] **HPC launch modes:** document and expose (a) preparation/analysis-only Python with the site's job script launching SALMON directly, and (b) a collectively called mpi4py/embedded path on caller-owned communicators. Keep nested launcher protection; removing the MPI-rank guard alone is not a solution. Preserve caller MPI after detach. Support site-specific argument construction rather than assuming every launcher accepts `-n`.
+- [ ] **Multi-node and multi-rank evidence:** audit tool-only rank limits separately from product limitations; parameterize appropriate tests without promising unsupported layouts. Test k-point/orbital/spatial combinations, independent state ownership and checkpoint repartition on site MPI and multiple nodes. Record compiler/MPI/node layout, correctness and scaling separately. Large physical campaigns remain manual/site jobs, not required GitHub CI.
+- [ ] **Observation I/O at scale:** measure output volume and file count versus ranks, points and stride; design optional aggregation/buffering or sharded output while preserving observation metadata and existing small-run interfaces. Do not assume byte volume alone measures filesystem cost.
+- [ ] **GPU prerequisites (after receipt work):** declare validation per feature/backend/precision rather than a single GPU-supported flag; assign device allocations and cache ownership to each slot/model, define stream/concurrency behavior, and set precision-specific comparison tolerances before implementation. Audit GPU eigensolver call paths under the existing prohibited-driver policy. Preserve explicit rejection of known unimplemented numerical paths without blocking unrelated custom backends.
+- [ ] Reconcile this review with current code before implementation: its 05827a7e timing and rank observations are baseline evidence, not measurements of later changes. No multi-node or GPU validation is claimed on this Mac.
+
+- [x] 2026-11-20: single-polarization optical_conductivity/dielectric_function, explicit total-E/charge-current/Gaussian-AU contract, masked weak-drive/DC bins; native Fortran ratios and finite-band/linearity diagnostics on supplied data. Synthetic phase, sign, amplitude scaling and finite-band integral tests; no material accuracy certification or extra solver runs.
+- [ ] Next optical task: native LD epsilon_infinity, then constrained fitting/provenance, time/window/k post-processing, and subpixel design. HPC receipt work follows this optical queue per user steering.
+
+- [x] 2026-11-20: LD epsilon_infinity (default1), native continuous permittivity/D/background-energy and FDTD coefficients; JSON/provider/config/checkpoint identity propagation. Preserve pole P/J and default update order. Non-unit-background legacy impulse spectra warn/omit without stopping evolution. Source synthetic and native MPI1/2 Fresnel/default parity/direct checkpoint checks passed; real-material certification is not claimed.
+- [ ] Next: constrained LD fitting/provenance, then time/window/k post-analysis, followed by subpixel design; HPC queue remains deferred until those optical items.

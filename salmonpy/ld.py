@@ -37,7 +37,10 @@ class LDModelConfig:
     resonance: tuple[float, ...]
     damping: tuple[float, ...]
     units: str = field(default='atomic_gaussian', init=False)
-    background_permittivity: float = field(default=1.0, init=False)
+    epsilon_infinity: float = 1.0
+
+    @property
+    def background_permittivity(self): return self.epsilon_infinity
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,12 +65,12 @@ class Response:
 class LorentzDrude:
     """Passive isotropic poles. Frequencies are angular frequencies in atomic units.
 
-    epsilon(omega) = 1 + sum(f * wp**2 / (w0**2 - omega**2 - i*gamma*omega)).
-    Time convention: exp(-i*omega*t). Instantaneous background epsilon is 1.
+    epsilon(omega) = epsilon_infinity + sum(f * wp**2 / (w0**2 - omega**2 - i*gamma*omega)).
+    Time convention: exp(-i*omega*t). P/J describe dispersive poles; D=epsilon_infinity*E+4*pi*P.
     """
     __slots__ = ('_config', '_wp', '_f', '_w', '_g')
 
-    def __init__(self, *, plasma_frequency, strength, resonance, damping):
+    def __init__(self, *, plasma_frequency, strength, resonance, damping, epsilon_infinity=1.0):
         self._wp = _positive(plasma_frequency, 'plasma_frequency', zero=True)
         self._f = _array(strength, 'strength')
         if self._f.ndim != 1 or not self._f.size:
@@ -77,7 +80,8 @@ class LorentzDrude:
         if any(np.any(a < 0) for a in (self._f, self._w, self._g)):
             raise InputError('strength, resonance and damping must be nonnegative')
         self._config = LDModelConfig(self._wp, tuple(map(float, self._f)),
-                                     tuple(map(float, self._w)), tuple(map(float, self._g)))
+                                     tuple(map(float, self._w)), tuple(map(float, self._g)),
+                                     epsilon_infinity=_positive(epsilon_infinity,"epsilon_infinity"))
         # Immutable byte-backed arrays cannot be made writable by NumPy callers.
         self._f, self._w, self._g = (np.frombuffer(a.tobytes(), dtype=np.float64)
                                     for a in (self._f, self._w, self._g))
@@ -89,15 +93,41 @@ class LorentzDrude:
     def permittivity(self, omega):
         """Continuous-model dielectric function. Raise at a real-axis pole."""
         omega = _array(omega, 'omega')
-        result = np.ones(omega.shape, dtype=complex)
-        for f, w, g in zip(self._f, self._w, self._g):
-            if f == 0 or self._wp == 0:
-                continue
-            denominator = w*w - omega*omega - 1j*g*omega
-            if np.any(denominator == 0):
-                raise InputError('permittivity is singular at a requested frequency')
-            result += f*self._wp**2/denominator
+        import ctypes as c
+        from .errors import RuntimeFailure
+        result=np.empty(omega.shape,dtype=np.complex128)
+        try: fn=_handles_api().library.sp_ld_permittivity
+        except AttributeError as exc:
+            raise RuntimeFailure('native LD observables ABI missing; explicitly rebuild kernels') from exc
+        fn.argtypes=[c.c_int,c.c_int,c.c_double,c.c_double]+[c.c_void_p]*5
+        fn.restype=c.c_int
+        status=fn(len(self._f),omega.size,self._wp,self.config.epsilon_infinity,
+                  *(a.ctypes.data for a in (self._f,self._w,self._g,omega,result)))
+        if status: raise InputError('permittivity is singular or nonfinite at a requested frequency')
         return result
+
+    def _background(self,field,polarization,magnetic_field):
+        import ctypes as c
+        from .errors import RuntimeFailure
+        e=_array(field,'field');p=_array(polarization,'polarization',e.shape)
+        h=_array(magnetic_field,'magnetic_field',e.shape)
+        if e.ndim<1 or e.shape[-1]!=3: raise InputError('field arrays must have shape (...,3)')
+        d=np.empty_like(e);u=np.empty(e.shape[:-1])
+        try: fn=_handles_api().library.sp_ld_background
+        except AttributeError as exc:
+            raise RuntimeFailure('native LD background ABI missing; explicitly rebuild kernels') from exc
+        fn.argtypes=[c.c_int,c.c_double]+[c.c_void_p]*5;fn.restype=c.c_int
+        status=fn(e.size//3,self.config.epsilon_infinity,*(a.ctypes.data for a in (e,p,h,d,u)))
+        if status: raise NumericalError('nonfinite LD background observable')
+        return d,u
+
+    def displacement(self,field,polarization):
+        """D=epsilon_infinity*E+4*pi*P_LD, with simultaneous (...,3) arrays."""
+        return self._background(field,polarization,np.zeros_like(field))[0]
+
+    def background_energy(self,electric_field,magnetic_field):
+        """(epsilon_infinity*E^2+H^2)/(8*pi), mu=1; excludes LD pole energy."""
+        return self._background(electric_field,np.zeros_like(electric_field),magnetic_field)[1]
 
     def new_state(self, *, dt, initial_field=(0., 0., 0.)):
         """Independent initially unpolarized state at t=0, with E(0) specified."""

@@ -1,4 +1,161 @@
-#ifdef SALMONPY_ABI_PROTOCOL_PROBE
+#ifdef SALMONPY_TBMBJ_INPUT_PROBE
+#include "config.h"
+program tbmbj_input_host
+ use mpi
+ use iso_c_binding
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ use inputoutput,only:read_input,s_input_parser
+ use math_constants,only:set_math_constants
+ use parallelization,only:setup_parallel
+ use structures,only:s_xc_config,s_xc_functional,s_pp_info
+ use salmon_xc,only:xc_input_config,init_xc_config,calc_xc,finalize_xc
+ use salmon_global,only:global_xc=>xc,global_c=>cval
+ implicit none
+ interface
+  integer(c_int) function attach(comm) bind(C,name='sp_attach')
+   import c_int,c_int64_t
+   integer(c_int64_t),value::comm
+  end function
+  integer(c_int) function detach() bind(C,name='sp_detach')
+   import c_int
+  end function
+ end interface
+ type(s_input_parser)::parser
+ type(s_xc_config)::config
+ type(s_xc_functional)::a,b
+ type(s_pp_info)::pp
+ real(8)::rho(2,2,2),grad(2,2,2,3),lap(2,2,2),tau(2,2,2),current(2,2,2,3)
+ real(8)::ea(2,2,2),va(2,2,2),eb(2,2,2),vb(2,2,2),again(2,2,2),vagain(2,2,2)
+ integer::status,ierr,i,j,k,u
+ character(16)::mode
+ call MPI_Init(ierr)
+ status=attach(int(MPI_COMM_WORLD,c_int64_t))
+ if(status/=0)stop 1
+ call setup_parallel
+ call set_math_constants
+ call get_command_argument(1,mode)
+ call read_input('inputfile',parser,status)
+ if(status/=0.or.global_xc/='tbmbj')stop 2
+ call xc_input_config(config)
+ if(mode=='auto')then
+  if(config%cval/=-1d0)stop 3
+ else
+  if(config%cval/=1.2d0)stop 4
+ endif
+ call init_xc_config(a,config,status)
+ if(status/=0)stop 5
+ if(mode=='auto')then
+  config%cval=1.2d0
+ else
+  config%cval=-1d0
+ endif
+ call init_xc_config(b,config,status)
+ if(status/=0)stop 6
+ rho=.2d0;grad=.03d0;lap=.01d0;tau=.3d0;current=0d0;pp%flag_nlcc=.false.
+ call calc_xc(a,pp,rho=rho,grho=grad,rlrho=lap,tau=tau,rj=current,eexc=ea,vxc=va)
+ call calc_xc(b,pp,rho=rho,grho=grad,rlrho=lap,tau=tau,rj=current,eexc=eb,vxc=vb)
+ if(maxval(abs(va-vb))<1d-10)stop 7
+ global_xc='pz';global_c=9d0
+ call calc_xc(a,pp,rho=rho,grho=grad,rlrho=lap,tau=tau,rj=current,eexc=again,vxc=vagain)
+ if(any(ea/=again).or.any(va/=vagain))stop 8
+ open(newunit=u,file='trace.txt',status='new')
+ do k=1,2
+ do j=1,2
+ do i=1,2
+  if(.not.ieee_is_finite(ea(i,j,k)).or..not.ieee_is_finite(va(i,j,k)))stop 9
+  if(.not.ieee_is_finite(eb(i,j,k)).or..not.ieee_is_finite(vb(i,j,k)))stop 10
+  write(u,'(4(es26.17e3,1x))')ea(i,j,k),va(i,j,k),eb(i,j,k),vb(i,j,k)
+ enddo
+ enddo
+ enddo
+ close(u)
+ call finalize_xc(a);call finalize_xc(b)
+ status=detach()
+ if(status/=0)stop 11
+ call MPI_Barrier(MPI_COMM_WORLD,ierr)
+ call MPI_Finalize(ierr)
+ print *, 'TB-mBJ input and independent XC evaluation PASS'
+end program
+#elif defined(SALMONPY_HSE_LEGACY_WARNING_PROBE)
+program legacy_warning_host
+ use parallelization,only:setup_parallel
+ use, intrinsic :: iso_fortran_env,only:error_unit
+ use mpi
+ use iso_c_binding
+ use salmonpy_tddft_context,only:rt_open,rt_model_settings,s_rt_model_settings,tddft_context
+ use salmon_global,only:theory
+ implicit none
+ interface
+  integer(c_int) function attach(comm) bind(C,name='sp_attach')
+   import c_int,c_int64_t
+   integer(c_int64_t),value::comm
+  end function
+  integer(c_int) function detach() bind(C,name='sp_detach')
+   import c_int
+  end function
+ end interface
+ type(tddft_context),pointer::ctx=>null()
+ type(s_rt_model_settings)::owner
+ integer::ierr,status
+ call MPI_Init(ierr)
+ status=attach(int(MPI_COMM_WORLD,c_int64_t))
+ if(status/=0)call MPI_Abort(MPI_COMM_WORLD,91,ierr)
+ call setup_parallel
+ theory='warning_probe'
+ call rt_model_settings(.true.,owner)
+ call rt_open(ctx,'probe',status,model_settings=owner)
+ if(status==0.or.associated(ctx))then
+  write(error_unit,*)'explicit-owner status/context:',status,associated(ctx),'theory:',trim(theory)
+  call MPI_Abort(MPI_COMM_WORLD,92,ierr)
+ endif
+ write(*,*)'explicit owner attempted before any fallback'
+ write(error_unit,'(a)')'explicit-owner-complete'
+ flush(error_unit)
+ call rt_model_settings(.true.)
+ call rt_model_settings(.true.)
+ call rt_open(ctx,'probe',status)
+ if(status==0.or.associated(ctx))call MPI_Abort(MPI_COMM_WORLD,93,ierr)
+ status=detach()
+ if(status/=0)call MPI_Abort(MPI_COMM_WORLD,94,ierr)
+ call MPI_Finalize(ierr)
+end program
+#elif defined(SALMONPY_PARSER_HOST_PROBE)
+program parser_status_only
+ use mpi
+ use iso_c_binding
+ use inputoutput,only:read_input,s_input_parser
+ use math_constants,only:set_math_constants
+ implicit none
+ interface
+  integer(c_int) function attach(comm) bind(C,name='sp_attach')
+   import c_int,c_int64_t
+   integer(c_int64_t),value::comm
+  end function
+  integer(c_int) function detach() bind(C,name='sp_detach')
+   import c_int
+  end function
+ end interface
+ integer::ierr,status
+ type(s_input_parser)::parser
+ call MPI_Init(ierr)
+ status=attach(int(MPI_COMM_WORLD,c_int64_t))
+ if(status/=0)call MPI_Abort(MPI_COMM_WORLD,91,ierr)
+ call set_math_constants
+ call read_input('inputfile',parser,status)
+ if(status/=1010)then
+  write(*,*)'status-only Maxwell returned',status,'expected',1010
+  call MPI_Abort(MPI_COMM_WORLD,92,ierr)
+ endif
+ call read_input('inputfile',parser,status,native_host=.false.)
+ if(status/=1010)call MPI_Abort(MPI_COMM_WORLD,94,ierr)
+ call read_input('inputfile',parser,status,native_host=.true.)
+ if(status/=0)call MPI_Abort(MPI_COMM_WORLD,95,ierr)
+ write(*,*)'parser explicit native-host contract PASS'
+ status=detach()
+ if(status/=0)call MPI_Abort(MPI_COMM_WORLD,93,ierr)
+ call MPI_Finalize(ierr)
+end program
+#elif defined(SALMONPY_ABI_PROTOCOL_PROBE)
 program test_native_protocol
  use iso_c_binding
  use mpi

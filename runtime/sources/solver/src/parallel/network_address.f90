@@ -18,12 +18,14 @@ module network_address
 
 contains
   ! convert 5-D address to rank
-  function get_neighbour_rank(info, idir, idisp) result(irank)
+  function get_neighbour_rank(info, idir, idisp, periodic) result(irank)
     use salmon_global, only: yn_periodic
     use structures, only: s_parallel_info
     implicit none
     type(s_parallel_info), intent(in) :: info
     integer,               intent(in) :: idir, idisp
+    logical,optional,intent(in) :: periodic
+    logical :: wrap
     integer :: iaddr(5),irank
     integer :: ishape(5)
 
@@ -31,7 +33,9 @@ contains
     iaddr(1:5)  = info%iaddress(1:5)
     iaddr(idir) = iaddr(idir) + idisp
 
-    if (yn_periodic == 'y') then
+    wrap=yn_periodic=='y'
+    if(present(periodic))wrap=periodic
+    if (wrap) then
       ! periodic boundary
       if (iaddr(idir) <  0)            iaddr(idir) = iaddr(idir) + ishape(idir)
       if (iaddr(idir) >= ishape(idir)) iaddr(idir) = iaddr(idir) - ishape(idir)

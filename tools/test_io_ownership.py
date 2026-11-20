@@ -21,6 +21,9 @@ def main():
     p.add_argument('--finite-source',type=Path)
     p.add_argument('--field-close',action='store_true')
     p.add_argument('--abi-contract',action='store_true')
+    p.add_argument('--legacy-settings-warning',action='store_true',help='check one-time HSE compatibility warning without GS creation')
+    p.add_argument('--tbmbj-input',action='store_true',help='check public TB-mBJ input on synthetic density, without GS')
+    p.add_argument('--parser-host',action='store_true',help='check status-only versus explicit native-host parser selection')
     p.add_argument('--abi-state',action='store_true')
     p.add_argument('--fixture',type=Path)
     p.add_argument('--state-output',type=Path)
@@ -34,14 +37,97 @@ def main():
     args=p.parse_args()
     if args.state_symmetry and not (args.abi_state and args.fast_hse):
         p.error('state-symmetry is a fast-HSE ABI-state fixture option')
+    if args.build.is_dir():args.build=args.build/'build.json'
+    if not args.build.is_file():p.error(f'expected a build.json record or a directory containing it: {args.build}')
     root=Path(__file__).resolve().parents[1]
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=False)
     checker=args.checker.resolve();fixture=root/'tests/native/test_io_ownership.f90'
     subprocess.run([sys.executable,str(checker),'--source-root',str(fixture.parent)],check=True)
+    if args.tbmbj_input:
+        import numpy as np
+        from importlib.resources import files
+        from salmonpy.dft import DFT,Pseudopotential
+        from dataclasses import replace
+        record=json.loads(args.build.read_text());lib=Path(record['library'])
+        digest=lambda path:hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest(lib)!=record['sha256']:raise ValueError('runtime hash changed')
+        command=record.get('configure_command') or record['commands'][0]
+        build=Path(command[command.index('-B')+1]);obj=out/'tbmbj.o';exe=out/'tbmbj-host'
+        subprocess.run([args.fc,'-cpp','-DSALMONPY_TBMBJ_INPUT_PROBE','-I'+str(build),'-c',str(fixture),'-o',str(obj)],check=True)
+        for objects in (out,build.parent):
+            subprocess.run([sys.executable,str(checker),'--object-tree',str(objects)],check=True)
+        subprocess.run(mpi_link_command([args.fc,str(obj),str(lib),'-o',str(exe)]),check=True)
+        exe_sha=digest(exe)
+        pseudo=Pseudopotential.from_file(Path(str(files('salmonpy.examples')/'si_intro_data/Si_rps.dat')),atomic_number=14,local_channel=2)
+        model=DFT((14,),np.eye(3)*8,[[0,0,0]],(pseudo,),4,2,(8,8,8),(2,1,1),xc='tbmbj')
+        for mode,coefficient in [('auto',None),('fixed',1.2)]:
+            work=out/mode;work.mkdir()
+            (work/'inputfile').write_text(replace(model,cval=coefficient).input_text())
+            for name,data in model.input_assets:(work/name).write_bytes(data)
+            if digest(exe)!=exe_sha or digest(lib)!=record['sha256']:raise ValueError('validated executable/runtime changed')
+            with (work/'stdout.log').open('w') as log:
+                subprocess.run([args.mpiexec,'-n','1',str(exe),mode],cwd=work,check=True,timeout=120,
+                    env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'},stdout=log,stderr=subprocess.STDOUT)
+            assert 'TB-mBJ input and independent XC evaluation PASS' in (work/'stdout.log').read_text()
+        (out/'result.json').write_text(json.dumps({'status':'passed','runtime_sha256':record['sha256'],
+            'executable_sha256':exe_sha,'libxc_enabled':'#define USE_LIBXC' in (build/'config.h').read_text(),
+            'automatic_and_fixed_input':True,'owned_XC_unchanged_by_global_settings':True,
+            'GS_data_collected':False,'scope':'synthetic XC/parser contract; no SCF or physical-material validation'},indent=2)+'\n')
+        return
+    if args.legacy_settings_warning:
+        record=json.loads(args.build.read_text());lib=Path(record['library'])
+        if record.get('schema')!='salmonpy.fast-hse-mpi/1':p.error('legacy-settings-warning needs a fast-HSE build')
+        digest=lambda path:hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest(lib)!=record['sha256']:raise ValueError('runtime hash changed')
+        command=record.get('configure_command') or record['commands'][0]
+        build=Path(command[command.index('-B')+1]);obj=out/'warning.o';exe=out/'warning-host'
+        subprocess.run([args.fc,'-cpp','-DSALMONPY_HSE_LEGACY_WARNING_PROBE','-I'+str(lib.parent),'-I'+str(build),'-c',str(fixture),'-o',str(obj)],check=True)
+        for objects in (out,build.parent):
+            subprocess.run([sys.executable,str(checker),'--object-tree',str(objects)],check=True)
+        link=mpi_link_command([args.fc,str(obj),str(lib),'-o',str(exe)])
+        subprocess.run(link,check=True);exe_sha=digest(exe)
+        for ranks in sorted({1,args.ranks}):
+            if digest(exe)!=exe_sha or digest(lib)!=record['sha256']:raise ValueError('validated executable/runtime changed')
+            result=subprocess.run([args.mpiexec,'-n',str(ranks),str(exe)],capture_output=True,text=True,timeout=120,
+                env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'})
+            (out/f'stdout-{ranks}.log').write_text(result.stdout)
+            (out/f'stderr-{ranks}.log').write_text(result.stderr)
+            result.check_returncode()
+            assert result.stderr.count('legacy_settings fallback')==1
+            assert result.stderr.index('explicit-owner-complete')<result.stderr.index('legacy_settings fallback')
+            assert 'explicit owner attempted before any fallback' in result.stdout
+        (out/'result.json').write_text(json.dumps({'status':'passed','runtime_sha256':record['sha256'],
+            'executable_sha256':exe_sha,'ranks':sorted({1,args.ranks}),'warning_count_per_MPI_job':1,
+            'solver_states_created':False},indent=2)+'\n')
+        return
+    if args.parser_host:
+        record=json.loads(args.build.read_text());lib=Path(record['library'])
+        digest=lambda path:hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest(lib)!=record['sha256']:raise ValueError('runtime hash changed')
+        command=record.get('configure_command') or record['commands'][0]
+        build=Path(command[command.index('-B')+1]);obj=out/'parser-host.o';exe=out/'parser-host'
+        subprocess.run([args.fc,'-cpp','-DSALMONPY_PARSER_HOST_PROBE','-I'+str(build),'-c',str(fixture),'-o',str(obj)],check=True)
+        for objects in (out,build.parent):
+            subprocess.run([sys.executable,str(checker),'--object-tree',str(objects)],check=True)
+        link=mpi_link_command([args.fc,str(obj),str(lib),'-o',str(exe)])
+        subprocess.run(link,check=True);exe_sha=digest(exe)
+        for ranks in sorted({1,args.ranks}):
+            work=out/f'ranks-{ranks}';work.mkdir()
+            (work/'inputfile').write_text("&calculation theory='maxwell' /\n&system yn_periodic='n' /\n&propagation propagator='user_extension' /\n")
+            if digest(exe)!=exe_sha or digest(lib)!=record['sha256']:raise ValueError('validated executable/runtime changed')
+            with (work/'stdout.log').open('w') as log:
+                subprocess.run([args.mpiexec,'-n',str(ranks),str(exe)],cwd=work,check=True,timeout=120,
+                    env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'},stdout=log,stderr=subprocess.STDOUT)
+            assert 'parser explicit native-host contract PASS' in (work/'stdout.log').read_text()
+        (out/'result.json').write_text(json.dumps({'status':'passed','runtime_sha256':record['sha256'],
+            'executable_sha256':exe_sha,'link_command':link,'ranks':sorted({1,args.ranks}),
+            'status_only_keeps_electronic_checks':True,'explicit_false_keeps_electronic_checks':True,
+            'native_host_true_selects_field_checks':True,'solver_states_created':False},indent=2)+'\n')
+        return
     if args.abi_state:
         if args.fixture is None or args.state_output is None:
             p.error('abi-state needs an existing fixture and state-output')
-        if args.ranks not in (1,2):p.error('this host fixture covers ranks1/2')
+        if args.ranks not in (1,2):p.error('this host fixture covers ranks 1/2')
         fixture_root=args.fixture.resolve();gs=(fixture_root/'data_for_restart').resolve()
         pp=(fixture_root/'pseudo1_rps.dat').resolve()
         if not gs.is_dir() or not pp.is_file():raise ValueError('existing GS and pseudopotential references required')

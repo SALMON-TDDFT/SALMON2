@@ -113,8 +113,17 @@ def _metadata(m):
     keys={'n_kpoints','n_bands','n_atoms','grid_zyx','orbital_block','electrons','energy_hartree','xc',
           'pseudopotentials','boundary','spin','wavefunction_convention','cell_convention',
           'grid_convention','bloch_phase','reciprocal_convention'}
-    if type(m) is not dict or not keys<=set(m) or set(m)-keys-{'provenance'}:raise InputError('invalid GS metadata')
+    if type(m) is not dict or not keys<=set(m) or set(m)-keys-{'provenance','xc_parameters'}:raise InputError('invalid GS metadata')
     if 'provenance' in m:_export_provenance(m['provenance'])
+    if 'xc_parameters' in m:
+        parameters=m['xc_parameters']
+        if type(parameters) is not dict:raise InputError('XC parameters must be a JSON object')
+        try:_json(parameters)
+        except (TypeError,ValueError) as exc:raise InputError('XC parameters must contain finite JSON values') from exc
+        if m.get('xc')=='tbmbj':
+            if set(parameters)!={'cval'}:raise InputError('TB-mBJ XC parameters require cval')
+            if parameters['cval'] is not None and _scalar(parameters['cval'],'cval')<=1e-10:
+                raise InputError('fixed TB-mBJ cval must exceed the native automatic threshold')
     for name in ('n_kpoints','n_bands','n_atoms','orbital_block'):_integer(m[name],name)
     if type(m['grid_zyx']) is not list or len(m['grid_zyx'])!=3:raise InputError('invalid GS grid')
     for n in m['grid_zyx']:_integer(n,'grid dimension')
@@ -187,7 +196,7 @@ def _physical(arrays,m):
 
 def save_ground_state(directory,*,wavefunctions,density,eigenvalues,occupations,kpoints,weights,
                       cell_bohr,fractional_positions,atomic_numbers,electrons,energy_hartree,xc,pseudopotentials,
-                      orbital_block=16,provenance=None):
+                      orbital_block=16,provenance=None,xc_parameters=None):
     """Write caller-supplied GS arrays, manifest last; return verified lazy archive.
 
     Waves are complex128 cell-periodic u[k,band,z,y,x]. No norm/orthogonality,
@@ -211,6 +220,8 @@ def save_ground_state(directory,*,wavefunctions,density,eigenvalues,occupations,
            grid_convention='fractional_origin_zero_endpoint_excluded',
            bloch_phase='exp(+i*k_cartesian_dot_r)',reciprocal_convention='2pi_inverse_transpose_row_lattice')
     if provenance is not None:m['provenance']=json.loads(_json(provenance))
+    if xc_parameters is not None:m['xc_parameters']=json.loads(_json(xc_parameters))
+    elif xc=='tbmbj':m['xc_parameters']={'cval':None}
     _metadata(m);specs=_specs(m)
     arrays={'wavefunction_real':waves.real,'wavefunction_imag':waves.imag,'atomic_numbers':numbers}
     supplied=dict(density=density,eigenvalues=eigenvalues,occupations=occupations,kpoints=kpoints,weights=weights,

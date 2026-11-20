@@ -55,7 +55,7 @@ python -m salmonpy.examples.tddft_response EXECUTABLE SHA256 NEW_GS NEW_RT --thr
 python -m salmonpy.examples.bands_from_gs EXECUTABLE SHA256 NEW_GS NEW_BANDS --threads 1
 python -m salmonpy.examples.ase_bands EXECUTABLE SHA256 NEW_GS NEW_ASE_BANDS --threads 1
 python -m salmonpy.examples.ase_energy_forces EXECUTABLE SHA256 SI_RPS NEW_CALCULATIONS --threads 1
-python -m salmonpy.examples.fdtd_dielectric EXECUTABLE SHA256 NEW_FDTD
+python -m salmonpy.examples.fdtd_dielectric RUNTIME NEW_FDTD
 python -m salmonpy.examples.sbe_from_salmon BUNDLE SYSNAME NEW_SBE --bands 32 --kpoints 8 --electrons 32 --lattice lattice-columns-bohr.txt
 ```
 
@@ -185,3 +185,54 @@ MPI samples also display `--help` from ordinary Python. Computation requires mpi
 Larger parallel checks: `mpi_mixed_native` supports `--field-shape`. See [COUPLED.en.md](../COUPLED.en.md) for5–15-rank layouts and measurement scope. The4GiB/4-core beginner profile remains available.
 
 Offline convergence planning: `python -m salmonpy.examples.convergence_plan NEW_JSON`; see CONVERGENCE.en.md. Explicit illustrative PP radius only; no material computation.
+
+## Start FDTD with these three examples
+
+1. `fdtd_dielectric RUNTIME NEW_OUTPUT`: open a verified bundle through `load_runtime` and check dielectric propagation.
+2. `fdtd_layers RUNTIME NEW_OUTPUT`: try two LD layers and material-ID-independent interfaces.
+3. `fdtd_mpi_layers MPI_BUILD_JSON NEW_OUTPUT`: use an audited MPI-capable build record for spatial parallelism.
+
+`RUNTIME` is a directory containing `runtime.json`, not a bare executable. Existing applications using `load_runtime` keep that entry unchanged. The MPI example is advanced and requires its separate capability-bearing build record. Start from fresh serial Python and use new output directories.
+
+`fdtd_periodic_slab RUNTIME NEW_OUTPUT [--ld]` demonstrates a grid-aligned slab with transverse periodic boundaries. See [FDTD materials](../FDTD_MATERIALS.en.md) for the C-reference Fresnel test.
+
+### Serial TB-mBJ ground states
+
+Use `DFT(..., xc="tbmbj", cval=None)` or `dft_from_atoms(..., xc="tbmbj", cval=1.2)`. Material JSON recipes accept xc and optional cval. None selects the automatic coefficient; a finite value greater than 1e-10 selects a fixed coefficient. The coefficient is retained in GS records, warm-start compatibility checks and TDDFT inputs. TB-mBJ is a model potential: total energies and forces are unvalidated diagnostics, with a warning rather than a run prohibition. ASE Calculator optimization and native parallel SCF support are unchanged. Run `python -m salmonpy.examples.dft_tbmbj --help` for the serial example. Validation here covers synthetic native XC evaluation and interface contracts, not real-material accuracy.
+
+## Optical conductivity and dielectric response: one polarization
+
+Use `analysis.optical_conductivity(time, charge_current_x, total_E_x,
+current_convention="charge", field_kind="total", units="atomic_gaussian",
+window="hann", drive_rtol=1e-8, metadata={"material_id":"Si","polarization":"x"})`.
+Then call `analysis.dielectric_function(sigma)`. Results have omega, values,
+valid and config. Inputs are simultaneous scalar time series; A is not E.
+For A-driven crystals the caller must provide E with consistent differentiation
+and time placement. Convert SALMON matter current J explicitly using j=-J.
+Only Gaussian atomic units are accepted. One selected drive gives a single
+polarization response, not a complete tensor; one circularly polarized run does
+not determine all tensor elements.
+
+The existing compiled NumPy FFT uses exp(+i omega t), normalized by dt. With
+exp(-i omega t), sigma=j/E and epsilon=1+4*pi*i*sigma/omega. Fortran computes
+ratios and diagnostics. Drive bins at or below drive_rtol times the maximum,
+and nonfinite conversion results, carry NaN with valid=False. Dielectric DC is
+undefined. An all-zero drive yields masked output rather than stopping a solver.
+External-field ratios are not silently treated as bulk dielectric functions.
+The same window is applied to both signals; window, time range, dt, peak E and
+caller provenance are retained. Windowed finite-time ratios are estimates;
+check duration/window dependence, especially for broadband drives.
+
+`optical_linearity(reference, candidate, rtol=...)` compares supplied normalized
+conductivities on common valid frequencies, reporting relative RMS. The caller
+must ensure matching material, polarization and drive shape. Zero reference
+response has undefined relative error/acceptance. `optical_sum_rule(sigma,
+expected_weight=..., normalization="...")` integrates Re sigma between adjacent
+valid bins with the trapezoidal rule. For an all-electron Gaussian-AU system,
+the positive-frequency f-sum reference is pi*n/2. Pseudopotentials, nonlocal
+current operators and missing bands require an appropriate caller-specified
+reference. Masked gaps and unobserved frequency ranges are not extrapolated.
+Neither diagnostic is a physical accuracy certificate or launches another run.
+
+Run `python -m salmonpy.examples.optical_response` for synthetic data, not a
+converged real-material optical calculation.

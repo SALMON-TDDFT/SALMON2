@@ -518,7 +518,7 @@ class LDMaterialProvider:
         from .ld import LorentzDrude
         c=self._config
         return LorentzDrude(plasma_frequency=c.plasma_frequency,strength=c.strength,
-                            resonance=c.resonance,damping=c.damping)
+                            resonance=c.resonance,damping=c.damping,epsilon_infinity=c.epsilon_infinity)
 
 
 class LDResponseBackend:
@@ -532,6 +532,9 @@ class LDResponseBackend:
     reduction='leader'
 
     def create_state(self,initial,point_id,dt,context):
+        if getattr(getattr(initial,'config',None),'epsilon_infinity',1.0)!=1.0:
+            import warnings
+            warnings.warn('LD A-endpoint current contains dispersive poles only; epsilon_infinity must be included by the field solver via D=epsilon_infinity*E+4*pi*P. It is not an extra current in this adapter.',RuntimeWarning,stacklevel=2)
         state=initial.new_state(dt=dt)
         class State:
             timing=_response_timing(dt,'LD driven by E_new = -(A_new-A_old)/dt; physical polarization current')

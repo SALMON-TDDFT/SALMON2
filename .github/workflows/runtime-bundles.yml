@@ -1,12 +1,12 @@
 name: Full runtime bundles
+# Expensive numerical/physics validation is explicit, not required automatic CI.
 on:
   workflow_dispatch:
-  push:
-    paths: ['runtime/**', 'native/**', 'salmonpy/runtime*', 'salmonpy/dft.py', 'salmonpy/ase*.py', 'tools/test_ase_warm_start.py', 'tools/*runtime*.py', 'tools/test_fdtd_material*.py', 'tools/test_fdtd_mpi_entrypoint.py', 'salmonpy/fdtd.py', 'salmonpy/distributed.py', 'salmonpy/material_response.py', 'salmonpy/embedded_tddft.py', 'salmonpy/coupled.py', 'salmonpy/examples/mpi_coupled_tddft.py', 'salmonpy/tests/test_embedded_tddft.py', 'tools/*embedded*.py', 'tools/*coupled*.py', 'tools/*ms1d*.py', 'tools/test_longitudinal_salmon.py', 'salmonpy/maxwell.py', 'salmonpy/timing.py', 'salmonpy/examples/mpi_multiscale_tddft.py', 'tools/*parallel*.py', 'tools/test_distributed_mpi.py', 'tools/test_ld_distributed_mpi.py', 'tools/test_tddft_distributed_mpi.py', '.github/workflows/runtime-bundles.yml']
 permissions:
   contents: read
 jobs:
   bundle:
+    # Run only when a maintainer explicitly requests this optional campaign.
     strategy:
       fail-fast: false
       matrix:

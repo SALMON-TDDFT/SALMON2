@@ -166,7 +166,7 @@ end function
     integer(c_int),intent(in) :: indices(3,npoints)
     character(4096) :: filename
     integer :: i,p,lo(3),hi(3),child_status,admission
-    logical :: exists
+    logical :: exists,grid_ready
     type(s_input_parser) :: parser
     sp_eh_init=1
     ! All ranks reject preflight together, without consuming the native lifetime.
@@ -186,7 +186,7 @@ end function
     if(admission/=0) return
     call set_math_constants
     ! Own parser files locally; a parsed-but-unsupported request is retryable.
-    call read_input(trim(filename),parser,admission)
+    call read_input(trim(filename),parser,admission,native_host=.true.)
     call comm_get_max(admission,nproc_group_global)
     if(admission/=0)then
       sp_eh_init=admission
@@ -209,9 +209,21 @@ end function
       call comm_release_children(state%mpi_child_owner)
       deallocate(state);return
     endif
-    ! Numerical initialization still consumes this process-local lifetime.
+    ! Only the documented early parameter failures are retryable. Unhandled
+    ! later numerical/I/O/allocation failures still consume this lifetime.
     used=.true.
-    call eh_init(state%fs,state%fe,state%ld)
+    call eh_init(state%fs,state%fe,state%ld,admission,grid_ready)
+    call comm_get_max(admission,nproc_group_global)
+    if(admission/=0)then
+      ! Release communication caches before the child communicator they borrow.
+      if(grid_ready)call dealloc_cache(state%fs%srg_ng)
+      call comm_end_children(state%mpi_child_owner)
+      call comm_release_children(state%mpi_child_owner)
+      deallocate(state)
+      used=.false.
+      sp_eh_init=admission
+      return
+    endif
     state%capacity=nt_em
     allocate(state%points(3,npoints))
     do p=1,npoints

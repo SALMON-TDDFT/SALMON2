@@ -212,3 +212,38 @@ native ABIは引き続き実験段階です。
 ディレクトリスコープの共通宣言は、両ハンドルヘッダーから取り込む`native_context.h`にあります。macOSではMPIホストのリンクにも既存の`tools/build_embedded_tddft.py::mpi_link_command`を使ってください。OpenMPIのFortran COMMON特殊値が実行ファイル内に別配置されると、共有ライブラリとの間でMPI_IN_PLACE処理の判定が変わる場合があります。試験ランナーはこの共通処理を使い、リンク引数と実行ファイルのハッシュを記録します。版の問い合わせだけではこの問題は検出できません。
 
 確認範囲は通常PZと高速PR版HSEの全k点／縮約k点入力、C／Fortranホスト、MPI 1／2ランク、複数状態と個別実行の電流一致です。HSE固有の引数と拒否コード（直前Aの不一致はHSEで1、通常TDDFTで10）を共通試験内で扱い、公開ABIや数値ソルバーは変更しません。縮約入力は対称性対応PT-CNと学習型交換を使い、全8点を4代表点で扱います。他XC・形状・他環境の検証は別途必要で、公開native ABIは引き続き実験的です。この小規模入力は接続と状態所有を検査するもので、実材料の収束を保証しません。
+
+### ホスト試験のPZ入力を準備する
+
+`--abi-state`の標準PZ入力は`rt.inp`、`data_for_restart/`、`pseudo1_rps.dat`を必要とします。`theory='tddft_pulse'`、周期・固定イオン・非スピン分極、`middlepoint`、`trans_longi='tr'`を使い、試験用RT入力から`&parallel`を除いてください。同じランナーが1／2ランクを試すため、固定した並列条件を埋め込まないひな形を提供します。GSのセル・原子・格子・k点・電子数・擬ポテンシャル・XCは入力と一致させてください。
+
+```sh
+python tools/prepare_pz_state_fixture.py GS_INPUT EXISTING_RESTART PSEUDO NEW_FIXTURE
+python tools/test_io_ownership.py BUILD_JSON NEW_BUILD --abi-state --fixture NEW_FIXTURE --state-output NEW_RESULTS --ranks 2
+```
+
+SALMONpy導入済みのPython環境で実行します。`GS_INPUT`には元のGS入力または同じGSから検証したRT入力を指定します。この準備ツールはPZ・周期・単一元素・インライン原子座標の試験用であり、GSを計算・コピー・ダウンロードしません。再開ディレクトリと擬ポテンシャルは既存ファイルへの参照です。小さなGS入力の例は`examples/pz_host_gs.inp`（Si1原子、8³格子、2×1×1 k点）です。必要なら利用者が計算ノードで明示的にGSを準備し、次にこのツールへ渡します。収束した物性の例ではありません。
+
+`BUILD_JSON`にはビルド記録のファイル、または`build.json`を含むディレクトリを指定できます。`--parser-host`はGSを使わず、`status`単独／`native_host=.false.`で通常検査を維持し、明示trueだけが場用検査へ切り替えることをMPIで検査します。
+
+ランタイムバンドルからは`SalmonExecutable.from_runtime(directory)`を使えます。これは`runtime.load_runtime`へ委譲し、全ファイルと能力記録を検証します。バイナリ単体とハッシュを手作業で組み合わせる必要はありません。
+
+## 誘電関数・光学伝導率（単一偏光）
+
+`salmonpy.analysis.optical_conductivity` は同じ時刻の全電場Eと電荷電流密度jからsigma=j/Eを求めます。結晶A駆動で得た電流にも使えますが、AそのものはEではありません。呼び出し側で時間配置と微分規約を揃えたEを用意してください。SALMON物質電流Jを使う場合はj=-Jへ明示的に変換します。単位はGaussian原子単位のみです。完全なテンソルには独立な駆動方向の計算が必要で、円偏光一回から全テンソルを復元しません。
+
+```python
+from salmonpy.analysis import optical_conductivity, dielectric_function
+sigma = optical_conductivity(time, charge_current_x, total_E_x,
+    current_convention="charge", field_kind="total", units="atomic_gaussian",
+    window="hann", drive_rtol=1e-8,
+    metadata={"material_id": "Si", "polarization": "x"})
+epsilon = dielectric_function(sigma)
+# sigma.omega, sigma.values, sigma.valid; epsilonも同じ構造
+```
+
+フーリエ変換は既存の `spectrum` と同じexp(+i omega t)、dt倍の和です。時間依存exp(-i omega t)に対応し、epsilon=1+4pi*i*sigma/omegaです。弱い駆動周波数（最大振幅のdrive_rtol以下）と数値変換不能点はvalid=False、値はNaNとなります。DCの誘電関数は未定義です。全駆動ゼロでも解析結果をマスクするだけで、時間発展を停止しません。外場だけの比をバルク誘電関数と呼び替えません。電場と電流には同じ窓を使い、窓・時間長・開始時刻・dt・電場振幅・利用者の来歴をconfigに保持します。窓付き有限時間比は近似で、特に単色駆動以外では窓依存性を確認してください。
+
+`optical_linearity(reference, candidate, rtol=...)` は利用者が渡した異なる振幅の伝導率を共通の有効周波数で比較し、相対RMSを返します。材料・偏光・駆動形状の一致は利用者が確認してください。電流が全てゼロなら相対誤差を定義せず判定も未定義とします。`optical_sum_rule(sigma, expected_weight=..., normalization="...")` は有効な隣接周波数間のRe sigmaを台形積分します。正周波数の全電子系では期待値pi*n/2が基準ですが、擬ポテンシャル・非局所電流・不足バンドに応じた基準は利用者が指定します。欠損帯域を補外せず、物理精度の合格証明にはしません。追加のSCF/TDDFT計算やダウンロードは起動しません。
+
+合成データのサンプル: `python -m salmonpy.examples.optical_response`。実材料の収束済み光学定数の例ではありません。

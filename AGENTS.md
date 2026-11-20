@@ -25,3 +25,17 @@ Git-tracked and prepare/build a Git-only export before considering the import
 complete. Local ignored assets must not mask a broken clone. Preserve nested
 upstream .gitignore bytes; force-stage only hash-verified manifest paths, never
 an entire work directory. Heavy CI avoidance does not replace this check.
+
+Source/distribution integrity CI policy (2026-11-20 review instruction): commits
+touching runtime/sources/**, runtime/source-trees/**, packaging/** or pyproject.toml
+must not use [skip ci]. Keep required inventory verification, Git-only export
+preparation/build and GS-free C/Fortran ABI query checks enabled. Do not dispatch
+additional heavy CI manually without need. Put new per-instance native state in
+owned contexts/registry slots, not additional process-wide selector flags.
+
+CI scope clarification (2026-11-20): automated CI covers source inventories,
+tracked-only builds, packaging, synthetic kernel checks and host/API contracts.
+Do not add real-material physical-observable reproduction, convergence campaigns,
+measured optical tables or GS/TDDFT physics calculations to required CI. Keep
+those as separately requested validation tools; any retained heavy workflow is
+manual-only. This does not waive source/object eigensolver audits.

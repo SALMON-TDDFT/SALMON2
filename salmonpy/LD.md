@@ -23,8 +23,8 @@ with material.new_state(dt=0.1, initial_field=E[0]) as state:
 
 連続モデルは `dP/dt=J`、`dJ/dt=f*wp**2*E/(4*pi)-gamma*J-w0**2*P` です。
 `material.permittivity(omega)` は時間規約 exp(-i omega t) の
-`1+sum(f*wp**2/(w0**2-omega**2-i*gamma*omega))` を返します。
-実軸上の極は拒否します。瞬間的な背景誘電率は1に固定され、異方性・活性媒質・フィッティング・自動単位変換はありません。
+`epsilon_infinity+sum(f*wp**2/(w0**2-omega**2-i*gamma*omega))` を返します。
+実軸上の極は拒否します。瞬間的な背景誘電率は `epsilon_infinity`（既定1）で指定でき、異方性・活性媒質・フィッティング・自動単位変換はありません。
 
 ## 状態の保持と解放
 
@@ -35,3 +35,23 @@ with material.new_state(dt=0.1, initial_field=E[0]) as state:
 固定のメモリ上限や状態数上限は設けません。配列寸法の整数範囲と確保失敗を検査します。保持する主要なネイティブ配列は1状態につき `192*n_poles+48` バイト程度で、管理領域・Python側・入出力配列は別です。多数の待機状態では常駐メモリが増えるため、必要な期間だけ保持してください。極ごとの係数は dt が状態ごとに異なり得るため状態ごとに持ちます。
 
 `material` はデータだけのオブジェクトで、使用後もpickleできます。進行中の状態そのもののpickleは使わず、同一モデル・同一設定の [snapshot／restore](SNAPSHOTS.md) を使います。公開のC物質ABIにLDのプラグインを追加する変更ではありません。ライブラリのビルドは明示的に行い、import時には行いません。
+
+## 瞬時背景 epsilon_infinity
+
+```python
+material = LorentzDrude(plasma_frequency=0.5, strength=[1.0],
+    resonance=[0.3], damping=[0.02], epsilon_infinity=2.25)
+response = material.respond(E, dt=0.1)
+D = material.displacement(E, response.polarization)
+u_background = material.background_energy(E, H)
+```
+
+`epsilon_infinity` は有限の正数です。`material.config.epsilon_infinity` で確認でき、従来の `background_permittivity` 属性も同じ値を返します。物質JSONのparametersにも同名で指定できます。省略時は1で、既存の分散極の更新式・順序を変更しません。
+
+P・Jは分散極のみです。D=epsilon_infinity*E+4*pi*Pを `displacement` で求められます。`background_energy` はmu=1で (epsilon_infinity*E^2+H^2)/(8*pi) を返し、分散極の蓄積エネルギーや散逸は含みません。E・P・Hは同じ場所・時刻へ揃えた(...,3)配列を渡します。これらと連続誘電率の計算はFortran側です。背景は履歴を持つ架空の極ではなく、状態設定と保存／復元の識別に含まれます。
+
+FDTDには既存のepsilon_emを通して伝え、半陰的E更新の分母と分子に背景を含めます。LD極自体のP/J更新は共通です。真空/PMLを含む保守的CFLを使い、背景が1より小さければさらに厳しくします。遅い物質があるだけでは真空CFLを緩和しません。
+
+背景が1以外のimpulseは、従来の分散極電流へのkickとして時間発展を続け、生の極応答と観測データを保存します。背景1を仮定した従来の規格化スペクトルは警告して省略します。光学応答にはPlaneWaveと明示した参照・規格化を使ってください。A→JのLDアダプターも返すのは極電流です。背景は結合する場の側へ設定する必要があり、非単位背景では警告します。`dielectric_function` は全電荷電流を前提とするため、分散極Jだけから背景を含む全誘電率を得たと解釈しないでください。LDモデル全体の連続誘電率には `material.permittivity` を使えます。
+
+検証は合成LDです。MPI1/2で背景2.25の平板とFresnel参照、分散ゼロ極限と通常誘電体の一致、異なる背景の二物質を含むnative FDTDの直接保存／復元を確認しています。実材料の光学精度の保証ではありません。

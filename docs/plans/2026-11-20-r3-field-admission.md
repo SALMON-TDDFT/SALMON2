@@ -239,3 +239,9 @@ source/JP/EN/AI parity pass. Records:
 calc2026/salmonpy-r3-electronic-scope-record-20261120 and
 calc2026/salmonpy-electronic-scope-legacy-20261120. No GS collected, no Actions;
 cloud sync unconfirmed, uncommitted.
+
+## Early errors inside eh_init (2026-11-20)
+
+Optional status returns the existing grid/boundary/time/CFL errors as1101–1104; omitted status preserves standalone termination. A grid_ready output identifies completed communication setup so native rejection frees sendrecv caches before child communicators, destroys the context, and restores retryability. This does not catch failures inside grid/MPI setup or subsequent material/source/I/O/allocations. No new input restriction, numerical threshold, parser gate or automatic management-node calculation is introduced.
+
+The old library reproduces whole-host termination on overdetermined grid input. MPI1/2 candidate tests repeat each of the4 errors twice, require no surviving context/children and bounded reused registry slots, then initialize normally. All32 A/E/H samples and .data bytes equal the prior validated build. Initial test setup mistakenly duplicated an existing cell length rather than supplying the missing third grid quantity; a later test incorrectly expected zero registry slots after released children. Both test assumptions were corrected; their original logs remain preserved. Source/object/link prohibition audits pass. Evidence: calc2026/salmonpy-r3-geometry-record-v2-20261120 (cloud sync unconfirmed). No GS collection or Actions dispatch.

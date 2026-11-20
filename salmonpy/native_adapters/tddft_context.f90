@@ -37,6 +37,7 @@ module salmonpy_tddft_context
   logical::pinned=.false.
  end type
  type(s_rt_model_settings),save::legacy_settings
+ logical,save::legacy_settings_warning_emitted=.false.
 type :: checkpoint_payload
   type(s_orbital) :: spsi_in,spsi_out,tpsi
   type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
@@ -90,6 +91,13 @@ type(s_unfold) :: unfold
  integer::Mit=0,accepted=0
  end type
 contains
+ subroutine warn_legacy_settings()
+ use, intrinsic :: iso_fortran_env,only:error_unit
+ if(legacy_settings_warning_emitted)return
+ legacy_settings_warning_emitted=.true.
+ if(nproc_id_global==0)write(error_unit,'(a)') &
+   'SALMONpy warning: legacy_settings fallback is process-owned; pass model_settings for independent models.'
+ end subroutine
  subroutine rt_model_settings(reset,owner)
  logical,intent(in)::reset
  type(s_rt_model_settings),optional,intent(inout)::owner
@@ -97,6 +105,7 @@ contains
   owner%pinned=.not.reset
   if(.not.reset)owner%values=capture_settings()
  else
+  call warn_legacy_settings()
   legacy_settings%pinned=.not.reset
   if(.not.reset)legacy_settings%values=capture_settings()
  endif
@@ -236,7 +245,11 @@ contains
  logical::exists
  integer::i,child_owner
  owner_settings=legacy_settings
- if(present(model_settings))owner_settings=model_settings
+ if(present(model_settings))then
+  owner_settings=model_settings
+ else
+  call warn_legacy_settings()
+ endif
  status=1
 #if defined(USE_OPENACC) || defined(USE_FFTW)
  goto 900

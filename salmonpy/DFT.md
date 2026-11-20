@@ -85,7 +85,7 @@ TDDFT用入力は元の物理条件を保持して生成します。dtは `new_s
 Libxcには対応ビルドが必要です。今回の実GS一貫テストはmacOS arm64・PZ Siです。
 本体の力は `gs.forces_hartree_per_bohr` で取得できます。力の格子収束は別途確認します。
 ASE Calculatorと固定セル最適化への接続は独立したASE_CALCULATOR.mdに従ってください。
-TB-mBJの新規GS作成、分子・孤立系、応力、MPI起動はこの入口には含みません。既存のTB-mBJ GSを使うTDDFT入口は引き続き利用できます。
+TB-mBJの新規GSは直列の `DFT(xc="tbmbj", cval=None).run(...)` で作成できます。`cval=None` は自動係数、正の固定係数（1e-10より大きい値）も指定できます。分子・孤立系、応力、MPI起動はこの入口には含みません。native並列SCFの対応範囲は変更していません。
 
 ## 波動関数を初期値として再利用する
 
@@ -125,3 +125,7 @@ HSEのnative入口とCLIもこのレポートを出しますが、DFT.runのHSE�
 
 Siサンプルは--no-restartと--max-iterationsに対応します。
 `python -m salmonpy.examples.dft_si EXECUTABLE SHA256 PSEUDO NEW_OUTPUT --no-restart --max-iterations 4`
+
+### TB-mBJの直列GS入口
+
+`DFT(..., xc="tbmbj", cval=None)` または `dft_from_atoms(..., xc="tbmbj", cval=1.2)` を使います。JSONの物質レシピでも `xc` と任意の `cval` を指定できます。係数はGS記録、warm startの整合性検査、TDDFT入力へ引き継ぎます。TB-mBJはモデルポテンシャルのため、全エネルギーと力は未検証の診断値として警告し、計算は続行します。ASE Calculatorによる最適化の対象にはしません。サンプルは `python -m salmonpy.examples.dft_tbmbj --help` で確認できます。今回の確認は合成密度のネイティブXC評価とインターフェース検査であり、実材料の物理精度保証ではありません。

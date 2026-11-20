@@ -199,7 +199,7 @@ def run_dt_scan(plan, new_state, *, electron_number=None, atol=0., rtol=1e-5,
     occupied-wavefunction/density norm, not return the configured nelec. It is
     sampled at t=0 and after every step. Norm and optional current tolerances are
     independent; neither is a material-independent physical accuracy certificate.
-    Default relative norm tolerance is1e-5. Exceeding it records a result and
+    Default relative norm tolerance is 1e-5. Exceeding it records a result and
     continues the trial; only numerical breakdown ends a trial immediately.
     """
     atol,rtol=_tolerances(atol,rtol)
@@ -276,7 +276,7 @@ def _waveform_comparison(coarse, fine, atol, rtol):
 
 
 def run_current_grid_scan(plan, evaluate, *, rtol=.05, atol=0., stop_when_converged=True):
-    """Screen grid currents at norm-qualified dt; default relative RMS is5%.
+    """Screen grid currents at norm-qualified dt; default relative RMS is 5%.
 
     This screening default does not certify dielectric or high-harmonic spectra.
     Select tighter observable-specific tolerances and verify spectral convergence

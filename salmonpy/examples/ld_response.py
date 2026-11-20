@@ -7,6 +7,7 @@ material = LorentzDrude(
     strength=[0.8, 0.2],
     resonance=[0.0, 0.3],
     damping=[0.01, 0.02],
+    epsilon_infinity=2.25,  # instantaneous background; P/J below are dispersive poles
 )
 dt = 0.1  # atomic time units
 field = np.zeros((1001, 3))
@@ -16,3 +17,5 @@ response = material.respond(field, dt=dt)
 print('Final time (a.u.):', response.time[-1])
 print('Final current (a.u.):', response.current[-1])
 print('epsilon at omega=0.2 a.u.:', material.permittivity(0.2))
+
+print('Final displacement D (a.u.):', material.displacement(field, response.polarization)[-1])

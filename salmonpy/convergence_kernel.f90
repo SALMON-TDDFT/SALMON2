@@ -1,7 +1,7 @@
 ! SALMONpy convergence diagnostics. All IEEE inquiries are scalar.
 module salmonpy_convergence_kernel
   use iso_c_binding
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   implicit none
 contains
   integer(c_int) function sp_convergence_check(n,values,positive) bind(c)
@@ -127,5 +127,81 @@ contains
       if(stats(1)<=limit)accepted=1
     endif
     sp_convergence_waveforms=0
+  end function
+  integer(c_int) function sp_optical_ratio(n,omega,j,e,threshold,sigma,eps,mask) bind(c)
+    integer(c_int),value :: n
+    real(c_double),intent(in) :: omega(*)
+    complex(c_double_complex),intent(in) :: j(*),e(*)
+    real(c_double),value :: threshold
+    complex(c_double_complex),intent(out) :: sigma(*),eps(*)
+    integer(c_int),intent(out) :: mask(*)
+    real(c_double) :: peak,cutoff,nan
+    complex(c_double_complex) :: z,d
+    integer :: i
+    sp_optical_ratio=4
+    if(n<1)return
+    if(.not.ieee_is_finite(threshold))return
+    if(threshold<0d0.or.threshold>=1d0)return
+    peak=0d0
+    do i=1,n
+      if(.not.ieee_is_finite(omega(i)).or.omega(i)<0d0)return
+      if(.not.ieee_is_finite(real(j(i))).or..not.ieee_is_finite(aimag(j(i))))return
+      if(.not.ieee_is_finite(real(e(i))).or..not.ieee_is_finite(aimag(e(i))))return
+      if(.not.ieee_is_finite(abs(e(i))))return
+      peak=max(peak,abs(e(i)))
+    enddo
+    nan=ieee_value(0d0,ieee_quiet_nan)
+    cutoff=threshold*peak
+    do i=1,n
+      sigma(i)=cmplx(nan,nan,kind=c_double);eps(i)=sigma(i);mask(i)=0
+      if(abs(e(i))<=cutoff.or.abs(e(i))==0d0)cycle
+      z=j(i)/e(i)
+      if(.not.ieee_is_finite(real(z)).or..not.ieee_is_finite(aimag(z)))cycle
+      sigma(i)=z;mask(i)=1
+      if(omega(i)==0d0)cycle
+      d=1d0+cmplx(0d0,4d0*acos(-1d0),kind=c_double)*z/omega(i)
+      if(.not.ieee_is_finite(real(d)).or..not.ieee_is_finite(aimag(d)))cycle
+      eps(i)=d;mask(i)=3
+    enddo
+    sp_optical_ratio=0
+  end function
+  integer(c_int) function sp_optical_diagnostic(n,omega,a,b,ma,mb,stats) bind(c)
+    integer(c_int),value :: n
+    real(c_double),intent(in) :: omega(*)
+    complex(c_double_complex),intent(in) :: a(*),b(*)
+    integer(c_int),intent(in) :: ma(*),mb(*)
+    real(c_double),intent(out) :: stats(4)
+    real(c_double) :: es,eq,rs,rq,delta
+    integer :: i,count
+    sp_optical_diagnostic=4;stats=0d0;es=0d0;eq=1d0;rs=0d0;rq=1d0;count=0
+    if(n<1)return
+    do i=1,n
+      if(.not.ieee_is_finite(omega(i)))return
+      if(i>1)then
+        if(omega(i)<=omega(i-1))return
+      endif
+      if(ma(i)/=0.and.mb(i)/=0)then
+        if(.not.ieee_is_finite(real(a(i))).or..not.ieee_is_finite(aimag(a(i))))return
+        if(.not.ieee_is_finite(real(b(i))).or..not.ieee_is_finite(aimag(b(i))))return
+        delta=abs(a(i)-b(i))
+        if(.not.ieee_is_finite(delta))return
+        call scaled_square(delta,es,eq)
+        call scaled_square(abs(a(i)),rs,rq)
+        count=count+1
+      endif
+      if(i>1)then
+        if(ma(i)/=0.and.ma(i-1)/=0)then
+          stats(4)=stats(4)+.5d0*(real(a(i))+real(a(i-1)))*(omega(i)-omega(i-1))
+        endif
+      endif
+    enddo
+    stats(1)=dble(count)
+    if(count>0)then
+      stats(2)=es*sqrt(eq/dble(count));stats(3)=rs*sqrt(rq/dble(count))
+    endif
+    do i=1,4
+      if(.not.ieee_is_finite(stats(i)))return
+    enddo
+    sp_optical_diagnostic=0
   end function
 end module

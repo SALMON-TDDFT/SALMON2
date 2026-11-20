@@ -34,7 +34,7 @@ gridは`{"counts":[16,16,16]}`か`{"spacing":{"value":0.4,"unit":"angstrom"}}`�
 擬ポテンシャルは既存KY/NC-UPF読込、原子種との一対一対応、中性電子数の検証を使います。
 追加でNC-UPFヘッダーの元素名とatomic_numberを照合します。KYの元素メタデータや
 擬ポテンシャルの汎関数/XC由来まで認定するものではなく、検証済みの適合した組を指定してください。
-XCは既存のpz/libxc_pz/libxc_pbeで、Libxc全般やHSE対応を追加するものではありません。
+XCはpz/libxc_pz/libxc_pbeに加え、直列GS用のtbmbjに対応します。tbmbjでは任意の `cval` を指定でき、省略/nullは自動係数です。Libxc全般の対応を意味しません。
 
 採用parametersに元参照・正規化条件・電子数・structure_record・grid_resolution・file_sha256を保持します。
 読込前後のhashと、モデル作成時の再読込を照合し、変更時は明示的な再解決を要求します。
@@ -127,3 +127,7 @@ SCF未収束は別扱いで、従来どおり警告して最後の反復結果�
 明示的な対称操作は `salmonpy.dft.SymmetryOperations` をDFTのsymmetryへ渡します。
 操作はsym.dat資産として保持し、既定Noneは従来どおりです。縮約k点HSEのSCF継続の
 対応範囲・サンプル・対称力の座標基底修正はNATIVE_GS.mdを参照してください。
+
+### TB-mBJの直列GS入口
+
+`DFT(..., xc="tbmbj", cval=None)` または `dft_from_atoms(..., xc="tbmbj", cval=1.2)` を使います。JSONの物質レシピでも `xc` と任意の `cval` を指定できます。係数はGS記録、warm startの整合性検査、TDDFT入力へ引き継ぎます。TB-mBJはモデルポテンシャルのため、全エネルギーと力は未検証の診断値として警告し、計算は続行します。ASE Calculatorによる最適化の対象にはしません。サンプルは `python -m salmonpy.examples.dft_tbmbj --help` で確認できます。今回の確認は合成密度のネイティブXC評価とインターフェース検査であり、実材料の物理精度保証ではありません。

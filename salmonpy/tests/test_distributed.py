@@ -31,6 +31,12 @@ class DistributedTest(unittest.TestCase):
             np.testing.assert_array_equal(one.advance(old,new),reference.step(-(new-old)/.01)[1])
         np.testing.assert_array_equal(two.advance(np.zeros(3),np.zeros(3)),np.zeros(3))
         one.close();two.close()
+        # Preserve the existing duck-typed entry for user models without config.
+        from types import SimpleNamespace
+        custom=backend.create_state(SimpleNamespace(new_state=model.new_state),3,.01,None)
+        np.testing.assert_array_equal(custom.advance(np.zeros(3),np.zeros(3)),np.zeros(3))
+        custom.close()
+
 
     def test_tddft_backend_rejects_other_initial_types(self):
         from salmonpy.material_response import TDDFTResponseBackend

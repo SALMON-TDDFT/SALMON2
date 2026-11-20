@@ -9,6 +9,9 @@ permissions:
   contents: read
 jobs:
   wheels:
+    # Pushes use native-contract plus the lightweight sdist job; keep expensive
+    # platform/physics campaigns available on PR/manual runs.
+    if: github.event_name != 'push'
     strategy:
       fail-fast: false
       matrix:

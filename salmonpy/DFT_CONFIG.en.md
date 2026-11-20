@@ -39,7 +39,7 @@ rejected under existing adapter limits. Potentials use existing KY/NC-UPF parsin
 unique species mapping and neutral electron validation. This resolver additionally
 requires the NC-UPF header element to match atomic_number. KY element metadata and
 PP functional/XC provenance are **not certified**; choose verified compatible
-potentials. Supported XC names remain pz/libxc_pz/libxc_pbe, not all Libxc or HSE.
+potentials. Supported XC names include pz/libxc_pz/libxc_pbe and tbmbj for serial ground-state runs, not arbitrary Libxc functionals. For tbmbj, optional cval selects a fixed coefficient; omitted/null selects the automatic coefficient.
 
 Resolved parameters retain source references, normalized settings, electrons,
 `structure_record`, `grid_resolution` and `file_sha256`. Files are hashed around
@@ -146,3 +146,7 @@ Attach explicit symmetry with salmonpy.dft.SymmetryOperations via DFT.symmetry.
 Operations are owned sym.dat assets; the default None preserves prior behavior.
 See NATIVE_GS.en.md for reduced-k HSE SCF scope, examples and the corrected
 Cartesian force basis after symmetry averaging.
+
+### Serial TB-mBJ ground states
+
+Use `DFT(..., xc="tbmbj", cval=None)` or `dft_from_atoms(..., xc="tbmbj", cval=1.2)`. Material JSON recipes accept xc and optional cval. None selects the automatic coefficient; a finite value greater than 1e-10 selects a fixed coefficient. The coefficient is retained in GS records, warm-start compatibility checks and TDDFT inputs. TB-mBJ is a model potential: total energies and forces are unvalidated diagnostics, with a warning rather than a run prohibition. ASE Calculator optimization and native parallel SCF support are unchanged. Run `python -m salmonpy.examples.dft_tbmbj --help` for the serial example. Validation here covers synthetic native XC evaluation and interface contracts, not real-material accuracy.

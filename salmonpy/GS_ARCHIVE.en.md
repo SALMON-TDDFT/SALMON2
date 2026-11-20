@@ -105,3 +105,5 @@ GS/2-imported retained owners can re-export using
 reconstructed density are separated from carried source energy/eigenvalues/model/
 sampling information. Current convergence remains unknown. See the retained-GS
 guide; existing provenance stays readable, and new provenance needs a matching reader.
+
+TB-mBJ archives retain root metadata `xc_parameters: {"cval": null}` for automatic mode or a fixed coefficient. Native conversion rejects missing TB-mBJ parameters. Custom XC parameter dictionaries may contain finite JSON values; the built-in native converter rejects unsupported parameters instead of silently dropping them.

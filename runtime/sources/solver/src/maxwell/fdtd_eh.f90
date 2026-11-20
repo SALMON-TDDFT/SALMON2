@@ -171,7 +171,7 @@ contains
   
   !===========================================================================================
   != initialize eh-FDTD ======================================================================
-  subroutine eh_init(fs,fe,ld)
+  subroutine eh_init(fs,fe,ld,status,grid_ready)
     use salmon_global,   only: al_em,dl_em,num_rgrid_em,at_em,dt_em,nt_em,boundary_em,yn_periodic,         &
                                base_directory,media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,   &
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,                              &
@@ -205,6 +205,10 @@ contains
     type(s_ld_state), intent(inout) :: ld
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
+    ! Optional native early-return contract. Later I/O/allocation stages retain
+    ! their existing behavior; callers without status keep standalone diagnostics.
+    integer,optional,intent(out) :: status
+    logical,optional,intent(out) :: grid_ready
     integer             :: nsg_p          !yn_restart='y': nproc_size_global used in the previous calc.
     integer             :: nt_em_p        !yn_restart='y': nt_em             used in the previous calc.
     integer             :: iobs_samp_em_p !yn_restart='y': obs_samp_em       used in the previous calc.
@@ -226,6 +230,9 @@ contains
     character(256)      :: tmp_c(2)
     logical             :: flag_stop
     
+    if(present(status))status=0
+    if(present(grid_ready))grid_ready=.false.
+
     !*** set flag *********************************************************************************************!
     !pml option: use absorbing baundary(PML) condition(this flag would be updated later)
     fe%flag_pml = .false.
@@ -310,6 +317,9 @@ contains
         .or.                                                     &
         ( (dl_em(1)*dl_em(2)*dl_em(3)==0.0d0).and.               &
           (num_rgrid_em(1)*num_rgrid_em(2)*num_rgrid_em(3)==0) ) ) then
+      if(present(status))then
+        status=1101;return
+      endif
       call stop_em('Only two of al_em, dl_em, and num_rgrid_em must be set.')
     end if
     if(al_em(1)*al_em(2)*al_em(3)==0.0d0) then
@@ -339,13 +349,20 @@ contains
         fe%flag_pml    = .true.
       case('pec')
         if(yn_periodic=='y') then
+          if(present(status))then
+            status=1102;return
+          endif
           call stop_em('For yn_periodic = y, boundary_em must be default, periodic or abc.')
         end if
         fs%a_bc(ii,ij) = 'pec'
       case('periodic')
-        if(yn_periodic=='n') then
-          call stop_em('For yn_periodic = n, boundary_em must be default, abc, or pec.')
+        if(yn_periodic=='n'.and.boundary_em(ii,3-ij)/='periodic') then
+          if(present(status))then
+            status=1102;return
+          endif
+          call stop_em('Periodic boundary_em faces must be paired when yn_periodic=n.')
         end if
+        fs%a_bc(ii,ij) = 'periodic'
       end select
     end do
     end do
@@ -361,6 +378,7 @@ contains
     
     !*** prepare mpi, gird, and sendrecv environments *********************************************************!
     call eh_mpi_grid_sr(fs,fe)
+    if(present(grid_ready))grid_ready=.true.
     
     !*** set coordinate ***************************************************************************************!
     do ii=1,3
@@ -378,12 +396,24 @@ contains
     dt_cfl=1.0d0/( &
            cspeed_au*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) )
     
+    ! Keep vacuum/PML in the bound; faster positive backgrounds tighten it.
+    do ii=0,media_num
+      if(epsilon_em(ii)>0d0.and.mu_em(ii)>0d0)then
+        if(epsilon_em(ii)*mu_em(ii)<1d0) &
+          dt_cfl=min(dt_cfl,sqrt(epsilon_em(ii)*mu_em(ii))/( &
+          cspeed_au*sqrt(sum((1d0/fs%hgs)**2))))
+      endif
+    enddo
+
     !check and set at_em, dt_em, and nt_em
     if(comm_is_root(nproc_id_global)) write(*,*)
     if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
     if( ( (at_em >0.0d0) .and. (dt_em >0.0d0) .and. (nt_em>0) ) &
         .or.                                                    &
         ( (at_em==0.0d0) .and. (nt_em==0)                     ) ) then
+      if(present(status))then
+        status=1103;return
+      endif
       call stop_em(   'Two of at_em, dt_em, and nt_em must be set.',                    &
                    c2='Otherwise, both at_em and nt_em or either of those must be set.',&
                    c3='(then, dt_em is automatically determined)')
@@ -411,6 +441,9 @@ contains
     if(dt_em>=dt_cfl) then
       write(tmp_c(1),*) dt_cfl*utime_from_au
       write(tmp_c(2),*) 'in the unit system, ',trim(unit_system),'.'
+      if(present(status))then
+        status=1104;return
+      endif
       call stop_em('To sufficient CFL condition, dt_em must be set smaller than',&
                    c2=trim(adjustl(tmp_c(1))), c3=trim(adjustl(tmp_c(2))) )
     end if
@@ -684,9 +717,9 @@ contains
           if(pole_num_ld(ii)<=0) then
             call stop_em('For media_type = lorentz-drude, pole_num_ld must be equal to or larger than 1.')
           end if
-          if((epsilon_em(ii)/=1.0d0).or.(mu_em(ii)/=1.0d0).or.(sigma_em(ii)/=0.0d0)) then
+          if((epsilon_em(ii)<=0.0d0).or.(mu_em(ii)/=1.0d0).or.(sigma_em(ii)/=0.0d0)) then
             call stop_em(   'For media_type = lorentz-drude,', &
-                         c2='epsilon_em(ii) = 1.0d0, mu_em(ii) = 1.0d0, and sigma_em(ii) = 0.0d0 must be set.')
+                         c2='epsilon_em(ii) > 0, mu_em(ii) = 1.0d0, and sigma_em(ii) = 0.0d0 must be set.')
           end if
         end select
       end do
@@ -701,7 +734,7 @@ contains
       tmp_c0_ld(:,:) = 0.0d0; tmp_c1_ld(:,:) = 0.0d0; tmp_c2_ld(:,:) = 0.0d0; tmp_c3_ld(:,:) = 0.0d0;
       tmp_c4_ld(  :) = 0.0d0; tmp_c5_ld(  :) = 0.0d0;
       call ld_coefficients(ld%media_ld,pole_num_ld,gamma_ld,omega_ld,f_ld,omega_p_ld,dt_em,pi, &
-                           tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld)
+                           tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld,epsilon_em)
       ! LD owns its allocations and zero initialization, including halo values.
       call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array)
     end if
@@ -1449,7 +1482,8 @@ contains
       !check condition
       if(yn_periodic=='y'.and.trans_longi/='tr') flag_stop = .true.
       do ii=0,media_num
-        if(fe%rep(ii)/=1.0d0.or.fe%rmu(ii)/=1.0d0.or.fe%sig(ii)/=0.0d0) flag_stop = .true.
+        if(fe%rmu(ii)/=1.0d0.or.fe%sig(ii)/=0.0d0) flag_stop = .true.
+        if(ii==0.and.fe%rep(ii)/=1.0d0)flag_stop=.true.
         if(ii==0) then
           select case(media_type(ii))
           case('vacuum')
@@ -1469,7 +1503,7 @@ contains
       if(flag_stop) then
         call stop_em(   'Invalid input keywords:',&
                      c2='When ae_shape1=impulse and/or ae_shape2=impulse,',&
-                     c3='epsilon_em and mu_em must be 1.0d0.',&
+                     c3='Vacuum epsilon_em and all mu_em must be 1.0d0.',&
                      c4='sigma_em must be 0.0d0.',&
                      c5='media_type(i) must be lorentz-drude, where i > 0.',&
                      c6='trans_longi must be tr for yn_periodic=y.')
@@ -4488,6 +4522,28 @@ contains
     
     !*** output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr) ******!
     if(fe%flag_lr) then
+      if(any(fe%rep/=1d0))then
+        ! Keep the valid pole-current initial condition and raw trajectory.
+        ! The legacy optical normalization omits instantaneous polarization.
+        if(comm_is_root(nproc_id_global))then
+          write(*,'(A)') 'WARNING: non-unit LD background: legacy impulse spectra omitted; raw pole data retained.'
+          save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_rt.data'
+          open(fe%ifn,file=resolve_path(save_name))
+          write(fe%ifn,'(A)') '# Dispersive-pole data only; instantaneous background excluded. Time in a.u.'
+          if(yn_periodic=='n')then
+            write(fe%ifn,'(A)') '# 1:Time[a.u.] 2:ddm_e_x[a.u.] 3:ddm_e_y[a.u.] 4:ddm_e_z[a.u.]'
+            do ii=1,nt_em
+              write(fe%ifn,'(F16.8,3(1X,E23.15E3))')fe%time_lr(ii),fe%dip_lr(ii,1:3)
+            enddo
+          else
+            write(fe%ifn,'(A)') '# 1:Time[a.u.] 2:Jm_x[a.u.] 3:Jm_y[a.u.] 4:Jm_z[a.u.]'
+            do ii=1,nt_em
+              write(fe%ifn,'(F16.8,3(1X,E23.15E3))')fe%time_lr(ii),fe%curr_lr(ii,1:3)
+            enddo
+          endif
+          close(fe%ifn)
+        endif
+      else
       if(yn_periodic=='n') then
         !output time-dependent dipole data
         if(comm_is_root(nproc_id_global)) then
@@ -4690,6 +4746,7 @@ contains
             write(fe%ifn,*)
           end do
         end if
+      end if
       end if
     end if
     
@@ -5473,7 +5530,8 @@ contains
     fs%mg%Nd=fe%Nd
     
     !set sendrecv environment
-    call create_sendrecv_neig(neig_ng_eh,info) ! neighboring node array
+    call create_sendrecv_neig(neig_ng_eh,info, &
+      periodic=fs%a_bc(:,1)=='periodic'.and.fs%a_bc(:,2)=='periodic') ! neighboring node array
     call init_sendrecv_grid(fs%srg_ng,fs%mg,1,info%icomm_r,neig_ng_eh)
     
     return

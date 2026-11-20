@@ -70,3 +70,11 @@ python -m salmonpy.examples.fdtd_mpi_layers MPI_BUILD_JSON NEW_DIRECTORY --grid 
 例は1・2・3極の人工的なLD三材料を使い、材料セル数を表示します。メモリ使用量は未測定です。本計算の規模決定には資源見積もりと収束確認が必要です。
 
 TDDFTなどの電子応答をE/Hへ返すには、別の[ネイティブ結合入口](COUPLED.md)を使います。上記のバッチAPIの材料リストへTDDFTを渡す方式ではありません。
+
+## 横方向周期のスラブ
+
+`Boundaries(('pml','pml','periodic','periodic','periodic','periodic'))`でx方向をPML、y・z方向を周期境界にできます。周期指定は同じ軸の両面へ設定し、周期位相0で接続します。座標と材料IDプレビューは従来の中心原点を維持します。Fortranの場用通信が各軸の境界を使い、電子状態計算の周期設定を変更しません。PMLに接する材料への既存検査も維持します。旧ランタイムではなく、この軸別境界に対応したランタイムを用意してください。
+
+`python -m salmonpy.examples.fdtd_periodic_slab RUNTIME NEW_OUTPUT`は誘電体、`--ld`付きはLDスラブです。Fresnelの複素透過率との比較は明示的な`tools/test_fdtd_periodic.py AUDITED_MPI_BUILD_JSON NEW_RESULTS`で行います。計算はFortran、フーリエ和と解析式は検証用Cで評価します。256×8×8、1／2ランクの検証で、3周波数の相対複素誤差は誘電体で最大約0.0554%、LDで約0.0375%でした。横方向の観測点と1／2ランクの結果も一致しています。これは指定した合成スラブの検証であり、任意材料や全条件の精度保証ではありません。現在の共通格子初期化には細いMPI分割での最小領域制約が残るため、この例は横8格子を使います。
+
+背景誘電率は `LorentzDrude(..., epsilon_infinity=2.25)` で指定できます。既定値1の結果は維持します。非単位背景でもimpulseの時間発展は継続し、旧規格化スペクトルだけを警告して省略します。PlaneWaveの背景を含む伝播、CFL、P/JとDの区別は [LD.md](LD.md) を参照してください。

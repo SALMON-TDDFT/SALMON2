@@ -120,7 +120,7 @@ with tddft_from_atoms(
 `new-gs` の基底状態とログは残ります。再利用には `GroundStateResult.open` を使います。
 実行ファイルにはDFTとTDDFT workerの両方が必要です。実行時の自動取得・コンパイルはありません。
 周期・中性・非スピン分極・固定イオン・一MPIランク、PZ/Libxc-PZ/Libxc-PBEが対象です。
-TB-mBJのGS生成、孤立系、non-collinear、イオン運動、応力は今回追加しません。Calculatorの明示的なwarm startはASE_CALCULATOR.mdを参照してください。
+構造変換 `dft_from_atoms(..., xc="tbmbj", cval=None)` はTB-mBJの直列GS生成に対応します。Calculatorの力・構造最適化にはTB-mBJを追加していません。孤立系、non-collinear、イオン運動、応力は今回追加しません。Calculatorの明示的なwarm startはASE_CALCULATOR.mdを参照してください。
 Aは原子単位のA/c、戻り値は**電荷電流密度j**（SALMON物質電流Jの負号）です。
 
 実行可能な例は [examples/ase_tddft.py](examples/ase_tddft.py)。

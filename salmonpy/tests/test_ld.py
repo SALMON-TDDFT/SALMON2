@@ -27,6 +27,26 @@ class LDTests(unittest.TestCase):
     def test_dielectric(self):
         m=LorentzDrude(plasma_frequency=2.,strength=[.5],resonance=[3.],damping=[.2])
         np.testing.assert_allclose(m.permittivity([1.,2.]),1+2/(9-np.array([1.,2.])**2-1j*.2*np.array([1.,2.])))
+        bg=LorentzDrude(plasma_frequency=2.,strength=[.5],resonance=[3.],damping=[.2],epsilon_infinity=2.25)
+        self.assertEqual(bg.config.epsilon_infinity,2.25)
+        self.assertEqual(bg.config.background_permittivity,2.25)
+        np.testing.assert_allclose(bg.permittivity([1.,2.]),m.permittivity([1.,2.])+1.25)
+        fields=np.array([[.01,.02,0.],[.02,0.,.03],[0.,.01,.02]])
+        ordinary=m.respond(fields,dt=.01);with_bg=bg.respond(fields,dt=.01)
+        # P/J retain the dispersive-pole meaning: instantaneous background is in D.
+        np.testing.assert_array_equal(ordinary.polarization,with_bg.polarization)
+        np.testing.assert_array_equal(ordinary.current,with_bg.current)
+        np.testing.assert_allclose(bg.displacement(fields,with_bg.polarization),2.25*fields+4*np.pi*with_bg.polarization)
+        np.testing.assert_allclose(bg.background_energy(fields,np.zeros_like(fields)),2.25*np.sum(fields**2,axis=-1)/(8*np.pi))
+        with bg.new_state(dt=.01) as state, bg.new_state(dt=.01) as branch:
+            state.step(fields[0]);saved=state.snapshot()
+            expected=state.step(fields[1]);branch.restore(saved)
+            np.testing.assert_array_equal(branch.step(fields[1]),expected)
+            state.restore(saved);np.testing.assert_array_equal(state.step(fields[1]),expected)
+        for bad in (0.,-1.,float('nan'),float('inf'),True):
+            with self.subTest(epsilon_infinity=bad),self.assertRaises(ValueError):
+                LorentzDrude(plasma_frequency=1.,strength=[1.],resonance=[1.],damping=[0.],epsilon_infinity=bad)
+
 
     def test_damped_drude_convergence(self):
         m=LorentzDrude(plasma_frequency=1.,strength=[1.],resonance=[0.],damping=[.7])

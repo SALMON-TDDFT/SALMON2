@@ -251,3 +251,55 @@ the native ABI remains experimental.
 The common directory-scope declarations are in `native_context.h`, included by both handle headers. On macOS, use the existing `tools/build_embedded_tddft.py::mpi_link_command` policy when linking MPI hosts too: private executable copies of OpenMPI Fortran COMMON sentinels can corrupt MPI_IN_PLACE operations across the shared-library boundary. The runner applies this policy and records link commands and executable hashes. Do not infer correctness from a query-only probe.
 
 Verified scope: standard PZ and fast-PR HSE full/reduced-k fixtures, C/Fortran hosts, MPI 1/2 ranks, paired versus independent currents. HSE uses its own documented signatures and rejection status (1 for mismatched previous A, versus 10 in standard TDDFT). The adapters live only in the common host test; they do not change either public ABI or numerical solver. The reduced fixture runs symmetry-aware PT-CN with learned exchange, 8 full k points represented by4 points. Other XC profiles, geometries and platforms require their own tests; the public native ABI remains experimental. These small fixtures check interoperability and state ownership, not converged material properties.
+
+### Prepare the PZ host fixture
+
+The standard `--abi-state` fixture needs `rt.inp`, `data_for_restart/` and `pseudo1_rps.dat`. Use `theory='tddft_pulse'`, periodic fixed ions, unpolarized spin, `middlepoint` and `trans_longi='tr'`. Omit `&parallel` from the RT fixture: the runner exercises both 1 and 2 ranks, so its generated template does not pin a decomposition. Cell, atoms, grid, k points, electron count, pseudo and XC must match the GS.
+
+```sh
+python tools/prepare_pz_state_fixture.py GS_INPUT EXISTING_RESTART PSEUDO NEW_FIXTURE
+python tools/test_io_ownership.py BUILD_JSON NEW_BUILD --abi-state --fixture NEW_FIXTURE --state-output NEW_RESULTS --ranks 2
+```
+
+Use a Python environment with SALMONpy installed. `GS_INPUT` is the original GS input or a validated matching RT template. This periodic single-species PZ fixture preparer retains inline atoms and references existing restart/pseudo files: it never runs SCF, copies GS or downloads files. `examples/pz_host_gs.inp` is a small one-Si-atom starter with an 8³ grid and 2×1×1 k points. If needed, the user explicitly prepares GS on a compute node first. It is not a converged-material example.
+
+`BUILD_JSON` may be a record file or a directory containing `build.json`. The GS-free `--parser-host` check verifies that status-only and explicit `native_host=.false.` calls retain ordinary checks; only explicit true selects field-specific checks.
+
+`SalmonExecutable.from_runtime(directory)` delegates to `runtime.load_runtime`, verifying every bundle file and capability record. Prefer this entry over assembling a bare binary/hash manually.
+
+## Optical conductivity and dielectric response: one polarization
+
+Use `analysis.optical_conductivity(time, charge_current_x, total_E_x,
+current_convention="charge", field_kind="total", units="atomic_gaussian",
+window="hann", drive_rtol=1e-8, metadata={"material_id":"Si","polarization":"x"})`.
+Then call `analysis.dielectric_function(sigma)`. Results have omega, values,
+valid and config. Inputs are simultaneous scalar time series; A is not E.
+For A-driven crystals the caller must provide E with consistent differentiation
+and time placement. Convert SALMON matter current J explicitly using j=-J.
+Only Gaussian atomic units are accepted. One selected drive gives a single
+polarization response, not a complete tensor; one circularly polarized run does
+not determine all tensor elements.
+
+The existing compiled NumPy FFT uses exp(+i omega t), normalized by dt. With
+exp(-i omega t), sigma=j/E and epsilon=1+4*pi*i*sigma/omega. Fortran computes
+ratios and diagnostics. Drive bins at or below drive_rtol times the maximum,
+and nonfinite conversion results, carry NaN with valid=False. Dielectric DC is
+undefined. An all-zero drive yields masked output rather than stopping a solver.
+External-field ratios are not silently treated as bulk dielectric functions.
+The same window is applied to both signals; window, time range, dt, peak E and
+caller provenance are retained. Windowed finite-time ratios are estimates;
+check duration/window dependence, especially for broadband drives.
+
+`optical_linearity(reference, candidate, rtol=...)` compares supplied normalized
+conductivities on common valid frequencies, reporting relative RMS. The caller
+must ensure matching material, polarization and drive shape. Zero reference
+response has undefined relative error/acceptance. `optical_sum_rule(sigma,
+expected_weight=..., normalization="...")` integrates Re sigma between adjacent
+valid bins with the trapezoidal rule. For an all-electron Gaussian-AU system,
+the positive-frequency f-sum reference is pi*n/2. Pseudopotentials, nonlocal
+current operators and missing bands require an appropriate caller-specified
+reference. Masked gaps and unobserved frequency ranges are not extrapolated.
+Neither diagnostic is a physical accuracy certificate or launches another run.
+
+Run `python -m salmonpy.examples.optical_response` for synthetic data, not a
+converged real-material optical calculation.

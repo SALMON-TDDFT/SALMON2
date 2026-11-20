@@ -68,7 +68,7 @@ python -m salmonpy.examples.tddft_response EXECUTABLE SHA256 NEW_GS NEW_RT --thr
 python -m salmonpy.examples.bands_from_gs EXECUTABLE SHA256 NEW_GS NEW_BANDS --threads 1
 python -m salmonpy.examples.ase_bands EXECUTABLE SHA256 NEW_GS NEW_ASE_BANDS --threads 1
 python -m salmonpy.examples.ase_energy_forces EXECUTABLE SHA256 SI_RPS NEW_CALCULATIONS --threads 1
-python -m salmonpy.examples.fdtd_dielectric EXECUTABLE SHA256 NEW_FDTD
+python -m salmonpy.examples.fdtd_dielectric RUNTIME NEW_FDTD
 ```
 
 各引数付きサンプルの `--help` で必要な入力を確認できます。空白を含むパスは引用符で囲みます。
@@ -199,3 +199,37 @@ MPIサンプルも通常のPythonから `--help` を表示できます。実計�
 大きな並列テスト: `mpi_mixed_native` は `--field-shape` に対応します。5〜15ランクの構成と計測の範囲は [COUPLED.md](../COUPLED.md) を参照してください。4GiB・4コアの入門条件は引き続き利用できます。
 
 収束試験の計画のみ：`python -m salmonpy.examples.convergence_plan NEW_JSON`。CONVERGENCE.md参照。例のPP半径は説明用で、物質計算は行いません。
+
+## FDTDはこの順で
+
+1. `fdtd_dielectric RUNTIME NEW_OUTPUT`：検証済みバンドルを`load_runtime`で開き、誘電体の伝播を確認します。
+2. `fdtd_layers RUNTIME NEW_OUTPUT`：LD二層と材料ID非依存の界面を試します。
+3. `fdtd_mpi_layers MPI_BUILD_JSON NEW_OUTPUT`：MPI対応の監査済みビルド記録で空間並列へ進みます。
+
+`RUNTIME`は実行ファイル単体ではなく`runtime.json`のあるディレクトリです。既存の`load_runtime`を使うアプリもそのまま利用できます。MPI例は別途能力を確認したビルド記録を使う応用例です。いずれも新しい直列Pythonから開始し、既存の出力先を上書きしません。
+
+`fdtd_periodic_slab RUNTIME NEW_OUTPUT [--ld]` は横方向周期境界と格子に沿ったスラブの例です。[材料と界面](../FDTD_MATERIALS.md)に、Cの解析式を使うFresnel比較試験を説明しています。
+
+### TB-mBJの直列GS入口
+
+`DFT(..., xc="tbmbj", cval=None)` または `dft_from_atoms(..., xc="tbmbj", cval=1.2)` を使います。JSONの物質レシピでも `xc` と任意の `cval` を指定できます。係数はGS記録、warm startの整合性検査、TDDFT入力へ引き継ぎます。TB-mBJはモデルポテンシャルのため、全エネルギーと力は未検証の診断値として警告し、計算は続行します。ASE Calculatorによる最適化の対象にはしません。サンプルは `python -m salmonpy.examples.dft_tbmbj --help` で確認できます。今回の確認は合成密度のネイティブXC評価とインターフェース検査であり、実材料の物理精度保証ではありません。
+
+## 誘電関数・光学伝導率（単一偏光）
+
+`salmonpy.analysis.optical_conductivity` は同じ時刻の全電場Eと電荷電流密度jからsigma=j/Eを求めます。結晶A駆動で得た電流にも使えますが、AそのものはEではありません。呼び出し側で時間配置と微分規約を揃えたEを用意してください。SALMON物質電流Jを使う場合はj=-Jへ明示的に変換します。単位はGaussian原子単位のみです。完全なテンソルには独立な駆動方向の計算が必要で、円偏光一回から全テンソルを復元しません。
+
+```python
+from salmonpy.analysis import optical_conductivity, dielectric_function
+sigma = optical_conductivity(time, charge_current_x, total_E_x,
+    current_convention="charge", field_kind="total", units="atomic_gaussian",
+    window="hann", drive_rtol=1e-8,
+    metadata={"material_id": "Si", "polarization": "x"})
+epsilon = dielectric_function(sigma)
+# sigma.omega, sigma.values, sigma.valid; epsilonも同じ構造
+```
+
+フーリエ変換は既存の `spectrum` と同じexp(+i omega t)、dt倍の和です。時間依存exp(-i omega t)に対応し、epsilon=1+4pi*i*sigma/omegaです。弱い駆動周波数（最大振幅のdrive_rtol以下）と数値変換不能点はvalid=False、値はNaNとなります。DCの誘電関数は未定義です。全駆動ゼロでも解析結果をマスクするだけで、時間発展を停止しません。外場だけの比をバルク誘電関数と呼び替えません。電場と電流には同じ窓を使い、窓・時間長・開始時刻・dt・電場振幅・利用者の来歴をconfigに保持します。窓付き有限時間比は近似で、特に単色駆動以外では窓依存性を確認してください。
+
+`optical_linearity(reference, candidate, rtol=...)` は利用者が渡した異なる振幅の伝導率を共通の有効周波数で比較し、相対RMSを返します。材料・偏光・駆動形状の一致は利用者が確認してください。電流が全てゼロなら相対誤差を定義せず判定も未定義とします。`optical_sum_rule(sigma, expected_weight=..., normalization="...")` は有効な隣接周波数間のRe sigmaを台形積分します。正周波数の全電子系では期待値pi*n/2が基準ですが、擬ポテンシャル・非局所電流・不足バンドに応じた基準は利用者が指定します。欠損帯域を補外せず、物理精度の合格証明にはしません。追加のSCF/TDDFT計算やダウンロードは起動しません。
+
+合成データのサンプル: `python -m salmonpy.examples.optical_response`。実材料の収束済み光学定数の例ではありません。

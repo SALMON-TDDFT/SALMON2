@@ -293,7 +293,12 @@ install(FILES "${ROOT}/docs/plans/2026-11-20-scf-declared-source-migration.md" D
 install(FILES "${ROOT}/tools/test_timer_context.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_timer_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
-install(FILES "${ROOT}/tools/test_io_ownership.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tools/test_io_ownership.py" "${ROOT}/tools/prepare_pz_state_fixture.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_io_ownership.f90" "${ROOT}/tests/native/test_native_protocol.c" "${ROOT}/tests/native/test_native_state.c" "${ROOT}/tests/native/test_native_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
 install(FILES "${ROOT}/tests/native/test_directory_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/test_fdtd_periodic.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_fdtd_fresnel.c" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/examples/pz_host_gs.inp" DESTINATION salmonpy/examples)

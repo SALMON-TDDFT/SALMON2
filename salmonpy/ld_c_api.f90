@@ -52,3 +52,69 @@ subroutine salmonpy_ld(n,nt,dt,wp,f,w,g,e,p,j,po,jo) bind(C)
     p(3,q)=ld%pz_ld(1,1,1,q); j(3,q)=ld%rjz_ld(1,1,1,q)
   end do
 end subroutine salmonpy_ld
+
+! Continuous dispersion and instantaneous-background observables. P/J remain
+! dispersive-pole quantities; there is no fictitious high-frequency oscillator.
+integer(c_int) function sp_ld_permittivity(n,m,wp,eps,f,w,g,omega,result) bind(C)
+  use iso_c_binding
+  use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
+  implicit none
+  integer(c_int),value :: n,m
+  real(c_double),value :: wp,eps
+  real(c_double),intent(in) :: f(*),w(*),g(*),omega(*)
+  complex(c_double_complex),intent(out) :: result(*)
+  complex(c_double_complex) :: denominator,value
+  integer :: k,q
+  sp_ld_permittivity=1
+  if(n<1.or.m<0)return
+  if(.not.ieee_is_finite(wp).or..not.ieee_is_finite(eps))return
+  if(wp<0d0.or.eps<=0d0)return
+  do q=1,n
+    if(.not.ieee_is_finite(f(q)).or..not.ieee_is_finite(w(q)).or..not.ieee_is_finite(g(q)))return
+    if(f(q)<0d0.or.w(q)<0d0.or.g(q)<0d0)return
+  enddo
+  do k=1,m
+    if(.not.ieee_is_finite(omega(k)))return
+    value=cmplx(eps,0d0,kind=c_double)
+    do q=1,n
+      if(f(q)==0d0.or.wp==0d0)cycle
+      denominator=cmplx(w(q)*w(q)-omega(k)*omega(k),-g(q)*omega(k),kind=c_double)
+      if(denominator==cmplx(0d0,0d0,kind=c_double))return
+      if(.not.ieee_is_finite(real(denominator,kind=c_double)))return
+      if(.not.ieee_is_finite(aimag(denominator)))return
+      value=value+f(q)*wp**2/denominator
+    enddo
+    if(.not.ieee_is_finite(real(value,kind=c_double)).or..not.ieee_is_finite(aimag(value)))return
+    result(k)=value
+  enddo
+  sp_ld_permittivity=0
+end function
+
+integer(c_int) function sp_ld_background(n,eps,e,p,h,d,u) bind(C)
+  use iso_c_binding
+  use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
+  implicit none
+  integer(c_int),value :: n
+  real(c_double),value :: eps
+  real(c_double),intent(in) :: e(3,*),p(3,*),h(3,*)
+  real(c_double),intent(out) :: d(3,*),u(*)
+  real(c_double) :: pi,value
+  integer :: i,k
+  sp_ld_background=4
+  if(n<0.or..not.ieee_is_finite(eps))return
+  if(eps<=0d0)return
+  pi=acos(-1d0)
+  do i=1,n
+    value=0d0
+    do k=1,3
+      if(.not.ieee_is_finite(e(k,i)).or..not.ieee_is_finite(p(k,i)))return
+      if(.not.ieee_is_finite(h(k,i)))return
+      d(k,i)=eps*e(k,i)+4d0*pi*p(k,i)
+      if(.not.ieee_is_finite(d(k,i)))return
+      value=value+eps*e(k,i)**2+h(k,i)**2
+    enddo
+    u(i)=value/(8d0*pi)
+    if(.not.ieee_is_finite(u(i)))return
+  enddo
+  sp_ld_background=0
+end function

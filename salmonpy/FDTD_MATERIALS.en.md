@@ -99,3 +99,11 @@ material-cell counts and leaves memory explicitly unmeasured. Production sizes
 need resource planning and numerical convergence tests.
 
 For electronic feedback into E/H, use the separate [native coupling entry](COUPLED.en.md). Do not put TDDFT objects in the batch API material list.
+
+## Transverse-periodic slabs
+
+`Boundaries(('pml','pml','periodic','periodic','periodic','periodic'))` uses x PML and y/z periodic boundaries. Periodic faces must come in opposite pairs and use zero-phase wrapping. Coordinates and material-ID previews stay centered. Fortran field communication selects each axis independently without changing electronic periodicity. Existing vacuum-PML material checks remain. Use a runtime with this per-axis implementation rather than an older bundle.
+
+`python -m salmonpy.examples.fdtd_periodic_slab RUNTIME NEW_OUTPUT` selects a dielectric; add `--ld` for LD. Explicit `tools/test_fdtd_periodic.py AUDITED_MPI_BUILD_JSON NEW_RESULTS` compares vacuum-normalized complex Fresnel transmission. The solver remains Fortran; Fourier sums and the analytic reference are evaluated in test-only C. On the 256×8×8 fixture with 1 and 2 ranks, maximum relative complex error over 3 frequencies was about 0.0554% for the dielectric and 0.0375% for LD. Transverse probes and MPI 1/2 results agree. This verifies the stated synthetic slab, not arbitrary materials/conditions. The common grid initializer still has a minimum-domain constraint on thin MPI decompositions; this example uses 8 transverse cells.
+
+Set an LD instantaneous background with `LorentzDrude(..., epsilon_infinity=2.25)`; default1 preserves prior results. Non-unit-background Impulse propagation continues, while legacy normalized spectra are omitted with a warning. See [LD.en.md](LD.en.md) for PlaneWave propagation, whole-domain CFL and pole P/J versus D conventions.
