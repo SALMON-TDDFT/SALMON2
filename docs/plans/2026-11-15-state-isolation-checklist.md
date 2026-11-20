@@ -27,7 +27,7 @@ retains results. GS saving/reuse is the normal workflow. Collected GS validation
   completes with maximum relative electron loss4.22e-10. This is not an optical
   or general-grid convergence certificate. Existing12³→16³ current error18.83%
   does not pass5%;12³ SCF was unconverged, so that comparison is provisional.
-- [x] Latest source/installed640 tests:639pass,1skip. Fresh source/object audits,
+- [x] Latest source/installed641 tests:640pass,1skip. Fresh source/object audits,
   sdist→wheel, installed examples, JP/EN/AI byte parity and guide sync verified.
 
 ### User-directed execution order (2026-11-19)
@@ -41,7 +41,7 @@ measured below, together with full/reduced-k orbital/spatial mixed restart and l
 
 ### Remaining groups (not a count of individual implementation patches)
 
-Group5 now has concrete R0–R4 scope in [resource inventory](2026-11-20-group5-resource-inventory.md). R0 scalar IEEE compliance is implemented and GNU-tested (Fujitsu untested). R0–R2 are implemented and verified within documented profiles; remaining group5 milestones are the still-unhandled R3 unit/coordinate/semantic/numerical-init failures and R4 native ABI stability. R3 preflight, parsed admission and detected namelist read errors are verified; scheduled-job startup declaration errors now record and exit collectively. Management-node checking remains an optional independent user action. Do not treat every process-scoped selector as a new isolation task.
+Group5 now has concrete R0–R4 scope in [resource inventory](2026-11-20-group5-resource-inventory.md). R0 scalar IEEE compliance is implemented and GNU-tested (Fujitsu untested). R0–R2 are implemented and verified within documented profiles; remaining group5 milestones are the still-unhandled R3 wider semantic/numerical-init failures (including allocation failures outside the verified coordinate-return path) and R4 native ABI stability. R3 preflight, parsed admission and detected namelist read errors are verified; scheduled-job startup declaration errors now record and exit collectively. Management-node checking remains an optional independent user action. Do not treat every process-scoped selector as a new isolation task.
 
 1. [ ] DEFERRED by user: extend measured-norm diagnostics to fast PR HSE. Isolated E-drive norm
    wiring belongs to paused molecular work and is not the next active priority.
@@ -2721,3 +2721,60 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 - [x] 4-rank LD/SBE/native field protected continuation is exactly equal to the
   prior sample. No GS data collected and no Actions run.
 - Scope is declaration reads, not complete native/runtime/physical validation.
+
+### 2026-11-20 — unsupported native unit selection
+
+- [x] Status-returning input parsing rejects unsupported unit_system with1001,
+  closes parser scratch and preserves MPI. Native E/H passes status to Python,
+  which names accepted unit spellings. No valid conversion policy changed.
+- [x] 1/2-rank repeated unit rejection followed by normal propagation verified;
+  A/E/H exactly match the prior R2 reference. No GS collected, no Actions run.
+- [ ] Remaining R3: coordinate parsing, semantic checks, failures inside numerical
+  initialization; arbitrary STOP/OOM/MPI-failure recovery remains out of scope.
+
+### 2026-11-20 — superseding batch-check design
+
+- User requests a separate Python checker accepting code and input; not an
+  embedded calculation gate. Removed --input-check and startup check pipeline
+  from the calculation sample; removed the MPI preflight example.
+- Standalone preparation --code / check_job never executes supplied code/imports/
+  plugins. Scope: Python syntax, JSON syntax/duplicates/finite values, staged
+  bundle inventory/hash/size. Code-input/scientific/runtime correspondence is
+  explicitly unverified. No universal arbitrary-combination validator intended.
+- Existing backend validation, numerical failure handling and collective output
+  directory failure handling remain; no compulsory management-node procedure.
+
+- Separate-checker validation: source and installed wheel641 tests (640pass,
+  1skip). Supplied top-level code that writes a marker/raises was never executed;
+  code and input errors were reported independently. Normal4-rank/64-step
+  LD/SBE/native-field A/E/j exactly match the prior baseline after removing the
+  embedded check pipeline. Installed source/guides/AI match; deleted MPI checker
+  absent from wheel. Record: calc2026/salmonpy-static-job-check-20261120.
+  No GS collected, no Actions; cloud sync unconfirmed; uncommitted.
+
+### 2026-11-20 — native coordinate input errors
+
+- [x] Optional-status coordinate parsing distinguishes restart conflicts,
+  source count conflicts, reduced coordinates in isolated systems, file open
+  and row read errors. Root I/O status is broadcast before array collectives.
+  Caller closes parser scratch; external coordinate files close on read errors.
+- [x] 8 coordinate rejection cases on1/2 ranks followed by normal FDTD pass;
+  normal A/E/H exactly match R2. Source tests641 (640pass/1skip).
+- No new physical input restriction, no automatic editing/retry in batch jobs,
+  no GS data collected or Actions run. The separate static checker remains
+  syntax/file-integrity-only; it is not a scientific/combination validator.
+- Remaining R3: wider semantic checks and failures inside numerical setup;
+  coordinate allocation failure remains outside this verified return path.
+
+### 2026-11-20 — named semantic rejection paths
+
+- [x] Optional-status check_bad_input returns existing unsupported propagator,
+  deferred source/finite-range EXX and invalid y/n flag failures as1010–1013.
+  Scalar/three-character flag normalizers preserve Y/N lowercase conversion;
+  no-status callers retain old fatal handling. No new numerical restriction.
+- [x] Six semantic cases plus prior admission cases on1/2 ranks, followed by
+  normal FDTD with uppercaseN, pass with exact A/E/H versus R2. Source641 tests
+  (640pass/1skip); no GS data collected and no Actions run.
+- [ ] Remaining R3: later specialized semantic fatal paths, initialization
+  allocation/I/O and failures inside numerical setup. This is not arbitrary
+  MPI-error recovery or a universal checker for custom combinations.

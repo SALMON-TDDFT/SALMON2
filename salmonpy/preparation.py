@@ -4,6 +4,8 @@ No acquisition, installation, solver execution or backend discovery. Trusted
 configuration resolvers run only during prepare_inputs, not verify_inputs.
 """
 import argparse
+import ast
+import tokenize
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -15,7 +17,7 @@ import unicodedata
 from .config import _copy_json, resolve_materials
 from .errors import InputError
 
-__all__ = ['prepare_inputs', 'verify_inputs', 'preflight_inputs']
+__all__ = ['prepare_inputs', 'verify_inputs', 'preflight_inputs', 'check_job']
 _SCHEMA = 'salmonpy.input-bundle/1'
 _GENERATED = {'materials.json', 'resolved.json', 'manifest.json'}
 _DIGEST = re.compile(r'[0-9a-f]{64}\Z')
@@ -250,10 +252,55 @@ def preflight_inputs(directory, *, manifest_sha256=None, registry=None):
     return report
 
 
+def check_job(code, inputs, *, manifest_sha256=None):
+    """Statically check a Python source and local JSON/bundle; never run either.
+
+    Does not import the supplied code, call its main(), follow its imports,
+    execute plugins, or infer dynamic file references. A passing report covers
+    syntax/integrity only, not code-input agreement or a runnable calculation.
+    """
+    code, inputs = Path(code), Path(inputs)
+    report = {'schema': 'salmonpy.job-static-check/1', 'status': 'failed',
+              'code': str(code.absolute()), 'inputs': str(inputs.absolute()),
+              'code_executed': False, 'solver_started': False, 'errors': [],
+              'checks': {}, 'not_checked': [
+                  'Agreement between Python code and input parameters or paths.',
+                  'Imported modules, runtime/MPI availability and native namelist semantics.',
+                  'Physical convergence, GS compatibility and memory capacity.']}
+    try:
+        with tokenize.open(code) as stream:
+            text = stream.read()
+        tree = ast.parse(text, filename=str(code))
+        compile(tree, str(code), 'exec', dont_inherit=True)
+        report['checks']['python'] = {'status': 'passed', 'sha256': _hash(code)[0],
+                                     'scope': 'syntax only; no imports or execution'}
+    except Exception as exc:
+        report['errors'].append({'phase': 'python', 'type': type(exc).__name__,
+                                 'message': str(exc), 'line': getattr(exc, 'lineno', None)})
+    if inputs.is_dir():
+        result = preflight_inputs(inputs, manifest_sha256=manifest_sha256)
+        report['checks']['inputs'] = result
+        report['errors'].extend(result['errors'])
+    else:
+        try:
+            if manifest_sha256 is not None:
+                raise InputError('manifest SHA256 applies to an input bundle directory only')
+            _read(inputs)
+            report['checks']['inputs'] = {'status': 'passed', 'sha256': _hash(inputs)[0],
+                                         'scope': 'JSON syntax and finite values only; no scientific schema validation'}
+        except Exception as exc:
+            report['errors'].append({'phase': 'inputs', 'type': type(exc).__name__,
+                                     'message': str(exc)})
+    if not report['errors']:
+        report['status'] = 'passed'
+    return report
+
+
 def _main():
     parser = argparse.ArgumentParser(description='Check staged inputs before submission or after offline transfer; no solver launch.')
     parser.add_argument('directory')
     parser.add_argument('--manifest-sha256')
+    parser.add_argument('--code', type=Path, help='Statically check this Python file with the JSON or bundle input; never execute it')
     parser.add_argument('--resolve-builtins', action='store_true',
                         help='Recheck built-in material parameters with local files; no solver execution')
     parser.add_argument('--report', type=Path, help='New JSON report outside the immutable input bundle')
@@ -263,17 +310,20 @@ def _main():
         if args.report.resolve().is_relative_to(root):
             parser.error('--report must be outside the input bundle')
     registry = None
+    if args.code is not None and args.resolve_builtins:
+        parser.error('--code does not execute material resolvers; do not combine with --resolve-builtins')
     if args.resolve_builtins:
         from .builtin_materials import builtin_material_registry
         registry = builtin_material_registry()
-    report = preflight_inputs(args.directory, manifest_sha256=args.manifest_sha256,
-                              registry=registry)
+    report = (check_job(args.code, args.directory, manifest_sha256=args.manifest_sha256)
+              if args.code is not None else
+              preflight_inputs(args.directory, manifest_sha256=args.manifest_sha256, registry=registry))
     text = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + '\n'
     if args.report is not None:
         with args.report.open('x', encoding='utf-8') as stream:
             stream.write(text)
     print(text, end='')
-    raise SystemExit(0 if report['verified'] else 2)
+    raise SystemExit(0 if report['status'] == 'passed' else 2)
 
 
 if __name__ == '__main__':

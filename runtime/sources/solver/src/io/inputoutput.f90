@@ -95,9 +95,27 @@ contains
       parser%isolated=.false.
     endif
     call read_stdin(input_path,parser)
-    call read_input_common(parser)
+    if(present(status))then
+      call read_input_common(parser,parse_status)
+      if(parse_status/=0)then
+        status=parse_status
+        call close_parser_workspace(parser)
+        return
+      endif
+    else
+      call read_input_common(parser)
+    endif
     if(.not.worker_embedded) call worker_configure()
-    call read_atomic_coordinates(parser)
+    if(present(status))then
+      call read_atomic_coordinates(parser,parse_status)
+      if(parse_status/=0)then
+        status=parse_status
+        call close_parser_workspace(parser)
+        return
+      endif
+    else
+      call read_atomic_coordinates(parser)
+    endif
     if(present(status))then
       call dump_input_common(parser,parse_status)
       if(parse_status/=0)then
@@ -108,7 +126,16 @@ contains
     else
       call dump_input_common(parser)
     endif
-    call check_bad_input
+    if(present(status))then
+      call check_bad_input(parse_status)
+      if(parse_status/=0)then
+        status=parse_status
+        call close_parser_workspace(parser)
+        return
+      endif
+    else
+      call check_bad_input
+    endif
     if(parser%isolated)then
       call parser%values%capture()
       call close_parser_workspace(parser)
@@ -250,7 +277,7 @@ contains
     return
   end subroutine read_stdin
 
-  subroutine read_input_common(parser)
+  subroutine read_input_common(parser,status)
     use parallelization
     use communication
     use filesystem, only: get_filehandle
@@ -260,6 +287,7 @@ contains
     implicit none
     type(s_input_parser),intent(inout) :: parser
     integer :: ii
+    integer,optional,intent(out) :: status
     real(8) :: norm
     ! Read-only compatibility aliases; computational modules use EXX names.
     integer :: hse_mlwf_interval,hse_mlwf_maxiter
@@ -694,6 +722,7 @@ contains
       & nq_mom, &
       & dq_mom
 
+    if(present(status))status=0
 !! == default for &unit ==
     unit_system='au'
 !! =======================
@@ -715,6 +744,10 @@ contains
     case('au','a.u.','A_eV_fs')
       continue
     case default
+      if(present(status))then
+        status=1001
+        return
+      endif
       stop 'invalid unit_system'
     end select
 
@@ -2092,7 +2125,7 @@ contains
     write(*,'(a,a,a,a)')'Automatic KY spin: spin=',trim(spin_mode),', yn_spinorbit=',trim(soc_mode)
   end subroutine resolve_ky_spin_inputs
 
-  subroutine read_atomic_coordinates(parser)
+  subroutine read_atomic_coordinates(parser,status)
     use parallelization
     use communication
     use filesystem, only: get_filehandle
@@ -2100,10 +2133,13 @@ contains
     use checkpoint_restart_sub, only: generate_restart_directory_name
     character(256) :: filename_tmp,char_atom, gdir,wdir
     type(s_input_parser),intent(inout) :: parser
-    integer :: icount,i,coordinate_unit
+    integer :: icount,i,coordinate_unit,io_status
+    integer,optional,intent(out) :: status
     logical :: scratch_coordinates
     logical :: if_error, if_cartesian, iself
 
+    if(present(status))status=0
+    io_status=0
     scratch_coordinates=.false.
     if (comm_is_root(nproc_id_global)) then
 
@@ -2176,6 +2212,10 @@ contains
     call comm_bcast(if_error,nproc_group_global)
 
     if(if_error)then
+       if(present(status))then
+         status=1002
+         return
+       endif
        if (comm_is_root(nproc_id_global))then
          write(*,"(A)") 'Error in input: Explicit atomic coordinates cannot be specified when restarting an MD calculation.'
          write(*,"(A)") 'Remove the following input(s); atomic coordinates are read from the restart data:'
@@ -2189,6 +2229,10 @@ contains
     end if
 
     if(0 < natom .and. icount/=1 .and. yn_jm == 'n')then
+       if(present(status))then
+         status=1003
+         return
+       endif
        if (comm_is_root(nproc_id_global))then
          write(*,"(A)")'Error in input: The following inputs are incompatible.'
          write(*,"(A)")'file_atom_coor, file_atom_red_coor, &atomic_coor, and &atomic_red_coor.'
@@ -2198,6 +2242,10 @@ contains
     end if
 
     if( (.not.if_cartesian) .and. iperiodic == 0)then
+       if(present(status))then
+         status=1004
+         return
+       endif
        if (comm_is_root(nproc_id_global))then
          write(*,"(A)")'Error in input: Reduced coordinate is invalid for isolated systems.'
        end if
@@ -2224,15 +2272,30 @@ contains
           rewind(coordinate_unit)
         else
           coordinate_unit = get_filehandle()
+          if(present(status))then
+            open(coordinate_unit, file=resolve_path(filename_tmp), status='old',iostat=io_status)
+          else
           open(coordinate_unit, file=resolve_path(filename_tmp), status='old')
+          endif
         endif
+        if(io_status==0)then
         select case(iflag_atom_coor)
         case(ntype_atom_coor_cartesian)
            do i=1,natom
               if(yn_opt == 'y')then
-                 read(coordinate_unit, *) char_atom, Rion(:,i), kion(i), flag_opt_atom(i)
+                 if(present(status))then
+                   read(coordinate_unit, *,iostat=io_status) char_atom, Rion(:,i), kion(i), flag_opt_atom(i)
+                   if(io_status/=0)exit
+                 else
+                   read(coordinate_unit, *) char_atom, Rion(:,i), kion(i), flag_opt_atom(i)
+                 endif
               else
-                 read(coordinate_unit, *) char_atom, Rion(:,i), kion(i)
+                 if(present(status))then
+                   read(coordinate_unit, *,iostat=io_status) char_atom, Rion(:,i), kion(i)
+                   if(io_status/=0)exit
+                 else
+                   read(coordinate_unit, *) char_atom, Rion(:,i), kion(i)
+                 endif
               end if
               atom_name(i) = char_atom
            end do
@@ -2241,18 +2304,39 @@ contains
         case(ntype_atom_coor_reduced)
            do i=1,natom
               if(yn_opt == 'y')then
-                 read(coordinate_unit, *) char_atom, Rion_red(:,i), kion(i), flag_opt_atom(i)
+                 if(present(status))then
+                   read(coordinate_unit, *,iostat=io_status) char_atom, Rion_red(:,i), kion(i), flag_opt_atom(i)
+                   if(io_status/=0)exit
+                 else
+                   read(coordinate_unit, *) char_atom, Rion_red(:,i), kion(i), flag_opt_atom(i)
+                 endif
               else
-                 read(coordinate_unit, *) char_atom, Rion_red(:,i), kion(i)
+                 if(present(status))then
+                   read(coordinate_unit, *,iostat=io_status) char_atom, Rion_red(:,i), kion(i)
+                   if(io_status/=0)exit
+                 else
+                   read(coordinate_unit, *) char_atom, Rion_red(:,i), kion(i)
+                 endif
               end if
               atom_name(i) = char_atom
            end do
 
         end select
+        if(io_status/=0)io_status=1006
         if(.not.scratch_coordinates)close(coordinate_unit)
+        else
+          io_status=1005
+        endif
 
       end if
 
+      if(present(status))then
+        call comm_bcast(io_status,nproc_group_global)
+        if(io_status/=0)then
+          status=io_status
+          return
+        endif
+      endif
       call comm_bcast(Rion,nproc_group_global)
       call comm_bcast(Rion_red,nproc_group_global)
       call comm_bcast(kion,nproc_group_global)
@@ -2956,26 +3040,44 @@ contains
 
   end subroutine dump_input_common
 
-  subroutine check_bad_input
+  subroutine check_bad_input(status)
     use ieee_finite_check, only: ieee_is_finite => is_finite
     use parallelization
     use communication
     use exx_functional, only: is_global_hybrid,is_hybrid
     implicit none
     integer :: i,round_phi,exx_grid(3)
+    integer,optional,intent(out) :: status
     real(8) :: udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf
     logical :: global_symmetry_route,global_native_k_route,native_kspace_scf
 
+    if(present(status))status=0
+
     ! The giant-Gamma source/SR algorithms remain on the development branches.
     ! Reject their inputs before any restart or pseudopotential data is loaded.
-    if(exx_ace_support=='source')error stop 'source-support ACE is deferred'
-    if(.not.ieee_is_finite(hse_sr_tolerance).or.hse_sr_tolerance/=0d0) &
+    if(exx_ace_support=='source')then
+      if(present(status))then
+        status=1011
+        return
+      endif
+      error stop 'source-support ACE is deferred'
+    endif
+    if(.not.ieee_is_finite(hse_sr_tolerance).or.hse_sr_tolerance/=0d0)then
+      if(present(status))then
+        status=1012
+        return
+      endif
       error stop 'Finite-range Gamma exchange is deferred; hse_sr_tolerance must be zero'
+    endif
 
     select case(propagator)
     case('middlepoint','aetrs','hse_ptcn','hse_taylor4','hse_taylor4_full')
     case default
+      if(present(status))then
+        status=1010
+        return
+      endif
       error stop 'Unsupported propagator'
     end select
 
@@ -2983,78 +3085,82 @@ contains
     !! (now only a few)
 
     ! to correct 'Y' and 'N' to be 'y' and 'n', also error check too
-    call yn_argument_check(yn_md)
-    call yn_argument_check(yn_opt)
-    call yn_argument_check(yn_dc)
-    call yn_argument_check(yn_conventional_from_dcdft)
-    call yn_argument_check(yn_restart)
-    call yn_argument_check(yn_self_checkpoint)
-    call yn_argument_check(yn_reset_step_restart)
-    call yn_argument_check(yn_ffte)
-    call yn_argument_check(yn_fftw)
-    call yn_argument_check(yn_scalapack)
-    call yn_argument_check(yn_gramschmidt_blas)
-    call yn_argument_check(yn_eigenexa)
-    call yn_argument_check(yn_diagonalization_red_mem)
-    call yn_argument_check(yn_nccl_reduction)
-    call yn_argument_check(yn_periodic)
-    call yn_argument_check(yn_psmask)
-    call yn_argument_check(yn_pseudo_atomic_orbital)
-    call yn_argument_check(yn_fix_func)
-    call yn_argument_check(yn_predictor_corrector)
-    call yn_argument_check(yn_auto_mixing)
-    call yn_argument_check(yn_subspace_diagonalization)
-    call yn_argument_check(yn_out_psi)
-    call yn_argument_check(yn_out_dos)
-    call yn_argument_check(yn_out_dos_set_fe_origin)
-    call yn_argument_check(yn_out_pdos)
-    call yn_argument_check(yn_out_dns)
-    call yn_argument_check(yn_out_dns_rt)
-    call yn_argument_check(yn_out_dns_ac_je)
-    call yn_argument_check(yn_out_micro_je)
-    call yn_argument_check(yn_out_dns_trans)
-    call yn_argument_check(yn_out_elf)
-    call yn_argument_check(yn_out_elf_rt)
-    call yn_argument_check(yn_out_estatic_rt)
-    call yn_argument_check(yn_out_rvf_rt)
-    call yn_argument_check(yn_out_tm)
-    call yn_argument_check(yn_out_tm_bin)
-    call yn_argument_check(yn_out_intraband_current)
-    call yn_argument_check(yn_out_current_decomposed)
-    call yn_argument_check(yn_out_spin_current_decomposed)
-    call yn_argument_check(yn_out_mag_decomposed_rt)
-    call yn_argument_check(yn_out_mag_micro_rt)
-    call yn_argument_check(yn_out_spin_current_micro)
-    call yn_argument_check(yn_out_rt_energy_components)
-    call yn_argument_check(yn_out_gs_sgm_eps)
-    call yn_argument_check(yn_set_ini_velocity)
-    call yn_argument_check(yn_jm)
-    call yn_argument_check(yn_charge_neutral_jm)
-    call yn_argument_check(yn_output_dns_jm)
-    call yn_argument_check(yn_stop_system_momt)
-    call yn_argument_check(yn_want_stencil_hand_vectorization)
-    call yn_argument_check(yn_want_communication_overlapping)
+    call yn_argument_check(yn_md,status)
+    call yn_argument_check(yn_opt,status)
+    call yn_argument_check(yn_dc,status)
+    call yn_argument_check(yn_conventional_from_dcdft,status)
+    call yn_argument_check(yn_restart,status)
+    call yn_argument_check(yn_self_checkpoint,status)
+    call yn_argument_check(yn_reset_step_restart,status)
+    call yn_argument_check(yn_ffte,status)
+    call yn_argument_check(yn_fftw,status)
+    call yn_argument_check(yn_scalapack,status)
+    call yn_argument_check(yn_gramschmidt_blas,status)
+    call yn_argument_check(yn_eigenexa,status)
+    call yn_argument_check(yn_diagonalization_red_mem,status)
+    call yn_argument_check(yn_nccl_reduction,status)
+    call yn_argument_check(yn_periodic,status)
+    call yn_argument_check(yn_psmask,status)
+    call yn_argument_check(yn_pseudo_atomic_orbital,status)
+    call yn_argument_check(yn_fix_func,status)
+    call yn_argument_check(yn_predictor_corrector,status)
+    call yn_argument_check(yn_auto_mixing,status)
+    call yn_argument_check(yn_subspace_diagonalization,status)
+    call yn_argument_check(yn_out_psi,status)
+    call yn_argument_check(yn_out_dos,status)
+    call yn_argument_check(yn_out_dos_set_fe_origin,status)
+    call yn_argument_check(yn_out_pdos,status)
+    call yn_argument_check(yn_out_dns,status)
+    call yn_argument_check(yn_out_dns_rt,status)
+    call yn_argument_check(yn_out_dns_ac_je,status)
+    call yn_argument_check(yn_out_micro_je,status)
+    call yn_argument_check(yn_out_dns_trans,status)
+    call yn_argument_check(yn_out_elf,status)
+    call yn_argument_check(yn_out_elf_rt,status)
+    call yn_argument_check(yn_out_estatic_rt,status)
+    call yn_argument_check(yn_out_rvf_rt,status)
+    call yn_argument_check(yn_out_tm,status)
+    call yn_argument_check(yn_out_tm_bin,status)
+    call yn_argument_check(yn_out_intraband_current,status)
+    call yn_argument_check(yn_out_current_decomposed,status)
+    call yn_argument_check(yn_out_spin_current_decomposed,status)
+    call yn_argument_check(yn_out_mag_decomposed_rt,status)
+    call yn_argument_check(yn_out_mag_micro_rt,status)
+    call yn_argument_check(yn_out_spin_current_micro,status)
+    call yn_argument_check(yn_out_rt_energy_components,status)
+    call yn_argument_check(yn_out_gs_sgm_eps,status)
+    call yn_argument_check(yn_set_ini_velocity,status)
+    call yn_argument_check(yn_jm,status)
+    call yn_argument_check(yn_charge_neutral_jm,status)
+    call yn_argument_check(yn_output_dns_jm,status)
+    call yn_argument_check(yn_stop_system_momt,status)
+    call yn_argument_check(yn_want_stencil_hand_vectorization,status)
+    call yn_argument_check(yn_want_communication_overlapping,status)
     if(obs_num_em>0) then
       do i = 1,obs_num_em
-        call yn_argument_check(yn_obs_plane_em(i))
-        call yn_argument_check(yn_obs_plane_integral_em(i))
+        call yn_argument_check(yn_obs_plane_em(i),status)
+        call yn_argument_check(yn_obs_plane_integral_em(i),status)
       end do
     end if
-    call yn_argument_check(yn_wf_em)
-    call yn_argument_check(yn_make_shape)
-    call yn_argument_check(yn_output_shape)
-    call yn_argument_check(yn_copy_x)
-    call yn_argument_check(yn_copy_y)
-    call yn_argument_check(yn_copy_z)
-    call yn_argument_check(yn_symmetrized_stencil)
-    call yn_argument_check(yn_put_wall_z_boundary)
-    call yn_argument_check(yn_spinorbit)
-    call yn_argument_check(yn_out_mom_distr_gs)
-    call yn_argument_check(yn_out_mom_distr_rt)
-    call yyynnn_argument_check(yn_symmetry)
-    call yn_argument_check(yn_out_dc_fragment_coor)
-    call yn_argument_check(yn_exx_dc_mlwf)
-    call yn_argument_check(yn_hse_wannier)
+    call yn_argument_check(yn_wf_em,status)
+    call yn_argument_check(yn_make_shape,status)
+    call yn_argument_check(yn_output_shape,status)
+    call yn_argument_check(yn_copy_x,status)
+    call yn_argument_check(yn_copy_y,status)
+    call yn_argument_check(yn_copy_z,status)
+    call yn_argument_check(yn_symmetrized_stencil,status)
+    call yn_argument_check(yn_put_wall_z_boundary,status)
+    call yn_argument_check(yn_spinorbit,status)
+    call yn_argument_check(yn_out_mom_distr_gs,status)
+    call yn_argument_check(yn_out_mom_distr_rt,status)
+    call yyynnn_argument_check(yn_symmetry,status)
+    call yn_argument_check(yn_out_dc_fragment_coor,status)
+    call yn_argument_check(yn_exx_dc_mlwf,status)
+    call yn_argument_check(yn_hse_wannier,status)
+
+    if(present(status))then
+      if(status/=0)return
+    endif
     if(exx_k_algorithm=='pair'.or.exx_k_algorithm=='orbits')then
       if(theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse') &
         error stop 'Manual EXX k algorithm requires dft or fixed-ion RT'
@@ -3070,18 +3176,26 @@ contains
       if(exx_k_algorithm=='pair'.and.yn_spinorbit=='n'.and.index(yn_symmetry,'y')/=0) &
         error stop 'Manual scalar pair algorithm requires crystal symmetry off'
     endif
-    call yn_argument_check(yn_exx_spinor_pair_fft)
+    call yn_argument_check(yn_exx_spinor_pair_fft,status)
+
+    if(present(status))then
+      if(status/=0)return
+    endif
     if(yn_exx_spinor_pair_fft=='y')then
       if(xc/='hse06'.or.yn_spinorbit/='y'.or.yn_dc/='n'.or. &
          exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1)) &
         error stop 'Spinor pair FFT requires native CPU SOC HSE06 with all q points'
     endif
-    call yn_argument_check(yn_exx_fft_orbits)
-    call yn_argument_check(yn_exx_k_pair_symmetry)
-    call yn_argument_check(yn_hse_sr_pair_symmetry)
-    call yn_argument_check(yn_dc_lcfo)
-    call yn_argument_check(yn_dc_lcfo_diag)
+    call yn_argument_check(yn_exx_fft_orbits,status)
+    call yn_argument_check(yn_exx_k_pair_symmetry,status)
+    call yn_argument_check(yn_hse_sr_pair_symmetry,status)
+    call yn_argument_check(yn_dc_lcfo,status)
+    call yn_argument_check(yn_dc_lcfo_diag,status)
 
+
+    if(present(status))then
+      if(status/=0)return
+    endif
 #ifndef USE_MPI
     if(trim(dm_unfold_option)/='no') then
       stop 'dm_unfold_option requires a build with MPI support.'
@@ -3781,28 +3895,34 @@ contains
     stop
   end subroutine stop_by_bad_input2
 
-  subroutine yn_argument_check(str)
+  subroutine yn_argument_check(str,status)
     use misc_routines, only: string_lowercase
     use parallelization, only: end_parallel
     implicit none
     character(*), intent(inout) :: str
+    integer,optional,intent(inout) :: status
 
     call string_lowercase(str)
 
     if (str /= 'y' .and. str /= 'n') then
+      if(present(status))then
+        status=1013
+        return
+      endif
       write (*,*) "Bad input: yn_* option only accepts 'y' or 'n'."
       call end_parallel
       stop
     end if
   end subroutine yn_argument_check
 
-  subroutine yyynnn_argument_check(str)
+  subroutine yyynnn_argument_check(str,status)
     implicit none
     character(*), intent(inout) :: str
+    integer,optional,intent(inout) :: status
     integer :: i,n
     n = len(trim(str))
     do i = 1, n
-      call yn_argument_check( str(i:i) )
+      call yn_argument_check( str(i:i),status )
     end do
   end subroutine yyynnn_argument_check
 

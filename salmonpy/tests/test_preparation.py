@@ -169,3 +169,21 @@ class JobPreflightTests(unittest.TestCase):
         self.assertFalse(result['verified'])
         self.assertEqual(result['errors'][0]['phase'], 'materials')
         self.assertEqual(before, {str(p): p.read_bytes() for p in dest.rglob('*') if p.is_file()})
+
+
+class StaticJobCheckTests(unittest.TestCase):
+    def test_code_is_never_executed_and_errors_are_independent(self):
+        from salmonpy.preparation import check_job
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code, inputs, sentinel = root/'run.py', root/'input.json', root/'executed'
+            code.write_text("from pathlib import Path\nPath("+repr(str(sentinel))+").write_text('BAD')\nraise RuntimeError('must not run')\n")
+            inputs.write_text('{"steps": 3}')
+            self.assertEqual(check_job(code, inputs)['status'], 'passed')
+            self.assertFalse(sentinel.exists())
+            code.write_text('return 1\n')
+            inputs.write_text('{broken')
+            report = check_job(code, inputs)
+            self.assertEqual(report['status'], 'failed')
+            self.assertEqual({e['phase'] for e in report['errors']}, {'python', 'inputs'})
+            self.assertFalse(sentinel.exists())

@@ -44,50 +44,6 @@ def _clock():
         return None
 
 
-def _read_job_inputs(world, args, output):
-    """Read explicit startup declarations on every rank; no solver is created."""
-    from salmonpy.examples._tddft_materials import load_materials
-    values = {'layers': None, 'tddft_model_groups': None, 'tddft_materials': {}}
-    errors = []
-    for name in values:
-        path = getattr(args, name)
-        if path is None:
-            continue
-        try:
-            values[name] = load_materials(path) if name == 'tddft_materials' else json.loads(path.read_text())
-            if name == 'layers':
-                # The same structural access used below; detailed layer validation stays in assembly.
-                {layer['material_id'] for layer in values[name].get('layers', [])}
-            elif name == 'tddft_model_groups':
-                if not isinstance(values[name], dict):
-                    raise ValueError('model groups mapping required')
-                {mid for mids in values[name].values() for mid in mids}
-        except Exception as exc:
-            errors.append({'phase': name, 'path': str(path),
-                           'type': type(exc).__name__, 'message': str(exc)})
-    reports = world.gather({'rank': world.rank, 'errors': errors}, root=0)
-    status = None
-    if world.rank == 0:
-        record = {'schema': 'salmonpy.mixed-startup-inputs/1',
-                  'status': 'failed' if any(r['errors'] for r in reports) else 'passed',
-                  'ranks': reports, 'solver_started': False,
-                  'scope': 'explicit layers/model-group/TDDFT catalog reads only'}
-        try:
-            with (output/'startup-inputs.json').open('x', encoding='utf-8') as stream:
-                json.dump(record, stream, ensure_ascii=False, indent=2)
-                stream.write('\n')
-        except Exception as exc:
-            record['status'] = 'failed'
-            record['report_error'] = str(exc)
-        status = record['status']
-        if status != 'passed':
-            print(json.dumps(record, ensure_ascii=False))
-    status = world.bcast(status, root=0)
-    if status != 'passed':
-        raise SystemExit(2)
-    return values
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('build', 'runtime', 'bundle', 'output'): parser.add_argument(name, type=Path)
@@ -119,11 +75,7 @@ def main():
     parser.add_argument('--direct-save-at', type=int, help='save internal states and stop at this step')
     parser.add_argument('--direct-resume', type=Path, help='protected internal-state restore without replay; candidate-capable runtime required')
     parser.add_argument('--unprotected-direct-restore', action='store_true', help='explicit legacy restore with no failure-preservation guarantee')
-    parser.add_argument('--input-check', type=Path, help='optional staged input bundle checked on every rank before solver creation')
-    parser.add_argument('--input-manifest-sha256', help='externally recorded hash for --input-check')
     args = parser.parse_args()
-    if args.input_manifest_sha256 is not None and args.input_check is None:
-        parser.error('input-manifest-sha256 requires input-check')
     try:
         grid,points=_field_layout(args.field_shape)
     except ValueError as exc:
@@ -172,12 +124,6 @@ def main():
     if error is not None:
         if world.rank == 0:print(json.dumps({'status': 'failed', 'error': error, 'solver_started': False}))
         raise SystemExit(2)
-    if args.input_check is not None:
-        from salmonpy.examples.mpi_input_preflight import check_inputs
-        if not check_inputs(world, args.input_check, output/'input-preflight.json',
-                            manifest_sha256=args.input_manifest_sha256):
-            raise SystemExit(2)
-    startup_inputs = _read_job_inputs(world, args, output)
     try:
         if args.layers is None and world.size != field_ranks + 1 + args.tddft_ranks:
             raise ValueError('launch product(field-grid) + 1 + tddft-ranks MPI ranks')
@@ -191,8 +137,8 @@ def main():
         calculation = FDTD(geometry, () if args.without_ld else materials, dt, args.steps,
                            source=PlaneWave(AcosPulse(.001, 20., .15), 0, -16.), observations=observations)
         _, sbe = models()
-        layout = startup_inputs['layers']
-        model_groups = startup_inputs['tddft_model_groups']
+        layout = json.loads(args.layers.read_text()) if args.layers is not None else None
+        model_groups = json.loads(args.tddft_model_groups.read_text()) if args.tddft_model_groups is not None else None
         if model_groups is not None and layout is None:raise ValueError('model groups require --layers')
         if model_groups is not None and not isinstance(model_groups,dict):raise ValueError('model groups mapping required')
         grouped_materials={mid for mids in (model_groups or {}).values() for mid in mids}
@@ -207,7 +153,7 @@ def main():
         from salmonpy.examples._tddft_materials import MaterialInput,load_materials
         standard_inputs={'si-tddft':MaterialInput(args.bundle.resolve(),'rt.inp',
                          (1,args.tddft_ranks,1,1,1),args.tddft_points_per_group)}
-        if args.tddft_materials is not None:standard_inputs.update(startup_inputs['tddft_materials'])
+        if args.tddft_materials is not None:standard_inputs.update(load_materials(args.tddft_materials))
         standard_inputs={key:value for key,value in standard_inputs.items() if key in selected}
         for key,spec in standard_inputs.items():
             available[key]=MaterialBinding(key,

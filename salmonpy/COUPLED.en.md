@@ -576,3 +576,29 @@ R2 native FDTD assigns child communicators created during initialization, update
 Native FDTD initialization distinguishes admission from numerical setup. New runtimes collectively reject invalid point counts, empty/overlong/missing input paths, and successfully parsed unsupported theory/restart requests without consuming the native numerical lifetime. Parsing uses a local scratch workspace. An empty context is released if allocation or MPI-owner admission fails. Corrected native calls can retry on the same attachment before `eh_init`; the Python constructor attachment policy is unchanged. Malformed namelists and failures inside `eh_init` are not yet recoverable through this mechanism.
 
 For new native FDTD runtimes, namelist read errors reported by the parser now return initialization failure collectively rather than finalizing MPI. Parser scratch files are closed and corrected input can retry before numerical setup. The ordinary standalone parser retains its previous failure behavior. This covers detected namelist read errors; earlier unit selection, coordinate parsing, semantic checks and numerical initialization still have separate failure paths.
+
+Native FDTD now returns status1001 for an unsupported `unit_system` instead of
+stopping MPI in the status-returning parser path. Python reports the accepted
+spellings (`au`, `a.u.`, `A_eV_fs`). Parser scratch units close before rejection,
+and no field state/child communicator is retained. Standalone parser callers
+without an optional status retain their old stop behavior; valid unit conversion
+and numerical update order are unchanged. This is not a general coordinate or
+semantic-validation recovery contract, nor automatic job input repair.
+
+The status-returning native FDTD parser also distinguishes coordinate-source
+conflicts (1002/1003), reduced coordinates for an isolated system (1004), failed
+coordinate-file open (1005) and failed row reads (1006). Root-rank read failures
+are broadcast before coordinate-array collectives; external units and parser
+scratch are closed. Python names the corresponding reason. These are existing
+invalid-input conditions, not new physical restrictions. Valid coordinate
+conversion/order and standalone no-status failure behavior are retained. This
+scope does not cover allocation failure, every semantic check or arbitrary
+native initialization failure. It is independent of the optional static checker.
+
+The native status-returning parser reports existing unsupported-propagator and
+source-support/finite-range EXX rejections as1010–1012, and invalid y/n flags as
+1013. Normal uppercase Y/N normalization remains accepted. These checks reuse
+the existing predicates; they add no supported-profile restriction. Legacy
+callers without status retain their prior fatal behavior. This covers the named
+checks only: later specialized semantic checks and failures inside numerical
+initialization remain separate. No automatic repair or batch-job retry is added.

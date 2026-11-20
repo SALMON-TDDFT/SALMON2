@@ -124,7 +124,18 @@ class NativeEHField:
         try:
             code=self._call(lib.sp_eh_init,b'inputfile',len(self.point_ids),np.array(indices,dtype=np.int32,order='C'))
             self.initialized=(code==0)
-            _agree(comm,'native field initialization rejected' if code else None)
+            reason = {1001: 'invalid unit_system; expected au, a.u. or A_eV_fs',
+                      1002: 'explicit atomic coordinates conflict with an MD restart',
+                      1003: 'atomic coordinate source is missing or specified more than once',
+                      1004: 'reduced atomic coordinates require a periodic system',
+                      1005: 'cannot open atomic coordinate file; check the input path',
+                      1006: 'cannot read atomic coordinates; check row count and column format',
+                      1010: 'unsupported propagator',
+                      1011: 'source-support ACE is deferred',
+                      1012: 'hse_sr_tolerance must be zero in the supported profile',
+                      1013: "a yn_* option only accepts y or n (case-insensitive)"}.get(
+                          code, 'native field initialization rejected')
+            _agree(comm,f'{reason} (native status {code})' if code else None)
         except BaseException:
             self.failed=True
             self.close();raise

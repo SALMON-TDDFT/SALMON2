@@ -142,3 +142,62 @@ and installed tests: 640 run, 639 passed, 1 skipped. Installed sample and JP/EN/
 guides exactly match source. No GS data collected; no Actions run; uncommitted.
 Records: `calc2026/salmonpy-startup-reads-20261120` and
 `calc2026/salmonpy-startup-reads-installed-20261120` (cloud sync unconfirmed).
+
+## Unit-selection admission
+
+Optional status is threaded through `read_input_common`. Unsupported unit_system
+returns1001 on that path rather than STOP; read_input closes its local parser
+scratch and native E/H forwards the reason to Python. Existing callers omitting
+status retain standalone behavior. Valid unit conversions remain unchanged.
+The test replaces the existing units block (an initial duplicate-block test did
+not override the first block and was corrected); the old build confirms
+`STOP invalid unit_system`. New 1/2-rank tests repeat invalid units twice, then
+normal propagation; A/E/H samples and `.data` output bytes match R2 exactly.
+No GS data collected, no Actions runs. Native source/object/link audits passed.
+Record: `calc2026/salmonpy-r3-unit-record-20261120` (cloud sync unconfirmed).
+
+Management-node checks are independent optional user commands that only check
+and exit, including on success. They never launch a solver or submit a job.
+The ordinary mixed calculation sample is for separately submitted compute-node
+jobs, not a management-node checker. Documentation states that distinction.
+
+## Coordinate input status (2026-11-20)
+
+Thread optional status through read_atomic_coordinates. Existing collective
+coordinate-source conflicts return1002/1003, reduced isolated coordinates1004.
+Root opens/reads use iostat only on the opted-in status path, normalize to1005/
+1006, close external units and broadcast failure before coordinate-array
+collectives. The caller closes parser scratch before return. Legacy callers
+without status retain their existing STOP/runtime-I/O behavior. Python names
+these reasons without extra physical restrictions.
+
+Old validated unit-stage build reproduces MPI termination on absent coordinate
+source. New build passed eight coordinate-admission cases on1/2 ranks, followed
+by normal FDTD whose A/E/H exactly match R2. This proves the tested admission
+cases and normal field regression, not physical electronic-coordinate accuracy,
+allocation failure recovery or every semantic constraint. No GS collected/CI.
+
+Coordinate-stage distribution check: fresh sdist/wheel installed tests641
+(640passed/1skipped). Installed parser/field source, Python error mapping and
+JP/EN/AI guides exactly match source. Validation records live at canonical
+calc2026/salmonpy-r3-coordinates-record-20261120; cloud sync unconfirmed.
+
+## Named semantic checks (2026-11-20)
+
+Optional status now reaches check_bad_input and existing y/n normalizers.
+Unsupported propagator1010, source-support ACE1011, finite-range EXX1012 and
+invalid y/n flags1013 return rather than terminate on the opted-in native path.
+Absent status retains legacy fatal behavior. The existing predicates, accepted
+profiles and uppercase Y/N normalization remain unchanged. Later specialized
+semantic STOP paths are still outside this subset.
+
+Old validated coordinate build reproduces ERROR STOP Unsupported propagator.
+New build passes six semantic cases and all earlier admission cases (23 total)
+on1/2 ranks, then normal FDTD with uppercaseN. All A/E/H and `.data` bytes equal
+R2. Source641 tests (640pass/1skip); native source/object/link audits passed.
+No GS collection, no Actions runs. Canonical evidence:
+calc2026/salmonpy-r3-semantic-record-20261120 (cloud sync unconfirmed).
+
+Named-semantic distribution check: fresh sdist/wheel installed tests641
+(640passed/1skipped). Installed parser/native/Python status mapping and JP/EN/AI
+guides match source exactly. Changes remain uncommitted.

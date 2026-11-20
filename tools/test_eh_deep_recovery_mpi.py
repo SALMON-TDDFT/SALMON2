@@ -104,8 +104,69 @@ def main():
                     assert all(value!=0 for value in comm.allgather(int(code)))
                     if inspect_mpi:assert mpi_counts()[:2]==[0,0]
                     admission_cases.append('malformed-integer-rejected-'+str(attempt))
+            if '--unit-admission' in sys.argv:
+                rejected=self.directory/'unit-rejected-input'
+                if comm.rank==0:
+                    text=(self.directory/'inputfile').read_text()
+                    rejected.write_text(text.replace("unit_system = 'au'", "unit_system = 'unsupported-units'", 1))
+                comm.Barrier()
+                for attempt in range(2):
+                    code=original_call(self,function,b'unit-rejected-input',count,indices)
+                    assert comm.allgather(int(code))==[1001]*comm.size
+                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    admission_cases.append('invalid-units-rejected-'+str(attempt))
+            if '--coordinate-admission' in sys.argv:
+                specifications=[
+                    ('missing-source', "natom=1", 1003),
+                    ('duplicate-source', "natom=1, file_atom_coor='missing.xyz', file_atom_red_coor='missing.red'", 1003),
+                    ('reduced-isolated', "natom=1, file_atom_red_coor='missing.red'", 1004),
+                    ('missing-file', "natom=1, file_atom_coor='missing.xyz'", 1005),
+                    ('bad-row', "natom=1, file_atom_coor='bad-coordinates.txt'", 1006),
+                    ('truncated', "natom=2, file_atom_coor='short-coordinates.txt'", 1006),
+                    ('bad-reduced', "natom=1, file_atom_red_coor='bad-coordinates.txt'", 1006),
+                    ('bad-optimization-row', "natom=1, file_atom_coor='short-coordinates.txt'", 1006)]
+                for name,settings,expected in specifications:
+                    if comm.rank==0:
+                        text=(self.directory/'inputfile').read_text().replace('&system','&system\n '+settings,1)
+                        if name=='bad-reduced':text=text.replace("yn_periodic = 'n'", "yn_periodic = 'y'",1)
+                        if name=='bad-optimization-row':text=text.replace('&calculation',"&calculation\n yn_opt='y'",1)
+                        (self.directory/'coordinate-rejected-input').write_text(text)
+                        (self.directory/'bad-coordinates.txt').write_text('Si invalid 0 0 1\n')
+                        (self.directory/'short-coordinates.txt').write_text('Si 0 0 0 1\n')
+                    comm.Barrier()
+                    code=original_call(self,function,b'coordinate-rejected-input',count,indices)
+                    assert comm.allgather(int(code))==[expected]*comm.size,(name,code)
+                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    admission_cases.append('coordinates-'+name)
+            if '--semantic-admission' in sys.argv:
+                specifications=[
+                    ('propagator', "&propagation\n propagator='unsupported'\n/",1010),
+                    ('source-support', "&functional\n exx_ace_support='source'\n/",1011),
+                    ('finite-range', "&functional\n hse_sr_tolerance=0.1\n/",1012),
+                    ('yn-maxwell', "maxwell:yn_wf_em='z'",1013),
+                    ('yn-symmetry', "system:yn_symmetry='nyz'",1013),
+                    ('yn-dc', "&dc\n yn_dc_lcfo_diag='z'\n/",1013)]
+                for name,settings,expected in specifications:
+                    if comm.rank==0:
+                        text=(self.directory/'inputfile').read_text()
+                        if ':' in settings:
+                            group,entry=settings.split(':',1)
+                            text=text.replace('&'+group,'&'+group+'\n '+entry,1)
+                        else:text+='\n'+settings+'\n'
+                        (self.directory/'semantic-rejected-input').write_text(text)
+                    comm.Barrier()
+                    code=original_call(self,function,b'semantic-rejected-input',count,indices)
+                    assert comm.allgather(int(code))==[expected]*comm.size,(name,code)
+                    if inspect_mpi:assert mpi_counts()[:2]==[0,0]
+                    admission_cases.append('semantic-'+name)
+                if comm.rank==0:
+                    text=(self.directory/'inputfile').read_text()
+                    (self.directory/'inputfile').write_text(text.replace('&maxwell',"&maxwell\n yn_wf_em='N'",1))
+                comm.Barrier()
+
+
         return original_call(self,function,*args)
-    with patch.object(NativeEHField,'_call',admission_call) if '--admission' in sys.argv or '--parsed-admission' in sys.argv or '--malformed-admission' in sys.argv else patch.object(NativeEHField,'_call',original_call):
+    with patch.object(NativeEHField,'_call',admission_call) if '--admission' in sys.argv or '--parsed-admission' in sys.argv or '--malformed-admission' in sys.argv or '--unit-admission' in sys.argv or '--coordinate-admission' in sys.argv or '--semantic-admission' in sys.argv else patch.object(NativeEHField,'_call',original_call):
         f=NativeEHField(ctx,calc,build,out/'field',points={1:(20,20,20)},grid=(1,comm.size,1))
     if inspect_mpi:
         mpi_initialized=mpi_counts();assert mpi_initialized[0]>0

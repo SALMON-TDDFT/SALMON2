@@ -188,7 +188,10 @@ end function
     ! Own parser files locally; a parsed-but-unsupported request is retryable.
     call read_input(trim(filename),parser,admission)
     call comm_get_max(admission,nproc_group_global)
-    if(admission/=0)return
+    if(admission/=0)then
+      sp_eh_init=admission
+      return
+    endif
     admission=0
     if(theory/='maxwell'.or.yn_restart/='n') admission=1
     call comm_get_max(admission,nproc_group_global)
