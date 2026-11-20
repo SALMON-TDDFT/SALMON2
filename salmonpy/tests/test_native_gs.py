@@ -97,6 +97,13 @@ class NativeGSTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'full mesh'):session.run(hybrid)
             kspace_lib.sp_gs_hse_kspace_protocol.assert_called_once()
             kspace_lib.sp_gs_create.assert_not_called()
+            from salmonpy.dft import SymmetryOperations
+            operations=np.zeros((1,3,4));operations[0,:,:3]=np.eye(3)
+            kspace_lib.sp_gs_hse_kspace_protocol.return_value=1
+            with self.assertRaisesRegex(ValueError,'full mesh'):
+                session.run(replace(hybrid,symmetry=SymmetryOperations(operations,directions='yyn')))
+            kspace_lib.sp_gs_create.assert_not_called()
+
 
 
             malformed=json.loads(receipt.read_text());malformed.pop('gs_abi');receipt.write_text(json.dumps(malformed))

@@ -3760,7 +3760,7 @@ contains
     native_kspace_scf=comm_is_attached().and.xc=='hse06'.and.theory=='dft'.and. &
       product(num_kgrid)>1.and.nproc_ob==1.and.yn_hse_wannier=='n'.and. &
       yn_dc=='n'.and.yn_md=='n'.and.yn_opt=='n'.and.temperature<0d0.and. &
-      index(yn_symmetry,'y')==0.and.trim(file_kw)=='none'.and.exx_kpoint_backend=='cpu'.and. &
+      trim(file_kw)=='none'.and.exx_kpoint_backend=='cpu'.and. &
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.all(hse_q_reduction==1)
 #endif
     hybrid_spatial_scf=(is_hybrid(xc)).and.theory=='dft'.and. &

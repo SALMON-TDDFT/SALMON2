@@ -61,7 +61,7 @@ int sp_gs_hse_orbital_protocol(void);
  * Explicit full-support CPU Gamma profile, selected on both hosts including1 rank.
  * Spatial-repartition2 additionally maps dense ACE/workspace physical grid rows. */
 int sp_gs_hse_spatial_protocol(void);
-/* Explicit CPU full-mesh SCF bridge: local accepted rows, replicated FFT scratch. */
+/* CPU SCF bridge: local rows, replicated FFT scratch. 1=full k, 2=full/reduced k. */
 int sp_gs_hse_kspace_protocol(void);
 /* Spatial repartition1: ordinary XC;2 also dense full-support Gamma HSE.
  * boxes is 6*old_size integers:

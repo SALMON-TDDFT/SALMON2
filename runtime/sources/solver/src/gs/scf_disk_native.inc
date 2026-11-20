@@ -508,7 +508,7 @@ end subroutine
 
 integer(c_int) function sp_gs_hse_kspace_protocol() bind(C)
 #ifdef USE_HSE
- sp_gs_hse_kspace_protocol=1
+ sp_gs_hse_kspace_protocol=2
 #else
  sp_gs_hse_kspace_protocol=0
 #endif
@@ -589,7 +589,7 @@ integer(c_int) function scf_grid_repartition(token,path,old_size,boxes,tiles) re
 #ifdef USE_HSE
  case('hse06')
   if(.not.ctx%hse_bound)status=15
-  if(.not.ctx%hse%orbital_scf.and.(ctx%system%nk<=1.or.ctx%info%isize_o/=1))status=15
+  if(.not.ctx%hse%orbital_scf.and.(product(ctx%system%kmesh)<=1.or.ctx%info%isize_o/=1))status=15
 #endif
  case default
   status=15
@@ -750,6 +750,9 @@ integer(c_int) function scf_grid_repartition(token,path,old_size,boxes,tiles) re
   value%hse%initial_ace%metric_comm=ctx%info%icomm_r
   value%hse%midpoint_ace%metric_comm=ctx%info%icomm_r
   value%hse%spatial%gauge_tiles%comm=ctx%info%icomm_ro
+  if(allocated(value%hse%native_symmetry%cached_phase))deallocate(value%hse%native_symmetry%cached_phase)
+  if(allocated(value%hse%native_symmetry%phase_offset))deallocate(value%hse%native_symmetry%phase_offset)
+  value%hse%native_symmetry%cached_first=1;value%hse%native_symmetry%cached_count=0
  endif
 #endif
  call move_alloc(value,ctx%scf_pending)

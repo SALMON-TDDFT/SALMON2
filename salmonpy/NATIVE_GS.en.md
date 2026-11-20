@@ -1203,10 +1203,10 @@ spatial HSE and ordinary-XC controls verify the retained arithmetic.
 
 Select `NativeGSBackend(..., decomposition=(K,1,X,Y,Z), hse_kspace=True)` on
 both hosts, including a one-rank source. The explicit runtime must declare
-`sp_gs_hse_kspace_protocol()==1`; changed-layout restore additionally requires
+`sp_gs_hse_kspace_protocol()` version1 or2; changed-layout restore additionally requires
 `sp_gs_scf_m_repartition_protocol()==3`. Use a fixed full uniform k mesh with
 more than one point, CPU, scalar full occupied spin pairs and an orthogonal
-cell. Symmetry reduction and orbital splitting belong to other profiles.
+cell. Symmetry reduction requires compute2 below; orbital splitting remains separate.
 Do not set hse_spatial/hse_orbital or request the Gamma Wannier exchange path.
 
 Accepted wavefunctions, dense ACE/cache rows and SCF/mixing history remain local.
@@ -1230,3 +1230,30 @@ Fresh-process controls cover2↔4,2→1,4→8,changed-axis4→4 and a PBE pre-st
 zero; five new iterations match source-initialized continuous8 within unchanged
 rtol1e-9/atol1e-10. Late donor failure preserves originals and source files.
 These are execution regressions, not physical convergence certification.
+
+### Symmetry-reduced k × spatial SCF bridge
+
+`hse_kspace=True` with compute protocol2 additionally accepts the existing
+`DFT(..., symmetry=SymmetryOperations(...))` inputs. Keep the underlying uniform
+physical k mesh and exact symmetry asset/weights fixed between saving and
+restoring. Use one/two k groups and no orbital splitting. Source and target may
+change Cartesian space and k layout through mixed-repartition3.
+
+Local boxes are checked against the global cell, spacing and grid count; full
+exchange scratch uses the existing symmetry/star expansion. Restored accepted
+wavefunctions/ACE and SCF histories are copied by representative index and grid
+row. Only rank-specific geometric phase caches are invalidated, as in pure-k
+migration; electronic evolution and SCF are not replayed. The same replicated
+exchange FFT memory/communication caveat applies.
+
+The example combines `--xc hse06 --hse-kspace --symmetry c2z` with
+`--decomposition K 1 X Y Z`, `--save-scf` or `--restart ... --repartition`.
+Use a new output directory. Neither this feature nor restart agreement certifies
+a material's k/grid/SCF convergence.
+
+Reduced-k controls cover2↔4,2→1,4→8,changed-axis4→4 and a pre-PBE2→4 cut.
+Accepted physical wave/density interiors are exact, bootstrap SCF work is zero,
+and five new iterations agree with source-initialized continuous8 within the
+existing rtol1e-9/atol1e-10. Late donor read failures preserve originals/files.
+Different-input protected owners agree exactly after failure/continue/retry;
+previous pure reduced-k and full-k/Gamma/ordinary controls retain their results.

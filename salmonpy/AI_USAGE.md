@@ -881,10 +881,17 @@ continue_scfする。再初期化した波動関数や交換作用で置き換�
 異なるruntime間の移行まで対応したと解釈しない。詳細はNATIVE_GS日英ガイド。
 
 高速PR版HSEの全k点×空間SCF接続は、両側でhse_kspace=Trueと
-decomposition=(K,1,X,Y,Z)を明示する。compute sp_gs_hse_kspace_protocol1と
+decomposition=(K,1,X,Y,Z)を明示する。compute sp_gs_hse_kspace_protocol1/2と
 mixed-repartition3を要求する。全一様k格子・CPU・完全占有スピン対・直交セル、
 対称性縮約／軌道分割なし。hse_spatial／hse_orbitalやΓ点Wannier入力と混ぜない。
 受理済み状態は空間局所だが、交換更新の全格子FFT作業は空間ランクで複製される。
 メモリ削減や交換FFTの空間高速化と説明しない。既存の高速k点カーネルを使い、
 低速HSEには戻さない。再開はrun(restart=...,repartition=True)、過去SCF／交換の
 再計算0を確認する。サンプルは--xc hse06 --hse-kspace --decomposition K 1 X Y Z。
+
+HSE縮約k点×空間SCFはhse_kspace=Trueの計算protocol2を要求する。
+既存のSymmetryOperationsと固定した元の一様k格子・代表点／重みを使い、
+k群1/2・軌道分割なし。再開はmixed-repartition3。局所格子の整合検査を省かず、
+格子行／代表点スライスと混合履歴を直接移す。無効化される幾何学的位相キャッシュを、
+電子状態の再計算と混同しない。交換FFT作業は空間ランクに複製される。
+サンプルは--hse-kspace --symmetry c2zと明示decompositionを併用する。

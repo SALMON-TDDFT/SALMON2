@@ -272,7 +272,7 @@ contains
         exx_local_backend=='cpu'.and.exx_pair_screening=='off'
     endif
     kspace_gs=theory=='dft'.and.product(system%kmesh)>1.and.info%isize_o==1.and. &
-      .not.system%kpoint_input%use_symmetry.and.yn_hse_wannier=='n'.and. &
+      yn_hse_wannier=='n'.and. &
       maxval(abs(offdiag))<=1d-12
     ok=system_functional(system)=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
       yn_dc=='n'.and.(yn_hse_wannier=='n'.or.orbital_gs).and.temperature<0d0.and. &
@@ -377,18 +377,34 @@ contains
       return
     end select
   end subroutine exx_validate_vector_potential
-  logical function owned_symmetry_grid_matches(system,mg) result(ok)
+  logical function owned_symmetry_grid_matches(system,mg,info) result(ok)
     type(s_dft_system),intent(in)::system
     type(s_rgrid),intent(in)::mg
-    integer(int64)::points
+    type(s_parallel_info),optional,intent(in)::info
+    integer(int64)::points,extent
     real(8)::scale,ratio
-    integer::i,j
+    integer::i,j,n(3),dims(3),coords(3)
     ok=.false.
     if(system%ngrid<1.or.any(mg%num<1))return
+    n=mg%num
+    if(present(info))then
+      if(theory=='dft'.and.product(system%kmesh)>1.and.info%isize_r>1)then
+        if(info%isize_o/=1)return
+        dims=[info%isize_x,info%isize_y,info%isize_z]
+        coords=[info%id_x,info%id_y,info%id_z]
+        if(any(dims<1).or.any(coords<0).or.any(coords>=dims))return
+        do i=1,3
+          extent=int(mg%num(i),int64)*int(dims(i),int64)
+          if(extent>int(huge(0),int64))return
+          n(i)=int(extent)
+          if(mg%is(i)/=1+coords(i)*mg%num(i).or.mg%ie(i)/=mg%is(i)+mg%num(i)-1)return
+        enddo
+      endif
+    endif
     points=1_int64
     do i=1,3
-      if(int(mg%num(i),int64)>int(system%ngrid,int64)/points)return
-      points=points*int(mg%num(i),int64)
+      if(int(n(i),int64)>int(system%ngrid,int64)/points)return
+      points=points*int(n(i),int64)
     enddo
     if(points/=int(system%ngrid,int64))return
     do i=1,3
@@ -401,7 +417,7 @@ contains
       if(scale<=0d0)return
       ratio=(scale/system%hgs(i))*sqrt(sum((system%primitive_a(:,i)/scale)**2))
       if(.not.ieee_is_finite(ratio))return
-      if(abs(ratio-dble(mg%num(i)))>1d-4)return
+      if(abs(ratio-dble(n(i)))>1d-4)return
     enddo
     ok=.true.
   end function owned_symmetry_grid_matches
@@ -1316,7 +1332,7 @@ contains
     endif
     if(exx_state_owner%native_resources_enabled)then
       if(system%kpoint_input%use_symmetry)then
-        if(.not.owned_symmetry_grid_matches(system,mg))then
+        if(.not.owned_symmetry_grid_matches(system,mg,info))then
           if(present(rt_status))then
             rt_status=2;return
           endif
@@ -1358,7 +1374,7 @@ contains
       endif
       return
     endif
-    if(theory=='dft'.and.system%nk>1.and.info%isize_r>1.and. &
+    if(theory=='dft'.and.product(system%kmesh)>1.and.info%isize_r>1.and. &
        exx_state_owner%native_resources_enabled)then
       call refresh_kspace(system,mg,info,psi,exx_state_owner)
       return
@@ -1923,7 +1939,7 @@ contains
     endif
     if(exx_state_owner%native_resources_enabled)then
       if(system%kpoint_input%use_symmetry)then
-        if(.not.owned_symmetry_grid_matches(system,mg))then
+        if(.not.owned_symmetry_grid_matches(system,mg,info))then
           if(present(rt_status))then
             rt_status=2;return
           endif
