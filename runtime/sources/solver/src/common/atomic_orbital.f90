@@ -19,6 +19,7 @@
 
 module atomic_orbital
 
+  use filesystem,only:resolve_path
   implicit none
 
   private
@@ -115,7 +116,7 @@ contains
       do il = 0, pp%mlps(ik) !!DEBUG
         c_l = sqrt((2d0*il+1d0)/(4d0*pi)) !!DEBUG
         write(filename, '(a,i0,a,i0,a)') 'upp', ik, '_', il, '.txt' !!DEBUG
-        open(99, file=trim(filename), action='write') !!DEBUG
+        open(99, file=resolve_path(trim(filename)), action='write') !!DEBUG
         do ir = 1, pp%nrmax - 1 !!DEBUG
           r_i = pp%rad(ir, ik) !!DEBUG
           u_l = pp%upptbl_ao_l(ir, il, ik) * r_i**(il+1) / c_l !!DEBUG

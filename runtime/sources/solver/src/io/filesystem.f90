@@ -25,6 +25,9 @@ module filesystem
   public :: atomic_create_directory ! for multi process
 
   public :: get_filehandle
+  public :: resolve_path,sp_io_directory_protocol,sp_io_directory_enter,sp_io_directory_leave
+  character(:),allocatable,save,private :: io_root
+
   public :: open_filehandle
 
 private
@@ -62,6 +65,46 @@ interface
 end interface
 
 contains
+  integer(c_int) function sp_io_directory_protocol() bind(C)
+    sp_io_directory_protocol=3
+  end function
+
+  integer(c_int) function sp_io_directory_enter(directory) bind(C) result(status)
+    character(c_char),intent(in) :: directory(*)
+    character(4096) :: path
+    integer :: i
+    integer(c_int) :: exists
+    status=11
+    if(allocated(io_root))return
+    path=''
+    do i=1,len(path)
+      if(directory(i)==c_null_char)exit
+      path(i:i)=directory(i)
+    enddo
+    if(i>len(path).or.len_trim(path)==0)return
+    if(path(1:1)/='/')return
+    call posix_directory_exists(trim(path)//c_null_char,exists)
+    if(exists/=1)then
+      status=4;return
+    endif
+    io_root=trim(path)
+    if(io_root(len(io_root):)/='/')io_root=io_root//'/'
+    status=0
+  end function
+
+  subroutine sp_io_directory_leave() bind(C)
+    if(allocated(io_root))deallocate(io_root)
+  end subroutine
+
+  function resolve_path(path) result(resolved)
+    character(*),intent(in) :: path
+    character(:),allocatable :: resolved
+    resolved=trim(path)
+    if(.not.allocated(io_root).or.len_trim(path)==0)return
+    if(path(1:1)=='/')return
+    resolved=io_root//trim(path)
+  end function
+
   ! filepath: file path (relative or absolute)
   ! result: .true.  = file exists
   !         .false. = file not exists
@@ -70,7 +113,7 @@ contains
     character(*), intent(in) :: filepath
     logical :: ret
     integer(c_int) :: retcode
-    call posix_file_exists(adjustl(trim(filepath))//c_null_char, retcode)
+    call posix_file_exists(resolve_path(adjustl(trim(filepath)))//c_null_char, retcode)
     ret = (retcode == 1) ! success
   end function
 
@@ -82,7 +125,7 @@ contains
     character(*), intent(in) :: dirpath
     logical :: ret
     integer(c_int) :: retcode
-    call posix_directory_exists(adjustl(trim(dirpath))//c_null_char, retcode)
+    call posix_directory_exists(resolve_path(adjustl(trim(dirpath)))//c_null_char, retcode)
     ret = (retcode == 1) ! success
   end function
 
@@ -93,7 +136,7 @@ contains
     integer, intent(out), optional :: iret
     integer(c_int) :: retcode
     if (.not. directory_exists(dirpath)) then
-      call posix_mkdir(adjustl(trim(dirpath))//c_null_char, retcode)
+      call posix_mkdir(resolve_path(adjustl(trim(dirpath)))//c_null_char, retcode)
       if (present(iret)) then
         iret = retcode
       else
@@ -110,7 +153,7 @@ contains
     character(*), intent(in) :: filepath
     integer(c_int) :: retcode
     if (file_exists(filepath)) then
-      call stdio_remove(adjustl(trim(filepath))//c_null_char, retcode)
+      call stdio_remove(resolve_path(adjustl(trim(filepath)))//c_null_char, retcode)
       if (retcode /= 0) then
         stop 'fail: remove_file'
       end if
@@ -126,7 +169,7 @@ contains
     character(*), intent(in) :: dirpath
     integer(c_int) :: retcode
     if (directory_exists(dirpath)) then
-      call stdio_remove(adjustl(trim(dirpath))//c_null_char, retcode)
+      call stdio_remove(resolve_path(adjustl(trim(dirpath)))//c_null_char, retcode)
       if (retcode /= 0) then
         stop 'fail: remove_directory'
       end if
@@ -147,7 +190,7 @@ contains
     if (file_exists(entry_path)) then
       call remove_file(entry_path)
     else if (directory_exists(entry_path)) then
-      call posix_remove_directory_tree(entry_path, retcode)
+      call posix_remove_directory_tree(resolve_path(entry_path)//c_null_char, retcode)
       if (retcode /= 0) then
         stop 'fail: force_remove: check file or directory'
       end if
@@ -210,7 +253,7 @@ contains
     endif
 
     fh = get_filehandle()
-    open(unit=fh, file=trim(file), status=trim(my_status))
+    open(unit=fh, file=resolve_path(trim(file)), status=trim(my_status))
   end function open_filehandle
 
 end module filesystem

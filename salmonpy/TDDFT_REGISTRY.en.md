@@ -122,3 +122,12 @@ closeable owners in SolverContext.group_resources, released in insertion order
 after states and material factories. All subgroup ranks must register resources
 and enter callbacks in matching order. Different-input built-in fast-PR HSE
 models still require separate groups.
+
+## Host working directory
+
+Runtimes with directory scope2/3 avoid host chdir during registration, state
+creation, stepping, direct checkpoints and close. The native resolver uses each
+model/state work folder for relative files and releases the scope after exceptions
+or rank-local admission failure. Older runtimes, including scope1, retain the
+legacy switch. Main-thread sequential calls remain required. Numerical checkpoint
+fields and update order are unchanged.

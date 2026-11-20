@@ -18,7 +18,10 @@
 #include "config.h"
 
 module salmonpy_gs_context
+  use filesystem,only:resolve_path
 use iso_c_binding
+use timer,only:s_timer_context,timer_context_swap,timer_context_get,timer_initialize, &
+ LOG_TOTAL,LOG_INIT_GS,LOG_GS_ITERATION,LOG_WRITE_GS_RESULTS
 use structures
 use salmonpy_model_inputs,only:s_model_inputs
 use salmonpy_gs_seed,only:s_gs_seed
@@ -74,6 +77,7 @@ end type
 integer(c_int64_t),save :: scf_snapshot_serial=0
 type s_gs_context
  private
+ type(s_timer_context)::timers
  logical::active=.false.,imported=.false.,scf_capable=.false.
  integer :: initializations=0,executed_iterations=0
  type(s_scf_snapshot_slot),allocatable :: scf_snapshots(:)
@@ -438,7 +442,7 @@ endif
 ! Scalar bridge reports mirror native values without changing SCF arithmetic.
 if(theory=='dft'.and.yn_opt=='n'.and.yn_md=='n'.and.yn_dc=='n')then
  if(comm_is_root(nproc_id_global))then
-  open(newunit=gs_status_unit,file='gs_status.dat',status='replace')
+  open(newunit=gs_status_unit,file=resolve_path('gs_status.dat'),status='replace')
   write(gs_status_unit,'(a)')'SALMONPY_GS_V1'
   write(gs_status_unit,*)merge(1,0,ctx%converged),Miter
   write(gs_status_unit,'(3es26.17e3)')sum1,selected%threshold,ctx%energy%E_tot
@@ -480,7 +484,7 @@ end if
      call calc_force(ctx%system,ctx%pp,ctx%fg,ctx%info,ctx%mg,ctx%stencil,ctx%poisson,ctx%srg,ctx%ppg,ctx%spsi,ctx%ewald,ctx%Vxc)
      if(comm_is_root(nproc_id_global))then
         if(theory=='dft'.and.yn_opt=='n'.and.yn_md=='n')then
-         open(newunit=force_status_unit,file='gs_forces.dat',status='replace')
+         open(newunit=force_status_unit,file=resolve_path('gs_forces.dat'),status='replace')
          write(force_status_unit,'(a)')'SALMONPY_FORCES_V1'
          write(force_status_unit,*)natom
          do iatom=1,natom
@@ -842,6 +846,7 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
  integer(c_int64_t),value::token
  integer(c_int),value::steps
  type(s_model_inputs)::previous
+ type(s_timer_context)::host_timers
  type(s_hse_symmetry_workspace)::previous_symmetry
  type(s_hse_density_workspace)::previous_density_symmetry
  integer::index,status,old_iter,group,rank,nproc,reference_steps,restore_status
@@ -878,6 +883,9 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
   ! Avoid overflow; an oversized budget simply reaches the original total cap.
   ctx%mixing%scf_progress%stop_after=ctx%iterations+min(steps, &
     ctx%system%gs_input%max_iterations-ctx%iterations)
+  call timer_context_swap(host_timers)
+  call timer_context_swap(ctx%timers)
+  call timer_initialize
   call timer_begin(LOG_TOTAL)
   call timer_enable_sub
   call timer_begin(LOG_GS_ITERATION)
@@ -897,6 +905,8 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
   call timer_end(LOG_GS_ITERATION)
   call timer_disable_sub
   call timer_end(LOG_TOTAL)
+  call timer_context_swap(ctx%timers)
+  call timer_context_swap(host_timers)
   calc_mode=old_mode
   call swap_hse_density_workspace(ctx%density_symmetry)
   call swap_hse_symmetry_workspace(ctx%symmetry)
@@ -1127,6 +1137,7 @@ integer(c_int) function create_gs(path,token,reading_only,steps)
  character(c_char),intent(in)::path(*)
  integer(c_int64_t),intent(out)::token
  type(s_input_parser)::parser
+ type(s_timer_context)::host_timers
  type(s_hse_symmetry_workspace)::old_symmetry
  type(s_hse_density_workspace)::old_density_symmetry
  type(s_gs_context),pointer::candidate
@@ -1179,11 +1190,16 @@ integer(c_int) function create_gs(path,token,reading_only,steps)
   endif
   candidate%mixing%scf_progress%stop_after=steps
  endif
+ call timer_context_swap(host_timers)
+ call timer_context_swap(candidate%timers)
+ call timer_initialize
  if(present(steps))then
   call gs_run(candidate,status,import_only=reading_only,disk_bootstrap=steps==0)
  else
   call gs_run(candidate,status,import_only=reading_only)
  endif
+ call timer_context_swap(candidate%timers)
+ call timer_context_swap(host_timers)
  call swap_hse_density_workspace(candidate%density_symmetry)
  call swap_hse_symmetry_workspace(candidate%symmetry)
  calc_mode=previous_mode
@@ -1215,6 +1231,21 @@ integer(c_int) function create_gs(path,token,reading_only,steps)
  gs_handles(index)%context=>candidate
  gs_handles(index)%token=token
  create_gs=0
+end function
+integer(c_int) function sp_gs_timer_protocol() bind(C)
+ sp_gs_timer_protocol=1
+end function
+integer(c_int) function sp_gs_timers(token,seconds) bind(C) result(status)
+ integer(c_int64_t),value :: token
+ real(c_double),intent(out) :: seconds(4)
+ integer :: index
+ seconds=0d0
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ associate(owner=>gs_handles(index)%context%timers)
+  seconds=[timer_context_get(owner,LOG_TOTAL),timer_context_get(owner,LOG_INIT_GS), &
+           timer_context_get(owner,LOG_GS_ITERATION),timer_context_get(owner,LOG_WRITE_GS_RESULTS)]
+ end associate
 end function
 integer(c_int) function sp_gs_info(token,stats,values) bind(C)
  integer(c_int64_t),value::token

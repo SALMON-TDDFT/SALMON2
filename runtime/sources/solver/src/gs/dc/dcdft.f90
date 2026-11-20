@@ -16,6 +16,7 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 #include "config.h"
 module dcdft
+  use filesystem,only:resolve_path
   implicit none
 contains
 
@@ -335,7 +336,7 @@ contains
       if(comm_is_root(dc%id_frag)) then
         filename = trim(directory)//'atomic_coor.txt'
         iu = get_filehandle()
-        open(iu, file=filename, status='replace')
+        open(iu, file=resolve_path(filename), status='replace')
         do ia = 1,natom
           write(iu,1000) trim(pp%atom_symbol(kion(ia))), rion(1:3,ia)*ulength_from_au, kion(ia)
         end do
@@ -370,7 +371,7 @@ contains
       filename = trim(base_directory)//trim(file_atom_coor_frag)
       
       if(comm_is_root(dc%id_frag)) then
-        open(iu, file=filename, status="old")
+        open(iu, file=resolve_path(filename), status="old")
         counter = 0
         do
           read(iu,'()',end=100)
@@ -385,7 +386,7 @@ contains
       allocate(rion(3,natom),kion(natom))
       
       if(comm_is_root(dc%id_frag)) then
-        open(iu, file=filename, status="old")
+        open(iu, file=resolve_path(filename), status="old")
         rewind(iu)
         do ia = 1,natom
           read(iu,*) cbuf, Rion(1:3,ia), kion(ia)

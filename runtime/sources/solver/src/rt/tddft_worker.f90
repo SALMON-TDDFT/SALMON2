@@ -1,6 +1,7 @@
 #include "config.h"
 ! Optional SALMONpy process-isolated endpoint-A protocol; ordinary runs are unchanged.
 module tddft_worker
+  use filesystem,only:resolve_path
   implicit none
   private
   public :: worker_requested, worker_configure, worker_initial_A, worker_next_A, worker_reply
@@ -70,7 +71,7 @@ contains
       error stop 'SALMONpy TDDFT worker does not support projection/unfolding'
     if(write_rt_wfn_k/='n') &
       error stop 'SALMONpy TDDFT worker does not support RT wavefunction checkpoints'
-    inquire(file='hubbard_param.dat',exist=plus_u_file)
+    inquire(file=resolve_path('hubbard_param.dat'),exist=plus_u_file)
     if(plus_u_file) error stop 'SALMONpy TDDFT worker does not support +U inputs'
     if(len_trim(sysname)==0.or.index(sysname,'/')/=0.or.index(sysname,achar(92))/=0.or. &
        index(sysname,':')/=0.or.index(sysname,'..')/=0) error stop 'SALMONpy: sysname must be a filename stem'

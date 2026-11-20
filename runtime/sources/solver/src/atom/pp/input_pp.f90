@@ -15,6 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module input_pp_sub
+  use filesystem,only:resolve_path
   implicit none
 
   private :: scale_pseudo_wavefunctions
@@ -91,7 +92,7 @@ subroutine input_pp(pp,hx,hy,hz)
         pp%has_proj_pp(ik)=.true.
       case('UPF')
         if( index(ps_file,'paw')>0 .or. index(ps_file,'PAW')>0 )then
-          open(4,file=ps_file,status='old')
+          open(4,file=resolve_path(ps_file),status='old')
           call read_paw_upf(4,pp,ik)
           close(4)
         else
@@ -275,8 +276,8 @@ subroutine input_pp(pp,hx,hy,hz)
       end if
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
 
-      open(4,file=trim(pp%input_config%base_directory)//"PS_"//trim(pp%atom_symbol(ik))//"_"// &
-        trim(pp%ps_format(ik))//"_"//trim(pp%input_config%yn_psmask)//".dat")
+      open(4,file=resolve_path(trim(pp%input_config%base_directory)//"PS_"//trim(pp%atom_symbol(ik))//"_"// &
+        trim(pp%ps_format(ik))//"_"//trim(pp%input_config%yn_psmask)//".dat"))
       write(4,*) "# Mr=",pp%mr(ik)
       write(4,*) "# Rps(ik), NRps(ik)",pp%rps(ik), pp%nrps(ik)
       write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)
@@ -370,7 +371,7 @@ subroutine read_ps_ky(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
 
   rhor_nlcc=0d0
   flag_nlcc_element(ik)=.false.
-  open(4,file=ps_file,status='old')
+  open(4,file=resolve_path(ps_file),status='old')
   read(4,*) pp%mr(ik),step,pp%mlps(ik),rzps
   read(4,'(a)')header_line
   if(trim(header_line)=='KY_SOC_NLCC_V1'.or.trim(header_line)=='KY_SOC_NLCC_V2')then
@@ -437,7 +438,7 @@ subroutine read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
  integer,allocatable::ls(:),js(:)
  real(8),allocatable::wave(:,:),potential(:,:),vl(:),beta(:),occupation(:)
  if(pp%input_config%yn_spinorbit/='y') error stop 'KY_SOC_NLCC requires yn_spinorbit=y'
- open(newunit=unit,file=ps_file,status='old',action='read')
+ open(newunit=unit,file=resolve_path(ps_file),status='old',action='read')
  read(unit,*,iostat=ios)n,h,lm,zval
  if(ios/=0) error stop 'KY_SOC_NLCC invalid header'
  if(n<4.or.n>pp%nrmax0.or.n+2>size(pp%rad,1).or.lm<0.or.lm>pp%lmax0.or.lm>pp%lmax) &
@@ -571,7 +572,7 @@ subroutine read_ps_abinit(pp,rrc,ik,ps_file)
   real(8) :: e99_0,e99_9,nproj,rcpsp,rms,ekb1,ekb2,epsatm,rchrg,fchrg,qchrg
   character(1) :: dummy_text
 
-  open(4,file=ps_file,status='old')
+  open(4,file=resolve_path(ps_file),status='old')
   read(4,*) dummy_text
   read(4,*) zatom, pp%zion, pspdat
   rzps = pp%zion
@@ -634,7 +635,7 @@ subroutine read_ps_abinitfhi(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
 
   rrc_mat(0:pp%lmax,0:pp%lmax)=-1.d0
 
-  open(4,file=ps_file,status='old')
+  open(4,file=resolve_path(ps_file),status='old')
   if (.not. pp%input_config%quiet) &
   write(*,*) '===================Header of ABINITFHI pseudo potential==================='
   do i=1,7
@@ -726,7 +727,7 @@ subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
 
   pp%flag_beta_proj_is_given = .true.
 
-  open(4,file=ps_file,status='old')
+  open(4,file=resolve_path(ps_file),status='old')
 ! header
   read(4,*) dummy_text
   read(4,*) zatom, pp%zion, pspdat
@@ -843,7 +844,7 @@ subroutine read_ps_fhi(pp,rrc,ik,ps_file)
 
   rrc_mat(0:pp%lmax,0:pp%lmax)=-1.d0
 
-  open(4,file=ps_file,status='old')
+  open(4,file=resolve_path(ps_file),status='old')
   read(4,*) rzps,pp%mlps(ik)
   pp%zps(ik)=int(rzps+1d-10)
   pp%mlps(ik) = pp%mlps(ik)-1
@@ -912,7 +913,7 @@ subroutine read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
 
   pp%flag_beta_proj_is_given = .true.
 
-  open(4,file=ps_file,status="old")
+  open(4,file=resolve_path(ps_file),status="old")
 
   pp%nproj(:,ik)=0
 
@@ -1141,7 +1142,7 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
     end do
   end if
 
-  open(4,file="PSbeforemask_"//trim(pp%atom_symbol(ik))//"_"//trim(pp%ps_format(ik))//".dat")
+  open(4,file=resolve_path("PSbeforemask_"//trim(pp%atom_symbol(ik))//"_"//trim(pp%ps_format(ik))//".dat"))
   write(4,*) "# Mr =",pp%mr(ik)
   write(4,*) "# Rps(ik), NRps(ik)",pp%rps(ik), pp%nrps(ik)
   write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)
@@ -1163,7 +1164,7 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
 
   call ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
 
-  open(4,file="PSaftermask_"//trim(pp%atom_symbol(ik))//"_"//trim(pp%ps_format(ik))//".dat")
+  open(4,file=resolve_path("PSaftermask_"//trim(pp%atom_symbol(ik))//"_"//trim(pp%ps_format(ik))//".dat"))
   write(4,*) "# Mr =",pp%mr(ik)
   write(4,*) "# Rps(ik), NRps(ik)",pp%rps(ik), pp%nrps(ik)
   write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)
@@ -1660,7 +1661,7 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
     end do
   end do
 
-  open(4,file="PSFourier_"//trim(pp%atom_symbol(ik))//"_"//trim(pp%ps_format(ik))//".dat")
+  open(4,file=resolve_path("PSFourier_"//trim(pp%atom_symbol(ik))//"_"//trim(pp%ps_format(ik))//".dat"))
   write(4,*) "# Kmax, NKmax =",kmax,nkmax
   write(4,*) "# Mlps(ik), Lref(ik) =",pp%mlps(ik), pp%lref(ik)
   write(4,*) "#  Pi/max(Hx,Hy,Hz) =", pi/max(Hx,Hy,Hz)
@@ -1772,7 +1773,7 @@ subroutine make_mask_function(pp,rmask,dmask,ik)
   end do
   nmask0 = nmask0/nmask0
 
-  open(4,file="nmask.dat")
+  open(4,file=resolve_path("nmask.dat"))
   write(4,*) "# M =",M
   write(4,*) 0,nmask0
   do i= 1,M
@@ -1794,7 +1795,7 @@ subroutine make_mask_function(pp,rmask,dmask,ik)
     nmask_k(i) = nmask_k(i)*dx/k(i)**2
   end do
 
-  open(4,file="nmask_k.dat")
+  open(4,file=resolve_path("nmask_k.dat"))
   write(4,*) 0,  3.d0*nmask_k(1) - 3.d0*nmask_k(2) + nmask_k(3)
   do i= 1,M
     write(4,*) k(i),nmask_k(i)
@@ -1822,7 +1823,7 @@ subroutine make_mask_function(pp,rmask,dmask,ik)
    rmask(i3)=  rmask(i2)+( rmask(i2)- rmask(i1))/(pp%rad(i2,ik)-pp%rad(i1,ik))*(pp%rad(i3,ik)-pp%rad(i2,ik))
   dmask(i3)= dmask(i2)+(dmask(i2)-dmask(i1))/(pp%rad(i2,ik)-pp%rad(i1,ik))*(pp%rad(i3,ik)-pp%rad(i2,ik))
 
-  open(4,file="mask.dat")
+  open(4,file=resolve_path("mask.dat"))
   write(4,*) "# rps(ik), nrps(ik) =",pp%rps(ik), pp%nrps(ik)
   do i= 1,pp%nrps(ik)
     write(4,'(8e22.10)') pp%rad(i,ik),rmask(i),dmask(i)

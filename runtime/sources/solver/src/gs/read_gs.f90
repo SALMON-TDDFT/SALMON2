@@ -15,6 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module read_gs
+  use filesystem,only:resolve_path
   implicit none
 
 contains
@@ -38,7 +39,7 @@ subroutine read_dns_cube(lg,mg,system,info,rho,rho_s)
   
   if(comm_is_root(info%id_rko))then
     write(*,*) "method_init_density=read_dns_cube: read density from dns.cube"
-    open(fp,file=filename,status='old')
+    open(fp,file=resolve_path(filename),status='old')
     read(fp,*)
     read(fp,*)
     read(fp,*) iatom
@@ -119,7 +120,7 @@ subroutine read_wfn(lg,mg,psi,info,system)
 
   if(comm_is_root(nproc_id_global))then
     write(*,*) "read GS wavefunction wfn.bin"
-    open(fp,file=filename,form='unformatted')
+    open(fp,file=resolve_path(filename),form='unformatted')
     read(fp) ix,iy,iz,io,ik
     if(ix/=lg%num(1) .or. iy/=lg%num(2) .or. iz/=lg%num(3)) stop "error @ read_wfn: array size"
     if(io < no) stop "error @ read_wfn: # of orbitals"
@@ -216,7 +217,7 @@ subroutine write_wfn(lg,mg,psi,info,system)
 
   if(comm_is_root(nproc_id_global))then
     write(*,*) "write GS wavefunction wfn.bin"
-    open(fp,file=filename,form='unformatted')
+    open(fp,file=resolve_path(filename),form='unformatted')
     write(fp) lg%num(1),lg%num(2),lg%num(3),no,nk
     write(fp) system%vec_k
     write(fp) tmp2

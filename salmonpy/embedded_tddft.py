@@ -232,14 +232,9 @@ class _NativeState:
         self.closed=False;self.failed=False;self.initialized=False;self.steps=0;self.A=np.zeros(3)
 
     def _call(self,fn,*args):
+        from ._native_group import _directory_call
         self.native._live()
-        # Native relative I/O is process-global; calls are main-thread only.
-        # Token shims select shared owners. Restore the caller's directory.
-        previous=Path.cwd()
-        try:
-            os.chdir(self.work)
-            return fn(*args)
-        finally:os.chdir(previous)
+        return _directory_call(self.lib,self.native.context.solver_comm,self.work,fn,*args,minimum_protocol=2)
 
     @property
     def electron_number(self):

@@ -1,6 +1,7 @@
 ! Copyright 2026 SALMONpy contributors. Apache-2.0.
 ! Metadata for the two audited live RT streams. No duplicated owning handles.
 module salmonpy_step_output
+  use filesystem,only:resolve_path
   use structures,only:s_ofile
   implicit none
   private
@@ -77,7 +78,7 @@ contains
         ! Another context may have reused the old positive unit while closed.
         ! Select an available unit and update the owning ofile after reconnection.
         unit=get_filehandle()
-        open(unit=unit,file=trim(value%names(i)),status='old', &
+        open(unit=unit,file=resolve_path(trim(value%names(i))),status='old', &
           form='formatted',access='sequential',action='readwrite',position='append',iostat=ios)
         if(ios/=0)then
           status=90

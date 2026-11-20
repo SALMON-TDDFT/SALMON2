@@ -16,6 +16,7 @@
 !======================================================================
 !======================================================================
 module write_file3d
+  use filesystem,only:resolve_path
   implicit none
 
 contains
@@ -34,7 +35,7 @@ subroutine write_avs(lg,fp,suffix,header_unit,rmat)
   character(60),intent(in):: suffix
   !
   character(60):: filename
-  integer::ix,iy,iz
+  integer::ix,iy,iz,output_unit
   integer::jj,icount
   integer::jsta,jend
   integer :: icoo1d(3,lg%num(1)*lg%num(2)*lg%num(3))
@@ -55,38 +56,38 @@ subroutine write_avs(lg,fp,suffix,header_unit,rmat)
     if(nproc_id_global<nsplit_voxel_data)then
       write(filenumber_data, '(i8)') nproc_id_global
       filename = trim(suffix)//"."//adjustl(filenumber_data)
-      open(fp,file=filename)
+      open(newunit=output_unit,file=resolve_path(filename))
       if(comm_is_root(nproc_id_global))then
-        write(fp,'("# unit is ",a)') header_unit
+        write(output_unit,'("# unit is ",a)') header_unit
       end if
       jsta=nproc_id_global*(lg%num(1)*lg%num(2)*lg%num(3))/nsplit_voxel_data+1
       jend=(nproc_id_global+1)*(lg%num(1)*lg%num(2)*lg%num(3))/nsplit_voxel_data
       do jj=jsta,jend
         if(abs(rmat(icoo1d(1,jj),icoo1d(2,jj),icoo1d(3,jj)))>=1.0d-10)then
-          write(fp,'(e20.8)') rmat(icoo1d(1,jj),icoo1d(2,jj),icoo1d(3,jj))
+          write(output_unit,'(e20.8)') rmat(icoo1d(1,jj),icoo1d(2,jj),icoo1d(3,jj))
         else
-          write(fp,'(a1)') "0"
+          write(output_unit,'(a1)') "0"
         end if
       enddo
-      close(1)
+      close(output_unit)
     end if
   else
     if(comm_is_root(nproc_id_global))then
       filename=trim(suffix)
-      open(fp,file=filename)
-      write(fp,'("# unit is ",a)') header_unit
+      open(newunit=output_unit,file=resolve_path(filename))
+      write(output_unit,'("# unit is ",a)') header_unit
       do iz=lg%is(3),lg%ie(3)
       do iy=lg%is(2),lg%ie(2)
       do ix=lg%is(1),lg%ie(1)
         if(abs(rmat(ix,iy,iz))>=1.0d-10)then
-          write(fp,'(e20.8)') rmat(ix,iy,iz)
+          write(output_unit,'(e20.8)') rmat(ix,iy,iz)
         else
-          write(fp,'(a1)') "0"
+          write(output_unit,'(a1)') "0"
         end if
       enddo
       enddo
       enddo
-      close(fp)
+      close(output_unit)
     endif
   endif
   
@@ -119,7 +120,7 @@ subroutine write_cube(lg,fp,suffix,phys_quantity,rmat,system)
 
   if(comm_is_root(nproc_id_global))then
     filename=trim(suffix)//".cube"
-    open(fp,file=filename)
+    open(fp,file=resolve_path(filename))
     if(phys_quantity=="psi")then
       write(fp,*) "Molecular Orbital"
     else if(phys_quantity=="dns")then
@@ -190,7 +191,7 @@ subroutine write_vtk(lg,fp,suffix,rmat,hgs)
 
   if(comm_is_root(nproc_id_global))then
     filename=trim(suffix)//".vtk"
-    open(fp,file=filename)
+    open(fp,file=resolve_path(filename))
 
     write(fp, '(A)') "# vtk DataFile Version 3.0"
     write(fp, '(A)') "vtk output"

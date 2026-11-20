@@ -77,6 +77,10 @@ int sp_gs_scf_r_repartition(int64_t token,const char *directory,int old_size,con
  * Same runtime/physical input/assets; stage then publish. Protocol2 maps dense Gamma orbital/spatial HSE; protocol3 also maps full-k/spatial HSE. */
 int sp_gs_scf_m_repartition_protocol(void);
 int sp_gs_scf_m_repartition(int64_t token,const char *directory,int old_size,const int *boxes);
+/* Read-only native stream representation; kinds[8], bytes[128], no GS needed. */
+int sp_gs_scf_state_revision(void); /* semantic revision; not an arbitrary source version */
+int sp_gs_scf_format_protocol(void);
+int sp_gs_scf_format_signature(int *kinds,int8_t *bytes);
 int sp_gs_scf_disk_protocol(void);
 int sp_gs_scf_bootstrap(const char *filename,int64_t *token);
 int sp_gs_scf_disk(int64_t token,const char *filename,int mode);
@@ -105,6 +109,15 @@ int sp_gs_read(int64_t token,int quantity,double *real_part,double *imag_part,in
 int sp_gs_close(int64_t token);
 /* states,live child communicators,management slot high-water. */
 int sp_gs_resources(int counts[3]);
+/* Rank-local completed timer intervals; diagnostics, not numerical state. */
+int sp_gs_timer_protocol(void);
+int sp_gs_timers(int64_t token, double seconds[4]);
+
+/* Optional directory scope1/2/3 resolves relative native I/O without host chdir.
+ * Protocol2 covers TDDFT; protocol3 additionally covers FDTD paths. Enter/leave on the main thread around one call; not concurrent solver support. */
+int sp_io_directory_protocol(void);
+int sp_io_directory_enter(const char *absolute_directory);
+void sp_io_directory_leave(void);
 #ifdef __cplusplus
 }
 #endif

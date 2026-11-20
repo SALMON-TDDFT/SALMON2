@@ -3,6 +3,7 @@
 ! Global input configuration must remain common and immutable. Never copy contexts.
 #include "config.h"
 module salmonpy_tddft_context
+ use filesystem,only:resolve_path
  use structures
  use salmonpy_gs_seed,only:s_gs_seed
  use salmonpy_step_output
@@ -274,9 +275,9 @@ contains
  do i=1,len_trim(name)
   if(index('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-',name(i:i))==0)goto 900
  enddo
- inquire(file=trim(base_directory)//trim(name)//'_rt.data',exist=exists)
+ inquire(file=resolve_path(trim(base_directory)//trim(name)//'_rt.data'),exist=exists)
  if(exists)goto 900
- inquire(file=trim(base_directory)//trim(name)//'_rt_energy.data',exist=exists)
+ inquire(file=resolve_path(trim(base_directory)//trim(name)//'_rt_energy.data'),exist=exists)
  if(exists)goto 900
  if(yn_out_dns_rt/='n'.or.yn_out_micro_je/='n'.or.yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n')goto 900
  status=0
@@ -603,9 +604,9 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
   copy%tpsi%update_zwf_overlap=.true.
  endif
  if(restore)then
-  open(newunit=u,file=trim(path),access='stream',form='unformatted',status='old',action='read',iostat=ios)
+  open(newunit=u,file=resolve_path(trim(path)),access='stream',form='unformatted',status='old',action='read',iostat=ios)
  else
-  open(newunit=u,file=trim(path),access='stream',form='unformatted',status='new',action='write',iostat=ios)
+  open(newunit=u,file=resolve_path(trim(path)),access='stream',form='unformatted',status='new',action='write',iostat=ios)
  endif
  opened=ios==0
  call checkpoint_collective_status(ios)

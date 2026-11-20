@@ -31,6 +31,8 @@ def main():
     p.add_argument('--tolerance',type=float,default=1e-30)
     p.add_argument('--common-api',action='store_true')
     p.add_argument('--protected-api',action='store_true')
+    p.add_argument('--no-chdir',action='store_true',help='forbid host chdir for new-runtime GS calls')
+    p.add_argument('--timer-ownership',action='store_true',help='check rank-local GS timer independence on the new runtime')
     p.add_argument('--full-k-control',action='store_true',help='also compare SCF-converged diamond-Si full/reduced k states')
     args=p.parse_args();args.common_api=args.common_api or args.protected_api;world=MPI.COMM_WORLD
     if world.size!=3*args.size:raise ValueError('launch exactly3*size ranks')
@@ -102,7 +104,12 @@ def main():
                 'force_max_absolute_difference':float(np.max(abs(reduced_force-full_force))),
                 'status':'pass' if force_agrees else 'energy-density-pass-force-mismatch',
                 'scope':'same fixed cell/grid/k sampling, not grid/k convergence certification'}
-    with warnings.catch_warnings():
+    from unittest.mock import patch
+    from contextlib import nullcontext
+    import os
+    anchor=Path.cwd()
+    directory_guard=patch('os.chdir',side_effect=AssertionError('host chdir is forbidden')) if args.no_chdir and g!=2 else nullcontext()
+    with directory_guard, warnings.catch_warnings():
       warnings.simplefilter('ignore',RuntimeWarning)
       with backend.open(ctx) as session:
         if g==0:
@@ -110,7 +117,14 @@ def main():
             assert state.scf_status['paused'] and state.scf_status['initializations']==1
             assert state.scf_status['executed_iterations']==3
             cut3=frame(state);snap3=state.snapshot()
+            owner_timing=state.timing_seconds if args.timer_ownership else None
             sibling=session.run(b,scf=scf,material_id='B',steps=2)
+            if args.timer_ownership:
+                assert state.timing_seconds==owner_timing
+                assert all(v>=0 for v in state.timing_seconds.values())
+                assert sibling.timing_seconds['total']>0
+                view=state.timing_seconds;view['total']=-1
+                assert state.timing_seconds==owner_timing
             sibling_cut=frame(sibling)
             if args.common_api:
                 from salmonpy.checkpointing import execute_checkpoint,restore_checkpoint,CheckpointState
@@ -210,7 +224,9 @@ def main():
                 assert state.info==info
                 for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
             for q,value in frame(sibling).items():np.testing.assert_array_equal(value,sibling_cut[q])
+            owner_timing=state.timing_seconds if args.timer_ownership else None
             sibling.continue_scf(steps=1)
+            if args.timer_ownership:assert state.timing_seconds==owner_timing
             sibling_future=frame(sibling);sibling_work=sibling.scf_status['executed_iterations']
             sibling.restore(sibling_snapshot)
             assert sibling.iterations==2 and sibling.scf_status['executed_iterations']==sibling_work
@@ -254,9 +270,10 @@ def main():
             finally:response.close();model.close()
         state.close()
         full_check=full_k_control(session)
+        assert Path.cwd()==anchor
     if world.rank==0:
         result={'status':'pass','size':args.size,'split':args.split,'xc':args.xc,'initial_no_mix':args.initial_no_mix,
-                'continuous_arrays_exact':True,
+                'continuous_arrays_exact':True,'new_runtime_host_chdir_forbidden':args.no_chdir,'state_owned_GS_timers_checked':args.timer_ownership,
                 'continuous_new_and_previous_exact':args.build.resolve()!=args.baseline.resolve() and (args.symmetry=='none' or values[2*args.size][2]),
                 'previous_equivalent_with_cartesian_force_units':args.build.resolve()!=args.baseline.resolve(),
                 'old_force_lattice_components_converted':args.symmetry!='none' and not values[2*args.size][2],'snapshot_restore_numerical_arrays_exact':True,

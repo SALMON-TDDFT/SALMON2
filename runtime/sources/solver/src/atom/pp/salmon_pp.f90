@@ -15,6 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 module salmon_pp
+  use filesystem,only:resolve_path
   implicit none
 
   contains
@@ -328,7 +329,7 @@ module salmon_pp
     integer :: ik
     character(256) :: ps_file
     
-    open(4,file=ps_file,status='old')
+    open(4,file=resolve_path(ps_file),status='old')
     read(4,*) pp%mr(ik)
     close(4)
     return
@@ -344,7 +345,7 @@ module salmon_pp
     real(8) :: zatom, zion, pspdat,pspcod,pspxc,lmaxabinit,lloc,mmax,r2well
     character(1) :: dummy_text
     
-    open(4,file=ps_file,status='old')
+    open(4,file=resolve_path(ps_file),status='old')
     read(4,*) dummy_text
     read(4,*) zatom, zion, pspdat
     read(4,*) pspcod,pspxc,lmaxabinit,lloc,mmax,r2well
@@ -363,7 +364,7 @@ module salmon_pp
     character(256) :: ps_file
     character(1) :: dummy_text
     
-    open(4,file=ps_file,status='old')
+    open(4,file=resolve_path(ps_file),status='old')
     do i=1,18
       read(4,*) dummy_text
     end do
@@ -382,7 +383,7 @@ module salmon_pp
     character(256) :: ps_file
     character(1) :: dummy_text
     
-    open(4,file=ps_file,status='old')
+    open(4,file=resolve_path(ps_file),status='old')
     do i=1,11
       read(4,*) dummy_text
     end do
@@ -399,7 +400,7 @@ module salmon_pp
     type(s_pp_info),intent(inout) :: pp
     integer,intent(in) :: ik
     character(*),intent(in) :: ps_file
-    open(4,file=ps_file,status='old')
+    open(4,file=resolve_path(ps_file),status='old')
     call get_mr_norb_upf( 4, pp%mr(ik), pp%num_orb(ik) )
     close(4)
   end subroutine read_mr_norb_upf

@@ -419,13 +419,9 @@ class _State:
         return self.steps*self.dt
 
     def _call(self,fn,*args):
+        from ._native_group import _directory_call
         self._native._live()
-        previous = Path.cwd()
-        try:
-            os.chdir(self.work)
-            return fn(*args)
-        finally:
-            os.chdir(previous)
+        return _directory_call(self.lib,self._native.context.solver_comm,self.work,fn,*args,minimum_protocol=2)
 
     def _validate(self,callback):
         error = None; result = None

@@ -1284,3 +1284,110 @@ reduced-k2→8/8→4 and pre-PBE2→8. Restored physical wave/density interiors
 are exact; bootstrap SCF work is zero; five new iterations match source-initialized
 continuous8 at unchanged rtol1e-9/atol1e-10. Late donor failures preserve originals
 and saved files. These are execution checks, not a physical convergence certificate.
+
+### Explicit same-source rebuilt-runtime SCF restart
+
+Default SCF disk restart still requires the exact runtime SHA256. To resume
+with a separately rebuilt library, explicitly use
+`session.run(..., restart=checkpoint, compatible_runtime=True)`. Combine with
+`repartition=True` only when changing to a supported MPI layout.
+
+A new checkpoint records a `salmonpy.scf-rebuild/1 or /2` contract: all recorded solver
+and adapter source hashes/build schema; native stream storage sizes and byte
+patterns for integer/integer8/real8/complex8/logical true/false/character; HSE/FFTW
+layout flags; and OS/architecture. The native probe needs no MPI or GS state and
+writes no files. Different binaries are accepted only with an equal recorded
+contract. Missing proof, changed source, representation or platform is rejected
+before creating a GS owner. Input, material, assets, hashes and MPI checks stay
+in effect. Older checkpoints/runtimes retain exact-binary restore.
+
+```python
+with session.run(calculation, scf=scf, material_id="Si",
+                 restart=checkpoint, compatible_runtime=True,
+                 repartition=True) as state:
+    assert state.scf_status["executed_iterations"] == 0
+    print(state.scf_restart_origin)  # saved/current SHA256, actual rebuild flag
+    state.continue_scf(steps=5)
+```
+
+`scf_restart_origin` returns detached binary provenance. A new save records the
+current contract and parent runtime provenance; it does not edit the source
+checkpoint. The example adds `--compatible-runtime` on the resume invocation
+with the new BUILD_JSON, optionally `--repartition`. This option belongs to
+retained SCF `run`; generic protected checkpoints/TDDFT loaders are unchanged.
+
+Measured controls use genuinely different binaries from one source snapshot
+on this Mac with unchanged compiler/libraries: ordinary PZ/Libxc-PBE and fast
+HSE, same layout, ordinary4→2, HSE2→8, reduced-k HSE8→4 and pre-PBE2→8.
+Accepted wave/density cuts are exact, bootstrap SCF work is zero, and five new
+iterations agree with source-binary continuous8 within existing1e-9/1e-10.
+ABI/source/missing-contract/default-refusal and corrupt/late-read controls pass.
+This certifies the measured rebuild route, not source-version migration, other
+platforms, changed-library numerical accuracy or material convergence.
+
+### SCF restart across explicitly declared source-version pairs
+
+Use `compatible_runtime="declared"` for a registered source-version transition.
+The example exposes `--declared-runtime`, mutually exclusive with
+`--compatible-runtime`. Exact SHA remains the default; `True` still means
+same-source only. Add `repartition=True` separately for a supported MPI change.
+
+The packaged `scf_compatibility.json` lists exact directed source-fingerprint
+pairs with evidence IDs. No reverse or transitive compatibility is inferred.
+Complete type-definition/generated-IO source fingerprints, native byte layout,
+HSE/FFTW flags, OS/architecture and numerical-state revision are checked.
+Matching byte layout alone never admits a new version. A change to stored
+numerical meaning requires a native state-revision update and migration/retesting.
+Legacy contracts without codec information require an explicitly validated exact
+legacy-source pair. Input, assets, material ID and file-integrity checks remain.
+
+The initial ordinary/fast-PR HSE declarations cover only addition of a read-only
+state-revision export: arithmetic and serialized fields are unchanged. They do
+not certify arbitrary solver updates or cross-platform migration. Inspect
+`scf_restart_origin["compatibility_declaration"]` for the accepted declaration.
+New saves retain the current contract and origin without modifying old files.
+
+### Per-GS timing diagnostics
+
+`state.timing_seconds` returns a detached dictionary of completed rank-local
+seconds: `total`, `initialization`, `scf_iterations`, and `write_results`. Call
+collectively in matching order; these values are not MPI sums or maxima. Creating
+or continuing another GS owner leaves the first owner's timing unchanged. The
+host's running timers are parked and resumed excluding time lent to GS work.
+
+These are lifetime diagnostics. Numerical snapshot restore does not rewind spent
+work, and fresh-process SCF restart starts fresh timers. Older runtimes retain
+normal GS APIs; only this query requires additive timer protocol1. This does not
+certify concurrent threaded calls or independent timing for TDDFT states.
+
+### Output settings and temporary file units across state switches
+
+Activating a model restores its unit selectors and derived output conversion
+factors together. Existing SALMON constants/formulas are retained; Python module
+boundaries remain in atomic units. DOS, PDOS, band and AVS writers acquire and
+close their own temporary file units, preserving host units1/77/100/101. AVS keeps
+its legacy fp argument while using a temporary unit internally.
+
+Output routing still uses each owner's working directory and input settings.
+Temporary-unit ownership does not permit concurrent threaded calls. See the
+next section for retained-GS directory scoping. File-unit handles are not numerical snapshot fields, and restoring
+numerical state does not rewind output files.
+
+### Retained GS calls without changing the host working directory
+
+Runtimes with directory scope1/2 keep the host process working directory unchanged
+for retained GS create/continue/numerical restore. Each call passes the owner's
+working folder to native path resolution. Input, pseudopotential, symmetry,
+output and restart file operations resolve relative paths there; absolute paths
+retain their meaning. Normal `session.run` and `continue_scf` usage is unchanged.
+
+The temporary scope is released on exceptions and remote-rank admission failure.
+It adds no fields to numerical snapshots or logical input records, so restoring
+numerical state uses the current owner's folder. Older runtimes retain the
+previous temporary-directory-switch implementation.
+
+Python FDTD and older-runtime compatibility paths may still switch directories. Native solver calls
+remain sequential on the main thread; this is not concurrent solver reentrancy.
+
+GS and TDDFT share path admission/cleanup. Retained GS accepts scope1/2;
+standard TDDFT and fast-PR HSE require scope2 for their expanded RT file paths.

@@ -25,6 +25,9 @@ def main():
     parallel.add_argument('--spatial-parallel',action='store_true',help='ordinary-XC x-domain layout with a fixed Gamma mesh')
     parallel.add_argument('--decomposition',type=int,nargs=5,help='explicit k,orbital,x,y,z layout; fast HSE uses Gamma orbital/spatial mixing')
     p.add_argument('--hse-kspace',action='store_true',help='full multi-k HSE spatial bridge; use explicit decomposition')
+    runtime_mode=p.add_mutually_exclusive_group()
+    runtime_mode.add_argument('--compatible-runtime',action='store_true',help='verified same-source rebuilt-runtime SCF resume')
+    runtime_mode.add_argument('--declared-runtime',action='store_true',help='verified declared source-version SCF transition')
     p.add_argument('--repartition',action='store_true',help='opt into a supported pure-layout restart with a new rank count')
     p.add_argument('--disk',action='store_true',help='exercise disk save/restore; requires --save-scf')
     p.add_argument('--protected',action='store_true',help='requires native SCF candidate protocol1')
@@ -36,6 +39,7 @@ def main():
     args=p.parse_args();comm=MPI.COMM_WORLD
     if args.disk and args.save_scf is None:p.error('--disk requires --save-scf')
     if args.repartition and args.restart is None:p.error('--repartition requires --restart')
+    if (args.compatible_runtime or args.declared_runtime) and args.restart is None:p.error('--compatible-runtime requires --restart')
     if comm.size not in (1,2) and args.decomposition is None:p.error('use --decomposition for more than two ranks')
     if not 0<args.pause_at<args.iterations:p.error('pause-at must be between zero and total iterations')
     error=None
@@ -65,12 +69,13 @@ def main():
     with backend.open(context) as session:
         if args.restart is not None:
             with session.run(calculation,scf=SCFSettings(max_iterations=args.iterations,tolerance=1e-30),
-                             material_id='si-example',restart=args.restart,repartition=args.repartition) as state:
+                             material_id='si-example',restart=args.restart,repartition=args.repartition,compatible_runtime='declared' if args.declared_runtime else args.compatible_runtime) as state:
                 loaded=state.scf_status
                 assert loaded['executed_iterations']==0
                 state.continue_scf(steps=args.iterations)
                 result={'status':'pass','loaded_counters':loaded,'final_counters':state.scf_status,
-                        'final_info':asdict(state.info),'snapshot_storage':'same-build pure-layout repartitioned disk checkpoint' if args.repartition else 'same-build/topology disk checkpoint',
+                        'final_info':asdict(state.info),'snapshot_storage':'direct SCF disk checkpoint',
+                        'restart_origin':state.scf_restart_origin,'repartition_requested':args.repartition,
                         'GS_datasets_collected':True}
                 if comm.rank==0:(args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n')
             return

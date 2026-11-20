@@ -2,16 +2,16 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## Current actionable queue — 2026-11-20 (mixed SCF restart review)
+## Current actionable queue — 2026-11-20 (native directory scope3 review)
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
 Molecular work remains paused. Memory budgets warn; SCF nonconvergence warns and
-retains results. GS saving/reuse and validation datasets in calc2026 are authorized by the user (2026-11-19/20). Do not dispatch routine CI.
+retains results. GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not dispatch routine CI.
 
 ### Completed and verified
 
-- [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC pure k/orbital/spatial and mixed-layout changed-rank restart are measured. Dense fast-PR HSE pure k/orbital and Gamma spatial/orbital×spatial mixed restart are measured below; Full-k spatial SCF bridge/restart is measured below; orbital multi-k spatial, packed/tiled/sparse formats and changed-runtime migration remain open.
+- [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC pure k/orbital/spatial and mixed-layout changed-rank restart are measured. Dense fast-PR HSE full/reduced-k × orbital × spatial mixed restart is measured below. Same-source rebuilt binaries and exact declared metadata-only source transitions are verified; arbitrary changed-numerics/cross-platform migration and packed/tiled/sparse formats remain outside the measured scope.
 
 - [x] One maintained fast-PR solver tree and shared default preparation/build path;
   ordinary XC does not require HSE dependencies. Historical source evidence retained.
@@ -37,7 +37,7 @@ prioritize fast-HSE norm wiring or a current-grid campaign now. Molecular work
 remains paused. Group6 follows separately with the existing CI budget constraint.
 Group4 SCF history, numerical checkpoint/live continuation and ordinary mixed
 repartition are complete within the measured scopes. Fast-PR HSE dense Gamma orbital/spatial mixed ownership and restart are also
-measured below, together with the explicit full-k spatial bridge. Packed/tiled formats and optimized distributed exchange FFT remain separate. GS saving/reuse and the approved validation datasets are authorized; keep results in calc2026.
+measured below, together with full/reduced-k orbital/spatial mixed restart and limited rebuilt/source-pair compatibility. Packed/tiled formats and optimized distributed exchange FFT remain separate extensions. The next active group is5, then3; do not manufacture new storage formats merely to extend group4. Keep authorized validation results in calc2026.
 
 ### Remaining groups (not a count of individual implementation patches)
 
@@ -51,17 +51,26 @@ measured below, together with the explicit full-k spatial bridge. Packed/tiled f
    silently changing existing results.
 4. [ ] Dense ordinary-XC and fast-PR HSE full/reduced-k orbital/spatial direct
    SCF repartition is measured below. Remaining: packed/tiled/sparse state
-   migration and portable/checkpoint-version migration across runtimes. Current
+   migration, arbitrary changed-numerics source-version transitions and cross-platform/portable-format migration. Same-source rebuilt-runtime and exact declared metadata-only source-pair
+   SCF restart are measured below with explicit native-format/codec/state-revision proof. Current
    built-in SCF generates dense ACE; do not add an artificial format switch only
    to fill a checkpoint checklist. Same-topology RT remains complete in scope.
-5. [ ] Remaining shared initialization/I/O/timer/MPI ownership, stable public native
+5. [ ] Retained GS timers are now owner-scoped and independently queryable;
+   transient DOS/PDOS/band/AVS file units and model-derived output conversions
+   are isolated below. Retained GS now uses a native path scope without host chdir.
+   Standard/shared/registered TDDFT and fast-PR HSE now use scope2 through one
+   common helper, including GS→RT setup; native FDTD now uses scope3 without host
+   chdir. Remaining initialization/
+   other I/O/TDDFT-timer/MPI ownership, stable public native
    ABI and wider initialization/allocation/process-failure recovery. Existing
    rollback does not guarantee arbitrary STOP/OOM/MPI-failure or threaded reentrancy.
 6. [ ] Larger grids/material counts, resource/communication calibration, matching
    runtime distribution and Linux/Intel Mac/other-platform evidence. Respect the
    Actions budget; no routine CI dispatch.
 
-Latest restart evidence: calc2026/salmonpy-hse-korspace-record-20261120,
+Latest restart evidence: calc2026/salmonpy-scf-declared-record-20261120,
+calc2026/salmonpy-scf-rebuild-record-20261120,
+calc2026/salmonpy-hse-korspace-record-20261120,
 calc2026/salmonpy-hse-symspace-record-20261120,
 calc2026/salmonpy-hse-kspace-record-20261120,
 calc2026/salmonpy-hse-mixed-record-20261120,
@@ -2230,3 +2239,172 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 - [ ] Packed/tiled/sparse, changed-runtime portability and spatial/orbital
   GS→RT remain separate. Replicated full-grid/all-orbital EXX scratch is not a
   distributed exchange-FFT speedup. No routine CI.
+
+## 2026-11-20 Explicit same-source rebuilt-runtime SCF restart
+
+- [x] Previous HSE multi-k/orbital/spatial changes committed/pushed as64a834a7.
+- [x] Explicit compatible_runtime flag; exact binary SHA remains default. Native
+  format1 probes representation without MPI/GS; recorded complete source/adapter
+  fingerprint, HSE/FFTW stream flags and OS/architecture must match.
+- [x] HSE/ordinary A/B are real independent audited binaries with different SHAs
+  and equal contracts. No archived manifest is rewritten. Parent/current binary
+  provenance is available on the state and preserved in new saves.
+- [x] Campaign source/wheel ordinary+HSE GS/restart data explicitly authorized.
+- [x] Ordinary/HSE same-layout,ordinary4→2,HSE2→8,reduced8→4,pre-PBE2→8:
+  exact cut,bootstrap0,continuation within unchanged1e-9/1e-10. Default and
+  missing/source/stream/platform mismatches reject before owner creation; late
+  donor/corrupt payload preserve originals/files. Same-layout reference corrected
+  to retain saved ghost work values rather than assume a spatial remap.
+- [x] Prior HSE full/reduced and ordinary numerical results exact. Source/
+  installed637 tests each636pass/1skip; wheel HSE reduced8→4,ordinary same-layout
+  and public rebuilt-runtime8→4 sample pass. Final sample records actual saved/
+  current binary provenance. Source/wheel/docs/header/audited-native bytes match.
+- Evidence: calc2026/salmonpy-scf-rebuild-record-20261120. No CI dispatched;
+  local OneDrive writes do not establish cloud synchronization.
+- [ ] Source-version/cross-platform migration and archive conversions remain
+  separate; this initial route is the same-source Mac/toolchain rebuild scope.
+
+## 2026-11-20 Declared source-version SCF transitions
+
+- [x] Strict SHA default and same-source True retained; explicit 'declared' mode
+  requires an exact directed source pair with validation identity. No implicit
+  reverse/transitive acceptance or blanket same-format override.
+- [x] Codec/type/IO inventory, native stream/platform and numerical-state revision
+  checked before owner creation. Native metadata export changes no arithmetic or
+  serialized fields; ordinary/HSE exact pairs recorded in packaged catalog.
+- [x] Source637/installed637 tests each636pass/1skip. Ordinary same/4→2 and
+  HSE same/2→8/reduced8→4/pre-PBE2→8 pass exact cut,bootstrap0,continuation
+  unchanged1e-9/1e-10. Old/new ordinary and full/reduced HSE normal arrays exact.
+- [x] Installed ordinary/HSE and public sample reduced8→4 pass; accepted
+  declaration ID recorded in restart provenance. JP/EN/AI instructions updated.
+- [ ] General changed-numerics source-version migration, cross-platform/portable
+  streams and conversion remain separate work, not covered by the initial pair.
+- Evidence: calc2026/salmonpy-scf-declared-record-20261120. No CI dispatch.
+
+## 2026-11-20 Queue reconciliation
+
+- [x] Updated the authoritative top queue to supersede stale multi-k/orbital and
+  changed-runtime statements. Historical unchecked notes remain dated evidence.
+- [x] Dense SCF restart, same-source rebuild and the exact metadata-only source
+  transition are accepted within their measured scopes. Latest changes remain
+  uncommitted; last pushed commit64a834a7. No CI dispatched.
+- Next active work: group5 ownership/ABI/recovery audit, then group3 NLCC runtime
+  certification and legacy unit audit. Group4 packed/tiled/sparse and general
+  portable/version migration are separate extensions, not missing dense restart.
+- Groups1/2 remain deferred; molecular work remains paused; group6 is separate.
+
+## 2026-11-20 Group5 GS timer ownership
+
+- [x] Retained GS create/continue borrow an owner timer bank and restore host
+  timers on returned paths. Parked running/thread timers exclude other work;
+  banks use allocation moves, not numerical-state copies. Close releases storage.
+- [x] Additive timer protocol1 and rank-local detached timing_seconds mapping;
+  old runtimes retain normal GS APIs. Timings are not numerical restart payloads
+  and are not rewound by numerical restore. Existing stream writer bytes match.
+- [x] Deterministic native clock fixture verifies host/sibling/running/thread/
+  subrange isolation. Baseline compilation fails without the new interface.
+- [x] Ordinary MPI2 and full/reduced-k HSE MPI4 (three groups each) verify
+  different-input owner timing independence, old/new numerical bit equality,
+  protected failure preservation/continuation/retry and zero restore SCF replay.
+  Numerical arrays remain in RAM; no GS datasets collected for this campaign.
+- [x] Source/installed637 tests:636pass/1skip each. sdist→wheel, installed native
+  fixture and ordinary/reduced-HSE MPI checks pass. JP/EN/AI/catalog updated;
+  source/object audits and source/wheel/source-snapshot parity checked. No CI.
+- Evidence: calc2026/salmonpy-gs-timers-record-20261120. Failed early HSE driver
+  launch before build receipt existed is retained; verified rerun used new paths.
+- [ ] Group5 shared I/O/initialization/TDDFT timing/MPI ownership, wider ABI and
+  fatal allocation/process/publication recovery remain; no threaded guarantee.
+
+## 2026-11-20 Group5 output file and conversion ownership
+
+- [x] Reproduced stale unit conversions and host file collisions in audited old
+  binaries with synthetic fixtures. DOS/PDOS/band use NEWUNIT; AVS acquires and
+  closes its own temporary unit (legacy fp argument retained). Host1/77/100/101
+  stay open and unchanged. Output content/formats match previous binaries exactly.
+- [x] Model activation restores derived conversion factors/names from owned
+  selectors. Existing conversion body/literals preserved verbatim, in a logical
+  module alongside input declarations; no extra implementation source file.
+  Unsupported selectors return before changing globals. No serialized fields added.
+- [x] Source ordinary/HSE and installed ordinary synthetic MPI2 controls pass.
+  Parser defaults/tempfile/log controls match old runtime; input record test passes.
+- [x] Ordinary MPI2 and full/reduced-HSE MPI4 in three independent groups: old/new
+  numerical arrays bit exact; sibling/protected failure/continuation/retry exact.
+  Installed ordinary/reduced-HSE controls pass. Restore SCF work0. All real
+  numerical arrays remain in RAM; no GS datasets collected in this campaign.
+- [x] Source/installed637 tests:636pass/1skip each. Source/object audits, sdist→
+  wheel, JP/EN/AI sync and packaged fixture/code parity verified. Input-declaration
+  audit now stops at the correct module boundary; historical failure log kept.
+- Evidence: calc2026/salmonpy-gs-io-record-20261120. No CI; cloud sync unconfirmed.
+- [ ] Process-wide CWD, broader native I/O/initialization/TDDFT timers/MPI and
+  concurrent/fatal-failure ownership remain group5 work. Outputs are not rewound
+  by numerical restore. Group3 NLCC/unit-constant certification remains next.
+
+## 2026-11-20 Group5 retained-GS directory scopes
+
+- [x] Additive native directory scope1 resolves owner-relative file operations
+  without changing process CWD; absolute paths retain their meaning. Python
+  GS create/continue/numerical restore selects this automatically on new runtimes.
+  Old binaries retain the previous implementation. No new numerical/input fields.
+- [x] Central filesystem/POSIX and GS-related OPEN/INQUIRE/MPI-file routes share
+  the resolver. Scope-free standalone calls preserve previous output behavior.
+- [x] Python failure-first test, native MPI2 relative/absolute/missing/nested/
+  sibling/host-file controls and one-rank admission failure/callback-error/retry
+  pass. Successfully entered scopes release on all Python returned paths.
+- [x] Ordinary MPI2 and full/reduced-HSE MPI4 (three groups): Python chdir is
+  forbidden on new-runtime groups; old/new arrays bit exact; protected late
+  failure/continuation/retry exact; restore SCF work0. No GS datasets collected.
+- [x] Source/installed637 tests each636pass/1skip. Wheel synthetic scoped I/O,
+  ordinary/reduced-HSE parity and public ordinary/HSE protected samples pass.
+  Source/object audits, source snapshot/wheel/docs/header parity and JP/EN/AI sync
+  checked. No CI; cloud sync not confirmed. Changes remain uncommitted.
+- Evidence: calc2026/salmonpy-gs-directory-record-20261120.
+- [ ] Other Python TDDFT/FDTD wrappers may still switch directories; broader
+  initialization/MPI/timer/I/O ownership and fatal/threaded recovery remain.
+  Native calls remain sequential on the main thread.
+
+## 2026-11-20 Group5 TDDFT directory scopes/common call ownership
+
+- [x] Native directory scope2 extends path resolution to RT core and fast-PR
+  adapter checks/checkpoints. GS accepts1/2; TDDFT uses2 and preserves the legacy
+  scoped-chdir path for older/no-scope runtimes. No serialized numerical fields.
+- [x] One helper in existing _native_group implements collective path admission
+  and finally cleanup for GS and standard/fast-PR legacy/shared/registered TDDFT.
+  Redundant HSE registry override removed. GS→RT setup explicitly requests the
+  RT capability, including cleanup; no new Python module or numerical work.
+- [x] Old wrapper fails no-chdir tests; all wrapper variants and protocol1 fallback
+  pass. Campaign-specific source/wheel GS-copy and checkpoint storage authorized.
+- [x] MPI2 per group (three groups): PBE/TB-mBJ heterogeneous and shared-standard
+  currents exactly match audited old independent controls. Full/reduced learned/
+  PT-CN HSE registry current/energy/history and shared-HSE controls exact.
+  Direct resume exact, replay0; new-runtime groups forbid Python chdir.
+- [x] Existing GS→ordinary/HSE memory models, interleaved GS import, GS close and
+  source-copy removal, independent children and direct resume pass. New protocol2
+  avoids chdir; old protocol1 HSE route remains valid. No new SCF; measured bridge
+  current/energy difference0 within unchanged existing tolerances.
+- [x] Final source/installed637 tests:636pass/1skip each. Wheel heterogeneous/
+  shared-standard/HSE registry and ordinary/HSE bridge controls pass. Source/object
+  audits, source/prepared/wheel/docs/header parity checked. JP/EN/AI/list synced.
+- Evidence: calc2026/salmonpy-td-directory-record-20261120. No CI dispatched;
+  cloud synchronization unconfirmed. These changes are included in the 2026-11-20 native ownership commit.
+- [x] Native E/H FDTD now uses directory scope3; legacy scope1/2 keeps the fallback.
+  Main-thread sequential calls and wider MPI/timer/I/O/initialization ownership
+  remain group5 work.
+
+### 2026-11-20 — E/H directory scope3 acceptance
+
+- [x] Reused common collective directory helper; field calls require scope3,
+  GS accepts1/2/3 and TDDFT2/3. Maxwell relative OPEN/INQUIRE paths resolve
+  against the field work folder. Numerical kernels/layout/order unchanged.
+- [x] Failure-first wrapper test, exception cleanup and old-runtime fallback.
+  Source/object prohibition audits and both ordinary/HSE builds passed.
+- [x] MPI2 field A/E/H arrays exactly match old audited ordinary/HSE binaries.
+  New calls run with Python chdir forbidden.
+- [x] Installed-wheel MPI4: two LD materials plus two SBE points,64steps.
+  New/old A/E/j and direct-resume/continuous A/E/j exactly match.
+  Late rank1 native-candidate failure preserves all field/LD/SBE state bytes;
+  original continues, protected retry gives3 exact future steps, replay0.
+- [x] Source and installed-wheel637 tests:636pass/1skip each. JP/EN/AI synced.
+- Evidence: calc2026/salmonpy-fdtd-directory-record-20261120. No GS data or
+  SCF computations; no CI. OneDrive cloud synchronization unconfirmed.
+  Changes are included in the 2026-11-20 native ownership commit.
+  Native main-thread/one-field-lifetime limits remain.

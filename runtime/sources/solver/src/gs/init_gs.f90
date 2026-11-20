@@ -15,6 +15,7 @@
 !
 
 module init_gs
+  use filesystem,only:resolve_path
   implicit none
 
 contains
@@ -345,7 +346,7 @@ SUBROUTINE make_pp_orbital_table(pp,n_ao,iatom_ao,l_ao,m_ao,eig_ao)
       iatom_ao(j+1)=it; l_ao(j+1)=lt; m_ao(j+1)=mt; eig_ao(j+1)=et
     end do
 
-    open(newunit=fh,file='method_init_wf_pp.txt',status='replace')
+    open(newunit=fh,file=resolve_path('method_init_wf_pp.txt'),status='replace')
     write(fh,'(a,2i8)') '# n_ao, nstate =',n_ao,nstate
     write(fh,'(a)') '# index  iatom  l   m   energy(Ha)'
     do i=1,n_ao

@@ -2,7 +2,8 @@
 
 Pass the ordinary sample arguments, with --direct-save-at N and --steps>N+3.
 Optional --kernel LIB explicitly selects the built LD/SBE kernel for source tests.
-The test injects a failure after one material rank stages a valid native payload.
+The test injects a failure after a selected native rank stages a valid payload
+(last rank by default; --failure-rank can select a field rank).
 No sample flags or native physics are mocked. Use mpiexec with a timeout.
 """
 import argparse
@@ -21,6 +22,7 @@ from mpi4py import MPI
 def main():
     parser=argparse.ArgumentParser(add_help=False)
     parser.add_argument('--kernel')
+    parser.add_argument('--failure-rank',type=int)
     parser.add_argument('--simulate-memory-probe-failure',action='store_true')
     args, sample_args=parser.parse_known_args()
     if args.kernel:
@@ -35,6 +37,8 @@ def main():
     from salmonpy.checkpointing import AtomicRestoreError
     original=coordinator.checkpoint
     world=MPI.COMM_WORLD
+    failure_rank=world.size-1 if args.failure_rank is None else args.failure_rank
+    if not 0<=failure_rank<world.size:raise ValueError('failure-rank out of range')
     completed=[]
 
     def freeze(coupled,root,label):
@@ -161,8 +165,8 @@ def main():
         stage=NativeRestoreCandidate.stage
         def fail_late(candidate):
             value=stage(candidate)
-            if world.rank==world.size-1:
-                raise OSError('injected after valid late electronic candidate load')
+            if world.rank==failure_rank:
+                raise OSError('injected after valid native candidate load')
             return value
         try:
             with patch.object(NativeRestoreCandidate,'stage',fail_late):
@@ -182,7 +186,7 @@ def main():
         assert coupled.step_index==count and not coupled.response.failed
         statuses=world.allgather(True)
         if world.rank==0:
-            record={'status':'passed','ranks':world.size,'saved_step':saved,
+            record={'status':'passed','ranks':world.size,'saved_step':saved,'failure_rank':failure_rank,
                 'failure_step':saved+2,'continued_after_failure':True,
                 'all_original_state_bytes_preserved':True,'field_LD_materials':2,
                 'retry_future_steps_exact':3,'mixed_policy_rejected_before_stage':True,'invalid_history_rejected_before_stage':True,'restore_replayed_steps':0,

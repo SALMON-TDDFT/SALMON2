@@ -221,8 +221,18 @@ module timer
   public :: timer_get_sub
 
 
+  ! Parked rank-local diagnostics; never part of the numerical checkpoint.
+  type,public :: s_timer_context
+    private
+    integer :: enable_range=1
+    real(8) :: parked_at=0d0
+    real(8),allocatable :: elapsed(:,:),started(:,:),thread_elapsed(:,:),thread_started(:,:)
+    logical,allocatable :: running(:),thread_running(:,:)
+  end type
+  public :: timer_context_swap,timer_context_get
+
   integer,private,parameter   :: LOG_SIZE = 300
-  integer,private             :: enable_range
+  integer,private             :: enable_range=1
   real(8),private,allocatable :: log_time(:,:)
   real(8),private,allocatable :: log_temp(:,:)
   logical,private,allocatable :: ticked(:)
@@ -243,6 +253,55 @@ module timer
 
 private
 contains
+  subroutine timer_context_swap(owner)
+    type(s_timer_context),intent(inout) :: owner
+    real(8),allocatable :: real_work(:,:)
+    logical,allocatable :: logical_work(:),thread_work(:,:)
+    real(8) :: now,paused
+    integer :: previous_range,i,j
+    now=get_wtime();paused=now-owner%parked_at
+    previous_range=enable_range;enable_range=owner%enable_range
+    owner%enable_range=previous_range
+    call move_alloc(log_time,real_work)
+    call move_alloc(owner%elapsed,log_time)
+    call move_alloc(real_work,owner%elapsed)
+    call move_alloc(log_temp,real_work)
+    call move_alloc(owner%started,log_temp)
+    call move_alloc(real_work,owner%started)
+    call move_alloc(log_time_t,real_work)
+    call move_alloc(owner%thread_elapsed,log_time_t)
+    call move_alloc(real_work,owner%thread_elapsed)
+    call move_alloc(log_temp_t,real_work)
+    call move_alloc(owner%thread_started,log_temp_t)
+    call move_alloc(real_work,owner%thread_started)
+    call move_alloc(ticked,logical_work)
+    call move_alloc(owner%running,ticked)
+    call move_alloc(logical_work,owner%running)
+    call move_alloc(ticked_t,thread_work)
+    call move_alloc(owner%thread_running,ticked_t)
+    call move_alloc(thread_work,owner%thread_running)
+    ! Running timers resume from their elapsed boundary, excluding parked work.
+    if(allocated(ticked))then
+      do i=lbound(ticked,1),ubound(ticked,1)
+        if(ticked(i))log_temp(i,:)=log_temp(i,:)+paused
+      enddo
+      do j=lbound(ticked_t,2),ubound(ticked_t,2)
+        do i=lbound(ticked_t,1),ubound(ticked_t,1)
+          if(ticked_t(i,j))log_temp_t(i,j)=log_temp_t(i,j)+paused
+        enddo
+      enddo
+    endif
+    owner%parked_at=now
+  end subroutine
+
+  function timer_context_get(owner,id) result(seconds)
+    type(s_timer_context),intent(in) :: owner
+    integer,intent(in) :: id
+    real(8) :: seconds
+    seconds=0d0
+    if(allocated(owner%elapsed))seconds=owner%elapsed(id,1)
+  end function
+
   subroutine timer_initialize
     use omp_lib, only: omp_get_max_threads
     implicit none

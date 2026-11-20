@@ -82,16 +82,9 @@ class NativeFastHSEModel:
             json.dumps([backend_identity,manifest],sort_keys=True).encode()).hexdigest()
 
     def _call(self,fn,*args):
-        # All handles use the same immutable model directory; legacy host cwd
-        # is restored after every call. Main-thread restriction remains explicit.
-        import os
-        from pathlib import Path
+        from ._native_group import _directory_call
         self._native._live()
-        previous=Path.cwd()
-        try:
-            os.chdir(self.work)
-            return fn(*args)
-        finally:os.chdir(previous)
+        return _directory_call(self.lib,self._native.context.solver_comm,self.work,fn,*args,minimum_protocol=2)
 
     def new_state(self,point_id=None,*,dt=None,capacity=None):
         """Fresh original-GS state, never a copy of another state's excitation."""

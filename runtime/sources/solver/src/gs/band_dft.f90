@@ -15,6 +15,7 @@
 !
 !=======================================================================
 module band_dft_sub
+  use filesystem,only:resolve_path
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root
   implicit none
@@ -24,6 +25,7 @@ contains
 subroutine init_band_dft(system,band)
   use structures, only: s_dft_system,s_band_dft
   implicit none
+  integer :: output_unit
   type(s_dft_system), intent(inout)  :: system
   type(s_band_dft), intent(inout) ::band
 
@@ -38,11 +40,11 @@ subroutine init_band_dft(system,band)
   band%check_conv_esp=.false.
 
   if ( comm_is_root(nproc_id_global) ) then
-     open(100,file='band.dat')
-     write(100,*) "Number_of_Bands:",system%no
-     write(100,*) "Number_of_kpt_in_each_block:",system%nk
-     write(100,*) "Number_of_blocks:",band%num_band_kpt/system%nk
-     close(100) 
+     open(newunit=output_unit,file=resolve_path('band.dat'))
+     write(output_unit,*) "Number_of_Bands:",system%no
+     write(output_unit,*) "Number_of_kpt_in_each_block:",system%nk
+     write(output_unit,*) "Number_of_blocks:",band%num_band_kpt/system%nk
+     close(output_unit)
  end if
 
 
@@ -51,6 +53,7 @@ end subroutine init_band_dft
 subroutine calc_band_write(iter_band_kpt,system,band,info)
   use structures, only: s_dft_system,s_band_dft,s_parallel_info
   implicit none
+  integer :: output_unit
   type(s_dft_system), intent(inout)  :: system
   type(s_band_dft), intent(inout) ::band
   type(s_parallel_info),intent(in) :: info
@@ -66,12 +69,12 @@ subroutine calc_band_write(iter_band_kpt,system,band,info)
    if( comm_is_root(nproc_id_global) ) then
       write(*,10) iter_band_kpt, iter_band_kpt+system%nk-1
       write(*,20) "kpoints","kpoints in Cartesian"
-      open(100,file='band.dat',position="append")
+      open(newunit=output_unit,file=resolve_path('band.dat'),position="append")
       do ik=iter_band_kpt,iter_band_kpt+system%nk-1
          write(*,30) ik, band%band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
-         write(100,30) ik, band%band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
+         write(output_unit,30) ik, band%band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
       end do
-      close(100)
+      close(output_unit)
    end if
 10 format(1x,"iter_band_kpt=",i3," to",i3)
 20 format(1x,3x,2x,a30,2x,a30)
@@ -82,18 +85,19 @@ end subroutine calc_band_write
 subroutine write_band(system,energy)
   use structures, only: s_dft_system,s_dft_energy
   implicit none
+  integer :: output_unit
   type(s_dft_system), intent(in) :: system
   type(s_dft_energy), intent(in) :: energy
   integer :: ik, iob, ispin
 
   if( comm_is_root(nproc_id_global) ) then
-     open(100,file='band.dat',position="append")
+     open(newunit=output_unit,file=resolve_path('band.dat'),position="append")
      do ik=1,size(energy%esp,2)
      do iob=1,size(energy%esp,1)
-        write(100,*) ik,iob,(energy%esp(iob,ik,ispin),ispin=1,system%nspin)
+        write(output_unit,*) ik,iob,(energy%esp(iob,ik,ispin),ispin=1,system%nspin)
      end do
      end do
-     close(100)
+     close(output_unit)
   end if
 
 end subroutine write_band

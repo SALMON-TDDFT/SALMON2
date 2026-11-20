@@ -242,3 +242,10 @@ mpiexec -n 6 python -m salmonpy.examples.mixed_hse_models FIELD_BUILD HSE_BUILD 
 ファイル番号が他状態と衝突しない最新ランタイムを指定してください。
 
 入力雛形は `examples/mixed_hse_models_inputs.json` です。bundleを手元の既存GSへ書き換えて使います。
+
+## 呼出しごとのファイル基準
+
+directory scope2/3対応runtimeでは、高速PR HSEの通常・共有・登録モデルの呼出しで
+ホストCWDを変更しません。各workフォルダを一時的なファイル解決の基準とし、
+失敗時も解除します。scope1／旧runtimeは従来経路です。GSと同じ共通呼出し処理を
+使いますが、同時スレッド実行の対応ではありません。直接再開の数値形式は維持します。

@@ -33,6 +33,64 @@ class NativeGSTests(unittest.TestCase):
         fn.assert_not_called()
         self.assertEqual(Path.cwd(),previous)
 
+        local=SimpleNamespace(allgather=lambda value:[value])
+        scope=SimpleNamespace(sp_io_directory_protocol=Mock(return_value=1),
+                              sp_io_directory_enter=Mock(return_value=0),sp_io_directory_leave=Mock())
+        scoped=NativeGSSession(None,SimpleNamespace(_live=lambda:None,
+            context=SimpleNamespace(solver_comm=local)),scope)
+        with patch('salmonpy.native_gs.os.chdir',side_effect=AssertionError('host chdir prohibited')):
+            self.assertEqual(scoped._call(previous,lambda:7),7)
+            with self.assertRaisesRegex(RuntimeError,'native failed'):
+                scoped._call(previous,Mock(side_effect=RuntimeError('native failed')))
+        self.assertEqual(scope.sp_io_directory_leave.call_count,2)
+        scope.sp_io_directory_enter.return_value=11
+        with self.assertRaises(InputError):scoped._call(previous,fn)
+        self.assertEqual(scope.sp_io_directory_leave.call_count,2)
+
+        from salmonpy.embedded_tddft import _NativeState
+        from salmonpy.fast_hse_mpi import _State
+        from salmonpy._shared_hse import NativeFastHSEModel
+        from salmonpy._shared_tddft import NativeTDDFTModel
+        from salmonpy._tddft_registry import NativeTDDFTRegistry
+        from salmonpy._hse_registry import _RegisteredModel
+        tdlib=SimpleNamespace(sp_io_directory_protocol=Mock(return_value=2),
+            sp_io_directory_enter=Mock(return_value=0),sp_io_directory_leave=Mock())
+        native=SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=local))
+        owner=SimpleNamespace(native=native,_native=native,lib=tdlib,work=previous)
+        with patch('os.chdir',side_effect=AssertionError('TDDFT host chdir prohibited')):
+            for method in (_NativeState._call,_State._call,NativeFastHSEModel._call,_RegisteredModel._call,NativeTDDFTModel._call):
+                self.assertEqual(method(owner,lambda:9),9)
+            self.assertEqual(NativeTDDFTRegistry._call(owner,previous,lambda:9),9)
+        self.assertEqual(tdlib.sp_io_directory_leave.call_count,6)
+        tdlib.sp_io_directory_protocol.return_value=1
+        with patch('os.chdir') as legacy_chdir:
+            self.assertEqual(NativeTDDFTModel._call(owner,lambda:9),9)
+        self.assertEqual(legacy_chdir.call_count,2)
+        self.assertEqual(tdlib.sp_io_directory_enter.call_count,6)
+        bridge=NativeGSSession(None,native,tdlib)
+        with patch('os.chdir') as legacy_chdir:
+            self.assertEqual(bridge._call(previous,lambda:9,minimum_protocol=2),9)
+        self.assertEqual(legacy_chdir.call_count,2)
+
+        # The optional timer query returns a detached rank-local mapping and
+        # fails clearly on an older runtime, without affecting ordinary GS calls.
+        import ctypes
+        from salmonpy.native_gs import NativeGSState
+        def fill(token,pointer):
+            values=(ctypes.c_double*4).from_address(pointer)
+            values[:]=[1.,2.,3.,4.]
+            return 0
+        lib=SimpleNamespace(sp_gs_timer_protocol=Mock(return_value=1),sp_gs_timers=Mock(side_effect=fill))
+        host=SimpleNamespace(_live=lambda:None,comm=SimpleNamespace(allgather=lambda x:[x]),
+                             _check=lambda code: self.assertEqual(code,0),lib=lib)
+        owner=NativeGSState(host,123,None,'A',None)
+        observed=owner.timing_seconds
+        self.assertEqual(observed,dict(total=1.,initialization=2.,scf_iterations=3.,write_results=4.))
+        observed['total']=-1
+        self.assertEqual(owner.timing_seconds['total'],1.)
+        host.lib=SimpleNamespace()
+        with self.assertRaisesRegex(InputError,'timers require'): _=owner.timing_seconds
+
     def test_material_identity_cannot_be_relabelled(self):
         from salmonpy.native_gs import NativeGSState
         calculation=object();state=NativeGSState(None,12,None,'film-a',calculation)
@@ -202,6 +260,47 @@ class NativeGSTests(unittest.TestCase):
 
 
 
+
+
+            # Different binary identity stays strict unless an equal recorded
+            # source/native-stream contract is explicitly selected.
+            local.comm.size=1;local.backend.decomposition=(1,1,1,1,1)
+            local.backend.sha256='rebuilt'
+            manifest['input_text']=text
+            contract={'schema':'salmonpy.scf-rebuild/1','source_sha256':'source',
+                      'stream_sha256':'abi','platform':'test','machine':'test'}
+            manifest['runtime_contract']=contract
+            (checkpoint/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(InputError,'runtime_sha256'):
+                _scf_disk_manifest(checkpoint,local,text,assets,'Si')
+            with patch('salmonpy.native_gs._scf_runtime_contract',return_value=dict(contract)):
+                _,accepted=_scf_disk_manifest(checkpoint,local,text,assets,'Si',compatible_runtime=True)
+                self.assertEqual(accepted['runtime_sha256'],'fixture')
+            for field in ('source_sha256','stream_sha256','platform','machine'):
+                other={**contract,field:'different'}
+                with patch('salmonpy.native_gs._scf_runtime_contract',return_value=other),self.assertRaisesRegex(InputError,'SCF rebuild requires'):
+                    _scf_disk_manifest(checkpoint,local,text,assets,'Si',compatible_runtime=True)
+            from salmonpy.native_gs import _scf_contract_mismatch
+            current={**contract,'schema':'salmonpy.scf-rebuild/2',
+                     'source_sha256':'new-source','codec_sha256':'c'*64,'state_revision':1}
+            declaration={'id':'fixture-transition','validation':'fixture-record',
+                         'from_source_sha256':'source','to_source_sha256':'new-source',
+                         'codec_sha256':'c'*64,'state_revision':1,'allow_legacy_state_revision':True}
+            with patch('salmonpy.native_gs._scf_version_catalog',return_value={'transitions':[declaration]}):
+                self.assertIn('source_sha256',_scf_contract_mismatch(contract,current,True)[0])
+                self.assertEqual(_scf_contract_mismatch(contract,current,'declared'),([],declaration['id']))
+                for field,value in (('source_sha256','unknown'),('codec_sha256','d'*64),
+                                    ('state_revision',2),('stream_sha256','other'),('platform','other')):
+                    self.assertTrue(_scf_contract_mismatch(contract,{**current,field:value},'declared')[0])
+                self.assertTrue(_scf_contract_mismatch(current,contract,'declared')[0])
+                for field,value in (('codec_sha256','d'*64),('state_revision',2)):
+                    self.assertTrue(_scf_contract_mismatch({**contract,field:value},current,'declared')[0])
+                self.assertEqual(_scf_contract_mismatch(contract,{**current,'source_sha256':'source'},True),([],None))
+            with patch('salmonpy.native_gs._scf_version_catalog',return_value={'transitions':[]}):
+                self.assertTrue(_scf_contract_mismatch(contract,current,'declared')[0])
+            manifest.pop('runtime_contract');(checkpoint/'manifest.json').write_text(json.dumps(manifest))
+            with patch('salmonpy.native_gs._scf_runtime_contract',return_value=contract),self.assertRaisesRegex(InputError,'SCF rebuild requires'):
+                _scf_disk_manifest(checkpoint,local,text,assets,'Si',compatible_runtime=True)
 
 
     def test_imported_force_and_native_complex_array_contract(self):

@@ -18,6 +18,7 @@
 #include "config.h"
 
 subroutine main_dft_k_expand_slice
+  use filesystem,only:resolve_path
   use math_constants, only: pi, zi
   use structures
   use inputoutput
@@ -160,6 +161,7 @@ subroutine main_dft_k_expand_slice
 contains
 
 subroutine init_k_expand(mk,kex)
+  use filesystem,only:resolve_path
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_is_root, comm_bcast
   use salmon_global, only: al,natom,nelec,nstate,num_rgrid
@@ -190,7 +192,7 @@ subroutine init_k_expand(mk,kex)
 
      !(read information from "info_k_expand.dat")
      iu1=91
-     open(iu1,file="info_k_expand.dat",status="old")
+     open(iu1,file=resolve_path("info_k_expand.dat"),status="old")
      read(iu1,'(a)') ifile_k_data  !file name of k-point information printed by SALMON (xxx_k.data)
      read(iu1,*) kex%nkx, kex%nky, kex%nkz   ! super cell size ; must correspond to k-point
 
@@ -214,7 +216,7 @@ subroutine init_k_expand(mk,kex)
 
      !(read information of k-point in GS)
      iu2=92
-     open(iu2,file=trim(ifile_k_data),status="old")
+     open(iu2,file=resolve_path(trim(ifile_k_data)),status="old")
      do i=1,5
         read(iu2,*)
      enddo
@@ -249,6 +251,7 @@ subroutine init_k_expand(mk,kex)
 end subroutine init_k_expand
 
 subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
+  use filesystem,only:resolve_path
   use parallelization, only: nproc_size_global
   use communication, only: comm_is_root, comm_bcast
   implicit none
@@ -311,6 +314,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
   end subroutine
 
   subroutine get_restart_reading_directory_name(system,nblock,gdir,pdir)
+  use filesystem,only:resolve_path
     use salmon_global, only: directory_read_data
     implicit none
     type(s_dft_system) :: system
@@ -331,6 +335,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
   end subroutine get_restart_reading_directory_name
 
   subroutine gen_restart_writing_directory_name_k_expand(kex,nblock,odir,gdir,pdir)
+  use filesystem,only:resolve_path
     implicit none
     type(s_k_expand) :: kex
     character(*),  intent(in)  :: odir
@@ -356,6 +361,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
 
 
   subroutine read_write_info_bin(idir,odir,kex,system)
+  use filesystem,only:resolve_path
     implicit none
     type(s_k_expand) :: kex
     type(s_dft_system) :: system
@@ -368,8 +374,8 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
     iu3 = 93
     dir_file_in  = trim(idir)//"/info.bin"
     dir_file_out = trim(odir)//"/info.bin"
-    open(iu1,file=dir_file_in, form='unformatted')
-    open(iu3,file=dir_file_out,form='unformatted')
+    open(iu1,file=resolve_path(dir_file_in), form='unformatted')
+    open(iu3,file=resolve_path(dir_file_out),form='unformatted')
 
 
     read(iu1) mk
@@ -397,6 +403,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
   end subroutine read_write_info_bin
 
   subroutine read_write_atomic_coor(idir,odir,kex,system)
+  use filesystem,only:resolve_path
     use salmon_global, only: al,natom,atom_name,kion,unit_length
     use inputoutput, only: au_length_aa
     implicit none
@@ -417,7 +424,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
    !dir_file_in  = trim(idir)//"/atomic_coor.txt"
     dir_file_out = trim(odir)//"/atomic_coor.txt"
    !open(iu1,file=dir_file_in, status="old")
-    open(iu3,file=dir_file_out,status="unknown")
+    open(iu3,file=resolve_path(dir_file_out),status="unknown")
 
     do ia = 1,natom
        atom_name(ia) = adjustl(atom_name(ia))
@@ -435,6 +442,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
   end subroutine read_write_atomic_coor
 
   subroutine read_write_atomic_vel(idir,odir,kex,system)
+  use filesystem,only:resolve_path
     use salmon_global, only: natom
     implicit none
     type(s_k_expand) :: kex
@@ -449,7 +457,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
    !dir_file_in  = trim(idir)//"/atomic_vel.txt"
     dir_file_out = trim(odir)//"/atomic_vel.txt"
    !open(iu1,file=dir_file_in, status="old")
-    open(iu3,file=dir_file_out,status="unknown")
+    open(iu3,file=resolve_path(dir_file_out),status="unknown")
 
     do ixyz= 1,kex%nk
        do ia = 1,natom
@@ -462,6 +470,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
   end subroutine read_write_atomic_vel
 
   subroutine read_write_occ_bin(idir,odir,kex,system)
+  use filesystem,only:resolve_path
     implicit none
     type(s_k_expand) :: kex
     type(s_dft_system) :: system
@@ -474,8 +483,8 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
     iu3 = 93
     dir_file_in  = trim(idir)//"/occupation.bin"
     dir_file_out = trim(odir)//"/occupation.bin"
-    open(iu1,file=dir_file_in, form='unformatted')
-    open(iu3,file=dir_file_out,form='unformatted')
+    open(iu1,file=resolve_path(dir_file_in), form='unformatted')
+    open(iu3,file=resolve_path(dir_file_out),form='unformatted')
 
 
     read(iu1) system%rocc(1:system%no,1:system%nk,1:system%nspin)
@@ -500,6 +509,7 @@ subroutine assign_rank_mumber_to_read_write_files(kex,system,info)
 end subroutine read_write_occ_bin
 
 subroutine read_write_rho_inout_bin(idir,odir,kex,system,lg,mixing)
+  use filesystem,only:resolve_path
   implicit none
   type(s_k_expand) :: kex
   type(s_dft_system) :: system
@@ -517,8 +527,8 @@ subroutine read_write_rho_inout_bin(idir,odir,kex,system,lg,mixing)
   iu3 = 93
   dir_file_in  = trim(idir)//"/rho_inout.bin"
   dir_file_out = trim(odir)//"/rho_inout.bin"
-  open(iu1,file=dir_file_in, form='unformatted')  !read
-  open(iu3,file=dir_file_out,form='unformatted')  !write
+  open(iu1,file=resolve_path(dir_file_in), form='unformatted')  !read
+  open(iu3,file=resolve_path(dir_file_out),form='unformatted')  !write
 
   lg_is_new(:) = lg%is(:)
   lg_ie_new(1) = lg%ie(1) * kex%nkx
@@ -578,6 +588,7 @@ subroutine read_write_rho_inout_bin(idir,odir,kex,system,lg,mixing)
 end subroutine read_write_rho_inout_bin
 
 subroutine read_write_wfn_bin(idir,odir,kex,nblock,system,lg)
+  use filesystem,only:resolve_path
   implicit none
   type(s_k_expand) :: kex
   type(s_dft_system) :: system
@@ -642,7 +653,7 @@ subroutine read_write_wfn_bin(idir,odir,kex,nblock,system,lg)
      write(dir_file_out,'(A,I6.6,A)') trim(odir(i_wdir))//'/wfn_ob_',io_w,'.dat'
     !write(*,'(3a)') trim(dir_file_in),"  ", trim(dir_file_out)
 
-     open(iu,file=dir_file_in,form='unformatted',access='stream',status='old')
+     open(iu,file=resolve_path(dir_file_in),form='unformatted',access='stream',status='old')
      read(iu) zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
      close(iu)
 
@@ -684,7 +695,7 @@ subroutine read_write_wfn_bin(idir,odir,kex,nblock,system,lg)
      !write(*,*) "norm(after)=", norm
 
      !write
-     open(iu,file=dir_file_out,form='unformatted',access='stream')
+     open(iu,file=resolve_path(dir_file_out),form='unformatted',access='stream')
      write(iu) zwf_ekr(1:lg_ie_new(1),1:lg_ie_new(2),1:lg_ie_new(3))
      close(iu)
 
@@ -706,6 +717,7 @@ subroutine read_write_wfn_bin(idir,odir,kex,nblock,system,lg)
 end subroutine read_write_wfn_bin
 
 subroutine  write_cube(orb,mx,my,mz,hgs,ofl)
+  use filesystem,only:resolve_path
   implicit none
   integer :: mx,my,mz,fp,i,j,n,ix,iy,iz
   real(8) :: orb(mx,my,mz), hgs(3), crd(3,2)
@@ -718,7 +730,7 @@ subroutine  write_cube(orb,mx,my,mz,hgs,ofl)
   crd(3,2)=mz*hgs(3)
 
   fp=1
-  open(fp,file=trim(ofl),status="unknown")
+  open(fp,file=resolve_path(trim(ofl)),status="unknown")
   write(fp,*) "distribution"
   write(fp,*) "All values here are in a.u."
   write(fp,'(i5,3f12.6)') n, 0d0, 0d0, 0d0

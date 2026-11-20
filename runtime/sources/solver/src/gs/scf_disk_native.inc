@@ -6,6 +6,37 @@ integer(c_int) function sp_gs_hse_orbital_protocol() bind(C)
  sp_gs_hse_orbital_protocol=0
 #endif
 end function
+! Native stream representation probe; no calculation state, files or collectives.
+! Bump when the meaning of accepted serialized numerical state changes.
+integer(c_int) function sp_gs_scf_state_revision() bind(C)
+ sp_gs_scf_state_revision=1
+end function
+integer(c_int) function sp_gs_scf_format_protocol() bind(C)
+ sp_gs_scf_format_protocol=1
+end function
+integer(c_int) function sp_gs_scf_format_signature(kinds,bytes) bind(C) result(status)
+ integer(c_int),intent(out)::kinds(8)
+ integer(c_int8_t),intent(out)::bytes(128)
+ integer::n
+ kinds=[storage_size(0)/8,storage_size(0_8)/8,storage_size(0d0)/8, &
+  storage_size((0d0,0d0))/8,storage_size(.true.)/8,storage_size('a')/8,0,0]
+#ifdef USE_HSE
+ kinds(7)=1
+#endif
+#ifdef USE_FFTW
+ kinds(8)=1
+#endif
+ status=15;bytes=0
+ if(any(kinds(:6)<1).or.any(kinds(:6)>16).or.4*kinds(6)>16)return
+ n=kinds(1);bytes(1:n)=transfer(16909060,bytes(1:n))
+ n=kinds(2);bytes(17:16+n)=transfer(72623859790382856_8,bytes(17:16+n))
+ n=kinds(3);bytes(33:32+n)=transfer(-1.25d0,bytes(33:32+n))
+ n=kinds(4);bytes(49:48+n)=transfer((0.5d0,-2.25d0),bytes(49:48+n))
+ n=kinds(5);bytes(65:64+n)=transfer(.true.,bytes(65:64+n))
+ bytes(81:80+n)=transfer(.false.,bytes(81:80+n))
+ n=4*kinds(6);bytes(97:96+n)=transfer('aZ09',bytes(97:96+n))
+ status=0
+end function
 integer(c_int) function sp_gs_scf_disk_protocol() bind(C)
  sp_gs_scf_disk_protocol=1
 end function
@@ -45,9 +76,9 @@ integer(c_int) function sp_gs_scf_disk(token,path,mode) bind(C) result(status)
  expected=[1,rank,nproc,storage_size(0),storage_size(0d0)]
  header=expected;counters=[ctx%initializations,ctx%executed_iterations]
  if(reading)then
-  open(newunit=u,file=trim(filename),status='old',action='read',access='stream',form='unformatted',iostat=ios)
+  open(newunit=u,file=resolve_path(trim(filename)),status='old',action='read',access='stream',form='unformatted',iostat=ios)
  else
-  open(newunit=u,file=trim(filename),status='new',action='write',access='stream',form='unformatted',iostat=ios)
+  open(newunit=u,file=resolve_path(trim(filename)),status='new',action='write',access='stream',form='unformatted',iostat=ios)
  endif
  if(ios==0)then
   if(reading)then
@@ -190,7 +221,7 @@ integer(c_int) function scf_repartition(token,path,old_size,kbounds,axis) result
    status=4;exit
   endif
   write(filename,'(a,a,i8.8,a)')trim(directory),'/rank-',j-1,'.bin'
-  open(newunit=u,file=trim(filename),status='old',action='read',access='stream',form='unformatted',iostat=ios)
+  open(newunit=u,file=resolve_path(trim(filename)),status='old',action='read',access='stream',form='unformatted',iostat=ios)
   if(ios==0)then
    inquire(unit=u,size=limit)
    read(u,iostat=ios)header,counters
@@ -664,7 +695,7 @@ integer(c_int) function scf_grid_repartition(token,path,old_size,boxes,tiles) re
    status=4;exit
   endif
   write(filename,'(a,a,i8.8,a)')trim(directory),'/rank-',j-1,'.bin'
-  open(newunit=u,file=trim(filename),status='old',action='read',access='stream',form='unformatted',iostat=ios)
+  open(newunit=u,file=resolve_path(trim(filename)),status='old',action='read',access='stream',form='unformatted',iostat=ios)
   if(ios==0)then
    inquire(unit=u,size=limit)
    read(u,iostat=ios)header,counters

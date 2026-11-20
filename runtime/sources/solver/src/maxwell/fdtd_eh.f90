@@ -15,6 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 module fdtd_eh
+  use filesystem,only:resolve_path
   use lorentz_drude, only: s_ld_state, ld_allocate, ld_coefficients, ld_store_old, ld_update, ld_finalize
   use fdtd_eh_kernel, only: eh_fd
   implicit none
@@ -724,7 +725,7 @@ contains
        call init_ttm_grid( fs%hgs, fs%mg%is_array, fs%mg%is, fs%mg%ie, fs%imedia )
        call init_ttm_alloc( fs%srg_ng, fs%mg )
        if( comm_is_root(nproc_id_global) )then
-          open(unit2,file=file_unit2)
+          open(unit2,file=resolve_path(file_unit2))
           write(unit2,'("#",99(1X,I0,":",A))') &
                1, "Time[fs]",                &
                2, "EM_energy[eV]",           &
@@ -1153,7 +1154,7 @@ contains
           !set header for point data
           write(save_name,*) ii
           save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point_rt.data'
-          open(fe%ifn,file=save_name)
+          open(fe%ifn,file=resolve_path(save_name))
           write(fe%ifn,'(A)') "# Real time calculation:" 
           write(fe%ifn,'(A)') "# E: Electric field" 
           write(fe%ifn,'(A)') "# H: Magnetic field" 
@@ -1195,7 +1196,7 @@ contains
               write(save_name,*) ii
               save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//&
                         '_'//plane_name//'_integral_rt.data'
-              open(fe%ifn,file=save_name)
+              open(fe%ifn,file=resolve_path(save_name))
               write(fe%ifn,'(A)') "# Real time calculation:" 
               write(fe%ifn,'(A)') "# IE: Plane integration of electric field" 
               write(fe%ifn,'(A)') "# IH: Plane integration of magnetic field" 
@@ -3257,7 +3258,7 @@ contains
           tmp(3)=sum(work1)/count(work1/=0.0d0)*hartree_kelvin_relationship
           tmp(4)=sum(work2)/count(work2/=0.0d0)*hartree_kelvin_relationship
           if( comm_is_root(nproc_id_global) )then
-            open(unit2,file=file_unit2,status='old',position='append')
+            open(unit2,file=resolve_path(file_unit2),status='old',position='append')
             write(unit2,"(F16.8,99(1X,E23.15E3))",advance='no') &
                  iter*dt_em*utime_from_au, tmp(1:2), tmp(3:4)
             close(unit2)
@@ -3296,7 +3297,7 @@ contains
             if(fe%iobs_po_pe(ii)==1) then
               write(save_name,*) ii
               save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//'_at_point_rt.data'
-              open(fe%ifn,file=save_name,status='old',position='append')
+              open(fe%ifn,file=resolve_path(save_name),status='old',position='append')
               write(fe%ifn,"(F16.8,99(1X,E23.15E3))",advance='no')                                          &
                     dble(iter)*dt_em*utime_from_au,                                                         &
                     fe%ex_s(fe%iobs_po_id(ii,1),fe%iobs_po_id(ii,2),fe%iobs_po_id(ii,3))*fe%uVperm_from_au, &
@@ -4491,7 +4492,7 @@ contains
         !output time-dependent dipole data
         if(comm_is_root(nproc_id_global)) then
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_rt.data'
-          open(fe%ifn,file=save_name)
+          open(fe%ifn,file=resolve_path(save_name))
           write(fe%ifn,'(A)') "# Real time calculation:" 
           write(fe%ifn,'(A)') "# ddm_e: Change of dipole moment (electrons/plus definition)" 
           select case(unit_system)
@@ -4523,7 +4524,7 @@ contains
         call eh_fourier(nt_em,nenergy,dt_em,de,fe%time_lr,fe%dip_lr(:,3),fe%fr_lr(:,3),fe%fi_lr(:,3))
         if(comm_is_root(nproc_id_global)) then
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_response.data'
-          open(fe%ifn,file=save_name)
+          open(fe%ifn,file=resolve_path(save_name))
           write(fe%ifn,'(A)') "# Fourier-transform spectra:" 
           write(fe%ifn,'(A)') "# alpha: Polarizability" 
           write(fe%ifn,'(A)') "# df/dE: Strength function" 
@@ -4572,7 +4573,7 @@ contains
         if(comm_is_root(nproc_id_global)) then
           !average matter current density data
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_rt.data'
-          open(fe%ifn,file=save_name)
+          open(fe%ifn,file=resolve_path(save_name))
           write(fe%ifn,'(A)') "# Real time calculation:" 
           write(fe%ifn,'(A)') "# Jm: Matter current density (electrons)" 
           select case(unit_system)
@@ -4599,7 +4600,7 @@ contains
           
           !average electric field data
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_rt_e.data'
-          open(fe%ifn,file=save_name)
+          open(fe%ifn,file=resolve_path(save_name))
           write(fe%ifn,'(A)') "# Real time calculation:" 
           write(fe%ifn,'(A)') "# E: Averaged electric field in the unit cell" 
           select case(unit_system)
@@ -4634,7 +4635,7 @@ contains
         call eh_fourier(nt_em,nenergy,dt_em,de,fe%time_lr,fe%e_lr(:,3)   ,fe%er_lr(:,3),fe%ei_lr(:,3))
         if(comm_is_root(nproc_id_global)) then
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_response.data'
-          open(fe%ifn,file=save_name)
+          open(fe%ifn,file=resolve_path(save_name))
           write(fe%ifn,'(A)') "# Fourier-transform spectra:" 
           write(fe%ifn,'(A)') "# sigma: Conductivity" 
           write(fe%ifn,'(A)') "# eps: Dielectric constant" 
@@ -4799,7 +4800,7 @@ contains
                   end if
                   save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(iobs_name))//&
                             '_ene'//trim(adjustl(iene_name))//'_'//plane_name//'_'//trim(wf_name)//'.data'
-                  open(fe%ifn,file=save_name)
+                  open(fe%ifn,file=resolve_path(save_name))
                   if(il==1)     then
                     write(fe%ifn,'(A)') "# Fourier-transformed spatial distribution with window function:"
                   elseif(il==2) then
@@ -4919,7 +4920,7 @@ contains
             wf_name = 'without_wf'
           end if
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_ase_'//trim(wf_name)//'.data'
-          open( fe%ifn+il,file=save_name)
+          open( fe%ifn+il,file=resolve_path(save_name))
           if    (il==1) then
             write(fe%ifn+il,'(A)') "# Absorption-, Scattering-, and Extinction-cross-sections"     //&
                                    " normalized by the spectral distribution of the incident pulse"//&
@@ -5149,7 +5150,7 @@ contains
             wf_name = 'without_wf'
           end if
           save_name=trim(adjustl(base_directory))//'/'//trim(adjustl(sysname))//'_art_'//trim(wf_name)//'.data'
-          open( fe%ifn+il,file=save_name)
+          open( fe%ifn+il,file=resolve_path(save_name))
           if    (il==1) then
             write(fe%ifn+il,'(A)') "# Absorption-, Reflection-, and Transmission-rates"            //&
                                    " normalized by the spectral distribution of the incident pulse"//&
@@ -5350,7 +5351,7 @@ contains
     !*** make information file used for animation *************************************************************!
     if(fe%flag_obs) then
       if(comm_is_root(nproc_id_global)) then
-        open(fe%ifn,file=trim(base_directory)//"/obs0_info.data")
+        open(fe%ifn,file=resolve_path(trim(base_directory)//"/obs0_info.data"))
         write(fe%ifn,'(A,A23)')         'unit_system          =',trim(unit_system)
         write(fe%ifn,'(A,A23)')         'yn_periodic          =',yn_periodic
         write(fe%ifn,'(A,E23.15E3)')    'dt_em                =',dt_em*utime_from_au
@@ -5780,7 +5781,7 @@ contains
         write(iter_name,*) iter
         save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(iobs_name))//'_'//var//&
                   '_'//plane_name//'_'//trim(adjustl(iter_name))//'.data'
-        open(ifn,file=save_name)
+        open(ifn,file=resolve_path(save_name))
         do i2=lg_is(i2s),lg_ie(i2s)
         do i1=lg_is(i1s),lg_ie(i1s)
           write(ifn,'(I8,I8,1X,E23.15E3)') i1,i2,save_pl2(i1,i2)*conv
@@ -5913,7 +5914,7 @@ contains
         write(save_name,*) iobs
         save_name=trim(adjustl(base_directory))//'/obs'//trim(adjustl(save_name))//&
                   '_'//plane_name//'_integral_rt.data'
-        open(ifn,file=save_name,status='old',position='append')
+        open(ifn,file=resolve_path(save_name),status='old',position='append')
         write(ifn,"(F16.8,99(1X,E23.15E3))",advance='no') &
               ti,ex_sum2*conv_e,ey_sum2*conv_e,ez_sum2*conv_e,hx_sum2*conv_h,hy_sum2*conv_h,hz_sum2*conv_h, &
               px_sum2*(uenergy_from_au/utime_from_au),&

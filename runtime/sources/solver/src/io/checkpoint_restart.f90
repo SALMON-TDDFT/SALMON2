@@ -18,6 +18,7 @@
 #include "config.h"
 
 module checkpoint_restart_sub
+  use filesystem,only:resolve_path
   implicit none
 
   ! Checkpoint loading precedes RT energy initialization. Keep the original
@@ -61,13 +62,13 @@ subroutine rt_energy_reference_file(directory,step,info,writing)
   logical::exists
   status=0
   if(info%id_rko==0)then
-    inquire(file=trim(directory)//'rt-initial-energy.bin',exist=exists)
+    inquire(file=resolve_path(trim(directory)//'rt-initial-energy.bin'),exist=exists)
     if(writing.or.exists)then
       if(writing)then
-        open(newunit=unit,file=trim(directory)//'rt-initial-energy.bin', &
+        open(newunit=unit,file=resolve_path(trim(directory)//'rt-initial-energy.bin'), &
           form='unformatted',status='replace',iostat=status)
       else
-        open(newunit=unit,file=trim(directory)//'rt-initial-energy.bin', &
+        open(newunit=unit,file=resolve_path(trim(directory)//'rt-initial-energy.bin'), &
           form='unformatted',status='old',iostat=status)
       endif
       if(status==0)then
@@ -262,7 +263,7 @@ subroutine checkpoint_opt(Miopt,opt,odir)
 
   if (comm_is_root(nproc_id_global))then
      fh_opt_bin = get_filehandle()
-     open(fh_opt_bin,file=dir_file_out,form='unformatted')
+     open(fh_opt_bin,file=resolve_path(dir_file_out),form='unformatted')
      write(fh_opt_bin) Miopt
      write(fh_opt_bin) opt%a_dRion(1:NA3)
      write(fh_opt_bin) opt%dFion(1:NA3)
@@ -294,7 +295,7 @@ subroutine restart_opt(Miopt,opt)
      istat = access( dir_file_in, " ")
      if(istat==0) then  !if file exists
         fh_opt_bin = get_filehandle()
-        open(fh_opt_bin,file=dir_file_in,form='unformatted')
+        open(fh_opt_bin,file=resolve_path(dir_file_in),form='unformatted')
         read(fh_opt_bin) Miopt
         read(fh_opt_bin) opt%a_dRion(1:NA3)
         read(fh_opt_bin) opt%dFion(1:NA3)
@@ -461,7 +462,7 @@ subroutine write_bin(odir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2
   !information
   if(comm_is_root(nproc_id_global))then
     dir_file_out = trim(odir)//"info.bin"
-    open(iu1_w,file=dir_file_out,form='unformatted')
+    open(iu1_w,file=resolve_path(dir_file_out),form='unformatted')
 
     write(iu1_w) system%nk
     write(iu1_w) system%no
@@ -477,7 +478,7 @@ subroutine write_bin(odir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2
   !occupation
   if(comm_is_root(nproc_id_global))then
     dir_file_out = trim(odir)//"occupation.bin"
-    open(iu1_w,file=dir_file_out,form='unformatted')
+    open(iu1_w,file=resolve_path(dir_file_out),form='unformatted')
     write(iu1_w) system%rocc(1:system%no,1:system%nk,1:system%nspin)
     close(iu1_w)
   end if
@@ -570,7 +571,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   if(flag_read_info) then
      if(comm_is_root(nproc_id_global))then
         dir_file_in = trim(idir)//"info.bin"
-        open(iu1_r,file=dir_file_in,form='unformatted')
+        open(iu1_r,file=resolve_path(dir_file_in),form='unformatted')
 
         read(iu1_r) mk
         read(iu1_r) mo
@@ -611,7 +612,7 @@ subroutine read_bin(idir,lg,mg,system,info,spsi,iter,mixing,Vh_stock1,Vh_stock2,
   if(flag_read_occ) then
   if(comm_is_root(nproc_id_global))then
      dir_file_in = trim(idir)//"occupation.bin"
-     open(iu1_r,file=dir_file_in,form='unformatted')
+     open(iu1_r,file=resolve_path(dir_file_in),form='unformatted')
 
      allocate(roccbox(mo,mk,system%nspin))
      read(iu1_r) roccbox(1:mo,1:mk,1:system%nspin)
@@ -687,7 +688,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
   if(is_self_checkpoint) then
     ! write all processes (each process dump data)
     dir_file_out = trim(odir)//"wfn.bin"
-    open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
+    open(iu2_w,file=resolve_path(dir_file_out),form='unformatted',access='stream')
 
     if(allocated(spsi%rwf))then
       write (iu2_w) spsi%rwf(mg%is(1):mg%ie(1),   &
@@ -729,7 +730,7 @@ contains
   subroutine write_all
     implicit none
     dir_file_out = trim(odir)//"wfn.bin"
-    open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
+    open(iu2_w,file=resolve_path(dir_file_out),form='unformatted',access='stream')
 
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
@@ -775,7 +776,7 @@ contains
     do io=info%io_s,info%io_e
       nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
       write (dir_file_out,'(A,I6.6,A,I6.6,A,I6.6,A)') trim(odir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
-      open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
+      open(iu2_w,file=resolve_path(dir_file_out),form='unformatted',access='stream')
 
       do is=1,system%nspin
         if(allocated(spsi%rwf))then
@@ -822,7 +823,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
 
   if(is_self_checkpoint) then
     ! write all processes
-    open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
+    open(iu1_w,file=resolve_path(dir_file_out),form='unformatted',access='stream')
     do i=1,mixing%num_rho_stock+1
       write(iu1_w) mixing%rho_in (i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
@@ -843,7 +844,7 @@ subroutine write_rho_inout(odir,lg,mg,system,info,mixing,is_self_checkpoint)
   else
     ! write root process
     if(comm_is_root(nproc_id_global))then
-      open(iu1_w,file=dir_file_out,form='unformatted')
+      open(iu1_w,file=resolve_path(dir_file_out),form='unformatted')
     end if
 
     allocate(matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
@@ -962,7 +963,7 @@ subroutine write_rho(odir,lg,mg,system,info,mixing)
   dir_file_out = trim(odir)//"rho.bin"
 
   ! write root process
-  if(comm_is_root(nproc_id_global)) open(iu1_w,file=dir_file_out,form='unformatted')
+  if(comm_is_root(nproc_id_global)) open(iu1_w,file=resolve_path(dir_file_out),form='unformatted')
 
   allocate(matbox (lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
   allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
@@ -1037,7 +1038,7 @@ subroutine write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint
 
   if (is_self_checkpoint) then
     ! write all processes
-    open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
+    open(iu1_w,file=resolve_path(dir_file_out),form='unformatted',access='stream')
     write(iu1_w) Vh_stock1%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     write(iu1_w) Vh_stock2%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     close(iu1_w)
@@ -1077,7 +1078,7 @@ subroutine write_Vh_stock(odir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint
     call comm_summation(matbox0,matbox2,lg%num(1)*lg%num(2)*lg%num(3),info%icomm_r)
 
     if(comm_is_root(nproc_id_global))then
-      open(iu1_w,file=dir_file_out,form='unformatted')
+      open(iu1_w,file=resolve_path(dir_file_out),form='unformatted')
       write(iu1_w) matbox1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
       write(iu1_w) matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
       close(iu1_w)
@@ -1113,7 +1114,7 @@ subroutine write_rho0_s(odir,lg,mg,system,info,rho0_s,is_self_checkpoint)
   dir_file_out = trim(odir)//"rho0_s.bin"
 
   if (is_self_checkpoint) then
-    open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
+    open(iu1_w,file=resolve_path(dir_file_out),form='unformatted',access='stream')
     do jspin=1,system%nspin
       write(iu1_w) rho0_s(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
@@ -1121,7 +1122,7 @@ subroutine write_rho0_s(odir,lg,mg,system,info,rho0_s,is_self_checkpoint)
   else
     allocate(matbox0(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
     allocate(matbox1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-    if(comm_is_root(nproc_id_global)) open(iu1_w,file=dir_file_out,form='unformatted')
+    if(comm_is_root(nproc_id_global)) open(iu1_w,file=resolve_path(dir_file_out),form='unformatted')
     do jspin=1,system%nspin
       matbox0 = 0d0
 !$omp parallel do collapse(2) private(iz,iy,ix)
@@ -1166,20 +1167,20 @@ subroutine read_rho0_s(idir,lg,mg,system,info,rho0_s,is_self_checkpoint,success)
   dir_file_in = trim(idir)//"rho0_s.bin"
 
   ! Backward compatibility: older restart data has no rho0_s.bin.
-  if(comm_is_root(nproc_id_global)) inquire(file=dir_file_in,exist=file_exists)
+  if(comm_is_root(nproc_id_global)) inquire(file=resolve_path(dir_file_in),exist=file_exists)
   call comm_bcast(file_exists,nproc_group_global)
   success = file_exists
   if(.not. file_exists) return
 
   if (is_self_checkpoint) then
-    open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
+    open(iu1_r,file=resolve_path(dir_file_in),form='unformatted',access='stream')
     do jspin=1,system%nspin
       read(iu1_r) rho0_s(jspin)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
     close(iu1_r)
   else
     allocate(matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
-    if(comm_is_root(nproc_id_global)) open(iu1_r,file=dir_file_in,form='unformatted')
+    if(comm_is_root(nproc_id_global)) open(iu1_r,file=resolve_path(dir_file_in),form='unformatted')
     do jspin=1,system%nspin
       if(comm_is_root(nproc_id_global)) &
         read(iu1_r) matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
@@ -1229,7 +1230,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
 
   if (is_self_checkpoint) then
     ! write all processes
-    open(iu1_w,file=dir_file_out,form='unformatted',access='stream')
+    open(iu1_w,file=resolve_path(dir_file_out),form='unformatted',access='stream')
     write(iu1_w) singlescale%vec_Ac_m(-1:1,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
     write(iu1_w) Ac%v(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     write(iu1_w) singlescale%vec_je_old(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
@@ -1351,7 +1352,7 @@ subroutine write_singlescale(odir,lg,mg,info,singlescale,Ac,div_Ac,is_self_check
     end if
 
     if(comm_is_root(nproc_id_global))then
-      open(iu1_w,file=dir_file_out,form='unformatted')
+      open(iu1_w,file=resolve_path(dir_file_out),form='unformatted')
       write(iu1_w) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       write(iu1_w) v1(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       write(iu1_w) b1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),1:3,1:4)
@@ -1410,7 +1411,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
   if(is_self_checkpoint) then
     ! read all processes (each process load dumped data)
     dir_file_in = trim(idir)//"wfn.bin"
-    open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
+    open(iu2_r,file=resolve_path(dir_file_in),form='unformatted',access='stream')
 
     if (allocated(spsi%rwf)) then
       read (iu2_r) spsi%rwf(mg%is(1):mg%ie(1),   &
@@ -1454,7 +1455,7 @@ contains
     integer :: im,ik,io,is
 
     dir_file_in = trim(idir)//"wfn.bin"
-    open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
+    open(iu2_r,file=resolve_path(dir_file_in),form='unformatted',access='stream')
 
     if (if_real_orbital) then
       allocate(ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
@@ -1512,7 +1513,7 @@ contains
     do io=info%io_s,info%io_e
       nb = ((io - 1) / nblock_orbital) * nblock_orbital + 1
       write (dir_file_in,'(A,I6.6,A,I6.6,A,I6.6,A)') trim(idir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
-      open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
+      open(iu2_r,file=resolve_path(dir_file_in),form='unformatted',access='stream')
 
       do is=1,system%nspin
         if (if_real_orbital) then
@@ -1563,7 +1564,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
 
   if(is_self_checkpoint) then
     ! read all processses
-    open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
+    open(iu1_r,file=resolve_path(dir_file_in),form='unformatted',access='stream')
     do i=1,mixing%num_rho_stock+1
       read(iu1_r) mixing%rho_in (i)%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     end do
@@ -1584,7 +1585,7 @@ subroutine read_rho_inout(idir,lg,mg,system,info,mixing,is_self_checkpoint)
   else
     ! read root process
     if(comm_is_root(nproc_id_global))then
-      open(iu1_r,file=dir_file_in,form='unformatted')
+      open(iu1_r,file=resolve_path(dir_file_in),form='unformatted')
     end if
 
     allocate(matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
@@ -1686,7 +1687,7 @@ subroutine read_rho(idir,lg,mg,system,info,mixing)
   dir_file_in = trim(idir)//"rho.bin"
 
   ! read root process
-  if(comm_is_root(nproc_id_global)) open(iu1_r,file=dir_file_in,form='unformatted')
+  if(comm_is_root(nproc_id_global)) open(iu1_r,file=resolve_path(dir_file_in),form='unformatted')
 
   allocate(matbox(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
@@ -1754,7 +1755,7 @@ subroutine read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint)
 
   if (is_self_checkpoint) then
     ! read all processes
-    open(iu1_r,file=dir_file_in,form='unformatted',access='stream')
+    open(iu1_r,file=resolve_path(dir_file_in),form='unformatted',access='stream')
     read(iu1_r) Vh_stock1%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     read(iu1_r) Vh_stock2%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     close(iu1_r)
@@ -1764,7 +1765,7 @@ subroutine read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint)
     allocate(matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
 
     if(comm_is_root(nproc_id_global))then
-      open(iu1_r,file=dir_file_in,form='unformatted')
+      open(iu1_r,file=resolve_path(dir_file_in),form='unformatted')
       read(iu1_r) matbox1(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
       read(iu1_r) matbox2(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
       close(iu1_r)
@@ -1832,7 +1833,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
 
   if (iself) then
     ! read all processes
-    open(iu1_r,file=dir_file_in,form='unformatted',access='stream',status="old",err=20)
+    open(iu1_r,file=resolve_path(dir_file_in),form='unformatted',access='stream',status="old",err=20)
     read(iu1_r) singlescale%vec_Ac_m(-1:1,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
     read(iu1_r) Ac%v(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
     read(iu1_r) singlescale%vec_je_old(1:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
@@ -1865,7 +1866,7 @@ subroutine restart_singlescale(comm,lg,mg,singlescale,Ac,div_Ac)
     if(method_singlescale/='3d') allocate(zbox(1:lg%num(1),1:mg%num(2),1:mg%num(3),0:3,1:3))
 
     if(comm_is_root(nproc_id_global))then
-      open(iu1_r,file=dir_file_in,form='unformatted',status='old',iostat=ierr)
+      open(iu1_r,file=resolve_path(dir_file_in),form='unformatted',status='old',iostat=ierr)
       if(ierr==0) then
       read(iu1_r) matbox1(-1:1,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
       read(iu1_r) matbox2(1:3,lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),1:3)
@@ -2023,7 +2024,7 @@ subroutine write_Rion(odir,system)
 
   if(comm_is_root(nproc_id_global)) then
      dir_file_out = trim(odir)//"atomic_coor.txt"
-     open(iu1_w, file=dir_file_out, status="unknown")
+     open(iu1_w, file=resolve_path(dir_file_out), status="unknown")
      if(yn_opt == 'y')then
         do ia = 1,natom
            write(iu1_w,7000) trim(atom_name(ia)), system%Rion(1:3,ia)*uconv, kion(ia), flag_opt_atom(ia)
@@ -2058,7 +2059,7 @@ subroutine write_Velocity(odir,system)
   ! atomic velocity [au]
   if(comm_is_root(nproc_id_global)) then
      dir_file_out = trim(odir)//"atomic_vel.txt"
-     open(iu1_w, file=dir_file_out, status="unknown")
+     open(iu1_w, file=resolve_path(dir_file_out), status="unknown")
      do ia = 1,natom
         write(iu1_w,8000) system%Velocity(1:3,ia)
      enddo
@@ -2096,7 +2097,7 @@ subroutine read_Rion(idir,system)
 
   if(comm_is_root(nproc_id_global)) then
      dir_file_out = trim(idir)//"atomic_coor.txt"
-     open(iu1_w, file=dir_file_out, status="old",err=10)
+     open(iu1_w, file=resolve_path(dir_file_out), status="old",err=10)
     !read(iu1_w,'(a)') line
     !if(index(line,"&atomic_coor").ne.0) then
     !   stop 'must be &atomic_coor in atomic_coor.txt'
@@ -2135,7 +2136,7 @@ subroutine read_Velocity(idir,system)
   ! atomic velocity [au]
   if(comm_is_root(nproc_id_global)) then
      dir_file_out = trim(idir)//"atomic_vel.txt"
-     open(iu1_w, file=dir_file_out, status="old",err=20)
+     open(iu1_w, file=resolve_path(dir_file_out), status="old",err=20)
      do ia = 1,natom
         read(iu1_w,*) system%Velocity(1:3,ia)
      enddo
@@ -2179,7 +2180,7 @@ subroutine write_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   if(trans_longi /= 'tr') then
     if(comm_is_root(nproc_id_global)) then
       filename = trim(wdir)//"rtdata.bin"
-      open(iunit,file=filename,form='unformatted',iostat=ierr)
+      open(iunit,file=resolve_path(filename),form='unformatted',iostat=ierr)
       write(iunit) rt%Ac_tot(:,itt),rt%Ac_tot(:,itt+1)
       write(iunit) rt%Ac_ind(:,itt),rt%Ac_ind(:,itt+1)
       write(iunit) rt%Ac_ind(:,0) ! for the 2D approximation
@@ -2216,7 +2217,7 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   if(trans_longi /= 'tr') then
     if(comm_is_root(nproc_id_global)) then
       filename = trim(wdir)//"rtdata.bin"
-      open(iunit,file=filename,form='unformatted',status='old',iostat=ierr)
+      open(iunit,file=resolve_path(filename),form='unformatted',status='old',iostat=ierr)
       read(iunit) rt%Ac_tot(:,itt),rt%Ac_tot(:,itt+1)
       read(iunit) rt%Ac_ind(:,itt),rt%Ac_ind(:,itt+1)
       read(iunit) rt%Ac_ind(:,0) ! for the 2D approximation
@@ -2250,20 +2251,20 @@ subroutine symmetry_checkpoint_metadata(wdir,system,info,writing)
   required=use_symmetry.and.(xc=='hse06')
   status=0;opened=.false.
   if(comm_is_root(info%id_rko))then
-    inquire(file=trim(wdir)//'symmetry_restart.bin',exist=exists)
+    inquire(file=resolve_path(trim(wdir)//'symmetry_restart.bin'),exist=exists)
     if(writing)then
       if(required)then
-        open(newunit=unit,file=trim(wdir)//'symmetry_restart.bin',form='unformatted',status='replace',iostat=status)
+        open(newunit=unit,file=resolve_path(trim(wdir)//'symmetry_restart.bin'),form='unformatted',status='replace',iostat=status)
         opened=status==0
       else if(exists)then
         ! Avoid retaining a stale symmetry guard in a reused output directory.
-        open(newunit=unit,file=trim(wdir)//'symmetry_restart.bin',status='old',iostat=status)
+        open(newunit=unit,file=resolve_path(trim(wdir)//'symmetry_restart.bin'),status='old',iostat=status)
         if(status==0)close(unit,status='delete',iostat=status)
       endif
     else
       if(exists.neqv.required)status=1
       if(status==0.and.exists)then
-        open(newunit=unit,file=trim(wdir)//'symmetry_restart.bin',form='unformatted',status='old',iostat=status)
+        open(newunit=unit,file=resolve_path(trim(wdir)//'symmetry_restart.bin'),form='unformatted',status='old',iostat=status)
         opened=status==0
       endif
     endif
@@ -2316,20 +2317,20 @@ subroutine hse_checkpoint_metadata(wdir,system,info,writing)
   expected_version=merge(2,1,use_symmetry)
   if(ae_shape1=='Acos2')expected_version=merge(6,5,use_symmetry)
   if(comm_is_root(info%id_rko))then
-    inquire(file=trim(wdir)//'hse_restart.bin',exist=exists)
+    inquire(file=resolve_path(trim(wdir)//'hse_restart.bin'),exist=exists)
     if(writing)then
       if(xc=='hse06')then
-        open(newunit=unit,file=trim(wdir)//'hse_restart.bin',form='unformatted',status='replace',iostat=status)
+        open(newunit=unit,file=resolve_path(trim(wdir)//'hse_restart.bin'),form='unformatted',status='replace',iostat=status)
         opened=status==0
       else if(exists)then
         ! A reused non-HSE checkpoint must not retain old HSE metadata.
-        open(newunit=unit,file=trim(wdir)//'hse_restart.bin',status='old',iostat=status)
+        open(newunit=unit,file=resolve_path(trim(wdir)//'hse_restart.bin'),status='old',iostat=status)
         if(status==0)close(unit,status='delete',iostat=status)
       endif
     else
       if(exists.neqv.(xc=='hse06'))status=1
       if(status==0.and.exists)then
-        open(newunit=unit,file=trim(wdir)//'hse_restart.bin',form='unformatted',status='old',iostat=status)
+        open(newunit=unit,file=resolve_path(trim(wdir)//'hse_restart.bin'),form='unformatted',status='old',iostat=status)
         opened=status==0
       endif
     endif
@@ -2364,12 +2365,12 @@ subroutine hse_checkpoint_metadata(wdir,system,info,writing)
       endif
       do j=1,nelem
         if(status/=0)exit
-        inquire(file=trim(file_pseudo(j)),size=nbytes,iostat=status)
+        inquire(file=resolve_path(trim(file_pseudo(j))),size=nbytes,iostat=status)
         if(status/=0.or.nbytes<1)then
           status=1;exit
         endif
         allocate(character(nbytes)::bytes)
-        open(newunit=pu,file=trim(file_pseudo(j)),form='unformatted',access='stream',status='old',iostat=status)
+        open(newunit=pu,file=resolve_path(trim(file_pseudo(j))),form='unformatted',access='stream',status='old',iostat=status)
         if(status==0)then
           read(pu,iostat=status)bytes
           close(pu)
@@ -2503,7 +2504,7 @@ contains
     MPI_CHECK(MPI_Type_commit(global_type, ierr))
 
     ! write/read file
-    MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
+    MPI_CHECK(MPI_File_open(icomm, resolve_path(iofile), iopen_flag, minfo, mfile, ierr))
     MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type, global_type, 'native', MPI_INFO_NULL, ierr))
 
     select case(rw_mode)
@@ -2614,7 +2615,7 @@ contains
       write (iofile,'(A,I6.6,A,I6.6,A,I6.6,A)') trim(iodir)//'k_',ik,'_ob_',nb,'/wfn_ob_',io,'.dat'
 
       ! write/read file
-      MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
+      MPI_CHECK(MPI_File_open(icomm, resolve_path(iofile), iopen_flag, minfo, mfile, ierr))
       MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type, global_type, 'native', MPI_INFO_NULL, ierr))
 
       select case(rw_mode)

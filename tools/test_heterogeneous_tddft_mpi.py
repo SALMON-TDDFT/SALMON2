@@ -17,9 +17,14 @@ def main():
     p.add_argument('--b-split',choices=('orbital','rgrid'),default='rgrid')
     p.add_argument('--reverse',action='store_true')
     p.add_argument('--capacity-test',action='store_true')
+    p.add_argument('--no-chdir',action='store_true')
     a=p.parse_args();world=MPI.COMM_WORLD
     assert world.size==3*a.size
     group=world.rank//a.size;comm=world.Split(group,world.rank)
+    anchor=Path.cwd()
+    from unittest.mock import patch
+    guard=patch('os.chdir',side_effect=AssertionError('TDDFT host chdir forbidden')) if a.no_chdir and group==0 else None
+    if guard:guard.start()
     root=a.output.resolve()/str(group)
     if comm.rank==0:root.mkdir(parents=True,exist_ok=False)
     comm.Barrier()
@@ -116,12 +121,14 @@ def main():
             for model in tuple(models.values()):model.close()
             registry.close()
     assert context._dependents==0
+    assert Path.cwd()==anchor
+    if guard:guard.stop()
     all_traces=world.allgather(traces)
     for k in (1,2):np.testing.assert_array_equal(all_traces[0][k],all_traces[k*a.size][k][:len(all_traces[0][k])])
     np.savez(root/f'trace-{comm.rank}.npz',**{f'p{k}':v for k,v in traces.items()})
     if world.rank==0:
         (a.output/'result.json').write_text(json.dumps({'status':'pass','size':a.size,'b_split':a.b_split,
-            'reverse':a.reverse,'accepted_B_steps':steps_b,'independent_exact':True,'resume_exact':True,'replayed_steps':0,
+            'reverse':a.reverse,'accepted_B_steps':steps_b,'independent_exact':True,'new_runtime_no_chdir':a.no_chdir,'resume_exact':True,'replayed_steps':0,
             'model_close_preserves_siblings':True,'stale_and_mixed_model_tokens_rejected':True,
             'registry_close_order_independent':True,'failed_register_preserves_models':True})+'\n')
     comm.Free()

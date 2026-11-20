@@ -21,6 +21,7 @@ from salmonpy.errors import NumericalError
 def main():
     build,destination=sys.argv[1:3]
     split='--split' in sys.argv;faults='--faults' in sys.argv
+    no_chdir='--no-chdir' in sys.argv
     stride=int(sys.argv[sys.argv.index('--observation-stride')+1]) if '--observation-stride' in sys.argv else 1
     world=MPI.COMM_WORLD
     if split:assert world.size==4
@@ -34,6 +35,10 @@ def main():
     comm.Barrier()
     ctx=SimpleNamespace(solver_comm=comm,is_leader=comm.rank==0,closed=False,_dependents=0,
         group=SimpleNamespace(role='field'),plan=SimpleNamespace(point_ids=(1,)))
+    anchor=Path.cwd()
+    from unittest.mock import patch
+    guard=patch('os.chdir',side_effect=AssertionError('FDTD host chdir forbidden')) if no_chdir else None
+    if guard:guard.start()
     grid=Grid((40,40,40),(2.,2.,2.));dt=.003;steps=32
     ld=(LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[0.],damping=[2.]),
         LorentzDrude(plasma_frequency=15.,strength=[.7,.3],resonance=[25.,35.],damping=[2.,3.]))
@@ -95,8 +100,10 @@ def main():
         cases.append(('admission','capacity'))
     np.save(out/f'fields-{comm.rank}.npy',rows)
     f.close()
+    assert Path.cwd()==anchor
+    if guard:guard.stop()
     if comm.rank==0:
-        (out/'validation.json').write_text(json.dumps(dict(status='passed',cases=cases,ranks=comm.size,steps=steps,replayed_steps=0),indent=2)+'\n')
+        (out/'validation.json').write_text(json.dumps(dict(status='passed',new_runtime_no_chdir=no_chdir,cases=cases,ranks=comm.size,steps=steps,replayed_steps=0),indent=2)+'\n')
         print('E/H deep recovery PASS',cases)
 
 

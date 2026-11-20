@@ -18,6 +18,7 @@
 #include "config.h"
 
 module write_sub
+  use filesystem,only:resolve_path
   use math_constants,only : zi,pi
   implicit none
 
@@ -431,7 +432,7 @@ contains
 
       call MPI_Type_create_subarray(5, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, file_type, ierr)
       call MPI_Type_commit(file_type, ierr)
-      call MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr)
+      call MPI_File_open(icomm, resolve_path(iofile), iopen_flag, minfo, mfile, ierr)
 
       block_size = int(3,8)*system%nspin*NB*NB*int(16,8)
       base_vnl = int(NK,8) * block_size
@@ -525,13 +526,13 @@ contains
 
        if (comm_is_root(nproc_id_global)) then
           filename = trim(base_directory)//trim(sysname) // '_sigma.data'
-          open(fh_s, file=filename, status='replace')
+          open(fh_s, file=resolve_path(filename), status='replace')
           write(fh_s,'(3a)') "#1:omega[a.u.], 2:Re(sigma)[a.u.], 3:Im(sigma)[a.u.]", &
                             & ", 4:Re(sigma_intra)[a.u.], 5:Im(sigma_intra)[a.u.]", &
                             & ", 6:Re(sigma_inter)[a.u.], 7:Im(sigma_inter)[a.u.]"
                             
           filename = trim(base_directory)//trim(sysname) // '_epsilon.data'
-          open(fh_e, file=filename, status='replace')
+          open(fh_e, file=resolve_path(filename), status='replace')
           write(fh_e,'(3a)') "#1:omega[a.u.], 2:Re(epsilon), 3:Im(epsilon)", &
                             & ", 4:Re(epsilon_intra), 5:Im(epsilon_intra)", &
                             & ", 6:Re(epsilon_inter), 7:Im(epsilon_inter)"
@@ -617,7 +618,7 @@ contains
        file_trj=trim(base_directory)//trim(SYSname)//'_trj.xyz'
        unit_xyz = open_filehandle(file_trj)
        ofl%fh_trj = unit_xyz
-       open(unit_xyz,file=trim(file_trj),status="unknown")
+       open(unit_xyz,file=resolve_path(trim(file_trj)),status="unknown")
 
     else if(action=='add') then
 
@@ -1172,7 +1173,7 @@ contains
        ofl%file_dft_md = trim(base_directory)//trim(sysname)//'_dft_md.data'
        ofl%fh_dft_md   = open_filehandle(ofl%file_dft_md)
        uid = ofl%fh_dft_md
-       open(uid,file=trim(ofl%file_dft_md),status="unknown")
+       open(uid,file=resolve_path(trim(ofl%file_dft_md)),status="unknown")
     endif
     uid = ofl%fh_dft_md
 
@@ -1573,7 +1574,7 @@ contains
        ofl%file_eigen_data=trim(base_directory)//trim(sysname)//"_eigen.data"
        ofl%fh_eigen = open_filehandle(trim(ofl%file_eigen_data))
        uid = ofl%fh_eigen
-       open(uid,file=ofl%file_eigen_data)
+       open(uid,file=resolve_path(ofl%file_eigen_data))
        write(uid,'("#esp: single-particle energies (eigen energies)")')
        write(uid,'("#occ: occupation numbers, io: orbital index")')
        select case(unit_energy)
@@ -1615,7 +1616,7 @@ contains
     integer :: iob,iik,is
     real(8) :: dos_l(1:out_dos_nenergy,system%nspin)
     real(8) :: fk,ww,dw
-    integer :: iw,index_vbm
+    integer :: iw,index_vbm,output_unit
     real(8) :: ene_min,ene_max,eshift
     character(100) :: filename
 
@@ -1664,20 +1665,20 @@ contains
 
     if(comm_is_root(nproc_id_global))then
       filename=trim(base_directory)//trim(sysname)//"_dos.data"
-      open(101,file=filename)
-      write(101,'("# Density of States")')
+      open(newunit=output_unit,file=resolve_path(filename))
+      write(output_unit,'("# Density of States")')
       select case(unit_energy)
       case('au','a.u.')
-        write(101,'("# Energy[a.u.] DOS[a.u.]")')
+        write(output_unit,'("# Energy[a.u.] DOS[a.u.]")')
       case('ev','eV')
-        write(101,'("# Energy[eV]  DOS[1/eV]")')
+        write(output_unit,'("# Energy[eV]  DOS[1/eV]")')
       end select
-      write(101,'("#-----------------------")')
+      write(output_unit,'("#-----------------------")')
       do iw=1,out_dos_nenergy
         ww=out_dos_start+dble(iw-1)*dw
-        write(101,'(F16.8,99(1X,E23.15E3))') ww*uenergy_from_au, ( dos_l(iw,is)/uenergy_from_au, is=1,system%nspin )
+        write(output_unit,'(F16.8,99(1X,E23.15E3))') ww*uenergy_from_au, ( dos_l(iw,is)/uenergy_from_au, is=1,system%nspin )
       end do
-      close(101)
+      close(output_unit)
     end if
 
   end subroutine write_dos
@@ -1719,7 +1720,7 @@ contains
     real(8) :: pdos_l(out_dos_nenergy,0:4,natom)
     character(100) :: Outfile
     real(8) :: fk,ww,dw
-    integer :: iw,index_vbm
+    integer :: iw,index_vbm,output_unit
     real(8) :: ene_min,ene_max,eshift
     character(20) :: fileNumber
 
@@ -1823,53 +1824,53 @@ contains
         ikoa=Kion(iatom)
         write(fileNumber, '(i8)') iatom
         OutFile = trim(base_directory)//trim(sysname)//"_pdos"//trim(adjustl(fileNumber))//".data"
-        open(101,file=OutFile)
-        write(101,'("# Projected Density of States")')
+        open(newunit=output_unit,file=resolve_path(OutFile))
+        write(output_unit,'("# Projected Density of States")')
         select case(unit_energy)
         case('au','a.u.')
           if(pp%mlps(ikoa)==0)then
-            write(101,'("# Energy[a.u.] PDOS(l=0)[a.u.]")')
+            write(output_unit,'("# Energy[a.u.] PDOS(l=0)[a.u.]")')
           else if(pp%mlps(ikoa)==1)then
-            write(101,'("# Energy[a.u.] PDOS(l=0)[a.u.] PDOS(l=1)[a.u.]")')
+            write(output_unit,'("# Energy[a.u.] PDOS(l=0)[a.u.] PDOS(l=1)[a.u.]")')
           else if(pp%mlps(ikoa)==2)then
-            write(101,'("# Energy[a.u.] PDOS(l=0)[a.u.] PDOS(l=1)[a.u.] PDOS(l=2)[a.u.]")')
+            write(output_unit,'("# Energy[a.u.] PDOS(l=0)[a.u.] PDOS(l=1)[a.u.] PDOS(l=2)[a.u.]")')
           else if(pp%mlps(ikoa)==3)then
-            write(101,'("# Energy[a.u.] PDOS(l=0)[a.u.] PDOS(l=1)[a.u.] PDOS(l=2)[a.u.] PDOS(l=3)[a.u.]")')
+            write(output_unit,'("# Energy[a.u.] PDOS(l=0)[a.u.] PDOS(l=1)[a.u.] PDOS(l=2)[a.u.] PDOS(l=3)[a.u.]")')
           end if
         case('ev','eV')
           if(pp%mlps(ikoa)==0)then
-            write(101,'("# Energy[eV]  PDOS(l=0)[1/eV]")')
+            write(output_unit,'("# Energy[eV]  PDOS(l=0)[1/eV]")')
           else if(pp%mlps(ikoa)==1)then
-            write(101,'("# Energy[eV]  PDOS(l=0)[1/eV] PDOS(l=1)[1/eV]")')
+            write(output_unit,'("# Energy[eV]  PDOS(l=0)[1/eV] PDOS(l=1)[1/eV]")')
           else if(pp%mlps(ikoa)==2)then
-            write(101,'("# Energy[eV]  PDOS(l=0)[1/eV] PDOS(l=1)[1/eV] PDOS(l=2)[1/eV]")')
+            write(output_unit,'("# Energy[eV]  PDOS(l=0)[1/eV] PDOS(l=1)[1/eV] PDOS(l=2)[1/eV]")')
           else if(pp%mlps(ikoa)==3)then
-            write(101,'("# Energy[eV]  PDOS(l=0)[1/eV] PDOS(l=1)[1/eV] PDOS(l=2)[1/eV] PDOS(l=3)[1/eV]")')
+            write(output_unit,'("# Energy[eV]  PDOS(l=0)[1/eV] PDOS(l=1)[1/eV] PDOS(l=2)[1/eV] PDOS(l=3)[1/eV]")')
           end if
         end select
-        write(101,'("#-----------------------")')
+        write(output_unit,'("#-----------------------")')
         if(pp%mlps(ikoa)==0)then
           do iw=1,out_dos_nenergy
             ww=out_dos_start+dble(iw-1)*dw
-            write(101,'(f10.5,f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
+            write(output_unit,'(f10.5,f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         else if(pp%mlps(ikoa)==1)then
           do iw=1,out_dos_nenergy
             ww=out_dos_start+dble(iw-1)*dw
-            write(101,'(f10.5,2f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
+            write(output_unit,'(f10.5,2f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         else if(pp%mlps(ikoa)==2)then
           do iw=1,out_dos_nenergy
             ww=out_dos_start+dble(iw-1)*dw
-            write(101,'(f10.5,3f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
+            write(output_unit,'(f10.5,3f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         else if(pp%mlps(ikoa)==3)then
           do iw=1,out_dos_nenergy
             ww=out_dos_start+dble(iw-1)*dw
-            write(101,'(f10.5,4f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
+            write(output_unit,'(f10.5,4f14.8)') ww*uenergy_from_au,(pdos_l(iw,L,iatom)/uenergy_from_au,L=0,pp%mlps(ikoa))
           end do
         end if
-        close(101)
+        close(output_unit)
       end do
     end if
     return
@@ -2034,7 +2035,7 @@ contains
       !(header in SYSname_ovlp.data)
         write(ofl%file_ovlp,"(2A,'_ovlp.data')") trim(base_directory),trim(SYSname)
         ofl%fh_ovlp = open_filehandle(ofl%file_ovlp)
-        open(ofl%fh_ovlp,file=ofl%file_ovlp)
+        open(ofl%fh_ovlp,file=resolve_path(ofl%file_ovlp))
         write(ofl%fh_ovlp, '("#",1X,A)') "Projection"
         write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ik", "k-point index"
         write(ofl%fh_ovlp, '("#",1X,A,":",1X,A)') "ovlp_occup", "Occupation"
@@ -2046,7 +2047,7 @@ contains
       !(header in SYSname_nex.data)
         write(ofl%file_nex,"(2A,'_nex.data')") trim(base_directory),trim(SYSname)
         ofl%fh_nex = open_filehandle(ofl%file_nex)
-        open(ofl%fh_nex,file=ofl%file_nex)
+        open(ofl%fh_nex,file=resolve_path(ofl%file_nex))
         write(ofl%fh_nex, '("#",1X,A)') "Excitation"
         write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nelec", "Number of excited electrons"
         write(ofl%fh_nex, '("#",1X,A,":",1X,A)') "nhole", "Number of excited holes"
@@ -2059,7 +2060,7 @@ contains
         !(header in SYSname_intra_current.data)
           write(file_intra_current,"(2A,'_intra_current.data')") trim(base_directory),trim(SYSname)
           ofl%fh_intra_current = open_filehandle(file_intra_current)
-          open(ofl%fh_intra_current,file=file_intra_current)
+          open(ofl%fh_intra_current,file=resolve_path(file_intra_current))
           write(ofl%fh_intra_current, '("#",1X,A)') "Intra-band current density [T. Otobe, Phys. Rev. B 94, 235152 (2016).]"
           write(ofl%fh_intra_current, '("#",99(1X,I0,":",A,"[",A,"]"))',advance='no')  &
           &  1, "Time", trim(t_unit_time%name)
@@ -2417,7 +2418,7 @@ contains
       if(comm_is_root(nproc_id_global))then
         write(file_current_decomposed,"(2A,'_current_decomposed.data')") trim(base_directory),trim(SYSname)
         ofl%fh_current_decomposed = open_filehandle(file_current_decomposed)
-        open(ofl%fh_current_decomposed,file=file_current_decomposed)
+        open(ofl%fh_current_decomposed,file=resolve_path(file_current_decomposed))
         write(ofl%fh_current_decomposed, '("#",1X,A)') "decomposition of the current density"
         write(ofl%fh_current_decomposed, '("#",1X,A,":",1X,A)') "it", "time step index"
         write(ofl%fh_current_decomposed, '("#",1X,A,":",1X,A)') "ik", "k-point index"
@@ -2559,7 +2560,7 @@ contains
         write(filename,"(2A,'_rt_spin.data')") trim(base_directory),trim(SYSname)
         ofl%fh_rt_spin = open_filehandle(filename)
         fh = ofl%fh_rt_spin
-        open(fh,file=filename)
+        open(fh,file=resolve_path(filename))
         write(fh, '("#",1X,A)') "Spin magnetization & Spin current density"
         write(fh, '("#",1X,A,":",1X,A)') "mag_[xyz]", "Total magnetization"
         write(fh, '("#",1X,A,":",1X,A)') "spin_curr_i_[xyz]", "Spin current density with the Pauli matrix sigma_i (i=0,x,y,z)"
@@ -2586,7 +2587,7 @@ contains
           write(filename,"(2A,'_mag_decomposed_rt.data')") trim(base_directory),trim(SYSname)
           ofl%fh_mag_decomposed_rt = open_filehandle(filename)
           fh = ofl%fh_mag_decomposed_rt
-          open(fh,file=filename)
+          open(fh,file=resolve_path(filename))
           write(fh, '("#",1X,A)') "band decomposition of the time-dependent spin magnetization"
           write(fh, '("#",1X,A,":",1X,A)') "it", "time step index"
           write(fh, '("#",1X,A,":",1X,A)') "ik", "k-point index"
@@ -2607,7 +2608,7 @@ contains
           write(filename,"(2A,'_spin_current_decomposed.data')") trim(base_directory),trim(SYSname)
           ofl%fh_spin_current_decomposed = open_filehandle(filename)
           fh = ofl%fh_spin_current_decomposed
-          open(fh,file=filename)
+          open(fh,file=resolve_path(filename))
           write(fh, '("#",1X,A)') "Band decomposition of the spin current density"
           write(fh, '("#",1X,A,":",1X,A)') "it", "time step index"
           write(fh, '("#",1X,A,":",1X,A)') "ik", "k-point index"
@@ -2657,7 +2658,7 @@ contains
       !(header in gs_mag.data)
       write(file_gs_mag,"(2A,'_mag_decomposed_gs.data')") trim(base_directory),trim(SYSname)
       fh_gs_mag = open_filehandle(file_gs_mag)
-      open(fh_gs_mag,file=file_gs_mag)
+      open(fh_gs_mag,file=resolve_path(file_gs_mag))
       write(fh_gs_mag, '("#",1X,A)') "Band decomposition of the spin magnetization @ the ground state"
       write(fh_gs_mag, '("#",1X,A,":",1X,A)') "ik", "k-point index"
       write(fh_gs_mag, '("#",1X,A,":",1X,A)') "ib", "band index"

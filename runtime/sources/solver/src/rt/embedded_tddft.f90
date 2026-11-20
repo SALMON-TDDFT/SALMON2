@@ -20,8 +20,10 @@
 #include "config.h"
 #ifdef SALMONPY_FAST_CORE
 module salmonpy_standard_tddft_context
+  use filesystem,only:resolve_path
 #else
 module salmonpy_tddft_context
+  use filesystem,only:resolve_path
 #endif
 use tddft_worker
 use salmonpy_gs_seed, only: s_gs_seed
@@ -838,7 +840,7 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   if(any(decomposition<1))status=10
   if(product(real(decomposition,8))/=real(admission_size,8))status=10
   if(.not.associated(pending_gs))then
-    inquire(file=trim(filename),exist=exists)
+    inquire(file=resolve_path(trim(filename)),exist=exists)
     if(.not.exists)status=10
   endif
   call comm_get_max(status,admission_group)
@@ -913,9 +915,9 @@ subroutine open_initial_state(owner,J,status,name)
   saved_name=sysname
   if(len_trim(name)>0)saved_name=name
   if(len_trim(name)>0.or.handle_initializing)then
-    inquire(file=trim(base_directory)//trim(saved_name)//'_rt.data',exist=exists)
+    inquire(file=resolve_path(trim(base_directory)//trim(saved_name)//'_rt.data'),exist=exists)
     if(exists)status=1
-    inquire(file=trim(base_directory)//trim(saved_name)//'_rt_energy.data',exist=exists)
+    inquire(file=resolve_path(trim(base_directory)//trim(saved_name)//'_rt_energy.data'),exist=exists)
     if(exists)status=1
   endif
   call handle_agree(status)
@@ -1184,9 +1186,9 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
     state%info%io_s,state%info%io_e,state%info%ik_s,state%info%ik_e,state%info%im_s,state%info%im_e, &
     storage_size(1d0),storage_size(1),storage_size((0d0,0d0)),0,0]
   if(reading)then
-    open(newunit=u,file=trim(filename),status='old',access='stream',form='unformatted',action='read',iostat=ios)
+    open(newunit=u,file=resolve_path(trim(filename)),status='old',access='stream',form='unformatted',action='read',iostat=ios)
   else
-    open(newunit=u,file=trim(filename),status='new',access='stream',form='unformatted',action='write',iostat=ios)
+    open(newunit=u,file=resolve_path(trim(filename)),status='new',access='stream',form='unformatted',action='write',iostat=ios)
   endif
   opened=ios==0
   if(opened)then

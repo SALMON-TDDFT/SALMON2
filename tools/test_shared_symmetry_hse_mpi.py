@@ -20,6 +20,8 @@ def main():
     p.add_argument('--group-size',type=int,default=2)
     p.add_argument('--symmetry',action='store_true')
     p.add_argument('--steps',type=int,default=32)
+    p.add_argument('--baseline',type=Path)
+    p.add_argument('--no-chdir',action='store_true')
     args=p.parse_args();world=MPI.COMM_WORLD
     assert world.size==3*args.group_size and args.steps>=16
     group=world.rank//args.group_size;comm=world.Split(group,world.rank)
@@ -27,8 +29,12 @@ def main():
     if comm.rank==0:work.mkdir(parents=True,exist_ok=False)
     comm.Barrier()
     context=SimpleNamespace(solver_comm=comm,point_ids=(1,2) if group==0 else (group,),closed=False,_dependents=0)
+    anchor=Path.cwd()
+    from unittest.mock import patch
+    guard=patch('os.chdir',side_effect=AssertionError('shared HSE host chdir forbidden')) if args.no_chdir and group==0 else None
+    if guard:guard.start()
     initial=FastHSEMaterialProvider(args.fixture,max_steps=args.steps).prepare(context)
-    backend=NativeFastHSEBackend(args.build,work,allow_symmetry=args.symmetry)
+    backend=NativeFastHSEBackend(args.baseline if group and args.baseline else args.build,work,allow_symmetry=args.symmetry)
     states=[];model=None;traces={};histories={};resumes={}
     def drive(index,which):
         return np.array([0.,0.,1e-4*np.sin(.3*index)*(1 if which==1 else -.7)])
@@ -78,6 +84,8 @@ def main():
         for state in reversed(states):state.close()
         if model is not None:model.close()
     assert context._dependents==0
+    assert Path.cwd()==anchor
+    if guard:guard.stop()
     gathered=world.allgather(traces)
     for which in (1,2):
         ref=gathered[which*args.group_size][which]
@@ -86,7 +94,7 @@ def main():
         assert not np.array_equal(traces[1],traces[2])
         (out/'result.json').write_text(json.dumps({'status':'pass','symmetry':args.symmetry,
             'group_size':args.group_size,'steps':args.steps,'replayed_steps':0,
-            'independent_controls_exact':True,'resume_exact':True,'histories':histories},indent=2)+'\n')
+            'independent_controls_exact':True,'new_runtime_no_chdir':args.no_chdir,'previous_runtime_compared':bool(args.baseline),'resume_exact':True,'histories':histories},indent=2)+'\n')
         print('Shared symmetry HSE: controls and direct resume PASS',flush=True)
     comm.Free()
 

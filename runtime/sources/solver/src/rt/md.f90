@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 module md_sub
+  use filesystem,only:resolve_path
   implicit none
 
 contains
@@ -197,7 +198,7 @@ subroutine read_initial_velocity(system,md)
         stop
      endif
 
-     open(411, file=file_ini_velocity, status="old")
+     open(411, file=resolve_path(file_ini_velocity), status="old")
      do ia=1,natom
         read(411,*) (system%Velocity(ixyz,ia),ixyz=1,3)
      enddo
@@ -492,9 +493,9 @@ subroutine print_restart_data_md(system,md)
 
        select case(iflag_atom_coor)
        case(ntype_atom_coor_cartesian)
-          open(unit_atomic_coor_tmp,file='.atomic_coor.tmp',status='old')
+          open(unit_atomic_coor_tmp,file=resolve_path('.atomic_coor.tmp'),status='old')
        case(ntype_atom_coor_reduced)
-          open(unit_atomic_coor_tmp,file='.atomic_red_coor.tmp',status='old')
+          open(unit_atomic_coor_tmp,file=resolve_path('.atomic_red_coor.tmp'),status='old')
        end select
 
        if(unit_length=='AA')then

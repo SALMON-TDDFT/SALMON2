@@ -558,3 +558,5 @@ they are not yet connected to a Python shared factory or ordinary multipoint pla
 For opt-in standard TDDFT shared models and multipoint groups, see [SHARED_TDDFT.en.md](SHARED_TDDFT.en.md).
 
 For explicit sequential heterogeneous standard-model switching in one process, see [TDDFT_REGISTRY.en.md](TDDFT_REGISTRY.en.md).
+
+New directory-scope3 runtimes avoid changing the host working directory during native E/H initialization, updates, checkpoint/restore and close. Relative files resolve against the field work directory; absolute paths remain unchanged, with scope cleanup on exceptions. Scope1/2 and older runtimes retain the previous directory-switching path. Numerical order and checkpoint formats are unchanged. Main-thread sequential calls and one native field lifetime per process remain required.

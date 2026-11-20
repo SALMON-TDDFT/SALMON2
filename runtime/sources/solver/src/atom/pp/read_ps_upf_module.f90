@@ -5,6 +5,7 @@
 !--------------------------------------------
 module read_ps_upf_module
 
+  use filesystem,only:resolve_path
   implicit none
 
   private
@@ -24,7 +25,7 @@ contains
     character(30) :: cbuf
     integer,parameter :: g=4
 
-    open(g,file=ps_file,status='old')
+    open(g,file=resolve_path(ps_file),status='old')
 
     read(g,'(a)',END=10) cbuf
     cbuf = adjustl( cbuf )

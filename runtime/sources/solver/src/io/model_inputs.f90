@@ -1,6 +1,7 @@
 ! SALMONpy model-owned initialization values for the standard scalar TDDFT profile.
 ! Input values are captured after parsing/unit conversion; numerical/MPI owners are excluded.
 module salmonpy_model_inputs
+  use salmonpy_io_units,only:initialize_inputoutput_units,io_unit_selection_valid
   use salmon_global, only: maxmki, iflag_atom_coor, &
     theory, &
     yn_md, &
@@ -803,6 +804,7 @@ contains
     integer,intent(out) :: status
     status=1
     if(.not.self%ready)return
+    if(.not.io_unit_selection_valid(self%unit_time,self%unit_length,self%unit_energy,self%unit_charge))return
     exx_ace_support=self%exx_ace_support
     exx_factor_exact_interval=self%exx_factor_exact_interval
     exx_factor_history_frames=self%exx_factor_history_frames
@@ -1081,6 +1083,7 @@ contains
     nq_mom=self%nq_mom
     dq_mom=self%dq_mom
     iflag_atom_coor=self%iflag_atom_coor
+    call initialize_inputoutput_units
     status=0
   end subroutine
 #include "scf_model_disk_io.inc"

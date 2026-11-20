@@ -507,3 +507,297 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: dq_mom
 
 end module salmon_global
+
+! Derived I/O conversion view. Model activation rebuilds this view from its own
+! unit selectors; inputoutput re-exports the legacy names. Kept with the input
+! declarations to avoid a parser/model file-dependency cycle or another module file.
+module salmonpy_io_units
+  use salmon_global,only:unit_time,unit_length,unit_energy,unit_charge
+  implicit none
+  private :: unit_time,unit_length,unit_energy,unit_charge
+!Physical constant
+  real(8),parameter :: au_time_fs = 0.02418884326505d0
+  real(8),parameter :: au_energy_ev = 27.21138505d0
+  real(8),parameter :: au_length_aa = 0.52917721067d0
+
+!Input/Output units
+  integer :: iflag_unit_time
+  integer,parameter :: ntype_unit_time_au = 0
+  integer,parameter :: ntype_unit_time_fs = 1
+  real(8) :: utime_to_au, utime_from_au
+
+  integer :: iflag_unit_length
+  integer,parameter :: ntype_unit_length_au = 0
+  integer,parameter :: ntype_unit_length_aa = 1
+  real(8) :: ulength_to_au, ulength_from_au
+
+  integer :: iflag_unit_energy
+  integer,parameter :: ntype_unit_energy_au = 0
+  integer,parameter :: ntype_unit_energy_ev = 1
+  real(8) :: uenergy_to_au, uenergy_from_au
+
+  integer :: iflag_unit_charge
+  integer,parameter :: ntype_unit_charge_au = 0
+  real(8) :: ucharge_to_au, ucharge_from_au
+
+
+
+  type unit_t
+     character(32) :: name
+     real(8)       :: conv
+  end type unit_t
+
+  type(unit_t) :: t_unit_length
+  type(unit_t) :: t_unit_length_inv
+  type(unit_t) :: t_unit_energy
+  type(unit_t) :: t_unit_energy_inv
+  type(unit_t) :: t_unit_time
+  type(unit_t) :: t_unit_time_inv
+  type(unit_t) :: t_unit_spectrum_dipole
+  type(unit_t) :: t_unit_spectrum_dipole_square
+  type(unit_t) :: t_unit_current
+  type(unit_t) :: t_unit_spectrum_current
+  type(unit_t) :: t_unit_spectrum_current_square
+  type(unit_t) :: t_unit_ac
+  type(unit_t) :: t_unit_elec
+  type(unit_t) :: t_unit_spectrum_elec
+  type(unit_t) :: t_unit_spectrum_elec_square
+  type(unit_t) :: t_unit_polarizability
+  type(unit_t) :: t_unit_conductivity
+
+contains
+  logical function io_unit_selection_valid(time,length,energy,charge) result(valid)
+    character(*),intent(in) :: time,length,energy,charge
+    valid=(time=='au'.or.time=='a.u.'.or.time=='fs'.or.time=='femtosecond').and. &
+      (length=='au'.or.length=='a.u.'.or.length=='AA'.or.length=='angstrom'.or.length=='Angstrom').and. &
+      (energy=='au'.or.energy=='a.u.'.or.energy=='ev'.or.energy=='eV').and. &
+      (charge=='au'.or.charge=='a.u.')
+  end function
+  subroutine initialize_inputoutput_units
+    implicit none
+
+
+! Unit for time
+    select case(unit_time)
+    case('au','a.u.')
+      utime_to_au   = 1d0
+      utime_from_au = 1d0
+      iflag_unit_time = ntype_unit_time_au
+    case('fs','femtosecond')
+      utime_to_au   = 1d0/au_time_fs
+      utime_from_au = au_time_fs
+      iflag_unit_time = ntype_unit_time_fs
+    case default
+      stop "Invalid unit for time."
+    end select
+
+! Unit for length
+    select case(unit_length)
+    case('au','a.u.')
+      ulength_to_au   = 1d0
+      ulength_from_au = 1d0
+      iflag_unit_length = ntype_unit_length_au
+    case('AA','angstrom','Angstrom')
+      ulength_to_au   = 1d0/au_length_aa
+      ulength_from_au = au_length_aa
+      iflag_unit_length = ntype_unit_length_aa
+    case default
+      stop "Invalid unit for length."
+    end select
+
+! Unit for energy
+    select case(unit_energy)
+    case('au','a.u.')
+      uenergy_to_au   = 1d0
+      uenergy_from_au = 1d0
+      iflag_unit_energy = ntype_unit_energy_au
+    case('ev','eV')
+      uenergy_to_au   = 1d0/au_energy_ev
+      uenergy_from_au = au_energy_ev
+      iflag_unit_energy = ntype_unit_energy_ev
+    case default
+      stop "Invalid unit for energy."
+    end select
+
+! Unit for charge
+    select case(unit_charge)
+    case('au','a.u.')
+      ucharge_to_au   = 1d0
+      ucharge_from_au = 1d0
+      iflag_unit_charge = ntype_unit_charge_au
+    case default
+      stop "Invalid unit for charge."
+    end select
+
+!! prepare type(unit_t) :: t_unit_length,t_unit_length_inv
+    t_unit_length%conv = ulength_from_au
+    t_unit_length_inv%conv = 1d0/ulength_from_au
+    if(iflag_unit_length == ntype_unit_length_aa)then
+      t_unit_length%name     = 'Angstrom'
+      t_unit_length_inv%name = '1/Angstrom'
+    else
+      t_unit_length%name     = 'a.u.'
+      t_unit_length_inv%name = 'a.u.'
+      t_unit_length%conv = 1d0
+      t_unit_length_inv%conv = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_energy,t_unit_energy_inv
+    t_unit_energy%conv = uenergy_from_au
+    t_unit_energy_inv%conv = 1d0/uenergy_from_au
+    if(iflag_unit_energy == ntype_unit_energy_ev)then
+      t_unit_energy%name     = 'eV'
+      t_unit_energy_inv%name = '1/eV'
+    else
+      t_unit_energy%name     = 'a.u.'
+      t_unit_energy_inv%name = 'a.u.'
+      t_unit_energy%conv = 1d0
+      t_unit_energy_inv%conv = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_time,t_unit_time_inv
+    t_unit_time%conv = utime_from_au
+    t_unit_time_inv%conv = 1d0/utime_from_au
+    if(iflag_unit_time == ntype_unit_time_fs)then
+      t_unit_time%name     = 'fs'
+      t_unit_time_inv%name = '1/fs'
+    else
+      t_unit_time%name     = 'a.u.'
+      t_unit_time_inv%name = 'a.u.'
+      t_unit_time%conv = 1d0
+      t_unit_time_inv%conv = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_dipole
+    t_unit_spectrum_dipole%conv = utime_from_au*ulength_from_au
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole%name  = 'fs*Angstrom'
+    else
+      t_unit_spectrum_dipole%name  = 'a.u.'
+      t_unit_spectrum_dipole%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_dipole_square
+    t_unit_spectrum_dipole_square%conv = utime_from_au**2*ulength_from_au**2
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_dipole_square%name  = 'fs^2*Angstrom^2'
+    else
+      t_unit_spectrum_dipole_square%name  = 'a.u.'
+      t_unit_spectrum_dipole_square%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_current
+    t_unit_current%conv = (ulength_from_au/utime_from_au)/ulength_from_au**3
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_current%name  = '1/fs*Angstrom^2'
+    else
+      t_unit_current%name  = 'a.u.'
+      t_unit_current%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_current
+    t_unit_spectrum_current%conv = 1d0/ulength_from_au**2
+    if(iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_current%name  = '1/Angstrom^2'
+    else
+      t_unit_spectrum_current%name  = 'a.u.'
+      t_unit_spectrum_current%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_spectrum_current_square
+    t_unit_spectrum_current_square%conv = 1d0/ulength_from_au**4
+    if(iflag_unit_length == ntype_unit_length_aa &
+         )then
+      t_unit_spectrum_current_square%name  = '1/Angstrom^4'
+    else
+      t_unit_spectrum_current_square%name  = 'a.u.'
+      t_unit_spectrum_current_square%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_ac
+    t_unit_ac%conv = utime_from_au*uenergy_from_au/ulength_from_au/ucharge_from_au
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_ac%name     = 'fs*V/Angstrom'
+    else
+      t_unit_ac%name     = 'a.u.'
+      t_unit_ac%conv     = 1d0
+    end if
+
+    !! prepare type(unit_t) :: t_unit_elec
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_elec%name     = 'V/Angstrom'
+      t_unit_elec%conv     = 51.42206707d0
+    else
+      t_unit_elec%name     = 'a.u.'
+      t_unit_elec%conv     = 1d0
+    end if
+
+    !! prepare type(unit_t) :: t_unit_spectrum_elec
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_spectrum_elec%name     = 'fs*V/Angstrom'
+      t_unit_spectrum_elec%conv     = utime_from_au*51.42206707d0
+    else
+      t_unit_spectrum_elec%name     = 'a.u.'
+      t_unit_spectrum_elec%conv     = 1d0
+    end if
+
+    !! prepare type(unit_t) :: t_unit_spectrum_elec_square
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_spectrum_elec_square%name     = 'fs^2*V^2/Angstrom^2'
+      t_unit_spectrum_elec_square%conv     = utime_from_au**2*51.42206707d0**2
+    else
+      t_unit_spectrum_elec_square%name     = 'a.u.'
+      t_unit_spectrum_elec_square%conv     = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_polarizability
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_polarizability%name  = 'Augstrom^2/V'
+      t_unit_polarizability%conv = ulength_from_au**2/51.42206707d0
+    else
+      t_unit_polarizability%name  = 'a.u.'
+      t_unit_polarizability%conv  = 1d0
+    end if
+
+!! prepare type(unit_t) :: t_unit_conductivity
+    if(iflag_unit_time == ntype_unit_time_fs .and. &
+       iflag_unit_length == ntype_unit_length_aa .and. &
+       iflag_unit_energy == ntype_unit_energy_ev .and. &
+       iflag_unit_charge == ntype_unit_charge_au &
+         )then
+      t_unit_conductivity%name  = '1/fs*V*Angstrom'
+      t_unit_conductivity%conv = 1.d0/utime_from_au/51.42206707d0/ulength_from_au
+    else
+      t_unit_conductivity%name  = 'a.u.'
+      t_unit_conductivity%conv  = 1d0
+    end if
+
+  end subroutine initialize_inputoutput_units
+end module salmonpy_io_units

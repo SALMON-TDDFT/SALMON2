@@ -4,6 +4,7 @@
 ! thread collectively within the attached group. No world service is entered.
 #include "config.h"
 module salmonpy_fast_hse_mpi
+ use filesystem,only:resolve_path
  use salmonpy_hse_model_inputs,only:s_hse_model_inputs
  use sym_sub,only:s_hse_symmetry_workspace,swap_hse_symmetry_workspace
  use sym_rho_sub,only:s_hse_density_workspace,swap_hse_density_workspace
@@ -173,7 +174,7 @@ end function
  first_init=.not.used
  if((used.and..not.registration).or.capacity<1.or.capacity>=huge(0))status=1
  if(.not.ieee_is_finite(timestep).or.timestep<=0d0)status=1
- inquire(file=trim(filename),exist=exists)
+ inquire(file=resolve_path(trim(filename)),exist=exists)
  if(.not.exists)status=1
  call agree(status)
  if(status/=0)return
@@ -790,7 +791,7 @@ integer(c_int) function register_model(path,timestep,capacity,symmetry,model_tok
  if(used.and..not.registry_mode)status=12
  if(capacity<1.or.capacity>=huge(0).or.symmetry<0.or.symmetry>1)status=1
  if(.not.ieee_is_finite(timestep).or.timestep<=0d0)status=1
- inquire(file=trim(filename),exist=exists)
+ inquire(file=resolve_path(trim(filename)),exist=exists)
  if(.not.exists)status=1
  reference_path=filename;ref_int=[capacity,symmetry];ref_dt=timestep
  call comm_bcast(reference_path,group);call comm_bcast(ref_int,group);call comm_bcast(ref_dt,group)

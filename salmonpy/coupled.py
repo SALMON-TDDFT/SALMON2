@@ -185,11 +185,9 @@ class NativeEHField:
         _agree(self.context.solver_comm,error)
 
     def _call(self,fn,*args):
-        self.native._live();previous=Path.cwd()
-        try:
-            os.chdir(self.directory)
-            return fn(*args)
-        finally:os.chdir(previous)
+        from ._native_group import _directory_call
+        self.native._live()
+        return _directory_call(self.lib,self.context.solver_comm,self.directory,fn,*args,minimum_protocol=3)
 
     def advance(self,J_previous):
         comm=self.context.solver_comm;error=None

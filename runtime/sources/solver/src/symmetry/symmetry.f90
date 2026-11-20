@@ -1,6 +1,7 @@
 #include "config.h"
 module sym_sub
 
+  use filesystem,only:resolve_path
   use communication, only: comm_get_globalinfo, comm_is_root
 #ifdef USE_MPI
   use communication, only: comm_is_attached
@@ -321,7 +322,7 @@ contains
     integer :: unit
     integer :: i, j, nsym
 
-    inquire( FILE=sym_file, EXIST=flag )
+    inquire( FILE=resolve_path(sym_file), EXIST=flag )
     if ( .not.flag ) then
        if ( DISPLAY ) write(*,*) "symmetry-operation file ( "//sym_file//" ) can not be found."
        stop 'stop@read_SymMat'
@@ -329,7 +330,7 @@ contains
        if ( DISPLAY ) write(*,*) "symmetry-operation file is found ( "//sym_file//" )."
     end if
 
-    open( newunit=unit, file='sym.dat', status='old' )
+    open( newunit=unit, file=resolve_path('sym.dat'), status='old' )
 
     i=0
     do

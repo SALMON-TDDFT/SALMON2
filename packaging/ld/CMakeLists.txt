@@ -283,3 +283,17 @@ install(FILES "${ROOT}/tools/test_symmetry_force_units.py" DESTINATION salmonpy/
 install(FILES "${ROOT}/tools/test_scf_live_resume_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/tools/generate_scf_disk_io.py" "${ROOT}/tools/test_scf_disk_restart.py" DESTINATION salmonpy/_runtime_source/tools)
+
+# One authoritative source-version compatibility catalog, also available to SDK checks.
+install(FILES "${ROOT}/salmonpy/scf_compatibility.json" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/scf_compatibility.json" DESTINATION salmonpy/_runtime_source/salmonpy)
+
+install(FILES "${ROOT}/docs/plans/2026-11-20-scf-declared-source-migration.md" DESTINATION salmonpy/_runtime_source/docs/plans)
+
+install(FILES "${ROOT}/tools/test_timer_context.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_timer_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/test_io_ownership.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_io_ownership.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tests/native/test_directory_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)

@@ -280,3 +280,11 @@ inner rank count and complete inputs must stay the same. Use a current runtime
 with unique model output labels and collision-free symmetry input units.
 
 The local-input template is `examples/mixed_hse_models_inputs.json`; replace bundle paths with your existing matching GS inputs.
+
+## Per-call file resolution
+
+With directory scope2/3, legacy/shared/registered fast-PR HSE calls use each work
+folder as a native file-resolution base without host chdir. Failure paths release
+the scope. Older runtimes, including scope1, retain the prior route. This shares
+GS call-admission/cleanup code and does not enable concurrent threaded execution.
+The numerical direct-checkpoint layout is unchanged.

@@ -1,6 +1,7 @@
 ! Versioned physics contract for conventional global-hybrid GS -> native RT.
 ! The standard info.bin, occupation.bin and wavefunction formats stay unchanged.
 module exx_gs_metadata
+  use filesystem,only:resolve_path
   implicit none
   private
   public :: exx_gs_metadata_write,exx_gs_metadata_check,exx_gs_occupation_check
@@ -74,7 +75,7 @@ contains
     status=0
     if(comm_is_root(info%id_rko))then
       if(is_global_hybrid(xc).and..not.phase_active)then
-        open(newunit=unit,file=trim(path)//'hybrid_gs.bin',status='replace', &
+        open(newunit=unit,file=resolve_path(trim(path)//'hybrid_gs.bin'),status='replace', &
           form='unformatted',action='write',iostat=status)
         if(status==0)then
           write(unit,iostat=status)1,[system%nk,system%no,system%nspin,system%nion,nelem]
@@ -90,9 +91,9 @@ contains
         endif
       else
         ! PBE/HSE output or unfinished PBE warmup must not retain a hybrid certificate.
-        inquire(file=trim(path)//'hybrid_gs.bin',exist=exists)
+        inquire(file=resolve_path(trim(path)//'hybrid_gs.bin'),exist=exists)
         if(exists)then
-          open(newunit=unit,file=trim(path)//'hybrid_gs.bin',status='old',iostat=status)
+          open(newunit=unit,file=resolve_path(trim(path)//'hybrid_gs.bin'),status='old',iostat=status)
           if(status==0)close(unit,status='delete',iostat=status)
         endif
       endif
@@ -120,7 +121,7 @@ contains
     allocate(occupation(system%no,system%nk,system%nspin))
     status=0
     if(comm_is_root(info%id_rko))then
-      open(newunit=unit,file=trim(path)//'hybrid_gs.bin',status='old', &
+      open(newunit=unit,file=resolve_path(trim(path)//'hybrid_gs.bin'),status='old', &
         form='unformatted',action='read',iostat=status)
       if(status==0)then
         read(unit,iostat=status)version,dims
@@ -194,7 +195,7 @@ contains
     integer :: unit,ios,nk,no,iteration,ranks
     logical :: real_orbitals
     real(8),allocatable :: payload(:,:,:)
-    open(newunit=unit,file=trim(path)//'info.bin',status='old',form='unformatted',action='read',iostat=status)
+    open(newunit=unit,file=resolve_path(trim(path)//'info.bin'),status='old',form='unformatted',action='read',iostat=status)
     if(status/=0)return
     read(unit,iostat=status)nk
     if(status==0)read(unit,iostat=status)no
@@ -208,7 +209,7 @@ contains
       status=1;return
     endif
     allocate(payload(system%no,system%nk,system%nspin))
-    open(newunit=unit,file=trim(path)//'occupation.bin',status='old',form='unformatted',action='read',iostat=status)
+    open(newunit=unit,file=resolve_path(trim(path)//'occupation.bin'),status='old',form='unformatted',action='read',iostat=status)
     if(status/=0)return
     read(unit,iostat=status)payload
     close(unit,iostat=ios)
@@ -251,13 +252,13 @@ contains
     character(:),allocatable :: bytes,saved_text
     status=0
     do j=1,nelem
-      inquire(file=trim(file_pseudo(j)),size=nbytes,iostat=status)
+      inquire(file=resolve_path(trim(file_pseudo(j))),size=nbytes,iostat=status)
       if(status/=0)return
       if(nbytes<1)then
         status=1;return
       endif
       allocate(character(nbytes)::bytes)
-      open(newunit=pu,file=trim(file_pseudo(j)),form='unformatted',access='stream',status='old', &
+      open(newunit=pu,file=resolve_path(trim(file_pseudo(j))),form='unformatted',access='stream',status='old', &
         action='read',iostat=status)
       if(status==0)then
         read(pu,iostat=status)bytes

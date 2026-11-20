@@ -1,6 +1,5 @@
 """Explicit different-input fast-PR HSE models on one host-MPI attachment."""
 import ctypes as c
-import os
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -107,15 +106,6 @@ class _RegisteredModel(NativeFastHSEModel):
         comm=self._native.context.solver_comm
         descriptor=(self._registry_id,self.lib.token,self.closed)
         _agree(comm,'HSE model selections differ' if any(v!=descriptor for v in comm.allgather(descriptor)) else None)
-    def _call(self,fn,*args):
-        from .fast_hse_mpi import _agree
-        self._native._live();previous=Path.cwd();error=None
-        try:
-            try:os.chdir(self.work)
-            except Exception as exc:error=str(exc)
-            _agree(self._native.context.solver_comm,error)
-            return fn(*args)
-        finally:os.chdir(previous)
     def new_state(self,*args,**kwargs):
         self._selection()
         return super().new_state(*args,**kwargs)

@@ -18,6 +18,7 @@
 #include "config.h"
 
 subroutine main_dft_k_expand
+  use filesystem,only:resolve_path
   use salmon_global, only: method_wf_distributor
   implicit none
 
@@ -31,6 +32,7 @@ subroutine main_dft_k_expand
 end subroutine main_dft_k_expand
 
 subroutine main_dft_k_expand_single
+  use filesystem,only:resolve_path
   use math_constants, only: pi, zi
   use structures
   use inputoutput
@@ -168,6 +170,7 @@ subroutine main_dft_k_expand_single
 contains
 
 subroutine init_k_expand(mk,kex)
+  use filesystem,only:resolve_path
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_is_root, comm_bcast
   use salmon_global, only: al,natom,nelec,nstate,num_rgrid
@@ -198,7 +201,7 @@ subroutine init_k_expand(mk,kex)
 
      !(read information from "info_k_expand.dat")
      iu1=91
-     open(iu1,file="info_k_expand.dat",status="old")
+     open(iu1,file=resolve_path("info_k_expand.dat"),status="old")
      read(iu1,'(a)') ifile_k_data  !file name of k-point information printed by SALMON (xxx_k.data)
      read(iu1,*) kex%nkx, kex%nky, kex%nkz   ! super cell size ; must correspond to k-point
 
@@ -222,7 +225,7 @@ subroutine init_k_expand(mk,kex)
 
      !(read information of k-point in GS)
      iu2=92
-     open(iu2,file=trim(ifile_k_data),status="old")
+     open(iu2,file=resolve_path(trim(ifile_k_data)),status="old")
      do i=1,5
         read(iu2,*)
      enddo
@@ -257,6 +260,7 @@ subroutine init_k_expand(mk,kex)
 end subroutine init_k_expand
 
 subroutine get_print_rank_numbers(kex,info)
+  use filesystem,only:resolve_path
   use communication, only: comm_is_root, comm_bcast
   implicit none
   type(s_k_expand) :: kex
@@ -336,6 +340,7 @@ subroutine get_print_rank_numbers(kex,info)
   end subroutine get_print_rank_numbers
 
   subroutine generate_restart_directory_name_k_expand(kex,basedir,gdir,pdir)
+  use filesystem,only:resolve_path
     implicit none
     type(s_k_expand) :: kex
     character(*),  intent(in)  :: basedir
@@ -356,6 +361,7 @@ subroutine get_print_rank_numbers(kex,info)
 
 
   subroutine write_info_bin(odir,kex,system,iter)
+  use filesystem,only:resolve_path
     use parallelization, only: nproc_size_global
     implicit none
     type(s_k_expand) :: kex
@@ -367,7 +373,7 @@ subroutine get_print_rank_numbers(kex,info)
 
     iu3 = 93
     dir_file_out = trim(odir)//"/info.bin"
-    open(iu3,file=dir_file_out,form='unformatted')
+    open(iu3,file=resolve_path(dir_file_out),form='unformatted')
 
     kex%nk_new = 1
     kex%no_new = system%no * kex%nk
@@ -389,6 +395,7 @@ subroutine get_print_rank_numbers(kex,info)
   end subroutine write_info_bin
 
   subroutine write_atomic_coor(odir,kex,system)
+  use filesystem,only:resolve_path
     use salmon_global, only: al,natom,atom_name,kion,unit_length
     use inputoutput, only: au_length_aa
     implicit none
@@ -405,7 +412,7 @@ subroutine get_print_rank_numbers(kex,info)
 
     iu1 = 91
     dir_file_out = trim(odir)//"/atomic_coor.txt"
-    open(iu1,file=dir_file_out,status="unknown")
+    open(iu1,file=resolve_path(dir_file_out),status="unknown")
 
     do ia = 1,natom
        atom_name(ia) = adjustl(atom_name(ia))
@@ -423,6 +430,7 @@ subroutine get_print_rank_numbers(kex,info)
   end subroutine write_atomic_coor
 
   subroutine write_atomic_vel(odir,kex,system)
+  use filesystem,only:resolve_path
     use salmon_global, only: natom
     implicit none
     type(s_k_expand) :: kex
@@ -433,7 +441,7 @@ subroutine get_print_rank_numbers(kex,info)
 
     iu1 = 91
     dir_file_out = trim(odir)//"/atomic_vel.txt"
-    open(iu1,file=dir_file_out,status="unknown")
+    open(iu1,file=resolve_path(dir_file_out),status="unknown")
 
     do ixyz= 1,kex%nk
        do ia = 1,natom
@@ -446,6 +454,7 @@ subroutine get_print_rank_numbers(kex,info)
   end subroutine write_atomic_vel
 
   subroutine write_occ_bin(odir,kex,system)
+  use filesystem,only:resolve_path
     implicit none
     type(s_k_expand) :: kex
     type(s_dft_system) :: system
@@ -456,7 +465,7 @@ subroutine get_print_rank_numbers(kex,info)
 
     iu1 = 91
     dir_file_out = trim(odir)//"/occupation.bin"
-    open(iu1,file=dir_file_out,form='unformatted')
+    open(iu1,file=resolve_path(dir_file_out),form='unformatted')
 
     allocate(rocc_new(1:kex%no_new, 1:kex%nk_new, 1:system%nspin))
 
@@ -477,6 +486,7 @@ subroutine get_print_rank_numbers(kex,info)
 end subroutine write_occ_bin
 
 subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
+  use filesystem,only:resolve_path
   implicit none
   type(s_k_expand) :: kex
   type(s_dft_system) :: system
@@ -587,7 +597,7 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
 
         iu1 = 91
         dir_file_out = trim(odir)//"/rho_inout.bin"
-        open(iu1,file=dir_file_out,form='unformatted')
+        open(iu1,file=resolve_path(dir_file_out),form='unformatted')
         do i=1,num_rho_stock+1
            write(iu1) rho_in_new(1:lg_ie_new(1),1:lg_ie_new(2),1:lg_ie_new(3),i)
         end do
@@ -604,6 +614,7 @@ subroutine write_rho_inout_bin(odir,kex,system,lg,mg,info,mixing)
 end subroutine write_rho_inout_bin
 
 subroutine write_wfn_bin(odir,kex,system,spsi,lg,mg,info,mixing)
+  use filesystem,only:resolve_path
   implicit none
   type(s_k_expand) :: kex
   type(s_dft_system) :: system
@@ -674,7 +685,7 @@ subroutine write_wfn_bin(odir,kex,system,spsi,lg,mg,info,mixing)
 
      iu = 1000 + kex%myrank(id)
      dir_file_out = trim(odir(id))//"/wfn.bin"
-     open(iu,file=dir_file_out,form='unformatted',access='stream')
+     open(iu,file=resolve_path(dir_file_out),form='unformatted',access='stream')
 
      ix_add = (lg%ie(1)-lg%is(1)+1) * (inkx-1)
      iy_add = (lg%ie(2)-lg%is(2)+1) * (inky-1)
@@ -721,6 +732,7 @@ subroutine write_wfn_bin(odir,kex,system,spsi,lg,mg,info,mixing)
 end subroutine write_wfn_bin
 
 subroutine  write_cube(orb,mx,my,mz,hgs,ofl)
+  use filesystem,only:resolve_path
   implicit none
   integer :: mx,my,mz,fp,i,j,n,ix,iy,iz
   real(8) :: orb(mx,my,mz), hgs(3), crd(3,2)
@@ -733,7 +745,7 @@ subroutine  write_cube(orb,mx,my,mz,hgs,ofl)
   crd(3,2)=mz*hgs(3)
 
   fp=1
-  open(fp,file=trim(ofl),status="unknown")
+  open(fp,file=resolve_path(trim(ofl)),status="unknown")
   write(fp,*) "distribution"
   write(fp,*) "All values here are in a.u."
   write(fp,'(i5,3f12.6)') n, 0d0, 0d0, 0d0

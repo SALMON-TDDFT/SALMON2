@@ -98,6 +98,15 @@ def generate():
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--check',action='store_true');args=p.parse_args()
+    import json
+    catalog=Path(__file__).resolve().parents[1]/'salmonpy/scf_compatibility.json'
+    if catalog.exists():
+        expected=['src/'+x for x in FILES]+['src/gs/scf_disk_io.inc','src/io/scf_model_disk_io.inc']
+        data=json.loads(catalog.read_text())
+        if args.check:
+            if data.get('codec_sources')!=expected:raise ValueError('SCF codec inventory is stale')
+        else:
+            data['codec_sources']=expected;catalog.write_text(json.dumps(data,indent=2)+'\n')
     for path,text in generate().items():
         if args.check:
             if path.read_text()!=text:raise ValueError('regenerate '+str(path))

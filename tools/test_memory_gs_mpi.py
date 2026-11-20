@@ -15,6 +15,10 @@ def fast_controls(a):
     if comm.rank==0:root.mkdir(parents=True,exist_ok=False)
     comm.Barrier();ctx=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
     fixture=Path(a.fixture);trace=[]
+    anchor=Path.cwd()
+    from unittest.mock import patch
+    guard=patch('os.chdir',side_effect=AssertionError('GS to HSE host chdir forbidden')) if a.no_chdir and g==0 else None
+    if guard:guard.start()
     from salmonpy.bands import _input_groups,_scalar
     groups=_input_groups((fixture/'rt.inp').read_text())
     symmetric='y' in _scalar(groups.get('system',''),'yn_symmetry','n')
@@ -63,12 +67,14 @@ def fast_controls(a):
     finally:
         state.close();sibling.close();model.close()
         if session is not None:session.close()
+    assert Path.cwd()==anchor
+    if guard:guard.stop()
     rows=comm.gather(np.array(trace),root=0)
     gathered=w.gather(rows if comm.rank==0 else None,root=0)
     if w.rank==0:
         for first,second in zip(gathered[0],gathered[a.size]):np.testing.assert_allclose(first,second,rtol=3e-13,atol=3e-15)
         error=np.abs(gathered[0][0]-gathered[a.size][0])
-        result={'status':'pass','ranks':w.size,'memory_vs_file_current_energy':True,
+        result={'status':'pass','ranks':w.size,'memory_vs_file_current_energy':True,'new_runtime_no_chdir':a.no_chdir,
                 'max_current_difference_au':float(error[:,[0,1,2,4,5,6]].max()),
                 'max_energy_difference_hartree':float(error[:,[3,7]].max()),
                 'independent_states':True,'source_GS_closed_and_removed':True,
@@ -78,7 +84,7 @@ def fast_controls(a):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('build');p.add_argument('fixture');p.add_argument('output');p.add_argument('--size',type=int,default=1);p.add_argument('--split',default='orbital');p.add_argument('--external-k',action='store_true');p.add_argument('--describe-input',action='store_true');p.add_argument('--fast-hse',action='store_true');p.add_argument('--control-build');p.add_argument('--interleave-fixture');p.add_argument('--measure-norm',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('build');p.add_argument('fixture');p.add_argument('output');p.add_argument('--size',type=int,default=1);p.add_argument('--split',default='orbital');p.add_argument('--external-k',action='store_true');p.add_argument('--describe-input',action='store_true');p.add_argument('--fast-hse',action='store_true');p.add_argument('--control-build');p.add_argument('--interleave-fixture');p.add_argument('--measure-norm',action='store_true');p.add_argument('--no-chdir',action='store_true');a=p.parse_args()
     if a.fast_hse:
         try:fast_controls(a)
         except BaseException:
@@ -90,6 +96,10 @@ def main():
     comm.Barrier();ctx=SimpleNamespace(solver_comm=comm,point_ids=(1,),closed=False,_dependents=0)
     dec=((1,a.size,1,1,1) if a.split=='orbital' else (a.size,1,1,1,1) if a.split=='k' else (1,1,a.size,1,1))
     def A(i):return 1e-4*np.array([np.sin(.31*i),np.cos(.23*i)-1,np.sin(.17*i)])
+    anchor=Path.cwd()
+    from unittest.mock import patch
+    guard=patch('os.chdir',side_effect=AssertionError('GS to TDDFT host chdir forbidden')) if a.no_chdir and g==0 else None
+    if guard:guard.start()
     trace=[]
     try:
      if g==0:
@@ -207,6 +217,8 @@ def main():
       try:
        for i in range(1,17):trace.append(state.advance(state.A.copy(),A(i)))
       finally:state.close()
+     assert Path.cwd()==anchor
+     if guard:guard.stop()
      values=w.allgather(np.asarray(trace))
      difference=float(np.max(abs(values[0]-values[a.size])))
      exact=bool(np.array_equal(values[0],values[a.size]))
@@ -214,7 +226,7 @@ def main():
       np.testing.assert_allclose(values[0],values[a.size],rtol=3e-13,atol=3e-15)
      else:np.testing.assert_array_equal(values[0],values[a.size])
      if w.rank==0:
-      result={'status':'pass','size':a.size,'split':a.split,'file_route_exact':exact,'file_route_within_tolerance':True,'max_current_difference_au':difference,'independent_states_exact':True,'resume_exact':True,'SCF_calls':0,'replayed_steps':0,'input_metadata':a.describe_input,'external_k_table':a.external_k,'missing_asset_rejected_before_native':a.external_k,'measured_norm_checked':a.measure_norm}
+      result={'status':'pass','size':a.size,'split':a.split,'file_route_exact':exact,'new_runtime_no_chdir':a.no_chdir,'file_route_within_tolerance':True,'max_current_difference_au':difference,'independent_states_exact':True,'resume_exact':True,'SCF_calls':0,'replayed_steps':0,'input_metadata':a.describe_input,'external_k_table':a.external_k,'missing_asset_rejected_before_native':a.external_k,'measured_norm_checked':a.measure_norm}
       (Path(a.output)/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(result,flush=True)
     except BaseException:
      import traceback;traceback.print_exc();w.Abort(1)

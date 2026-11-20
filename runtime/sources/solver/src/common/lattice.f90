@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 module lattice
+  use filesystem,only:resolve_path
   implicit none
 
 contains
@@ -158,7 +159,7 @@ SUBROUTINE init_kvector_config(system,unfold,config)
   if(config%file_kw /= 'none') then
      if (comm_is_root(nproc_id_global)) then
         iu = 410
-        open(iu, file=config%file_kw, status="old")
+        open(iu, file=resolve_path(config%file_kw), status="old")
         read(iu, *) nk    !, nkxyz_dummy
         allocate( k(3,nk), wtk(nk) )
         do ik=1, nk

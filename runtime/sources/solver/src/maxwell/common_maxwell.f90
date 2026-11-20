@@ -15,6 +15,7 @@
 !
 !-----------------------------------------------------------------------------------------
 module common_maxwell
+  use filesystem,only:resolve_path
   use structures, only: s_vector, s_scalar
   implicit none
   
@@ -419,7 +420,7 @@ contains
     integer                    :: ij,ix,iy,iz,iflag_x,iflag_y,iflag_z
     
     !open file
-    open(ifn,file=trim(file_name), status='old')
+    open(ifn,file=resolve_path(trim(file_name)), status='old')
     
     if(trim(format)=='cu') then
       !check grid information
@@ -527,7 +528,7 @@ contains
       
       !open cube file and write basic information
       if(comm_is_root(nproc_id_global)) then
-        open(ifn,file=trim(file_name)//".cube")
+        open(ifn,file=resolve_path(trim(file_name)//".cube"))
         if(imessage==1) then
           write(ifn,*) "An input shape described in a cube file."
           conv = ulength_from_au
@@ -636,7 +637,7 @@ contains
     real(8),     intent(out),optional :: r1d(is:ie)
     
     if(comm_is_root(nproc_id_global)) then
-      open(ifn,file=trim(adjustl(directory_read_data))//'/'//in_name//'.data',status='old')
+      open(ifn,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'.data'),status='old')
       if    (present(i0d)) then; read(ifn,*) i0d   ;
       elseif(present(i1d)) then; read(ifn,*) i1d(:);
       elseif(present(r0d)) then; read(ifn,*) r0d   ;
@@ -693,7 +694,7 @@ contains
     select case(read_mode)
     case('single')
       if(comm_is_root(nproc_id_global)) then
-        open(ifn,file=trim(adjustl(directory_read_data))//'/'//in_name// '.bin',&
+        open(ifn,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name// '.bin'),&
              status='old',form='unformatted',access='stream')
         if    (present(r1d)) then; read(ifn) r1d(:)        ;
         elseif(present(r2d)) then; read(ifn) r2d(:,:)      ;
@@ -723,13 +724,13 @@ contains
       if(flag_same) then
         !read information
         ii = nproc_id_global; write(id_name,*) ii;
-        open(ifn+ii,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin',&
+        open(ifn+ii,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin'),&
              status='old',form='unformatted',access='stream')
         read(ifn+ii) is_p; read(ifn+ii) ie_p; read(ifn+ii) i_inf; close(ifn+ii);
         
         !read and input
         if(i_inf==1) then
-          open(ifn+ii,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin',&
+          open(ifn+ii,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin'),&
                status='old',form='unformatted',access='stream')
           if    (present(r1d)) then; read(ifn+ii) r1d(:)        ;
           elseif(present(r2d)) then; read(ifn+ii) r2d(:,:)      ;
@@ -761,7 +762,7 @@ contains
           !read information
           if(comm_is_root(nproc_id_global)) then
             write(id_name,*) ii;
-            open(ifn,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin',&
+            open(ifn,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin'),&
                  status='old',form='unformatted',access='stream')
             read(ifn) is_p; read(ifn) ie_p; read(ifn) i_inf; close(ifn);
           end if
@@ -796,7 +797,7 @@ contains
             !read and share
             if(comm_is_root(nproc_id_global)) then
               write(id_name,*) ii;
-              open(ifn,file=trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin',&
+              open(ifn,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin'),&
                    status='old',form='unformatted',access='stream')
               if    (present(r1d)) then; read(ifn) r1d_p(:)        ;
               elseif(present(r2d)) then; read(ifn) r2d_p(:,:)      ;
@@ -972,7 +973,7 @@ contains
     select case(write_mode)
     case('single')
       if(comm_is_root(nproc_id_global)) then
-        open(ifn,file='data_for_restart/'//out_name// '.data',status='replace')
+        open(ifn,file=resolve_path('data_for_restart/'//out_name// '.data'),status='replace')
         if    (present(i0d)) then; write(ifn,*) i0d   ;
         elseif(present(i1d)) then; write(ifn,*) i1d(:);
         elseif(present(r0d)) then; write(ifn,*) r0d   ;
@@ -982,7 +983,7 @@ contains
       end if
     case('all')
       ii = nproc_id_global; write(id_name,*) ii;
-      open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.data',status='replace')
+      open(ifn+ii,file=resolve_path('data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.data'),status='replace')
       if    (present(i0d)) then; write(ifn+ii,*) i0d   ;
       elseif(present(i1d)) then; write(ifn+ii,*) i1d(:);
       elseif(present(r0d)) then; write(ifn+ii,*) r0d   ;
@@ -1020,7 +1021,7 @@ contains
     select case(write_mode)
     case('single')
       if(comm_is_root(nproc_id_global)) then
-        open(ifn,file='data_for_restart/'//out_name// '.bin',status='replace',form='unformatted',access='stream')
+        open(ifn,file=resolve_path('data_for_restart/'//out_name// '.bin'),status='replace',form='unformatted',access='stream')
         if    (present(r1d)) then; write(ifn) r1d(:)        ;
         elseif(present(r2d)) then; write(ifn) r2d(:,:)      ;
         elseif(present(r3d)) then; write(ifn) r3d(:,:,:)    ;
@@ -1044,7 +1045,7 @@ contains
       
       !output date
       ii = nproc_id_global; write(id_name,*) ii;
-      open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.bin',status='replace',&
+      open(ifn+ii,file=resolve_path('data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.bin'),status='replace',&
            form='unformatted',access='stream')
       if(i_inf==1) then
         if    (present(r1d)) then; write(ifn+ii) r1d(:)        ;
@@ -1062,7 +1063,7 @@ contains
       close(ifn+ii)
       
       !output information
-      open(ifn+ii,file='data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '_inf.bin',status='replace',&
+      open(ifn+ii,file=resolve_path('data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '_inf.bin'),status='replace',&
            form='unformatted',access='stream')
       write(ifn+ii) is(:); write(ifn+ii) ie(:); write(ifn+ii) i_inf; close(ifn+ii);
     end select
@@ -1087,8 +1088,8 @@ contains
       istat_io = 0
   
       !open input and output files
-      open(iun_inp, file=file_inp, status='old'    , action='read' , iostat=istat_io)
-      open(iun_out, file=file_out, status='replace', action='write', iostat=istat_io)
+      open(iun_inp, file=resolve_path(file_inp), status='old'    , action='read' , iostat=istat_io)
+      open(iun_out, file=resolve_path(file_out), status='replace', action='write', iostat=istat_io)
   
       !copy
       do

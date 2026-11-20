@@ -15,6 +15,7 @@
 !
 !=======================================================================
 module writefield
+  use filesystem,only:resolve_path
   implicit none
 
 contains
@@ -207,7 +208,7 @@ subroutine write_dns_ac_je(info,mg,system,rho,fw,itt,action)
         write(filenum1,'(i6.6)') itt
         filenum1=adjustl(filenum1)
         ofile =trim(wdir1)//"it"//trim(filenum1)//"_ion.bin"
-        open(fp,file=trim(ofile),form='unformatted',access='stream')
+        open(fp,file=resolve_path(trim(ofile)),form='unformatted',access='stream')
         write(fp) system%nion
         write(fp) system%Rion(1:3,1:system%nion)
         write(fp) izatom(kion(1:system%nion))
@@ -224,7 +225,7 @@ subroutine write_dns_ac_je(info,mg,system,rho,fw,itt,action)
         filenum2=adjustl(filenum2)
        !ofile= trim(wdir2)//"it"//trim(filenum1)//"_idr"//trim(filenum2)//".bin"
         ofile= trim(wdir2)//"it"//trim(filenum1)//".bin"
-        open(fp,file=trim(ofile),form='unformatted',access='stream')
+        open(fp,file=resolve_path(trim(ofile)),form='unformatted',access='stream')
         write(fp) mg%is(1), mg%ie(1),mg%is(2), mg%ie(2),mg%is(3), mg%ie(3)
         write(fp) system%hgs(1:3)
         write(fp) rho(      mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))

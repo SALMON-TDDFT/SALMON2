@@ -903,3 +903,48 @@ decomposition=(K,O,X,Y,Z)を使う。O<=states、CPU・完全占有スピン対�
 軌道／空間MPIを増やすだけで交換FFTやピークメモリが改善すると説明しない。
 圧縮／分割／疎形式のSCF状態を生成・再開できると推定しない。サンプルは既存の
 --hse-kspace --decomposition K O X Y Zと必要に応じ--symmetry c2zを使う。
+
+SCFを同じソースの再ビルドへ再開する場合だけ、保持GSのrunに
+compatible_runtime=Trueを明示できる。新保存のruntime_contractと、記録済みsolver／
+adapterソース指紋・Fortran stream表現・HSE/FFTW種別・OS/CPUの一致が必須。
+一致しない／旧保存で情報がない場合にハッシュを書き換えて回避しない。既定は同一
+binary SHA256のまま。MPI変更は対応範囲のrepartition=Trueを別途明示する。
+scf_restart_originとexecuted_iterations==0を確認し、再保存時は元を上書きしない。
+サンプル再開側は新BUILD_JSONと--compatible-runtimeを使う。これは同じソース・
+今回の同一Mac/toolchainでの実測であり、ソース版・OS跨ぎや汎用checkpointへの
+対応を推定しない。generic restore_checkpoint／TDDFTの引数と混同しない。
+
+異なるソース版ではcompatible_runtime="declared"／--declared-runtimeを明示し、
+scf_compatibility.jsonの正確な保存元→復元先の登録だけを使う。逆向き・推移・任意の
+同形式版を推定しない。Trueは同一ソース限定、既定は同一SHA。codecの型／生成IO
+指紋、native表現、OS/CPU、数値状態版も一致が必要。初期登録は状態版照会の追加
+だけで演算／保存項目に変更がない通常XC・高速PR HSEの組。数値意味が変わる版には
+適用しない。scf_restart_originのcompatibility_declarationと再計算0を確認する。
+汎用checkpointやTDDFTの引数ではない。ソース差をレビューし、実測した組だけを
+根拠文書付きで登録する。OS跨ぎ・保存形式変換は未対応。
+
+GSの計算時間はstate.timing_secondsで照会する。全ランクが同順序で呼び、結果は
+rank-localの完了区間秒数（total/initialization/scf_iterations/write_results）。
+MPI合計・最大や物理精度の指標ではない。別GSの作成／継続で混ざらず、数値復元で
+時間を巻き戻さない。別プロセス再開では新計測。旧runtimeは従来のGS計算を維持し、
+新照会のみtimer protocol1が必要。同時スレッド実行／TDDFTタイマー分離を推定しない。
+
+モデル切替では単位名と出力換算係数を同時復元する。境界は原子単位のまま、既存
+SALMONの換算定数・式を保持する。DOS/PDOS/band/AVSは呼出しごとの空きファイル番号
+を使いホストのファイルを閉じない。各状態の作業フォルダと入力の出力先設定を使う。
+ファイル番号を数値checkpointに入れず、復元で出力を巻き戻すと説明しない。
+作業ディレクトリのプロセス共有、同時スレッド実行の制約が解消したと推定しない。
+
+保持GSではdirectory scope1/2/3対応runtimeを自動検出し、作成／継続／復元の際に
+os.chdirを使わず状態フォルダをnativeパス解決に渡す。相対ファイルは状態基準、
+絶対パスは維持。例外・他ランク準備失敗でも範囲を解除する。論理入力／数値保存に
+一時prefixを追加しない。旧runtimeの従来経路は維持する。旧runtime向けwrapperの
+CWD切替や同時スレッド実行まで解消したと推定せず、native呼出しはメインスレッドで
+順次行う。通常のrun/continue_scfの呼出し方は変えず、import時にビルドしない。
+
+通常TDDFT（通常／共有／異入力登録）と高速PR HSE（通常／共有／登録）は、scope2/3
+runtimeでホストCWDを変更しない共通native呼出しを使う。scope1はGSだけの対応で、
+TDDFTでは旧切替へ戻す。import時にビルドせず、対応runtimeは明示的に準備する。
+相対ファイルは各work基準、絶対パスは維持。準備のrank合意と例外時解除を共通化し、
+数値の保存形式・時刻・電流符号は維持する。FDTDはscope3で同じ経路を使い、scope1/2では従来の切替を維持する。
+主スレッド逐次の制約は維持し、同時native実行まで対応したと説明しない。

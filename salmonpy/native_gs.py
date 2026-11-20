@@ -5,6 +5,8 @@ import hashlib
 import json
 import math
 import os
+import platform
+import sys
 from pathlib import Path
 import tempfile
 import threading
@@ -141,7 +143,72 @@ def _scf_k_input(text,decomposition):
     return groups
 
 
-def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=False):
+def _scf_version_catalog():
+    return json.loads(Path(__file__).with_name('scf_compatibility.json').read_text())
+
+
+def _scf_codec_digest(hashes):
+    catalog=_scf_version_catalog()
+    files=catalog['codec_sources']
+    if not all(name in hashes for name in files):return None
+    return hashlib.sha256(json.dumps([catalog['codec_schema'],
+        {name:hashes[name] for name in files}],sort_keys=True).encode()).hexdigest()
+
+
+def _scf_contract_mismatch(saved,current,mode):
+    if not isinstance(saved,dict) or current is None:return ['runtime_contract'],None
+    schemas=('salmonpy.scf-rebuild/1','salmonpy.scf-rebuild/2')
+    if saved.get('schema') not in schemas or current.get('schema') not in schemas:return ['schema'],None
+    fields=('stream_sha256','platform','machine')
+    mismatch=[name for name in fields if saved.get(name)!=current.get(name)]
+    if saved.get('codec_sha256') is not None and current.get('codec_sha256') is not None and saved['codec_sha256']!=current['codec_sha256']:
+        mismatch.append('codec_sha256')
+    if saved.get('state_revision') is not None and current.get('state_revision') is not None and saved['state_revision']!=current['state_revision']:
+        mismatch.append('state_revision')
+    if saved.get('source_sha256')==current.get('source_sha256'):return mismatch,None
+    if mode!='declared':return mismatch+['source_sha256'],None
+    entries=_scf_version_catalog()['transitions']
+    selected=[x for x in entries if x.get('from_source_sha256')==saved.get('source_sha256')
+              and x.get('to_source_sha256')==current.get('source_sha256')]
+    if len(selected)!=1:return mismatch+['compatibility_declaration'],None
+    entry=selected[0];codec=entry.get('codec_sha256')
+    if not isinstance(codec,str) or len(codec)!=64 or current.get('codec_sha256')!=codec:
+        mismatch.append('codec_sha256')
+    if saved.get('codec_sha256') is not None and saved['codec_sha256']!=codec:mismatch.append('saved_codec_sha256')
+    revision=entry.get('state_revision')
+    if type(revision) is not int or current.get('state_revision')!=revision:mismatch.append('state_revision')
+    old_revision=saved.get('state_revision')
+    if old_revision!=revision and not (old_revision is None and entry.get('allow_legacy_state_revision') is True):
+        mismatch.append('saved_state_revision')
+    if not entry.get('id') or not entry.get('validation'):mismatch.append('compatibility_evidence')
+    return mismatch,entry.get('id') if not mismatch else None
+
+
+def _scf_runtime_contract(session):
+    source=getattr(session.backend,'_scf_source_digest',None)
+    if source is None:return None
+    probe=getattr(session.lib,'sp_gs_scf_format_protocol',None)
+    if probe is None:return None
+    probe.argtypes=[];probe.restype=c.c_int
+    if probe()!=1:return None
+    fn=session.lib.sp_gs_scf_format_signature
+    fn.argtypes=[c.c_void_p,c.c_void_p];fn.restype=c.c_int
+    kinds=np.zeros(8,dtype=np.int32);payload=np.zeros(128,dtype=np.int8)
+    if fn(kinds.ctypes.data,payload.ctypes.data)!=0:raise InputError('native SCF stream representation unavailable')
+    abi=hashlib.sha256(json.dumps(kinds.tolist()).encode()+payload.tobytes()).hexdigest()
+    contract={'schema':'salmonpy.scf-rebuild/1','source_sha256':source,
+              'stream_sha256':abi,'platform':sys.platform,'machine':platform.machine()}
+    codec=getattr(session.backend,'_scf_codec_digest',None)
+    if codec is not None:
+        contract.update(schema='salmonpy.scf-rebuild/2',codec_sha256=codec,state_revision=None)
+        revision=getattr(session.lib,'sp_gs_scf_state_revision',None)
+        if revision is not None:
+            revision.argtypes=[];revision.restype=c.c_int
+            contract['state_revision']=revision()
+    return contract
+
+
+def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=False,compatible_runtime=False):
     directory=Path(directory).expanduser().resolve()
     record=json.loads((directory/'manifest.json').read_text())
     expected={'schema':'salmonpy.native-scf-disk/1','runtime_sha256':session.backend.sha256,
@@ -151,6 +218,13 @@ def _scf_disk_manifest(directory,session,text,assets,material_id,*,repartition=F
     migrating=repartition and (record.get('ranks')!=session.comm.size or record.get('decomposition')!=list(session.backend.decomposition))
     for key,value in expected.items():
         if migrating and key in ('decomposition','ranks','input_text'):continue
+        if key=='runtime_sha256' and record.get(key)!=value and compatible_runtime:
+            contract=_scf_runtime_contract(session)
+            mismatch,declaration=_scf_contract_mismatch(record.get('runtime_contract'),contract,compatible_runtime)
+            if mismatch:
+                raise InputError('SCF rebuild requires matching recorded source, stream representation and platform; mismatched: '+','.join(mismatch))
+            if declaration is not None:record['accepted_compatibility_declaration']=declaration
+            continue
         if record.get(key)!=value:raise InputError('SCF disk checkpoint incompatible: '+key)
     old_size=record.get('ranks')
     if type(old_size) is not int or not 1<=old_size<2**31:raise InputError('invalid SCF saved rank count')
@@ -346,6 +420,12 @@ class NativeGSBackend:
                 raise InputError('explicit fast GS import ABI declaration required')
         elif record.get('schema')!='salmonpy.embedded-tddft/1':
             raise InputError('verified embedded or declared fast GS build record required')
+        hashes=record.get('source_hashes')
+        self._scf_source_digest=None;self._scf_codec_digest=None
+        if isinstance(hashes,dict) and hashes and all(isinstance(k,str) and isinstance(v,str) and len(v)==64 for k,v in hashes.items()):
+            self._scf_source_digest=hashlib.sha256(json.dumps(
+                [record.get('schema'),hashes,record.get('adapter_hashes',{})],sort_keys=True).encode()).hexdigest()
+        if isinstance(hashes,dict):self._scf_codec_digest=_scf_codec_digest(hashes)
         self._fast_hse=record.get('schema')=='salmonpy.fast-hse-mpi/1'
         self._supports_compute=not self._fast or 'run' in record.get('gs_abi',{}).get('modes',[])
         if type(hse_orbital) is not bool or (hse_orbital and not self._fast_hse):
@@ -410,14 +490,11 @@ class NativeGSSession:
     def _live(self):
         self._native._live()
         if self.closed:raise InputError('GS session is closed')
-    def _call(self,work,fn,*args):
-        self._live();previous=Path.cwd();error=None
-        try:
-            try:os.chdir(work)
-            except Exception as exc:error=str(exc)
-            _agree(self.comm,error)
-            return fn(*args)
-        finally:os.chdir(previous)
+    def _call(self,work,fn,*args,minimum_protocol=1):
+        from ._native_group import _directory_call
+        self._native._live()
+        return _directory_call(self.lib,self._native.context.solver_comm,work,fn,*args,minimum_protocol=minimum_protocol)
+
     def _check(self,code):
         codes=self.comm.allgather(code)
         if any(codes):raise RuntimeFailure('retained GS native call failed: '+str(codes))
@@ -438,7 +515,7 @@ class NativeGSSession:
         finally:
             if boundary is not None:self._check(boundary(1))
 
-    def run(self,calculation,*,scf=None,material_id='material',steps=None,restart=None,repartition=False):
+    def run(self,calculation,*,scf=None,material_id='material',steps=None,restart=None,repartition=False,compatible_runtime=False):
         from .dft import DFT,SCFSettings
         from .config import _identifier
         self._live();error=None
@@ -471,6 +548,8 @@ class NativeGSSession:
                             or tuple(calculation.kmesh)!=(1,1,1) or calculation.symmetry is not None
                             or calculation.electrons!=2*calculation.states):
                         raise InputError('fast HSE GS requires k-only MPI or a Gamma orbital/spatial layout and a matching runtime')
+            if (type(compatible_runtime) is not bool and not (type(compatible_runtime) is str and compatible_runtime=='declared')) or (compatible_runtime and restart is None):
+                raise InputError("compatible_runtime requires restart and must be False, True or 'declared'")
             if type(repartition) is not bool or (repartition and restart is None):
                 raise InputError('repartition is an explicit boolean option requiring restart')
             if restart is not None and steps is not None:
@@ -495,7 +574,7 @@ class NativeGSSession:
             descriptor=(material_id,text,tuple(p.sha256 for p in calculation.pseudopotentials))
             if calculation.symmetry is not None:descriptor+=(calculation.symmetry.sha256,)
             if restart is not None:
-                restart,saved=_scf_disk_manifest(restart,self,text,assets,material_id,repartition=repartition)
+                restart,saved=_scf_disk_manifest(restart,self,text,assets,material_id,repartition=repartition,compatible_runtime=compatible_runtime)
                 descriptor+=(str(restart),saved)
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
@@ -559,6 +638,11 @@ class NativeGSSession:
                 if candidate is None:raise InputError('SCF disk publication protocol missing')
                 self._check(candidate(state._token,0,3))
                 state._metadata_converged=state.info.converged
+                state._scf_restart_origin={'saved_runtime_sha256':saved['runtime_sha256'],
+                    'runtime_sha256':self.backend.sha256,
+                    'compatible_runtime':saved['runtime_sha256']!=self.backend.sha256}
+                if saved.get('accepted_compatibility_declaration') is not None:
+                    state._scf_restart_origin['compatibility_declaration']=saved['accepted_compatibility_declaration']
             info=state.info
         except BaseException:
             state.close();raise
@@ -702,7 +786,7 @@ class NativeGSState:
         self._material_id=material_id;self._calculation=calculation;self._identity=None;self.closed=False
         self._electrons=None;self._assets=()
         self._input_text=None;self._input_origin='unknown';self._metadata_converged=None
-        self._archive_origin=None
+        self._archive_origin=None;self._scf_restart_origin=None
         self._archive_export_context=None;self._archive_export_potentials=()
     @property
     def identity(self):return self._identity
@@ -712,6 +796,10 @@ class NativeGSState:
     def calculation(self):return self._calculation
     @property
     def archive_origin(self):return self._archive_origin
+
+    @property
+    def scf_restart_origin(self):
+        return None if self._scf_restart_origin is None else dict(self._scf_restart_origin)
 
     def input_metadata(self):
         """Return detached declared-input metadata, even after native state close.
@@ -756,6 +844,23 @@ class NativeGSState:
         result=dict(zip(('paused','iterations','max_iterations','initializations','executed_iterations','snapshots'),map(int,values)))
         result['paused']=bool(result['paused'])
         return result
+    @property
+    def timing_seconds(self):
+        """Rank-local completed intervals; fresh diagnostics, not restart data."""
+        self._live();error=None
+        try:
+            probe=getattr(self.session.lib,'sp_gs_timer_protocol',None)
+            if probe is None:raise InputError('state-owned GS timers require a matching explicit runtime')
+            probe.argtypes=[];probe.restype=c.c_int
+            if probe()!=1:raise InputError('unsupported GS timer protocol')
+            fn=self.session.lib.sp_gs_timers
+            fn.argtypes=[c.c_int64,c.c_void_p];fn.restype=c.c_int
+        except Exception as exc:error=str(exc)
+        _agree(self.session.comm,error)
+        values=np.zeros(4,dtype=np.float64)
+        self.session._check(fn(self._token,values.ctypes.data))
+        return dict(zip(('total','initialization','scf_iterations','write_results'),map(float,values)))
+
     @property
     def checkpoint_capability(self):
         """Collective declaration for memory snapshots of this live SCF owner."""
@@ -915,7 +1020,7 @@ class NativeGSState:
         return directory
 
     def save_scf(self,directory):
-        """Collectively save a complete same-build/topology numerical SCF boundary.
+        """Collectively save a complete numerical SCF boundary with rebuild provenance.
 
         The manifest is committed last. Failed output stays incomplete; never
         overwrite an existing checkpoint. No SCF iterations or exchange calls.
@@ -924,6 +1029,7 @@ class NativeGSState:
         try:
             fn=_scf_disk_api(self.session.lib)
             directory=Path(directory).expanduser().resolve()
+            contract=_scf_runtime_contract(self.session)
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         _agree(comm,'SCF output paths differ' if any(p!=str(directory) for p in comm.allgather(str(directory))) else None)
@@ -952,6 +1058,8 @@ class NativeGSState:
                 'material_id':self.material_id,'input_text':self._input_text,
                 'assets':{name:hashlib.sha256(data).hexdigest() for name,data in self._assets},
                 'files':files,'info':vars(info),'progress':progress}
+        if contract is not None:record['runtime_contract']=contract
+        if self.scf_restart_origin is not None:record['restart_origin']=self.scf_restart_origin
         if comm.rank==0:
             try:(directory/'manifest.json').write_text(json.dumps(record,indent=2)+'\n')
             except Exception as exc:error=str(exc)

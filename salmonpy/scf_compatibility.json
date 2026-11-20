@@ -1,0 +1,40 @@
+{
+  "schema": "salmonpy.scf-compatibility/1",
+  "codec_schema": "salmonpy.native-scf-stream/1",
+  "codec_sources": [
+    "src/common/structures.f90",
+    "src/io/model_inputs.f90",
+    "src/gs/main_dft.f90",
+    "src/xc/exx_rt_state.f90",
+    "src/xc/exx_ace.f90",
+    "src/xc/exx_symmetry.f90",
+    "src/xc/exx_factor_history.f90",
+    "src/xc/exx_spatial.f90",
+    "src/xc/exx_distributed_gauge.f90",
+    "src/xc/exx_sparse_orbitals.f90",
+    "src/gs/scf_disk_io.inc",
+    "src/io/scf_model_disk_io.inc"
+  ],
+  "transitions": [
+    {
+      "id": "scf-state1-ordinary-metadata-revision-20261120",
+      "from_source_sha256": "eae28e798c90235c9b95403204fcef067d49a26d6cf2331108a557409593d90d",
+      "to_source_sha256": "6d73f8e52213176c47ebd7eb3221a28903603d7bbf10a485fc5974b49802a5a4",
+      "codec_sha256": "201e04817b99b53ca6dfb2ef7e2ca084930a0dea1c72738e428c79284c0b631b",
+      "state_revision": 1,
+      "allow_legacy_state_revision": true,
+      "validation": "docs/plans/2026-11-20-scf-declared-source-migration.md",
+      "description": "Metadata-only native state revision export; no arithmetic or stream changes"
+    },
+    {
+      "id": "scf-state1-hse-metadata-revision-20261120",
+      "from_source_sha256": "727ab07caba4f59cfe5dd4aa3ad012b2c6d7a90f3fe74a5677849f377ac48794",
+      "to_source_sha256": "775b2d4a7395d2530eb4f2695d40efe9243606a0e8c6760b403f1853884909c7",
+      "codec_sha256": "201e04817b99b53ca6dfb2ef7e2ca084930a0dea1c72738e428c79284c0b631b",
+      "state_revision": 1,
+      "allow_legacy_state_revision": true,
+      "validation": "docs/plans/2026-11-20-scf-declared-source-migration.md",
+      "description": "Metadata-only native state revision export; no arithmetic or stream changes"
+    }
+  ]
+}

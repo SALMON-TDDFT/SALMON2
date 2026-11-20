@@ -10,6 +10,10 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('build',type=Path);p.add_argument('output',type=Path)
     p.add_argument('--size',type=int,default=2)
+    p.add_argument('--restore-build',type=Path,help='separately built runtime for an explicitly selected compatible resume/reject')
+    runtime_mode=p.add_mutually_exclusive_group()
+    runtime_mode.add_argument('--compatible-runtime',action='store_true')
+    runtime_mode.add_argument('--declared-runtime',action='store_true')
     p.add_argument('--restore-size',type=int,help='pure k/orbital SCF checkpoint migration to a different rank count')
     p.add_argument('--repartition',action='store_true',help=argparse.SUPPRESS)
     p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='libxc_pbe')
@@ -33,7 +37,8 @@ def main():
         args.output.mkdir(parents=True,exist_ok=False)
         for phase in ('continuous','save','resume','reject'):
             ranks=(args.restore_size or args.size) if phase in ('resume','reject') else args.size
-            command=['mpiexec','-n',str(ranks),sys.executable,str(Path(__file__).resolve()),str(args.build.resolve()),str(args.output.resolve()),
+            chosen=args.restore_build if phase in ('resume','reject') and args.restore_build else args.build
+            command=['mpiexec','-n',str(ranks),sys.executable,str(Path(__file__).resolve()),str(chosen.resolve()),str(args.output.resolve()),
                      '--size',str(ranks),'--xc',args.xc,'--split',args.split,'--worker',phase,
                      '--pre-scf-threshold',str(args.pre_scf_threshold),'--pre-scf-steps',str(args.pre_scf_steps)]
             command+=['--grid',str(args.grid),'--spatial-axis',args.restore_axis if phase in ('resume','reject') and args.restore_axis else args.spatial_axis]
@@ -42,15 +47,20 @@ def main():
             full=args.restore_decomposition if phase in ('resume','reject') and args.restore_decomposition else args.decomposition
             if full:command+=['--decomposition',*map(str,full)]
             if (args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition) and phase in ('resume','reject'):command+=['--repartition']
+            if args.compatible_runtime and phase in ('resume','reject'):command+=['--compatible-runtime']
+            if args.declared_runtime and phase in ('resume','reject'):command+=['--declared-runtime']
             if args.symmetry:command+=['--symmetry']
             if args.gamma:command+=['--gamma']
             if args.two_atoms:command+=['--two-atoms']
             if args.without_plot:command+=['--without-plot']
             with (args.output/(phase+'.log')).open('w') as log:
                 subprocess.run(command,env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'},stdout=log,stderr=subprocess.STDOUT,check=True)
+        if args.restore_build:
+            assert json.loads(args.build.read_text())['sha256']!=json.loads(args.restore_build.read_text())['sha256'],'rebuilt binary must differ'
         result={'status':'pass','fresh_processes':4,'MPI_size':args.size,'xc':args.xc,'split':args.split,
-                'symmetry':args.symmetry,'continuous_resume_arrays_exact':not bool(args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition),'restore_MPI_size':args.restore_size or args.size,
-                'comparison_rtol':1e-9 if args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition else 0.,'comparison_atol':1e-10 if args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition else 0.,
+                'runtime_rebuilt':bool(args.restore_build),'compatible_runtime':'declared' if args.declared_runtime else args.compatible_runtime,
+                'symmetry':args.symmetry,'continuous_resume_arrays_exact':not bool(args.restore_build or args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition),'restore_MPI_size':args.restore_size or args.size,
+                'comparison_rtol':1e-9 if args.restore_build or args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition else 0.,'comparison_atol':1e-10 if args.restore_build or args.restore_size or args.restore_axis or args.restore_rgrid or args.restore_decomposition else 0.,
                 'restored_accepted_iterations':3,'bootstrap_executed_iterations':0,
                 'resume_executed_iterations':5,'restored_k_slices_exact':args.split=='k','restored_orbital_slices_exact':args.split=='orbital','restored_spatial_interiors_exact':args.split in ('spatial','mixed'),'restored_mixed_orbital_k_interiors_exact':args.split=='mixed','corrupt_rank_rejected_before_creation':True,
                 'native_read_failure_preserves_live_state':True,'pre_scf_threshold':args.pre_scf_threshold,
@@ -60,6 +70,7 @@ def main():
         result['residual_plot_status']=report['plot_status']
         (args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(result);return
     import numpy as np
+    args.compatible_runtime='declared' if args.declared_runtime else args.compatible_runtime
     from mpi4py import MPI
     from types import SimpleNamespace
     from salmonpy.dft import DFT,Pseudopotential,SCFSettings,SymmetryOperations
@@ -94,6 +105,7 @@ def main():
     if args.decomposition:dec=tuple(args.decomposition)
     backend=NativeGSBackend(args.build,work,decomposition=dec,hse_orbital=args.xc=='hse06' and args.split=='orbital',hse_spatial=args.xc=='hse06' and (args.split=='spatial' or (args.split=='mixed' and args.gamma)),hse_kspace=args.xc=='hse06' and args.split=='mixed' and not args.gamma)
     checkpoint=args.output/'checkpoint'
+    layout_changed=args.repartition and json.loads((checkpoint/'manifest.json').read_text())['decomposition']!=list(dec)
     def spatial_expected(directory,array,lower):
         wave=array.ndim==7
         result=np.empty_like(array);covered=np.zeros(array.shape[:3]+(array.shape[4:6] if wave else ()),dtype=bool)
@@ -125,6 +137,8 @@ def main():
         start=np.asarray(rho.lower_indices)-np.asarray(orb.lower_indices[:3])
         return value[tuple(slice(int(a),int(a+n)) for a,n in zip(start,rho.values.shape))]
     def expected_orbitals(directory,orbital):
+        if not layout_changed:
+            with np.load(directory/f'rank-{comm.rank:08d}.npz') as old:return old['orbitals']
         if args.split in ('spatial','mixed'):return spatial_expected(directory,orbital.values,orbital.lower_indices)
         # Test-only global-k assembly, never used by the production loader.
         dim=4 if args.split=='orbital' else 5
@@ -142,6 +156,32 @@ def main():
         assert covered.all()
         return combined
     with backend.open(ctx) as session:
+        if args.compatible_runtime and args.worker in ('resume','reject'):
+            saved=json.loads((checkpoint/'manifest.json').read_text())
+            assert saved['runtime_sha256']!=backend.sha256
+            try:session.run(calc,scf=scf,material_id='Si',restart=checkpoint,repartition=args.repartition)
+            except InputError as exc:assert 'runtime_sha256' in str(exc)
+            else:raise AssertionError('different binary accepted without explicit option')
+            if args.declared_runtime:
+                try:session.run(calc,scf=scf,material_id='Si',restart=checkpoint,
+                                repartition=args.repartition,compatible_runtime=True)
+                except InputError as exc:assert 'source_sha256' in str(exc)
+                else:raise AssertionError('changed source accepted by same-source mode')
+            assert not session._states
+            for label in ('source_sha256','stream_sha256','platform','missing')+ (('codec_sha256','state_revision') if args.declared_runtime else ()):
+                directory=work/('bad-'+label)
+                if comm.rank==0:
+                    directory.mkdir()
+                    bad=json.loads(json.dumps(saved))
+                    if label=='missing':bad.pop('runtime_contract')
+                    else:bad['runtime_contract'][label]='incompatible'
+                    (directory/'manifest.json').write_text(json.dumps(bad))
+                comm.Barrier()
+                try:session.run(calc,scf=scf,material_id='Si',restart=directory,
+                                repartition=args.repartition,compatible_runtime=args.compatible_runtime)
+                except InputError as exc:assert 'SCF rebuild requires' in str(exc)
+                else:raise AssertionError('incompatible rebuild contract accepted')
+                assert not session._states
         if args.worker=='cleanup':
             from salmonpy.native_gs import _scf_candidate_function
             from salmonpy.errors import RuntimeFailure
@@ -260,7 +300,7 @@ def main():
                     f.seek(-1,2);v=f.read(1);f.seek(-1,2);f.write(bytes([v[0]^1]))
             comm.Barrier()
             try:
-                try:session.run(calc,scf=scf,material_id='Si',restart=checkpoint,**({'repartition':True} if args.repartition else {}))
+                try:session.run(calc,scf=scf,material_id='Si',restart=checkpoint,**({'repartition':True} if args.repartition else {}),compatible_runtime=args.compatible_runtime)
                 except InputError:pass
                 else:raise AssertionError('corrupt disk payload accepted')
             finally:
@@ -271,7 +311,7 @@ def main():
             assert not session._states
             return
         with session.run(calc,scf=scf,material_id='Si',steps=None if args.worker=='resume' else 3 if args.worker=='save' else 8,
-                         restart=checkpoint if args.worker=='resume' else None,**({'repartition':True} if args.repartition else {})) as state:
+                         restart=checkpoint if args.worker=='resume' else None,**({'repartition':True} if args.repartition else {}),compatible_runtime=args.compatible_runtime) as state:
             if args.worker=='save':
                 assert state.scf_status['executed_iterations']==3
                 if args.without_plot:
@@ -291,7 +331,7 @@ def main():
                 return
             if args.worker=='resume':
                 assert state.iterations==3
-                if args.repartition:
+                if args.repartition or args.compatible_runtime:
                     with np.load(args.output/'save/rank-00000000.npz') as cut:
                         for q in ('density','occupations','eigenvalues','scf_history'):
                             if args.split in ('spatial','mixed') and q=='density':
@@ -301,6 +341,11 @@ def main():
                     orbital=state.array('orbitals')
                     np.testing.assert_array_equal(orbital.values,expected_orbitals(args.output/'save',orbital))
                 assert state.scf_status['executed_iterations']==0,'bootstrap replayed SCF'
+                if args.compatible_runtime:
+                    origin=state.scf_restart_origin
+                    assert origin['saved_runtime_sha256']==saved['runtime_sha256']
+                    assert origin['runtime_sha256']==backend.sha256 and origin['compatible_runtime'] is True
+                    if args.declared_runtime:assert origin['compatibility_declaration']
                 if args.xc=='hse06' and args.split=='orbital' and not args.repartition:
                     # Round-trip every serialized numerical field, including
                     # spatial exchange workspace and ACE, before any continuation.
@@ -357,7 +402,7 @@ def main():
             arrays['grid_bounds']=np.asarray([[lo,lo+n-1] for lo,n in zip(rho.lower_indices,rho.values.shape)],dtype=np.int64)
             name=f'rank-{comm.rank:08d}.npz'
             if args.worker=='continuous':np.savez(work/name,**arrays)
-            elif not args.repartition:
+            elif not args.repartition and not args.compatible_runtime:
                 with np.load(args.output/'continuous'/name) as expected:
                     for key,value in arrays.items():np.testing.assert_array_equal(value,expected[key],err_msg=key)
             else:

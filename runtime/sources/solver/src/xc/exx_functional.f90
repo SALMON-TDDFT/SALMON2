@@ -1,5 +1,6 @@
 ! Shared hybrid settings for conventional and core-partitioned exchange.
 module exx_functional
+  use filesystem,only:resolve_path
   use salmon_global, only: xc,hse_omega,pbeh_coulomb_radius,rvv10_b,rvv10_c,rvv10_nq,exx_mlwf_radius
   implicit none
   private
@@ -45,7 +46,7 @@ contains
     character(*),intent(in) :: path,run_id
     integer,intent(out) :: status
     integer :: u,ios
-    open(newunit=u,file=path,status='replace',action='write',iostat=status)
+    open(newunit=u,file=resolve_path(path),status='replace',action='write',iostat=status)
     if(status/=0)return
     write(u,'(a)',iostat=status)'SLCFO_FUNCTIONAL_V1',trim(run_id),trim(xc)
     if(status==0)write(u,'(7es26.17)',iostat=status)parameters()
@@ -63,12 +64,12 @@ contains
     integer :: u,ios
     logical :: exists
     status=1
-    inquire(file=path,exist=exists)
+    inquire(file=resolve_path(path),exist=exists)
     if(.not.exists)then
       ! Pre-metadata HSE data retain their historical reconstruction route.
       if(.not.is_global_hybrid(xc))status=0
     else
-      open(newunit=u,file=path,status='old',action='read',iostat=ios)
+      open(newunit=u,file=resolve_path(path),status='old',action='read',iostat=ios)
       if(ios==0)then
         read(u,'(a)',iostat=ios)magic
         if(ios==0)read(u,'(a)',iostat=ios)saved_run

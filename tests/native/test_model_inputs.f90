@@ -153,10 +153,10 @@ contains
     write_gs_wfn_k=merge('a','b',value==1)
     write_rt_wfn_k=merge('a','b',value==1)
     unit_system=merge('a','b',value==1)
-    unit_time=merge('a','b',value==1)
-    unit_length=merge('a','b',value==1)
-    unit_energy=merge('a','b',value==1)
-    unit_charge=merge('a','b',value==1)
+    unit_time='au'
+    unit_length='au'
+    unit_energy=merge('au','eV',value==1)
+    unit_charge='au'
     nproc_k=value
     nproc_ob=value
     nproc_rgrid=value

@@ -98,11 +98,9 @@ class NativeTDDFTModel:
     @property
     def initial(self):return self._initial
     def _call(self,fn,*args):
+        from ._native_group import _directory_call
         self._native._live()
-        import os
-        old=Path.cwd()
-        try:os.chdir(self.work);return fn(*args)
-        finally:os.chdir(old)
+        return _directory_call(self.lib,self._native.context.solver_comm,self.work,fn,*args,minimum_protocol=2)
     def new_state(self,point_id=None):
         from .embedded_tddft import _NativeState
         from .material_response import _response_timing

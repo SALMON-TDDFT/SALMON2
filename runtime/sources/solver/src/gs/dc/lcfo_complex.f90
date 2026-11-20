@@ -16,6 +16,7 @@
 
 #include "config.h"
 module lcfo_complex
+  use filesystem,only:resolve_path
   use iso_fortran_env, only: int64
   implicit none
 
@@ -108,7 +109,7 @@ contains
     writer%file_coeff = trim(base_directory)//'wavefunctions.bin'
     writer%file_hamiltonian = trim(base_directory)//'hamiltonian_local.bin'
     writer%unit_basis = get_filehandle()
-    open(writer%unit_basis,file=trim(writer%file_basis),status='replace', &
+    open(writer%unit_basis,file=resolve_path(trim(writer%file_basis)),status='replace', &
          form='unformatted',access='stream',action='write',iostat=ios)
     if (ios /= 0) then
       local_status = 1
@@ -125,7 +126,7 @@ contains
     h_open = .false.
     if (do_diag) then
       writer%unit_coeff = get_filehandle()
-      open(writer%unit_coeff,file=trim(writer%file_coeff),status='replace', &
+      open(writer%unit_coeff,file=resolve_path(trim(writer%file_coeff)),status='replace', &
            form='unformatted',access='stream',action='write',iostat=ios)
       if (ios == 0) then
         coeff_open = .true.
@@ -141,7 +142,7 @@ contains
       end if
     end if
     writer%unit_hamiltonian = get_filehandle()
-    open(writer%unit_hamiltonian,file=trim(writer%file_hamiltonian),status='replace', &
+    open(writer%unit_hamiltonian,file=resolve_path(trim(writer%file_hamiltonian)),status='replace', &
          form='unformatted',access='stream',action='write',iostat=ios)
     if (ios == 0) then
       h_open = .true.
@@ -165,7 +166,7 @@ contains
 
     iu_rgrid = get_filehandle()
     rgrid_open = .false.
-    open(iu_rgrid,file=trim(base_directory)//'rgrid_index.bin', &
+    open(iu_rgrid,file=resolve_path(trim(base_directory)//'rgrid_index.bin'), &
          status='replace',form='unformatted',access='stream',action='write',iostat=ios)
     if (ios == 0) rgrid_open = .true.
     if (ios == 0) write(iu_rgrid,iostat=ios) lg%num(1:3),dc%lg_tot%num(1:3)
@@ -459,7 +460,7 @@ contains
       writer%unit_basis = -1
     end if
     if (ios == 0) then
-      inquire(file=trim(writer%file_basis),size=actual_bytes,iostat=ios)
+      inquire(file=resolve_path(trim(writer%file_basis)),size=actual_bytes,iostat=ios)
       if (ios == 0 .and. actual_bytes /= writer%bytes_basis) ios = 1
     end if
     if (do_diag) then
@@ -473,7 +474,7 @@ contains
         writer%unit_coeff = -1
       end if
       if (ios == 0) then
-        inquire(file=trim(writer%file_coeff),size=actual_bytes,iostat=ios)
+        inquire(file=resolve_path(trim(writer%file_coeff)),size=actual_bytes,iostat=ios)
         if (ios == 0 .and. actual_bytes /= writer%bytes_coeff) ios = 1
       end if
     end if
@@ -487,7 +488,7 @@ contains
       writer%unit_hamiltonian = -1
     end if
     if (ios == 0) then
-      inquire(file=trim(writer%file_hamiltonian),size=actual_bytes,iostat=ios)
+      inquire(file=resolve_path(trim(writer%file_hamiltonian)),size=actual_bytes,iostat=ios)
       if (ios == 0 .and. actual_bytes /= writer%bytes_hamiltonian) ios = 1
     end if
     if (ios /= 0) local_status = 1
@@ -1317,7 +1318,7 @@ contains
       if (dc%id_tot == 0) then
         iu = get_filehandle()
         filename = trim(dc%base_directory)//trim(sysname)//'_lcfo_complex_eigen.data'
-        open(iu,file=filename,status='replace',form='formatted',iostat=local_status)
+        open(iu,file=resolve_path(filename),status='replace',form='formatted',iostat=local_status)
         if (local_status == 0) then
           write(iu,'(a)') '# DC-LCFO complex scalar eigenvalues; format_version=1'
           write(iu,'(a,1x,i0,1x,a,1x,i0,1x,a,1x,i0)') '# nk=',nk,'nspin=',nspin, &
@@ -1581,7 +1582,7 @@ contains
     if (storage_size(0) /= 32 .or. storage_size(0d0) /= 64 .or. &
         storage_size(cmplx(0d0,0d0,8)) /= 128 .or. file_storage_size /= 8) return
     unit = get_filehandle()
-    open(unit,file=trim(path),status='old',form='unformatted', &
+    open(unit,file=resolve_path(trim(path)),status='old',form='unformatted', &
          access='stream',action='read',iostat=ios)
     if (ios /= 0) then
       unit = -1
@@ -1847,7 +1848,7 @@ contains
     if (meta_b(16) /= f .or. any(meta_b(4:6) /= ref_meta(4:6))) goto 900
     write(filename,'(a,i6.6,2a)') trim(bdir),f,'/','rgrid_index.bin'
     ur = get_filehandle()
-    open(ur,file=trim(filename),status='old',form='unformatted',access='stream', &
+    open(ur,file=resolve_path(trim(filename)),status='old',form='unformatted',access='stream', &
          action='read',iostat=ios)
     if (ios /= 0) goto 900
     read(ur,iostat=ios) gfrag,gtot

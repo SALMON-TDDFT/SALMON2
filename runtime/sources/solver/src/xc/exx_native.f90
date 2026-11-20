@@ -3,6 +3,7 @@
 ! Gamma hybrid SCF and native mesh RT preserve three-dimensional Cartesian spatial blocks.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module exx_native
+  use filesystem,only:resolve_path
   use rt_step_recovery,only:recovery_agree
 #ifdef USE_MPI
   use exx_worker_service, only: service_enabled,service_exchange
@@ -731,13 +732,13 @@ contains
     call comm_summation(status,total,info%icomm_rko)
     if(total/=0)error stop 'Invalid factor mode at checkpoint/restart'
     if(info%id_rko==0)then
-      inquire(file=trim(directory)//'factor-mode.bin',exist=exists)
+      inquire(file=resolve_path(trim(directory)//'factor-mode.bin'),exist=exists)
       if(writing.or.exists)then
         if(writing)then
-          open(newunit=unit,file=trim(directory)//'factor-mode.bin', &
+          open(newunit=unit,file=resolve_path(trim(directory)//'factor-mode.bin'), &
             form='unformatted',status='replace',iostat=status)
         else
-          open(newunit=unit,file=trim(directory)//'factor-mode.bin', &
+          open(newunit=unit,file=resolve_path(trim(directory)//'factor-mode.bin'), &
             form='unformatted',status='old',iostat=status)
         endif
         if(status==0)then
@@ -753,7 +754,7 @@ contains
           if(ios/=0)status=1
         endif
       else
-        inquire(file=trim(directory)//'factor-history-00000000.bin',exist=has_history)
+        inquire(file=resolve_path(trim(directory)//'factor-history-00000000.bin'),exist=has_history)
         if(mode/=0.or.has_history)status=1
       endif
     endif
@@ -809,7 +810,7 @@ contains
     call comm_summation(status,total,info%icomm_rko)
     if(total/=0)error stop 'Learned ACE checkpoint requires initialized dense factors'
     write(filename,'(a,a,i8.8,a)')trim(directory),'factor-history-',info%id_rko,'.bin'
-    open(newunit=unit,file=trim(filename),form='unformatted',access='stream',status='replace',iostat=status)
+    open(newunit=unit,file=resolve_path(trim(filename)),form='unformatted',access='stream',status='replace',iostat=status)
     if(status==0)then
       write(unit,iostat=status)3,step,mg%is,mg%ie,system%no,system%nk, &
         info%isize_r,info%isize_k,info%isize_o,info%ik_s,info%numk, &
@@ -852,7 +853,7 @@ contains
     expected=[mg%is,mg%ie,system%no,system%nk,info%isize_r,info%isize_k, &
       info%isize_o,info%ik_s,info%numk,exx_factor_exact_interval,exx_factor_warmup_steps]
     write(filename,'(a,a,i8.8,a)')trim(exx_state_owner%factor_restart_directory),'factor-history-',info%id_rko,'.bin'
-    open(newunit=unit,file=trim(filename),form='unformatted',access='stream',status='old',iostat=status)
+    open(newunit=unit,file=resolve_path(trim(filename)),form='unformatted',access='stream',status='old',iostat=status)
     if(status==0)then
       read(unit,iostat=status)version,step,header,dims,dv,condition,rows,ready,settings
       saved_q_reduction=1

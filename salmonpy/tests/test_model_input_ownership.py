@@ -16,6 +16,8 @@ class ModelInputOwnershipTests(unittest.TestCase):
                   'ewald','atomic_coor','atomic_red_coor','code','jellium','unfolding'}
         expected={'iflag_atom_coor'};section=None
         for line in (root/'salmon_global.f90').read_text().splitlines():
+            # Audit input declarations, not the derived conversion view below.
+            if re.match(r'\s*end\s+module\s+salmon_global\b',line,re.I):break
             marker=re.match(r'\s*!!\s*&([\w]+)',line)
             if marker:section=marker.group(1)
             clean=line.split('!')[0]

@@ -19,6 +19,7 @@
 
 #include "config.h"
 module lcfo
+  use filesystem,only:resolve_path
   implicit none
   
   private
@@ -639,7 +640,7 @@ contains
       ! eigen.data
         iunit = get_filehandle()
         filename = trim(dc%base_directory)//trim(sysname)//"_eigen.data" ! @ ./data_dcdft/total/
-        open(iunit,file=filename)
+        open(iunit,file=resolve_path(filename))
         write(iunit,'("#esp: single-particle energies (eigen energies) calculated by DC-LCFO method")')
         write(iunit,'("#io: orbital index")')
         select case(unit_energy)
@@ -662,7 +663,7 @@ contains
       ! r-grid index
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_rg ! base_directory==./data_dcdft/fragments/dc%i_frag/
-        open(iunit,file=filename,form='unformatted',access='stream')
+        open(iunit,file=resolve_path(filename),form='unformatted',access='stream')
         write(iunit) lg%num(1:3), dc%lg_tot%num(1:3)
         do n=1,3 ! x,y,z
           write(iunit) dc%jxyz_tot(1:lg%num(n),n)
@@ -671,7 +672,7 @@ contains
       ! basis functions | lambda >
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_bf ! base_directory==./data_dcdft/fragments/dc%i_frag/
-        open(iunit,file=filename,form='unformatted',access='stream')
+        open(iunit,file=resolve_path(filename),form='unformatted',access='stream')
         write(iunit) dc%nxyz_domain(1:3),nspin,dc%nstate_frag
         write(iunit) n_basis(dc%i_frag,1:nspin) ! # of basis functions
         write(iunit) f_basis(1:dc%nxyz_domain(1),1:dc%nxyz_domain(2),1:dc%nxyz_domain(3) &
@@ -680,7 +681,7 @@ contains
       ! local hamiltonian matrix
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_hl
-        open(iunit,file=filename,form='unformatted',access='stream')
+        open(iunit,file=resolve_path(filename),form='unformatted',access='stream')
         write(iunit) mat_H_local(1:dc%nstate_frag,1:dc%nstate_frag,1:nspin)
         write(iunit) n_halo
         do i_halo=1,n_halo
@@ -691,7 +692,7 @@ contains
         ! coefficients of the wavefunctions
           iunit = get_filehandle()
           filename = trim(base_directory)//binfile_wf
-          open(iunit,file=filename,form='unformatted',access='stream')
+          open(iunit,file=resolve_path(filename),form='unformatted',access='stream')
           write(iunit) dc%n_frag, nspin, dc%nstate_frag, dc%nstate_tot
           write(iunit) n_mat(1:nspin)
           write(iunit) n_basis(1:dc%n_frag,1:nspin)
@@ -790,7 +791,7 @@ contains
           write(filename,'(a,i6.6,a)') './data_dcdft/fragments/',f,'/wavefunctions.bin'
         endif
         iu=get_filehandle()
-        open(iu,file=trim(filename),status='old',form='unformatted',access='stream',action='read',iostat=ios)
+        open(iu,file=resolve_path(trim(filename)),status='old',form='unformatted',access='stream',action='read',iostat=ios)
         if(ios/=0)then
           counts(3)=counts(3)+1
           cycle
@@ -885,7 +886,7 @@ contains
     ! coefficients of the wavefunctions
       iunit = get_filehandle()
       write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_wf
-      open(iunit,file=filename,form='unformatted',access='stream')
+      open(iunit,file=resolve_path(filename),form='unformatted',access='stream')
       read(iunit) n_frag, nspin, nstate_frag, nstate_tot
       if( n_frag /= product(num_fragment) .or. nspin /= system%nspin ) stop "data_dcdft: input mismatch"
       allocate(n_mat(nspin))
@@ -900,7 +901,7 @@ contains
     ! r-grid index
       iunit = get_filehandle()
       write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_rg
-      open(iunit,file=filename,form='unformatted',access='stream')
+      open(iunit,file=resolve_path(filename),form='unformatted',access='stream')
       read(iunit) lgnum_frag(1:3), lgnum_tmp(1:3)
       if( any( lgnum_tmp /= lg%num ) ) stop "data_dcdft: input mismatch (lg)"
       allocate(jxyz_tot(maxval(lgnum_frag),3))
@@ -911,7 +912,7 @@ contains
     ! basis functions | lambda >
       iunit = get_filehandle()
       write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_bf
-      open(iunit,file=filename,form='unformatted',access='stream')
+      open(iunit,file=resolve_path(filename),form='unformatted',access='stream')
       read(iunit) nxyz_domain(1:3),i,j ! i,j: dummy
       read(iunit) lgnum_tmp(1:nspin) ! dummy
       if(i /= nspin .or. j /= nstate_frag .or. any( lgnum_tmp(1:nspin) /= n_basis(jfrag,1:nspin) ) ) then
@@ -990,7 +991,7 @@ contains
           else
             write(filename,'(a,i6.6,a,a)') trim(bdir),f,'/','wavefunctions.bin'
           end if
-          open(iu,file=trim(filename),status='old',form='unformatted', &
+          open(iu,file=resolve_path(trim(filename)),status='old',form='unformatted', &
                access='stream',action='read',iostat=ios)
           if (ios /= 0) cycle
           read(iu,iostat=ios) magic

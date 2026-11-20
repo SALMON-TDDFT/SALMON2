@@ -20,6 +20,7 @@
 ! Native E_n clock, A/J at (n+1/2)dt; sample map matches eh_sendrecv('s').
 #include "config.h"
 module salmonpy_eh_context
+  use filesystem,only:resolve_path
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use iso_c_binding
   use structures, only: s_fdtd_system
@@ -413,10 +414,10 @@ end function
     ! Work on detached allocatable storage; fs and its communicator/cache remain live.
     fe=state%fe;ld=state%ld;current=state%current;step=state%step
     if(loading)then
-      open(newunit=unit,file=trim(filename),access='stream',form='unformatted', &
+      open(newunit=unit,file=resolve_path(trim(filename)),access='stream',form='unformatted', &
            status='old',action='read',iostat=ios)
     else
-      open(newunit=unit,file=trim(filename),access='stream',form='unformatted', &
+      open(newunit=unit,file=resolve_path(trim(filename)),access='stream',form='unformatted', &
            status='new',action='write',iostat=ios)
     endif
     if(ios==0)then
