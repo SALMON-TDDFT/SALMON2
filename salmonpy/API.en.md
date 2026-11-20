@@ -182,3 +182,72 @@ physical GS identity or native restore compatibility. See the retained-GS guide.
 returns a JSON-ready input-admission report without starting a solver. Explicit
 trusted resolvers are optional; without one the scope is file integrity only.
 See PREPARATION.en.md for batch-job exit codes and per-rank startup reports.
+
+## Declared native execution contracts
+
+```python
+from salmonpy.api import native_contract
+contract = native_contract('fast_hse', route='shared')
+assert contract['model_settings_owner'] == 'explicit model'
+assert contract['runtime_verified'] is False
+```
+
+`native_contract` describes built-in `tddft`/`fast_hse` routes `legacy`, `shared`,
+`registry`, and `fdtd` route `legacy`. It loads no library, executes no calculation
+and enforces no new restriction. The result distinguishes process-compatibility
+settings from explicit model ownership, caller-owned MPI, sequential main-thread
+operations, entry-point collective ordering, current sign and failure scope.
+Legacy standard-TDDFT C current is matter J=-j; its Python adapter returns charge
+j. Fast-HSE and standard handle C currents are charge j. Follow exact headers for
+query locality; a local diagnostic is not automatically collective.
+
+This is declared documentation, not a live capability check or a stable-C-ABI
+promise: `runtime_verified` is always false. Query actual runtime/checkpoint
+capabilities separately. Unknown/custom component or route names return
+`known=False`, `status='unverified'` and do not block a custom backend; that
+backend owns its contract. Each result is independent and may be annotated by
+the host without changing later reports. Existing calls, numerical state,
+legacy fallback and accepted calculations are unchanged. Stable C/Fortran host
+ABI conformance remains a separate milestone.
+
+### Explicit live protocol probe
+
+```python
+from salmonpy.doctor import probe_native_protocols
+report = probe_native_protocols('audited-build.json', component='tddft', route='shared')
+# Inspect errors, observed protocols and protocol_match; runtime_ready stays unverified.
+```
+
+CLI: `python -m salmonpy.doctor --native-build audited-build.json --component tddft --route shared --json`.
+Unlike `native_contract` and the separate static checker, this explicitly loads
+native code in a child process after checking the recorded library SHA256 (and
+rechecking in the child). A hash proves identity, not trust or build-audit
+compliance. Use only trusted, audited libraries: loading can run constructors.
+The probe calls only known zero-argument version functions; it creates no solver
+state and does not request MPI initialization/attachment, compilation, installation
+or calculation. Unknown/custom routes do not even open the record or load code.
+
+`protocol_match` describes the selected version queries only. Missing/newer
+versions are reported, never converted to automatic backend rejection or feature
+fallback. `runtime_ready` remains `unverified`, and operation signatures, physical
+profiles and checkpoint/topology compatibility are not certified. A child failure
+is reported without taking down the host; `library_loaded=None` means the failed
+child could not report whether loading completed. Keep this opt-in diagnostic
+separate from `check_job`, which never loads the supplied code.
+
+Query-only C and ISO_C_BINDING Fortran hosts are in
+`tests/native/test_native_protocol.c` and the `SALMONPY_ABI_PROTOCOL_PROBE` mode of
+`tests/native/test_io_ownership.f90`. Development runner:
+`tools/test_io_ownership.py BUILD_RECORD NEW_OUTPUT --abi-contract` (add
+`--fast-hse` for a fast-HSE library). It checks runtime SHA, audits every linked
+application object, compares returned versions and verifies MPI stays uninitialized.
+This is version-query interoperability, not full model/state/step ABI conformance;
+the native ABI remains experimental.
+
+### Explicit state-lifecycle host test
+
+`tools/test_io_ownership.py BUILD_RECORD NEW_BUILD_DIR --abi-state --fixture EXISTING_PZ_FIXTURE --state-output NEW_RESULTS_DIR --ranks 2` runs C and ISO_C_BINDING Fortran hosts against an audited standard-TDDFT library. Add `--fast-hse` with a fast-PR-HSE build record and an existing full-k HSE fixture to exercise the same checks. The HSE fixture explicitly sets k-only MPI decomposition for each host run; it does not modify the supplied GS. Add `--state-symmetry` for the reduced-k fixture: it references the supplied `sym.dat`, enables the symmetry-aware HSE initializer and drives z, the direction preserved by this fixture's retained operations. The runner checks that representative k points are actually reported. This is a fixture-specific direction, not a restriction on full-k x/y/z driving. The caller initializes/finalizes MPI. The hosts compare two live states with independent runs, reject a mismatched previous A without changing accepted state, reject stale handles after slot reuse, and confirm a fresh state starts independently. Existing GS files are read in place and checked unchanged; this test neither copies GS data nor writes electronic checkpoints. Select results storage explicitly.
+
+The common directory-scope declarations are in `native_context.h`, included by both handle headers. On macOS, use the existing `tools/build_embedded_tddft.py::mpi_link_command` policy when linking MPI hosts too: private executable copies of OpenMPI Fortran COMMON sentinels can corrupt MPI_IN_PLACE operations across the shared-library boundary. The runner applies this policy and records link commands and executable hashes. Do not infer correctness from a query-only probe.
+
+Verified scope: standard PZ and fast-PR HSE full/reduced-k fixtures, C/Fortran hosts, MPI 1/2 ranks, paired versus independent currents. HSE uses its own documented signatures and rejection status (1 for mismatched previous A, versus 10 in standard TDDFT). The adapters live only in the common host test; they do not change either public ABI or numerical solver. The reduced fixture runs symmetry-aware PT-CN with learned exchange, 8 full k points represented by4 points. Other XC profiles, geometries and platforms require their own tests; the public native ABI remains experimental. These small fixtures check interoperability and state ownership, not converged material properties.

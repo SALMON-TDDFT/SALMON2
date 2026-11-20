@@ -276,7 +276,11 @@ def _waveform_comparison(coarse, fine, atol, rtol):
 
 
 def run_current_grid_scan(plan, evaluate, *, rtol=.05, atol=0., stop_when_converged=True):
-    """Compare grid currents at norm-qualified dt, with5% relative RMS by default.
+    """Screen grid currents at norm-qualified dt; default relative RMS is5%.
+
+    This screening default does not certify dielectric or high-harmonic spectra.
+    Select tighter observable-specific tolerances and verify spectral convergence
+    when the scientific target requires them.
 
     evaluate(trial) returns scf_converged and dt_report from run_dt_scan. Hold
     material, excitation, k sampling and physical duration fixed. Nested endpoint

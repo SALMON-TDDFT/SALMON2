@@ -157,3 +157,58 @@ SCFの閾値未達は `RuntimeWarning` として通知し、有限で読み出�
 `salmonpy.preparation.preflight_inputs(directory, manifest_sha256=None, registry=None)`は、
 計算を開始せずJSON化可能な入力受付レポートを返します。信頼する検証関数の登録は任意で、
 省略時はファイル整合性だけが対象です。ジョブの終了コードとランク別記録はPREPARATION.mdを参照してください。
+
+## native実行経路の契約情報
+
+```python
+from salmonpy.api import native_contract
+contract = native_contract('fast_hse', route='shared')
+assert contract['model_settings_owner'] == 'explicit model'
+assert contract['runtime_verified'] is False
+```
+
+`native_contract`は組み込み`tddft`／`fast_hse`の`legacy`・`shared`・`registry`経路、
+および`fdtd`の`legacy`経路を説明します。ライブラリ読込・計算・新しい制限は行いません。
+プロセス互換設定と明示的モデル所有、MPIの呼出し元所有、メインスレッドの逐次操作、collectiveの順序、電流符号、失敗保証範囲を区別します。
+標準TDDFTのlegacy C入口は物質電流J=-jを返し、Python側は電荷電流jへ変換します。
+高速HSEと標準handleのC入口は電荷電流jです。照会がローカルかcollectiveかは個別ヘッダーに従い、診断を一律collective扱いしません。
+
+これは宣言された仕様の情報で、実ランタイムの能力確認や安定C ABIの宣言ではありません。`runtime_verified`は常にfalseです。
+実際のランタイム・保存再開の対応可否は別途照会します。未知の自作コンポーネントや経路名には`known=False`・`status='unverified'`を返し、
+自作バックエンドを拒否しません。その契約はバックエンド自身が定めます。結果は独立した辞書で、呼出し側で注記しても後の照会に混入しません。
+既存の計算呼出し、数値状態、legacy経路の省略時処理、計算可能な条件は変えません。C／Fortranホストの安定ABI適合検証は別の残課題です。
+
+### 明示指定した実ランタイムの版照会
+
+```python
+from salmonpy.doctor import probe_native_protocols
+report = probe_native_protocols('audited-build.json', component='tddft', route='shared')
+# errors・照会結果・protocol_matchを確認。runtime_readyは未確認のままです。
+```
+
+CLIは`python -m salmonpy.doctor --native-build audited-build.json --component tddft --route shared --json`です。
+`native_contract`や独立静的チェッカーとは異なり、明示指定されたnativeライブラリを、記録のSHA256と照合して別プロセスで読み込みます。
+子側でも読込前にhashを再確認します。hashは同一性であり、信頼性やビルド監査の証明ではありません。
+読込時に初期化コードが動く可能性があるため、信頼する監査済みライブラリだけを対象にしてください。
+既知の引数なし版照会関数だけを呼び、ソルバー状態の作成、MPI初期化・接続、ビルド、インストール、計算は要求しません。
+未知の自作経路は記録ファイルも開かず、コードを読み込みません。
+
+`protocol_match`は選択した版照会だけの一致です。関数の欠如や新しい版は記録するだけで、自動的なバックエンド拒否や別機能への置換はしません。
+`runtime_ready`は未確認のままで、操作関数のシグネチャ、物理的対応範囲、保存形式・MPI分割の互換性の保証ではありません。
+子プロセスの異常は呼出し元を落とさず記録し、`library_loaded=None`は子側が読込完了の有無を報告できなかった意味です。
+渡されたコードを読み込まない`check_job`とは別の、任意の明示的診断として扱います。
+
+CとISO_C_BINDING Fortranの版照会例は`tests/native/test_native_protocol.c`と、
+`tests/native/test_io_ownership.f90`の`SALMONPY_ABI_PROTOCOL_PROBE`モードです。
+開発用の実行入口は`tools/test_io_ownership.py BUILD_RECORD NEW_OUTPUT --abi-contract`で、
+高速HSEの場合は`--fast-hse`を追加します。ランタイムhashと全リンク対象のアプリケーションオブジェクトを監査し、
+返却値の一致とMPIが未初期化のままであることを確認します。これは版照会の相互呼出し検証で、モデル・状態・step全体のABI適合確認ではありません。
+native ABIは引き続き実験段階です。
+
+### 状態の作成・更新・終了を確認するホスト試験
+
+`tools/test_io_ownership.py BUILD_RECORD NEW_BUILD_DIR --abi-state --fixture EXISTING_PZ_FIXTURE --state-output NEW_RESULTS_DIR --ranks 2` は、監査済みの通常TDDFTライブラリをCとISO_C_BINDING Fortranから呼びます。高速PR版HSEのビルド記録と既存の全k点HSE入力には`--fast-hse`を付けて同じ検査を実行できます。HSE試験では各実行のk点並列数だけを設定し、渡されたGSは変更しません。縮約k点入力にはさらに`--state-symmetry`を付けます。渡された`sym.dat`を参照し、対称性対応のHSE初期化を使い、この入力の保持対称操作に合うz方向を駆動します。代表k点が実際に出力されたことも確認します。この試験入力の方向指定であり、全k点でのx・y・z駆動を制限しません。MPIの初期化・終了は呼び出し側が所有します。2状態と個別実行の一致、直前Aが不一致のときの状態保持、スロット再利用後の古いハンドルの拒否、新しい状態の独立した初期化を確認します。既存GSはその場で読み、変更されていないことを確認します。GSのコピーや電子状態チェックポイントの保存はしません。結果の保存先は明示してください。
+
+ディレクトリスコープの共通宣言は、両ハンドルヘッダーから取り込む`native_context.h`にあります。macOSではMPIホストのリンクにも既存の`tools/build_embedded_tddft.py::mpi_link_command`を使ってください。OpenMPIのFortran COMMON特殊値が実行ファイル内に別配置されると、共有ライブラリとの間でMPI_IN_PLACE処理の判定が変わる場合があります。試験ランナーはこの共通処理を使い、リンク引数と実行ファイルのハッシュを記録します。版の問い合わせだけではこの問題は検出できません。
+
+確認範囲は通常PZと高速PR版HSEの全k点／縮約k点入力、C／Fortranホスト、MPI 1／2ランク、複数状態と個別実行の電流一致です。HSE固有の引数と拒否コード（直前Aの不一致はHSEで1、通常TDDFTで10）を共通試験内で扱い、公開ABIや数値ソルバーは変更しません。縮約入力は対称性対応PT-CNと学習型交換を使い、全8点を4代表点で扱います。他XC・形状・他環境の検証は別途必要で、公開native ABIは引き続き実験的です。この小規模入力は接続と状態所有を検査するもので、実材料の収束を保証しません。

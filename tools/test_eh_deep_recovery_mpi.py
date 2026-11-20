@@ -140,18 +140,15 @@ def main():
                     admission_cases.append('coordinates-'+name)
             if '--semantic-admission' in sys.argv:
                 specifications=[
-                    ('propagator', "&propagation\n propagator='unsupported'\n/",1010),
-                    ('source-support', "&functional\n exx_ace_support='source'\n/",1011),
-                    ('finite-range', "&functional\n hse_sr_tolerance=0.1\n/",1012),
                     ('yn-maxwell', "maxwell:yn_wf_em='z'",1013),
-                    ('yn-symmetry', "system:yn_symmetry='nyz'",1013),
-                    ('yn-dc', "&dc\n yn_dc_lcfo_diag='z'\n/",1013)]
+                    ('yn-shape', "maxwell:yn_make_shape='z'",1013)]
                 for name,settings,expected in specifications:
                     if comm.rank==0:
                         text=(self.directory/'inputfile').read_text()
                         if ':' in settings:
                             group,entry=settings.split(':',1)
-                            text=text.replace('&'+group,'&'+group+'\n '+entry,1)
+                            if name=='yn-shape':text=text.replace("yn_make_shape = 'y'","yn_make_shape = 'z'",1)
+                            else:text=text.replace('&'+group,'&'+group+'\n '+entry,1)
                         else:text+='\n'+settings+'\n'
                         (self.directory/'semantic-rejected-input').write_text(text)
                     comm.Barrier()
@@ -161,7 +158,18 @@ def main():
                     admission_cases.append('semantic-'+name)
                 if comm.rank==0:
                     text=(self.directory/'inputfile').read_text()
-                    (self.directory/'inputfile').write_text(text.replace('&maxwell',"&maxwell\n yn_wf_em='N'",1))
+                    if '--inactive-electronic-settings' in sys.argv:
+                        text=text.replace('&system','&system\n nelem=1',1)
+                        text+=("\n&pseudo\n file_pseudo(1)='missing-electronic-only_rps.dat'\n/\n"
+                               "&functional\n hse_mlwf_interval=11, exx_mlwf_interval=12,\n"
+                               " hse_mlwf_maxiter=13, exx_mlwf_maxiter=14,\n"
+                               " hse_mlwf_tolerance=1d-7, exx_mlwf_tolerance=2d-7,\n"
+                               " exx_k_algorithm='user_route', exx_factor_history_frames=0,\n"
+                               " exx_factor_n_teach=0, exx_factor_exact_interval=0\n/\n")
+                    (self.directory/'inputfile').write_text(
+                        text.replace('&maxwell',"&maxwell\n yn_wf_em='N'",1)
+                        +"\n&propagation\n propagator='user_extension'\n/\n"
+                        +"&scf\n method_init_wf='user_initializer'\n/\n")
                 comm.Barrier()
 
 

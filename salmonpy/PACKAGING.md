@@ -181,3 +181,14 @@ its RPATH/install-name changes. Direct source installation therefore does not
 require wheel repair for checksum validity. Portable redistribution still needs
 dependency repair; that step refreshes the checksum and RECORD again.
 The sdist CI checks and installs the unrepaired source-built wheel as well.
+
+## Matching kernels for source tests
+
+The numerical suite needs kernels from this source revision, including the
+convergence ABI. An older installed `.so`/`.dylib` can load LD/SBE successfully
+while lacking `sp_convergence_check`. Build a fresh wheel explicitly and run the
+source test files against it from outside the checkout, as in the installed-wheel
+checks above. Do not add a pure-Python numerical fallback, compile on import or
+silently skip those numerical tests. A missing ABI is an environment/version
+mismatch, not evidence that the convergence algorithm failed. Full fast-HSE
+runtime builds additionally require FFTW; see runtime/README.md in the checkout.

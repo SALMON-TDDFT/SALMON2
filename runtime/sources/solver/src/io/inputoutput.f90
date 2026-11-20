@@ -288,6 +288,7 @@ contains
     type(s_input_parser),intent(inout) :: parser
     integer :: ii
     integer,optional,intent(out) :: status
+    logical :: native_maxwell
     real(8) :: norm
     ! Read-only compatibility aliases; computational modules use EXX names.
     integer :: hse_mlwf_interval,hse_mlwf_maxiter
@@ -862,8 +863,10 @@ contains
     call string_lowercase(theory)
     call string_lowercase(spin)
     call string_lowercase(yn_spinorbit)
-    if(comm_is_root(nproc_id_global)) &
-      call resolve_ky_spin_inputs(file_pseudo,nelem,spin,yn_spinorbit)
+    if(comm_is_root(nproc_id_global))then
+      if(.not.(present(status).and.theory=='maxwell')) &
+        call resolve_ky_spin_inputs(file_pseudo,nelem,spin,yn_spinorbit)
+    endif
     call string_lowercase(xc)
     call string_lowercase(cname)
     call string_lowercase(xname)
@@ -907,6 +910,7 @@ contains
 ! Broad cast
 !! == bcast for &calculation
     call comm_bcast(theory             ,nproc_group_global)
+    native_maxwell=present(status).and.theory=='maxwell'
     call comm_bcast(yn_md              ,nproc_group_global)
     call comm_bcast(yn_opt             ,nproc_group_global)
     call comm_bcast(yn_dc              ,nproc_group_global)
@@ -1003,7 +1007,7 @@ contains
     call comm_bcast(hse_mlwf_interval,nproc_group_global)
     call comm_bcast(exx_mlwf_interval,nproc_group_global)
     if(hse_mlwf_interval/=-huge(1))then
-      if(exx_mlwf_interval/=-huge(1).and.exx_mlwf_interval/=hse_mlwf_interval) &
+      if(exx_mlwf_interval/=-huge(1).and.exx_mlwf_interval/=hse_mlwf_interval.and..not.native_maxwell) &
         error stop 'conflicting EXX/legacy MLWF interval'
       exx_mlwf_interval=hse_mlwf_interval
     endif
@@ -1011,7 +1015,7 @@ contains
     call comm_bcast(hse_mlwf_maxiter,nproc_group_global)
     call comm_bcast(exx_mlwf_maxiter,nproc_group_global)
     if(hse_mlwf_maxiter/=-huge(1))then
-      if(exx_mlwf_maxiter/=-huge(1).and.exx_mlwf_maxiter/=hse_mlwf_maxiter) &
+      if(exx_mlwf_maxiter/=-huge(1).and.exx_mlwf_maxiter/=hse_mlwf_maxiter.and..not.native_maxwell) &
         error stop 'conflicting EXX/legacy MLWF maxiter'
       exx_mlwf_maxiter=hse_mlwf_maxiter
     endif
@@ -1019,7 +1023,7 @@ contains
     call comm_bcast(hse_mlwf_tolerance,nproc_group_global)
     call comm_bcast(exx_mlwf_tolerance,nproc_group_global)
     if(hse_mlwf_tolerance/=-huge(1d0))then
-      if(exx_mlwf_tolerance/=-huge(1d0).and.exx_mlwf_tolerance/=hse_mlwf_tolerance) &
+      if(exx_mlwf_tolerance/=-huge(1d0).and.exx_mlwf_tolerance/=hse_mlwf_tolerance.and..not.native_maxwell) &
         error stop 'conflicting EXX/legacy MLWF tolerance'
       exx_mlwf_tolerance=hse_mlwf_tolerance
     endif
@@ -1521,6 +1525,7 @@ contains
     call comm_bcast(dq_mom, nproc_group_global)
     ! Resolve normalized, broadcast input once; legacy flags are blank only when omitted.
     call string_lowercase(yn_spinorbit)
+    if(.not.native_maxwell)then
     call resolve_k_algorithm(exx_k_algorithm,yn_spinorbit=='y',yn_exx_fft_orbits, &
       yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft,exx_k_algorithm_reason,ii, &
       spinor_pair_supported=xc=='hse06'.and.yn_dc=='n'.and.exx_kpoint_backend=='cpu'.and. &
@@ -1531,6 +1536,7 @@ contains
     if(ii/=0)then
       if(comm_is_root(nproc_id_global))write(*,'(a)')trim(exx_k_algorithm_reason)
       error stop 'Invalid EXX k algorithm selection'
+    endif
     endif
     ! Resolve the omitted pre-SCF input only for supported fresh static GS.
     ! Explicit zero remains the opt-out, and explicit positive inputs retain
@@ -1549,6 +1555,7 @@ contains
         exx_pre_scf_threshold=1d-4
 #endif
     endif
+    if(.not.native_maxwell)then
     ! BEGIN automatic ACE warmup
     ! H factors supply the first increment example at endpoint H; each later endpoint adds one.
     if(exx_factor_history_frames/=3)error stop 'EXX factor history is fixed at 3 frames'
@@ -1561,6 +1568,7 @@ contains
       error stop 'EXX factor warmup exceeds integer range'
     exx_factor_warmup_steps=(exx_factor_history_frames+exx_factor_n_teach-1)*exx_factor_exact_interval
     ! END automatic ACE warmup
+    endif
     if(parser%isolated)then
       call comm_bcast(parser%if_nml_coor,nproc_group_global)
       call comm_bcast(parser%if_nml_red_coor,nproc_group_global)
@@ -3052,7 +3060,13 @@ contains
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf
     logical :: global_symmetry_route,global_native_k_route,native_kspace_scf
 
-    if(present(status))status=0
+    if(present(status))then
+      status=0
+      if(theory=='maxwell')then
+        call check_native_maxwell_flags(status)
+        return
+      endif
+    endif
 
     ! The giant-Gamma source/SR algorithms remain on the development branches.
     ! Reject their inputs before any restart or pseudopotential data is loaded.
@@ -3894,6 +3908,29 @@ contains
     call end_parallel
     stop
   end subroutine stop_by_bad_input2
+
+  ! Native E/H does not use electronic propagators, SCF or LCFO settings.
+  ! Keep its active flag normalization without applying electronic whitelists.
+  subroutine check_native_maxwell_flags(status)
+    implicit none
+    integer,intent(out) :: status
+    integer :: i
+    status=0
+    call yn_argument_check(yn_periodic,status)
+    call yn_argument_check(yn_wf_em,status)
+    call yn_argument_check(yn_make_shape,status)
+    call yn_argument_check(yn_output_shape,status)
+    call yn_argument_check(yn_copy_x,status)
+    call yn_argument_check(yn_copy_y,status)
+    call yn_argument_check(yn_copy_z,status)
+    call yn_argument_check(yn_restart,status)
+    if(obs_num_em>0)then
+      do i=1,obs_num_em
+        call yn_argument_check(yn_obs_plane_em(i),status)
+        call yn_argument_check(yn_obs_plane_integral_em(i),status)
+      enddo
+    endif
+  end subroutine check_native_maxwell_flags
 
   subroutine yn_argument_check(str,status)
     use misc_routines, only: string_lowercase

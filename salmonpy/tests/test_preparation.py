@@ -181,6 +181,8 @@ class StaticJobCheckTests(unittest.TestCase):
             inputs.write_text('{"steps": 3}')
             self.assertEqual(check_job(code, inputs)['status'], 'passed')
             self.assertFalse(sentinel.exists())
+            inputs.write_text('{"backend":"lab.custom","parameters":{"user_knob":17}}')
+            self.assertEqual(check_job(code, inputs)['status'], 'passed')
             code.write_text('return 1\n')
             inputs.write_text('{broken')
             report = check_job(code, inputs)

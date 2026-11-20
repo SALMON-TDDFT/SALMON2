@@ -2,6 +2,7 @@
 #ifndef SALMONPY_STANDARD_TDDFT_HANDLES_H
 #define SALMONPY_STANDARD_TDDFT_HANDLES_H
 #include <stdint.h>
+#include "native_context.h"
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -1,7 +1,8 @@
-"""Read-only setup diagnosis: python -m salmonpy.doctor [--json].
+"""Setup diagnosis; never compiles, installs or starts a solver calculation.
 
-Loads the bundled kernels to check runtime dependencies and symbols, but never
-runs a calculation, compiles code, installs packages or launches an executable.
+Default diagnosis loads bundled kernels and checks an optional executable hash.
+Explicit --native-build probing loads a trusted library in an isolated Python
+child and calls version queries only. Loading native code can run constructors.
 """
 import argparse
 import hashlib
@@ -79,6 +80,83 @@ def diagnose(*, executable=None, sha256=None, lang='ja'):
             'next_steps': next_steps}
 
 
+def probe_native_protocols(build_record, *, component, route):
+    """Explicitly query a trusted audited library in an isolated child process.
+
+    SHA256 verifies identity, not trust or the original build audit. Loading
+    native code can run constructors: never use this on an untrusted library.
+    No solver initialization, MPI attachment, compilation or installation.
+    A version match does not certify operation signatures or physical support.
+    Unknown/custom routes return unverified without opening their build record.
+    """
+    import subprocess
+    from .api import native_contract
+    declaration = native_contract(component, route=route)
+    report = {'schema': 'salmonpy.native-protocol-probe/1', 'component': component,
+              'route': route, 'status': 'unverified', 'library_loaded': False,
+              'binary_identity_verified': False, 'protocol_match': None,
+              'runtime_ready': 'unverified', 'operation_signatures_checked': False,
+              'contract': declaration, 'errors': []}
+    if not declaration['known']:
+        return report
+    prefix = {'tddft': 'sp_tddft_', 'fast_hse': 'sp_fast_hse_', 'fdtd': 'sp_eh_'}[component]
+    if component == 'fdtd':
+        names = ['checkpoint_protocol', 'recovery_protocol']
+    elif route == 'legacy':
+        names = ['error_protocol' if component == 'tddft' else 'recovery_protocol']
+    else:
+        names = ['handle_protocol', 'model_protocol']
+        if route == 'registry': names.append('registry_protocol')
+    symbols = [prefix+name for name in names]
+    phase = 'identity'
+    try:
+        record_path = Path(build_record).expanduser().resolve()
+        record = json.loads(record_path.read_text())
+        expected = record['sha256']
+        if not isinstance(expected, str) or not re.fullmatch('[0-9a-f]{64}', expected):
+            raise ValueError('build record requires lowercase SHA256')
+        library = Path(record['library']).expanduser()
+        if not library.is_absolute(): library = record_path.parent/library
+        library = library.resolve()
+        def digest(path):
+            value = hashlib.sha256()
+            with path.open('rb') as stream:
+                for block in iter(lambda: stream.read(1024*1024), b''): value.update(block)
+            return value.hexdigest()
+        if digest(library) != expected: raise ValueError('native library SHA256 mismatch')
+        report.update(binary_identity_verified=True, library=str(library), sha256=expected)
+        phase = 'child-probe'
+        report['library_loaded'] = None  # Unknown if the child fails before reporting.
+        child = r"""
+import ctypes,hashlib,json,sys
+path,expected,names=sys.argv[1],sys.argv[2],json.loads(sys.argv[3])
+h=hashlib.sha256()
+with open(path,'rb') as f:
+    for block in iter(lambda:f.read(1048576),b''):h.update(block)
+if h.hexdigest()!=expected:raise ValueError('native library changed before loading')
+lib=ctypes.CDLL(path)
+values={}
+for name in names:
+    fn=getattr(lib,name,None)
+    if fn is None:values[name]=None
+    else:
+        fn.argtypes=[];fn.restype=ctypes.c_int
+        values[name]=int(fn())
+print(json.dumps({'library_loaded':True,'protocols':values}))
+"""
+        result = subprocess.run([sys.executable, '-I', '-c', child, str(library), expected,
+                                 json.dumps(symbols)], capture_output=True, text=True, timeout=15)
+        if result.returncode:
+            raise RuntimeError('protocol child failed: '+result.stderr[-2000:])
+        observed = json.loads(result.stdout)
+        report.update(observed)
+        report['protocol_match'] = all(observed['protocols'].get(name) == 1 for name in symbols)
+        report['status'] = 'queried'
+    except Exception as exc:
+        report['errors'].append({'phase': phase, 'type': type(exc).__name__, 'message': str(exc)})
+    return report
+
+
 def main():
     language_parser = argparse.ArgumentParser(add_help=False)
     language_parser.add_argument('--lang', choices=('en','ja'), default='ja')
@@ -89,7 +167,20 @@ def main():
     parser.add_argument('--json', action='store_true', help='Show machine-readable JSON' if english else 'AI向けJSONを表示')
     parser.add_argument('--executable', help='External SALMON path (not executed)' if english else '外部SALMONのパス（起動しません）')
     parser.add_argument('--sha256', help='SHA256 of the audited executable' if english else '監査済み実行ファイルのSHA256')
+    parser.add_argument('--native-build', help='Explicit trusted audited library build record; loads native code in a child')
+    parser.add_argument('--component', help='Built-in tddft, fast_hse, fdtd; custom names remain unverified')
+    parser.add_argument('--route', help='Explicit legacy, shared or registry route')
     args = parser.parse_args()
+    if args.native_build is not None:
+        if args.component is None or args.route is None:
+            parser.error('--native-build requires --component and --route')
+        if args.executable is not None or args.sha256 is not None:
+            parser.error('use either native-build probing or executable diagnosis')
+        print(json.dumps(probe_native_protocols(args.native_build, component=args.component, route=args.route),
+                         ensure_ascii=False, indent=2))
+        return
+    if args.component is not None or args.route is not None:
+        parser.error('--component/--route require --native-build')
     if args.sha256 and not args.executable:
         parser.error('--sha256 requires --executable')
     report = diagnose(executable=args.executable, sha256=args.sha256, lang=args.lang)

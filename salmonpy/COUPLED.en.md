@@ -595,10 +595,28 @@ conversion/order and standalone no-status failure behavior are retained. This
 scope does not cover allocation failure, every semantic check or arbitrary
 native initialization failure. It is independent of the optional static checker.
 
-The native status-returning parser reports existing unsupported-propagator and
-source-support/finite-range EXX rejections as1010–1012, and invalid y/n flags as
-1013. Normal uppercase Y/N normalization remains accepted. These checks reuse
-the existing predicates; they add no supported-profile restriction. Legacy
-callers without status retain their prior fatal behavior. This covers the named
-checks only: later specialized semantic checks and failures inside numerical
-initialization remain separate. No automatic repair or batch-job retry is added.
+Native E/H validates the y/n flags it actually uses (periodicity, restart,
+shape/copy and field-observation/output flags) and returns1013 for invalid flags.
+Uppercase Y/N normalization remains accepted. Electronic propagator, SCF and LCFO
+choice lists are not applied to native Maxwell admission: values for those
+inactive settings must not block an otherwise valid field calculation. This does
+not mean Maxwell executes a named electronic method. Earlier common parsing and
+active E/H numerical initialization still have their own checks; this is not a
+promise to accept arbitrary unknown namelist keys or malformed physical inputs.
+No-status standalone callers retain the existing global checks.
+
+Custom Python/C current backends do not pass through the SALMON input parser and
+are not restricted by its built-in method names. Their explicitly registered
+backend owns parameter semantics; SALMONpy still checks the declared interface,
+units/time contract and returned shapes/finite values at the connection. The
+separate static checker treats unknown backend names/JSON parameters as
+unverified, not unsupported, and never executes the supplied code.
+
+Native E/H also skips electronic-only preprocessing during input reading: KY
+pseudopotential/spin probing, rejection of conflicting EXX/legacy MLWF aliases,
+EXX k-algorithm resolution and ACE warmup validation/arithmetic. Those inactive
+settings and files must not prevent a field-only initialization. Input broadcasts
+and field units/flags remain in place. This is scoped to status-returning
+Maxwell reads; standalone no-status and electronic reads retain the existing
+processing. Unknown namelist keys and malformed values still require appropriate
+parser support; an ignored electronic method is not executed by the field solver.

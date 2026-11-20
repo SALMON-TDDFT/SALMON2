@@ -594,3 +594,9 @@ Noneとして返します。通常版のSCF経路は維持します。高速版�
 既定ビルドはHSE無効、高速HSEは同じソースから明示的に有効化します。
 旧ソースは開発用履歴アーカイブに保存し、wheel/sdistには含めません。
 配置変更で数値kernelは変更せず、高速版固有の初期化設定はモデルごとに保持します。
+
+高速PR版HSEには`fftw3.f03`を備えたFFTW3も必要です。軽量LD/SBE wheel自体の依存追加ではありません。
+明示的なソースビルドは導入済みFFTWを優先します（`--cmake-arg=-DFFTW_INSTALLDIR=YOUR_FFTW_PREFIX`）。
+利用可能なものがない場合は現行HSEビルダーが固定版FFTW3.3.10をダウンロード・構築します。
+オフライン環境では事前に用意し、設定ログの`HSE: using installed FFTW`を確認してください。
+import時の自動構築・ダウンロードは行わず、通常のUSE_HSE=OFFにはこのHSE用FFTWは不要です。

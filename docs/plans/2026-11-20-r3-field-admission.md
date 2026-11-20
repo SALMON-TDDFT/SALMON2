@@ -201,3 +201,41 @@ calc2026/salmonpy-r3-semantic-record-20261120 (cloud sync unconfirmed).
 Named-semantic distribution check: fresh sdist/wheel installed tests641
 (640passed/1skipped). Installed parser/native/Python status mapping and JP/EN/AI
 guides match source exactly. Changes remain uncommitted.
+
+## Backend-scoped validation supersedes blanket electronic checks for native E/H
+
+User-added backends own their parameter semantics; generic checks must not apply
+SALMON's electronic method lists to them. Native status-returning Maxwell parsing
+now uses only active E/H y/n flags at check_bad_input, not propagator/SCF/LCFO
+choice lists. No-status legacy calls retain existing checks. Earlier common
+parsing and actual E/H initialization remain separately scoped, so this is not
+arbitrary unknown-namelist acceptance. Broad common-choice status expansion was
+not retained. Historical build evidence is preserved and is not a new feature.
+
+Confirmed old rejection of an unused user propagator; new1/2-rank tests accept
+user_extension/user_initializer in inactive electronic settings, reject active
+field flags and exactly match R2 A/E/H and `.data` bytes. Static-checker test
+accepts lab.custom/user_knob as unverified without execution. Source and installed
+wheel641 tests (640pass/1skip), native source/object/link audits and installed
+source/JP/EN/AI parity pass. Evidence:
+calc2026/salmonpy-r3-maxwell-scope-record-20261120. No GS collected, no Actions;
+cloud sync unconfirmed. Pushed baseline dc7525b3; this scope correction uncommitted.
+
+## Inactive electronic preprocessing during native E/H input reading
+
+Native status-returning Maxwell input skips KY PP/spin probing, EXX/legacy MLWF
+alias-conflict rejection, EXX route resolution and ACE warmup guards/arithmetic.
+The existing broadcasts and field units/flags remain. Electronic/no-status
+callers retain existing behavior. Missing inactive PP, conflicting aliases,
+user_route, zero history/teacher/interval settings are accepted in native E/H;
+1/2-rank A/E/H and all `.data` bytes equal R2. Earlier source reproduced the
+unnecessary PP open error. The freshly audited standalone executable still
+rejects missing PP, alias conflicts, invalid EXX route and warmup history in
+four separate pre-GS trials; recorded executable SHA checked before each use.
+This does not certify new electronic physics or arbitrary namelist extensions.
+
+Source/installed wheel641 tests (640pass/1skip); native audits and installed
+source/JP/EN/AI parity pass. Records:
+calc2026/salmonpy-r3-electronic-scope-record-20261120 and
+calc2026/salmonpy-electronic-scope-legacy-20261120. No GS collected, no Actions;
+cloud sync unconfirmed, uncommitted.

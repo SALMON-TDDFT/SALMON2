@@ -41,7 +41,7 @@ measured below, together with full/reduced-k orbital/spatial mixed restart and l
 
 ### Remaining groups (not a count of individual implementation patches)
 
-Group5 now has concrete R0–R4 scope in [resource inventory](2026-11-20-group5-resource-inventory.md). R0 scalar IEEE compliance is implemented and GNU-tested (Fujitsu untested). R0–R2 are implemented and verified within documented profiles; remaining group5 milestones are the still-unhandled R3 wider semantic/numerical-init failures (including allocation failures outside the verified coordinate-return path) and R4 native ABI stability. R3 preflight, parsed admission and detected namelist read errors are verified; scheduled-job startup declaration errors now record and exit collectively. Management-node checking remains an optional independent user action. Do not treat every process-scoped selector as a new isolation task.
+Group5 now has concrete R0–R4 scope in [resource inventory](2026-11-20-group5-resource-inventory.md). R0 scalar IEEE compliance is implemented and GNU-tested (Fujitsu untested). R0–R2 are implemented and verified within documented profiles; remaining group5 milestones are the still-unhandled R3 wider semantic/numerical-init failures (including allocation failures outside the verified coordinate-return path) and R4 native ABI stability. R3 preflight, parsed admission and detected namelist read errors are verified; scheduled-job startup declaration errors now record and exit collectively. R4 declared contracts and explicit isolated protocol probes are implemented. C/ISO_C_BINDING Fortran host state lifecycles are verified for standard PZ and fast-PR HSE full/reduced-k on Mac MPI1/2, including independent-state controls and rejected-call state preservation. Stable ABI negotiation, broader profiles/platforms and the remaining host operations are still open; lifecycle success is not blanket ABI certification. Management-node checking remains an optional independent user action. Do not treat every process-scoped selector as a new isolation task.
 
 1. [ ] DEFERRED by user: extend measured-norm diagnostics to fast PR HSE. Isolated E-drive norm
    wiring belongs to paused molecular work and is not the next active priority.
@@ -2778,3 +2778,137 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 - [ ] Remaining R3: later specialized semantic fatal paths, initialization
   allocation/I/O and failures inside numerical setup. This is not arbitrary
   MPI-error recovery or a universal checker for custom combinations.
+
+### 2026-11-20 — scope checks to the active backend (supersedes blanket semantic admission)
+
+- User clarifies that user-added features must not be blocked by built-in method
+  lists. Standalone static checker accepts arbitrary backend names/JSON knobs as
+  unverified; supplied code remains unexecuted. Existing test covers lab.custom.
+- [x] Native E/H no longer applies electronic propagator/SCF/LCFO choice lists.
+  Validate only its used periodic/restart/shape/copy/field-output/observer y/n
+  flags here. Generic parser and actual E/H init checks remain separately scoped.
+  No-status legacy callers retain their existing global checks.
+- [x] Old build rejects an irrelevant user propagator. New1/2-rank native tests
+  accept user_extension/user_initializer in inactive fields; reject bad active
+  field flags; A/E/H and `.data` bytes match R2 exactly. Custom Python/C backends
+  remain outside SALMON parsing and own their parameter semantics.
+- Broader common-choice status expansion was not retained: do not implement
+  blanket rejection of arbitrary extensions or require unused-feature validation.
+- Evidence: calc2026/salmonpy-r3-maxwell-scope-record-20261120. No GS/Actions;
+  cloud sync unconfirmed. Changes after dc7525b3 remain uncommitted.
+
+### 2026-11-20 — native E/H skips inactive electronic preprocessing
+
+- [x] Status-returning Maxwell reading skips KY PP/spin probing, alias conflict
+  rejection, EXX route resolution and ACE warmup validation/arithmetic. Preserve
+  broadcasts and active field flags/units; no-status/electronic behavior unchanged.
+- [x] Native1/2-rank input with missing inactive PP, conflicting aliases, custom
+  EXX route and zero warmup settings initializes; A/E/H and `.data` match R2.
+- [x] Audited standalone executable retains all four old rejection classes before
+  any GS calculation. No GS collected; no Actions run.
+- Does not bypass native field checks or accept unknown namelist grammar. Static
+  checker/custom-backend contracts remain independent and scope-limited.
+
+### 2026-11-20 — external review: Git-only source integrity
+
+- [x] Confirmed25 inventory files absent from Git tracking despite correct local
+  bytes:16 cmakefiles and9 headers/pseudopotentials/sample inputs in this checkout.
+  Root and bundled nested .gitignore both contribute (case-insensitive CMakeFiles,
+  *.dat and version headers). Root negations alone do not override nested rules.
+- [x] Register only exact manifest-listed missing assets with -f; preserve vendored
+  bytes and existing inventory hashes. Existing source inventory test now checks
+  Git tracking when running in a development checkout; source test count unchanged.
+- [x] Red/green source tests8; a Git-index-only clean export prepares/audits/builds
+  USE_HSE=OFF successfully; new2-rank FDTD A/E/H and .data exactly match R2.
+  This clean export excludes the separately pending numerical input changes.
+- [x] Document fast-HSE-only FFTW dependency/download behavior, matching kernel
+  requirement for source tests and screening-only5% current default. No Python
+  numerical fallback or implicit compiler; no new stopping threshold.
+- Legacy model-settings fallback and active HSE selectors remain explicit R4
+  ownership/ABI work, not silently declared reentrant or disabled before migration.
+- No new GS data collected or CI run. Local export/build evidence does not replace
+  a future platform CI campaign; HSE ON not newly built by this review repair.
+
+### 2026-11-20 — R4 declared contract query (first milestone, not stable C ABI)
+
+- [x] `salmonpy.api.native_contract(component, route=...)` describes built-in
+  legacy/shared/registry ownership, MPI/thread/call-order requirements, current
+  sign and failure scope without loading native libraries or executing a solver.
+  Unknown custom routes return unverified rather than block a backend.
+- [x] Public inventory also includes the already shipped preflight_inputs/check_job.
+  Existing public-API tests cover ownership/sign differences, detached report
+  mutation, custom route handling and quiet imports without MPI loading.
+- [ ] R4 remains open: actual runtime negotiation/compatibility and C/Fortran
+  host conformance before declaring a stable ABI. This query is documentation,
+  not proof that a particular binary has a feature; runtime_verified stays false.
+- Existing legacy fallbacks, numerical calls and accepted calculations unchanged.
+  No new full-solver build/GS data collection/CI dispatch required for this metadata step.
+
+- R4 declaration-query verification: source and clean installed-wheel641 tests
+  (640pass/1skip). A subprocess with ctypes.CDLL blocked queried7 built-in routes
+  plus a custom route without loading MPI/optional libraries or executing a
+  calculation. Runtime verification remains false; no custom-route restrictions
+  imposed. Installed API/JP/EN/AI bytes match. Evidence:
+  calc2026/salmonpy-r4-native-contract-20261120 (cloud sync unconfirmed).
+  Stable C ABI remains open; this metadata milestone is uncommitted.
+
+### 2026-11-20 — R4 explicit protocol probe and query-only C/Fortran hosts
+
+- [x] `doctor.probe_native_protocols` verifies a trusted build-record SHA then
+  queries known zero-argument version functions in an isolated Python child.
+  Unknown custom routes never open the record/load code; absent/newer versions
+  are reported without backend rejection/fallback. runtime_ready stays unverified.
+- [x] Actual standard/FDTD/fast-HSE7 routes queried; ordinary library lacking HSE
+  protocols reported correctly. Identity mismatch does not launch the child;
+  simulated child failure reports loading as unknown without killing the host.
+- [x] C/ISO_C_BINDING Fortran hosts query4 versions per ordinary/HSE library;
+  values agree and MPI stays uninitialized. Mandatory source/all-linked-object
+  audits precede helper links. No solver states or GS data are created.
+- [x] Host compile found missing HSE checkpoint/recovery query declarations in
+  the handle header; add declarations only, without changing library functions.
+- [ ] R4 remains open for full model/state/step lifetime conformance and stable
+  ABI negotiation. Protocol-version matching alone is not physics/profile,
+  parameter-signature or checkpoint/topology certification.
+- The explicit probe loads native code and may run loader constructors: trusted,
+  audited libraries only. Static check_job remains strictly separate/nonexecuting.
+
+- R4 probe evidence: source and installed641 tests (640pass/1skip); standard/HSE
+  C/Fortran query-only hosts and installed HSE host runner pass. All return1 and
+  MPI remains uninitialized. Installed CLI/doctor/API/header/C fixture match source.
+  Canonical record: calc2026/salmonpy-r4-runtime-probe-20261120; cloud sync
+  unconfirmed. No solver state, GS data or Actions run. Still uncommitted.
+
+### 2026-11-20 — R4 standard-PZ functional C/Fortran host lifecycle
+
+- [x] C/Fortran MPI1/2 paired-state lifecycle matches independent controls; bad-old-A rejection preserves accepted state, stale generation remains rejected after slot reuse, fresh state reproduces its baseline, caller MPI survives detach.
+- [x] Reuse common Darwin MPI link policy in host runners. Same Fortran object relinked with shared MPI COMMON sentinels fixes the host-only failure; no numerical solver change. Record link commands and SHA256.
+- [x] Common directory-scope C declarations installed through native_context.h. Existing GS read in place and byte-checked unchanged; no GS copy/electronic checkpoint/Actions run.
+- [ ] Full R4 remains open: fast-HSE functional hosts, additional profiles/platforms and stable ABI negotiation.
+- Evidence: calc2026/salmonpy-r4-state-host-confirmed-20261120 (cloud sync unconfirmed).
+
+- Verification: source and sdist-built installed wheel each ran641 tests,640pass/1skip. Installed C/Fortran host lifecycle and independent controls pass at MPI1; source matrix passes MPI1/2. Installed fixture/header discovery and common MPI link helper verified. 日英APIとAI JSON同期検査通過。未コミット。
+
+### 2026-11-20 — R4 fast-PR HSE functional host lifecycle
+
+- [x] Reuse the C/ISO_C_BINDING Fortran lifecycle fixtures for fast-PR HSE via a compile-time profile; no duplicated host programs or numerical solver changes. HSE signatures/status codes remain distinct from ordinary TDDFT.
+- [x] Full-k HSE MPI1/2: paired currents match independent controls and C matches Fortran; sibling states remain unchanged, bad-old-A preserves accepted state, stale handles remain invalid after slot reuse, fresh state matches the original baseline, caller MPI survives detach.
+- Existing GS read in place, byte-checked unchanged; no GS collection or electronic disk checkpoints. Record: calc2026/salmonpy-r4-hse-state-host-20261120 (cloud sync unconfirmed). No Actions dispatch.
+- [ ] Stable ABI remains open: symmetry-reduced HSE functional hosts, more XC/platform profiles and negotiation coverage. This is state-lifecycle interoperability, not physical convergence certification.
+
+- Verification: source and sdist-built installed-wheel suites each641 tests (640pass/1skip). Installed HSE C/Fortran MPI1 lifecycle/independent controls pass; source HSE matrix passes MPI1/2. Common-fixture ordinary PZ MPI1/2 also passes; all8 traces byte-identical to the preceding ordinary-PZ run. JP/EN/AI guide sync and diff checks pass. Changes remain uncommitted.
+
+### 2026-11-20 — R4 symmetry-reduced fast-PR HSE host lifecycle
+
+- [x] Common C/ISO_C_BINDING Fortran host fixtures select symmetry-aware initialization without duplicating programs. Runner --state-symmetry references existing sym.dat and drives the fixture's retained z direction; full-k xyz driving stays unchanged.
+- [x] Symmetry-aware PT-CN/learned exchange,8 full k points reduced to4 representatives: MPI1/2 C/Fortran paired currents match independent controls; bad-old-A preserves state; stale generation rejected; fresh state reproduces baseline; caller MPI survives detach. Runtime logs confirm the orbits algorithm and representative k points.
+- [x] Existing GS, PP and symmetry data read in place and unchanged; no GS collection or electronic checkpoints. Evidence: calc2026/salmonpy-r4-hse-reduced-host-20261120 (cloud sync unconfirmed). No Actions dispatch.
+- [ ] Stable ABI still requires remaining negotiation/profile/platform coverage. This fixture is not physical convergence certification or a general all-direction symmetry guarantee.
+
+- Verification: source and sdist-built installed-wheel suites each641 tests (640pass/1skip). Installed reduced-HSE C/Fortran MPI1/2 all8 lifecycle/control cases pass; logs confirm4 representatives. PZ/full-k HSE MPI1 controls,4 traces each, remain byte-identical to preceding runs. Wheel guides/AI JSON/host fixtures/runner match source bytes; sync/diff checks pass. Changes remain uncommitted.
+
+### 2026-11-20 — commit/push queue reconciliation
+
+- Completed in this commit: native E/H checks only active field settings and skips inactive electronic preprocessing; current-grid5% screening scope/FFTW dependency documentation; declared native contracts, explicit trusted-runtime protocol probes, common directory header, C/Fortran query and functional lifecycle hosts, shared Darwin MPI link policy.
+- R4 measured lifecycle: standard PZ and fast-PR HSE full/reduced-k, Mac MPI1/2, independent controls and rejected-call state preservation. JP/EN/AI guides and packaged host fixtures synchronized. Historical 'uncommitted' notes above describe their recording time and are superseded by this commit.
+- Next active work remains group5: R3 later initialization/allocation failure returns/cleanup, then R4 remaining operation/negotiation and platform coverage. Group3 NLCC runtime certification and legacy unit audit follows. Group1/2 deferred; group4 portable/packed migration and group6 scaling/distribution are separate extensions.
+- Routine Actions remain disabled by commit skip marker; no new GS collection or production-job changes.

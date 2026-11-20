@@ -6,9 +6,10 @@ private names and incidental imports are not public APIs.
 """
 from types import MappingProxyType
 
-__all__ = ['PUBLIC_API']
+__all__ = ['PUBLIC_API', 'native_contract']
 PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spectrum', 'spectrum'),
- 'salmonpy.api': ('PUBLIC_API',),
+ 'salmonpy.api': ('PUBLIC_API', 'native_contract'),
+ 'salmonpy.doctor': ('diagnose', 'probe_native_protocols'),
  'salmonpy.convergence': ('plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan','run_current_grid_scan'),
  'salmonpy.gs_input': ('GSInputMetadata','describe_gs_input'),
  'salmonpy.native_steps': ('native_step_targets',),
@@ -90,7 +91,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
                       'Multiscale1D',
                       'CoupledResponse',
                       'couple'),
- 'salmonpy.preparation': ('prepare_inputs', 'verify_inputs'),
+ 'salmonpy.preparation': ('prepare_inputs', 'verify_inputs', 'preflight_inputs', 'check_job'),
  'salmonpy.outputs': ('CubeGrid',
                       'read_cube',
                       'DecomposedCurrent',
@@ -116,3 +117,45 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
                      'matter_timing',
                      'charge_sign',
                      'check_loop')})
+
+
+def native_contract(component, *, route):
+    """Describe a built-in execution contract without loading a native library.
+
+    Explicit names: tddft/fast_hse with legacy/shared/registry; fdtd with legacy.
+    This is declared documentation, not a runtime capability check or a stable
+    C ABI promise. Unknown/custom components return unverified, never a refusal
+    to execute them. Their backend owns its separate contract.
+    """
+    report = {'schema': 'salmonpy.native-contract/1', 'component': component,
+              'route': route, 'known': False, 'runtime_verified': False,
+              'scope': 'declared interface only; no library loading or execution',
+              'limitations': ['Runtime capabilities and checkpoint compatibility require separate queries.']}
+    definitions = {
+        'tddft': ('standard_tddft_handles.h', 'standard_tddft_models.h'),
+        'fast_hse': ('fast_hse_handles.h',),
+        'fdtd': ()}
+    if (component not in definitions or route not in ('legacy', 'shared', 'registry')
+            or (component == 'fdtd' and route != 'legacy')):
+        report['status'] = 'unverified'
+        report['limitations'].append('Use the custom backend contract; this description imposes no execution restriction.')
+        return report
+    report.update(known=True, status='experimental', abi_stability='experimental',
+                  host_thread='main thread, sequential calls',
+                  host_owns_mpi_initialization_and_finalization=True,
+                  attachment='one native attachment per process; close owned states before detach',
+                  collective_order='collective operations must match on the solver communicator; query locality is entry-point specific',
+                  multiple_live_states=route != 'legacy',
+                  model_settings_owner=('single field lifetime' if component == 'fdtd' else
+                                        'process compatibility settings' if route == 'legacy' else
+                                        'explicit model'),
+                  headers=['salmonpy/native_adapters/'+name for name in definitions[component]],
+                  failure_guarantee='Only declared numerical/transaction failures; not arbitrary STOP, allocation or MPI failure recovery')
+    if component != 'fdtd':
+        report['boundary'] = 'Cartesian A/c and physical charge-current density j, atomic units'
+        report['native_current'] = ('SALMON matter J=-j; Python adapter returns charge j'
+                                    if component == 'tddft' and route == 'legacy' else
+                                    'physical charge-current density j')
+    else:
+        report['boundary'] = 'Native E/H and mapped A/current coupling; follow COUPLED time/normalization contract'
+    return report

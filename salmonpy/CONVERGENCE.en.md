@@ -98,3 +98,8 @@ criterion yields None. Check k-point convergence and production conditions separ
 Use `python -m salmonpy.examples.convergence_plan NEW_JSON` for a self-contained
 offline planning example. Its explicit toy PP radius/hash are placeholders, not
 validated silicon material data; it performs no electronic calculation.
+
+The5% relative-RMS current default is a grid-screening criterion, not a dielectric
+or high-harmonic spectrum accuracy guarantee. Choose stricter `rtol`/`atol` and
+check the target spectrum separately where required; the report records the
+actual tolerances. The default numerical threshold is unchanged.

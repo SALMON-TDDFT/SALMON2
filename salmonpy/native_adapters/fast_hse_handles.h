@@ -2,6 +2,7 @@
 #ifndef SALMONPY_FAST_HSE_HANDLES_V1_H
 #define SALMONPY_FAST_HSE_HANDLES_V1_H
 #include <stdint.h>
+#include "native_context.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,6 +32,10 @@ int sp_fast_hse_legacy_timer_protocol(void);
 int sp_fast_hse_legacy_timers(double seconds[4]);
 int sp_fast_hse_timer_protocol(void);
 int sp_fast_hse_handle_timers(int64_t token,double seconds[4]);
+/* Additive read-only queries; no attachment or MPI initialization is required.
+ * Missing symbols in an older binary mean unverified, not implicit support. */
+int sp_fast_hse_checkpoint_protocol(void);
+int sp_fast_hse_recovery_protocol(void);
 int sp_fast_hse_handle_protocol(void); /* version 1 */
 int sp_fast_hse_handle_init(const char *path, double dt, int capacity,
                           int allow_symmetry, int64_t *handle, double j[3]);

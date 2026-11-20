@@ -648,3 +648,10 @@ Default preparation uses this tree and default builds disable HSE; explicit HSE
 builds use the same inventory. Historical archives are developer-only and are not
 shipped in wheel/sdist. No numerical kernel was changed by this layout migration.
 Fast-specific initialization settings are captured per model.
+
+Fast-PR HSE additionally needs FFTW3 with `fftw3.f03`; this is not a new dependency
+of the lightweight LD/SBE wheel. Explicit source builds prefer an installed FFTW
+(`--cmake-arg=-DFFTW_INSTALLDIR=YOUR_FFTW_PREFIX`). If none is usable, the current
+HSE builder downloads/builds pinned FFTW3.3.10. Offline systems must provision it
+beforehand and confirm `HSE: using installed FFTW` in the configure log. Import
+never performs this build/download. Ordinary USE_HSE=OFF does not need HSE FFTW.

@@ -1,4 +1,50 @@
-#ifdef SALMONPY_FIELD_CLOSE_PROBE
+#ifdef SALMONPY_ABI_PROTOCOL_PROBE
+program test_native_protocol
+ use iso_c_binding
+ use mpi
+ implicit none
+ interface
+#ifdef SALMONPY_ABI_FAST_HSE
+  integer(c_int) function one() bind(C,name="sp_fast_hse_handle_protocol")
+#else
+  integer(c_int) function one() bind(C,name="sp_tddft_handle_protocol")
+#endif
+   import c_int
+  end function
+#ifdef SALMONPY_ABI_FAST_HSE
+  integer(c_int) function two() bind(C,name="sp_fast_hse_model_protocol")
+#else
+  integer(c_int) function two() bind(C,name="sp_tddft_model_protocol")
+#endif
+   import c_int
+  end function
+#ifdef SALMONPY_ABI_FAST_HSE
+  integer(c_int) function three() bind(C,name="sp_fast_hse_registry_protocol")
+#else
+  integer(c_int) function three() bind(C,name="sp_tddft_registry_protocol")
+#endif
+   import c_int
+  end function
+#ifdef SALMONPY_ABI_FAST_HSE
+  integer(c_int) function four() bind(C,name="sp_fast_hse_checkpoint_protocol")
+#else
+  integer(c_int) function four() bind(C,name="sp_eh_checkpoint_protocol")
+#endif
+   import c_int
+  end function
+ end interface
+ integer(c_int)::a,b,c,d
+ integer::ierr
+ logical::initialized
+ call MPI_Initialized(initialized,ierr)
+ if(ierr/=MPI_SUCCESS.or.initialized)stop 41
+ a=one();b=two();c=three();d=four()
+ if(a/=1.or.b/=1.or.c/=1.or.d/=1)stop 42
+ call MPI_Initialized(initialized,ierr)
+ if(ierr/=MPI_SUCCESS.or.initialized)stop 43
+ write(*,'(4(i0,1x))')a,b,c,d
+end program
+#elif defined(SALMONPY_FIELD_CLOSE_PROBE)
 program test_field_close
  use field_close_probe
  implicit none
