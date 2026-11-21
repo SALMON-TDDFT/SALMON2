@@ -197,7 +197,9 @@ class FDTDTests(unittest.TestCase):
         self.assertIsInstance(tensor,LDTensorModelConfig)
         self.assertEqual(tensor.independent_components,1)
         self.assertEqual(tensor.representation,'isotropic_diagonal')
-        with self.assertRaises(AttributeError):tensor.representation='full'
+        # Frozen slotted dataclasses use TypeError on some supported Python versions.
+        with self.assertRaises((AttributeError,TypeError)):tensor.representation='full'
+        self.assertEqual(tensor.representation,'isotropic_diagonal')
         converted=replace(original,materials=(tensor,))
         self.assertEqual(original.input_text(),converted.input_text())
         self.assertEqual(converted.tensor_materials,(tensor,))
