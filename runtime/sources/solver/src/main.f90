@@ -42,8 +42,6 @@
   case('maxwell')                     ; call main_maxwell
   case('sbe', 'maxwell_sbe')          ; call main_ssbe(nproc_group_global)
  !case('maxwell_sbe')                 ; call main_maxwell_sbe
- !case('ttm')                         ; call main_ttm
- !case('maxwell_ttm')                 ; call main_maxwell_ttm
   case default ; stop 'invalid theory @ main'
   end select
 

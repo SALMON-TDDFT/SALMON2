@@ -53,7 +53,7 @@ contains
   end if
 end function check_numcpu
 
-subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info,rspace_allowed)
+subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info,rspace_allowed,status)
   use structures, only: s_parallel_info
   use communication, only: comm_get_groupinfo
   implicit none
@@ -61,6 +61,7 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info,rspace_allowed)
   type(s_parallel_info),intent(out) :: info
   ! rspace_allowed=.false. forbids real-space (domain) parallelization, used for
   ! non-orthogonal lattices. Optional; defaults to .true. (previous behaviour).
+  integer,intent(out),optional      :: status
   logical,intent(in),optional       :: rspace_allowed
   logical :: allow_rspace
   logical :: if_found
@@ -78,6 +79,7 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info,rspace_allowed)
 
   integer :: nk,no
 
+  if(present(status))status=0
   allow_rspace = .true.
   if (present(rspace_allowed)) allow_rspace = rspace_allowed
 
@@ -99,6 +101,9 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info,rspace_allowed)
     ! division of nk / no and the requested distribution axis) before giving up.
     call set_kob_only(iprefer_dist, nproc_size_comm1, nk, no, nproc_k, nproc_ob, if_found)
     if (.not. if_found) then
+      if(present(status))then
+        status=2;return
+      endif
       stop "automatic process distribution: a non-orthogonal lattice cannot use &
            &r-space parallelization, and no nproc_k*nproc_ob split fits the rank &
            &count; set nproc_k and nproc_ob explicitly so their product equals the &
@@ -145,9 +150,13 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info,rspace_allowed)
         ! Non-orthogonal lattice: real-space (domain) parallelization is not
         ! supported. Any processes left after k/orbital distribution cannot be
         ! placed without it, so this is a user configuration error.
-        if(nproc_size_comm1_tmp /= 1) &
+        if(nproc_size_comm1_tmp /= 1)then
+          if(present(status))then
+            status=2;return
+          endif
           stop "automatic process distribution: a non-orthogonal lattice cannot use &
                &r-space parallelization; set nproc_k*nproc_ob = (number of MPI processes)."
+        endif
         nproc_d_o = 1
         cycle
       end if
@@ -176,6 +185,9 @@ subroutine set_numcpu_general(iprefer_dist,numk,numo,icomm1,info,rspace_allowed)
       end do
 
       if(nproc_size_comm1_tmp/=1)then
+        if(present(status))then
+          status=1;return
+        endif
         stop "In automatic process distribution, prime factors for number of processes must be combination of 2, 3 or 5."
       end if
 

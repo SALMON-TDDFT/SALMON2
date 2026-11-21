@@ -200,7 +200,7 @@ cells must be vacuum. LD may occupy other regions.
 - Collectively close response, field, then Python context. Fortran does not finalize
   MPI. Native hangs/failures require launcher timeouts; the sample aborts the job on error.
 - Same-topology protected restart is documented below. Nonzero initial fields,
-  impulse sources, rotations, unequal macro volumes, subcycling and TTM remain unsupported.
+  impulse sources, rotations, unequal macro volumes, subcycling remain unsupported.
 
 `response.json` stores point-ordered A/c, sampled E, previous/new charge currents
 and both clocks. `salmonpy-coupled-field.json` records mapping, MPI decomposition,
@@ -451,7 +451,7 @@ Run `tools/test_fast_hse_deep_recovery_mpi.py BUILD GS NEW_OUTPUT --steps 32 --f
 
 New standard host-MPI libraries declare `sp_eh_recovery_protocol() == 1`. `NativeEHField.advance` selects a checked entry and backs up field/PML, every field-local LD, deposited current and clock in memory. Collective gates check E after update (20), LD after update (21), H after update (22), and sampled fields/integrated A/ordinary observation arithmetic (23). Handled failures restore accepted state directly without propagation replay. A declared known recovery raises `NumericalError`, preserving Python A/E/clock/failed so the caller can correct input and retry. Failed attempts append no ordinary observation records; diagnostic/progress stdout may remain.
 
-The guarded profile is the existing native E/H plane-wave path with local LD. TTM, dedicated linear response, ASE/ART and frequency-resolved observation are rejected before updating. Batch FDTD retains its old path. Old binaries without the checked entry and unknown failures remain conservative. Initialization, allocation, MPI/process termination, external STOP and output-device failure remain excluded. This protects the field group alone; it does not automatically roll back or retry a whole `CoupledStepper` / `ResponseSession` step. Budget for backup/check overhead; memory limits remain advisory.
+The guarded profile is the existing native E/H plane-wave path with local LD. Dedicated linear response, ASE/ART and frequency-resolved observation are rejected before updating. Batch FDTD retains its old path. Old binaries without the checked entry and unknown failures remain conservative. Initialization, allocation, MPI/process termination, external STOP and output-device failure remain excluded. This protects the field group alone; it does not automatically roll back or retry a whole `CoupledStepper` / `ResponseSession` step. Budget for backup/check overhead; memory limits remain advisory.
 
 Run `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` with one/two ranks, OMP/BLAS1 and an external timeout. `--split` uses two independent two-rank groups. `--faults` requires a separate explicit `SALMONPY_RECOVERY_TESTING` build; production exports no injection entry. Overflow stress values are not scientific inputs.
 
@@ -722,3 +722,429 @@ path. Unanimous setup selection, the pre-H vote, recipient-packet validation,
 physical sums and protected capture/rollback decisions remain. Protected retry
 guarantees and ordinary step's nontransactional semantics are unchanged. This
 is not recovery from broken MPI or process loss.
+
+### Retry after an undersized local MPI grid
+
+New native E/H returns status1106 consistently on every field rank when a local
+MPI subdomain violates the common grid initializer's existing stencil-width
+minimum. This converts an existing STOP; it adds no new admissibility criterion,
+partition rule or update change. Every rank already owns the complete domain
+bounds, so rejection requires no extra agreement collective. It returns before
+communication-cache creation and releases the failed state/owned MPI children.
+
+For the local-grid case, unanimous1106 plus `sp_eh_init_recovery_protocol()==1` lets NativeEHField
+close the rejected attachment and release its one-lifetime initialization
+reservation. The caller keeps its MPI communicator and may construct again with
+corrected settings and a new work directory. No such guarantee is inferred for
+old libraries or unknown statuses. Resources/inputs are never adjusted
+automatically: choose a layout/grid compatible with the job's allocation.
+Standalone callers omitting status keep their existing diagnostic/termination.
+
+Local GNU MPI1/2 tests include a domain too small on only the last rank. Two
+low-level and two Python-constructor rejections permit successful initialization,
+32 steps and direct checkpoint/restore. Live children return to0, caller MPI
+survives, and normal A/E/H plus point output match the prior runtime exactly.
+This does not cover all initialization/allocation failures, external STOP, OOM
+or MPI/process failure.
+
+### Recoverable explicit MPI layout/mapping errors
+
+The same cold-initialization cleanup now covers status1105 (the existing Maxwell
+k/orbital-factor requirement or a partition product inconsistent with the attached
+solver group) and1107 (the active communicator mapper reaches its unimplemented
+process_allocation branch). Recognized unanimous1105/1106/1107 and protocol1 let
+the Python adapter detach and release the rejected lifetime reservation. Correct
+the configuration and use a new work directory on the same caller communicator.
+The existing startup status agreement is reused; no new collective is added.
+
+Mapping names are not pre-whitelisted by Python or an outer validator. Returns
+are placed in the mapper's actual error branches, preserving implemented modes,
+Fujitsu mapping selection and caller-added native branches. Status-absent callers
+retain existing diagnostics/termination. Automatic layout factorization failures,
+Fujitsu topology errors, allocation and MPI/process failures remain separate
+uncovered paths; this is not full initialization recovery or new support for an
+unimplemented mapper. No scheduler/resource/input edits are automated.
+
+GNU MPI1/2 regressions combine the existing admissions rather than duplicate the
+suite:27 rejection/retry checks per layout, then normal32-step/direct-resume
+verification with zero live children after cleanup. A/E/H, point output and
+checkpoint bytes match the prior runtime. The existing orbital_sequential mode
+is also explicitly exercised on MPI2; it remains usable.
+
+### Recoverable material-ID CUBE input errors
+
+Native E/H initialization returns1115 for unavailable, malformed, truncated,
+nonfinite or grid-count-mismatched SALMON material-ID CUBE input. Reported tiny
+reader staging-buffer allocation failure returns1116; this allocation path has
+not been fault-injected and does not cover general OOM or solver allocations.
+The reader owns its file unit and checks every value used in integer conversion,
+including the final partial record. Existing streaming order and material-ID
+conversion are preserved; this is not a general electronic-density CUBE reader.
+
+For external shape input only, one field-group initialization agreement precedes
+halo exchange, so a read failure on one rank returns on all ranks. No per-step
+collective or generated-shape collective is added. Known unanimous statuses and
+recovery protocol1 permit cold cleanup and retry with a new work directory on
+the same caller communicator; status-absent standalone behavior is retained.
+
+Local GNU MPI1/2 tests cover retry, caller MPI survival, direct resume and exact
+agreement with prior generated-shape fields, point output and checkpoint bytes.
+A host-owned unit600 survives rejected shape reads. Ordinary point headers,
+point appends, final observation information, plane snapshots/integrals and the
+material-ID CUBE writer now open a local newunit and close only that owned unit.
+Filenames, record formats, ordering and numerical/communication operations are
+unchanged. The generated-shape writer no longer closes the caller's requested
+unit for an unimplemented output format. Existing helper signatures are retained.
+
+GNU MPI1/2 tests keep a host-owned unit600 open throughout initialization,
+32 steps, direct checkpoint restore and finalization. Field arrays, point files,
+checkpoint bytes and generated shapes match prior controls; enabled plane output
+also matches. This is file-unit ownership isolation, not output-error recovery:
+write failures may still use existing Fortran error handling. Linear-response/spectral/ASE/ART units are addressed below; TTM has been removed;
+legacy restart/helper ownership is addressed below. No claim covers arbitrary device failure,
+external STOP, process failure or all initialization allocations.
+
+### Legacy EM restart/helper file-unit ownership
+
+The common_maxwell text/binary restart readers and writers now open their own
+local newunit, including per-rank data and metadata files and the remapping read
+path. txtfile_copy_em independently owns its input and output units instead of
+borrowing700/701. Existing helper signatures retain ifn for source compatibility;
+it no longer selects an actual file unit in these helpers. Paths, formats,
+metadata, array order, copy trimming and communication/reconstruction operations
+are unchanged. No additional startup or per-step collective is introduced.
+
+The existing I/O fixture has an explicit --fdtd-restart-io mode: synthetic EM
+arrays only, no SCF/GS data. GNU MPI1/2 tests preserve host units600/601/700/701
+while exercising text values, real/complex1–5D binary arrays, single/all modes,
+same-layout and cyclically exchanged target-domain reads, inactive payloads and
+text copying. Control/occupied outputs and prior-runtime outputs match byte for
+byte. This tests the helpers and does not certify every complete legacy batch
+restart configuration or arbitrary rank counts. Normal LD+FDTD/direct-resume
+field, point, plane, shape and checkpoint data also match prior controls.
+
+Linear-response/spectral/ASE/ART units are addressed below; TTM has been removed.
+This change isolates file-unit ownership; missing/corrupt restart data, IO device
+failure and general allocation failure retain their existing handling. No general
+IO-error recovery, Fujitsu execution or multi-node certification is claimed.
+
+### Spectral output file-unit ownership
+
+E/H finalization owns local newunit handles for linear-response trajectories and
+spectra, frequency-resolved E/H/J planes, and ASE/ART spectra. The two simultaneous
+windowed/unwindowed ASE/ART files use two local handles, not base-unit arithmetic.
+The periodic linear-response response file is explicitly closed after its last
+record; its earlier implicit close at process termination is no longer needed.
+No module-wide file selector is added. Fourier transforms, normalizations, field
+updates, loop/file ordering, names, record formats and MPI operations are retained.
+
+The existing native I/O tool has --fdtd-spectrum-io, using actual small LD+FDTD
+lifecycles with no electronic GS. GNU MPI1/2 controls cover isolated and periodic
+impulse response, isolated non-unit-background raw response, Fourier planes, and
+separate ASE and ART cases with three frequencies and both window variants. Caller-owned
+units600/601/602 remain connected to their original files. Named spectral outputs
+are closed before return; expected numeric outputs are nonempty and finite.
+Unoccupied, occupied and previous-runtime outputs are compared byte for byte.
+These are output/host-contract regressions in atomic units, not convergence or
+material-property certification. Native E/H's existing supported-mode limits are
+not lifted: the batch host used here enables spectral modes, not the embedded
+step interface. No extra runtime collective, automatic build or startup run is
+introduced. TTM has been removed; general IO-error recovery remains separate.
+
+TTM is excluded from SALMONpy: unpublished implementation, automatic input-file activation, build targets, examples and utilities are removed from the maintained solver. A leftover `ttm.inp_ttm` file does not activate any calculation. Historical provenance records are retained.
+
+### Recoverable automatic MPI factorization failure
+
+Native E/H returns1117 when the existing automatic MPI distributor cannot assign
+its rank count. The current automatic domain routine factors2/3/5; this is a limit
+of that algorithm, not a blanket rank-count restriction. A supported explicit
+spatial partition remains usable (tested with7 ranks). No Python/outer factor
+whitelist is added and the distribution algorithm is unchanged. Correct the
+partition and create a new work directory on the same caller communicator.
+
+The internal Fortran helper has an optional status (0success,1unassigned prime
+factor,2no allowed non-orthogonal k/orbital split). Without status it retains the
+legacy diagnostics/STOP behavior. Matching Fortran modules must be used when
+building callers; this is source compatibility, not stable Fortran binary ABI.
+The C initialization signature and recovery protocol1 are unchanged. Python
+releases a failed lifetime only for a recognized unanimous1117 with protocol1.
+The existing cold cleanup/status agreement is reused; no new collective or
+per-step work is added. This does not handle allocation, Fujitsu topology, MPI
+failure or every specialized initialization stage.
+
+Local GNU tests cover unchanged automatic choices on MPI1/2 and helper failure/
+continuation on1/2/7. Native MPI7 repeats raw/public automatic-failure rejection,
+keeps parent MPI alive, releases owned children and retries explicit decomposition;
+32-step fields, point bytes and direct checkpoint/resume match the prior runtime.
+This is local contract/regression evidence, not multi-node scaling certification.
+
+### Retrying rejected LD tensor/subpixel input
+
+The existing native readers already return1110 for missing/invalid diagonal or
+reciprocal-tensor material sidecars and1113 for a missing/invalid reference
+subpixel profile. For these cold errors the native initializer destroys the
+candidate and releases its child resources. Python now recognizes these two
+unanimous statuses with sp_eh_init_recovery_protocol1, detaches, and releases its
+failed lifetime reservation. Correct/stage the material file and retry in a new
+work directory on the same caller communicator. Error messages identify the
+material input instead of reporting a generic native rejection.
+
+No Fortran routine, input validation, coefficient arithmetic, file format,
+communication or native binary changed in this correction. The existing audited
+runtime is reused by recorded SHA256. Unknown/mixed statuses or an absent/wrong
+recovery protocol do not enable retry. Handled coefficient/Bloch-mode returns are addressed below; arbitrary allocation,
+IO-device, MPI or process failure remain outside the bounded guarantee.
+
+The existing E/H recovery tool accepts --material-input-mode diagonal|tensor|subpixel
+and --material-input-admission. GNU MPI1/2 repeat missing, invalid-header, truncated
+and nonfinite-file rejection twice each through the public Python constructor;
+candidate/attachment resources are released and the parent communicator remains
+usable. Valid material initialization then completes32 steps and direct restore.
+Compare against the pre-change Python package with the same native binary; this
+is an input/lifecycle regression, not a new material-convergence certificate.
+
+### Retrying handled coefficient/special-mode initialization errors
+
+Python also recognizes existing native cold returns1111 (nonfinite diagonal/
+tensor LD update coefficients),1112 (nonzero Bloch phase with the unsupported
+off-diagonal tensor mode), and1114 (invalid subpixel update coefficients).
+Only unanimous codes with initialization recovery protocol1 release the failed
+lifetime. The native initializer already deallocates its candidate, releases its
+send/receive cache before its owned MPI children, and returns; the correction is
+Python's classification and diagnostic text, not a native numerical change.
+
+Correct the input/mode and use a new work directory on the same communicator.
+This does not implement Bloch/off-diagonal tensor evolution, silently set Bloch
+phase to zero, relax finite checks or change coefficient formulas. Files already
+written during rejected initialization remain in the rejected work directory;
+the rejection is not a promise of filesystem rollback. Unknown/mixed statuses,
+missing protocol, trapped floating-point exceptions and allocation/device/MPI/
+process failures remain outside this bounded retry guarantee.
+
+--coefficient-admission in the existing E/H tool uses material-input-mode
+(diagonal,tensor,subpixel) to exercise1111/1112/1114. Finite but oversized test
+rates provoke the existing coefficient guards; a native periodic test input
+provokes the existing unsupported Bloch/tensor return. GNU MPI1/2 repeat each
+failure and then run valid32-step/direct-resume controls. Reader rejections are
+combined in the same fixture. The old SHA256-verified native binary is reused;
+no solver rebuild, extra numerical calculation in Python or new collective.
+
+### Retrying handled early grid/boundary/time errors
+
+Native E/H already returns1101 for inconsistent cell/spacing/grid-count input,
+1102 for incompatible periodic/boundary faces,1103 for an invalid duration/
+step-count/time-step specification, and1104 when dt is not below its existing
+CFL bound. Python now releases the failed initialization reservation for these
+recognized unanimous returns only when initialization recovery protocol1 exists.
+The native cold candidate/owned-child cleanup remains the same. Correct the
+input and retry with a new work directory on the same caller communicator.
+
+No new input restriction, automatic repair, CFL threshold change, native binary
+change or collective is introduced. This aligns Python's error classification
+with existing native behavior. Unknown/mixed statuses, missing protocol and
+other unhandled failures remain conservative. Rejected directories are retained;
+this does not promise rollback of staged or diagnostic files. No automatic job
+resubmission or solver execution is added to preparation/checking workflows.
+
+The existing --grid-init-retry fixture now includes these four public-constructor
+rejections twice each. Combined with --geometry-admission, GNU MPI1/2 complete35
+rejection/retry checks per run, verify parent MPI/child cleanup, then32 steps and
+direct checkpoint restore. Field/point/shape/checkpoint bytes match earlier valid
+controls. This is a local lifecycle regression, not all initialization/IO-error
+recovery or cross-platform/physical-convergence certification.
+
+### Core 3D allocation failure (1118)
+
+Native E/H initialization uses `allocate(...,stat=...)` for the material-ID and
+material scratch arrays and the core split E/H, coefficient and saved-E/H 3D
+arrays. An allocation failure skips the remaining allocations in that phase.
+The owning FDTD group agrees before shape/halo communication or downstream
+coefficient setup and returns1118. Partially allocated arrays, communication
+caches and owned child communicators are released. Python permits constructor
+retry only for unanimous known1118 returns with the initialization recovery
+protocol; unknown failures retain conservative lifetime handling.
+
+Two phase agreements are added during initialization, within the field group.
+There are no extra time-step communications. Memory-budget estimates still warn;
+only an actual allocation failure ends this call.
+
+The separate test build's `--allocation-admission` injects a STAT failure on one
+rank after partial allocation and checks cleanup and retry. Production builds
+contain no injection hook. LD pole, PML, observation and other auxiliary arrays
+remain outside this bounded support. This does not guarantee recovery from OS
+termination, physical memory exhaustion or MPI failure.
+
+### LD state allocation failure (1119)
+
+In addition to the core 3D arrays above, the initial `ld_allocate` now returns
+STAT failures for its24 owned arrays:18 pole-current/history/polarization/
+coefficient4D arrays and6 FDTD-current/old-E3D arrays. The caller owns partially
+allocated state; native initialization cleanup releases it. One owning-field-
+group agreement returns1119 on every rank if any rank failed. Python permits
+retry only after unanimous known1119 and the initialization recovery protocol.
+There are no extra time-step communications; memory-budget excess still warns.
+
+Use `--ld-allocation-admission` only with a separately built testing runtime.
+It fails one rank partway through pole and3D history allocations, then checks
+cleanup and retry. Production includes no injection hook. LD update arithmetic
+and order are unchanged. Material-list/coefficient scratch allocations, tensor
+auxiliary arrays, subpixel-specific reallocation, PML and observation arrays
+remain outside this bounded support, as do OS memory exhaustion/termination and
+MPI failure.
+
+### Material/boundary coefficient allocation failure (1120)
+
+Native initialization detects STAT failures for three material vectors
+(permittivity, permeability, conductivity) and six E/H boundary-coefficient
+vectors. A partial allocation failure skips remaining allocations in that phase.
+The material-vector gate shares the existing LD-state startup agreement.
+This adds one field-group boundary agreement when LD is used (two startup
+agreements without LD), before coefficient communication/vector initialization. Any failed rank returns1120
+through the existing owned cleanup. Python constructor retry requires unanimous
+known1120 and the initialization recovery protocol. No step collective is added;
+memory-budget excess remains advisory.
+
+The large PML3D coefficients are already covered by1118. PML coefficient setup
+uses existing arrays and small automatic workspaces for the existing eight
+layers. Arbitrary automatic/auxiliary allocation or OS memory failure is not
+covered. PML formulas, layer count and update order are unchanged. The explicit
+`--aux-allocation-admission` test build fails one rank after partial material or
+boundary allocation; production contains no fault-injection hook.
+
+### Optional point-observation I/O failures
+
+Fortran checks open/write/close status for headers and time-series appends to
+`obsN_at_point_rt.data`. A failure emits `SALMONPY_POINT_OUTPUT_WARNING` and
+continues field/LD/electronic evolution. Warnings are limited to the first
+failure per state and output-owning rank. Only successfully opened owned units
+are closed; caller units remain untouched. No MPI communication is added.
+
+The next observation retries the append. Once the destination is repaired and
+a file with the required header exists, later rows can be written again. A
+failed header creation requires preparing that header file. Missing or partially
+written rows are not reconstructed or recomputed. Inspect warned output for
+incompleteness/malformed rows before analysis.
+
+This support is limited to point headers and appends. Plane integrals,info files,
+restart data and other outputs are separate paths. It does not guarantee progress
+through a filesystem-wide failure/full disk affecting required outputs. The
+warning state is not part of the physical checkpoint format or numerical state.
+
+### Optional plane-integral I/O failures
+
+Fortran checks open/write/close for `obsN_xy/yz/xz_integral_rt.data` headers and
+appends. Failure emits `SALMONPY_PLANE_INTEGRAL_WARNING` and continues evolution.
+Integration,unit conversion and existing MPI sums are unchanged. A failed write
+never skips subsequent plane or peer-rank reductions. No MPI communication is
+added solely for this I/O handling.
+
+The field state owns the bounded warning flag. Later observations retry after
+the destination/header is repaired;missing/partial rows are not reconstructed.
+Verify completeness before interpreting warned integral/energy-balance data.
+The flag is excluded from the physical checkpoint format/numerical state,and
+caller-owned file units remain untouched.
+
+This support covers only integral headers/time-series appends,not snapshots,
+frequency-resolved maps,info/restart files or all filesystem failures. Existing
+Fortran source calls remain valid;`eh_save_plane_integral` accepts an optional
+trailing warning flag. Without it,errors still warn,but cross-call warning
+suppression is not retained.
+
+### Optional observation-info failure during finalization
+
+Fortran checks open/write/close for the animation/observation helper file
+`obs0_info.data`. Failure emits `SALMONPY_OBSERVATION_INFO_WARNING` and proceeds
+with normal state/MPI cleanup. A failed optional metadata write does not turn
+completed physical evolution into a solver failure. Existing time series and
+checkpoints are not removed;normal formatting remains unchanged. No MPI
+communication or physical recomputation is added.
+
+The info file can be missing/incomplete:check its presence/content before using
+it for visualization or analysis. There is no automatic post-finalization retry.
+This policy is limited to optional observation metadata;it does not silently
+accept a failed required restart save or cover all output/filesystem failures.
+
+### Optional plane-snapshot I/O failures
+
+Fortran checks open/write/close for `obsN_<component>_<plane>_<step>.data`.
+Failure emits `SALMONPY_PLANE_SNAPSHOT_WARNING` and continues other planes,
+components and physical evolution. Existing plane aggregation,unit conversions,
+MPI ordering,workspace release and normal formatting are preserved. Failed
+writes never skip later reductions;no communication is added. The field owns
+the bounded warning flag.
+
+Later observations try their own time-stamped files normally. Missing/partial
+files are not repaired automatically. After destination repair,the user can
+advance from a checkpoint to the same time and write that snapshot again;the
+restore itself adds no replay. Check snapshot availability/completeness before
+visualization or analysis after a warning.
+
+This scope covers time-resolved snapshot I/O,not staging-array allocation,
+frequency-resolved maps,required restarts or filesystem-wide failures. Existing
+Fortran source calls remain valid;`eh_save_plane` accepts an optional trailing
+warning flag.
+
+### Batch frequency-resolved plane-map I/O failures
+
+Fortran checks open/write/close for
+`obsN_eneM_<plane>_with_wf/without_wf.data`. Failure emits
+`SALMONPY_FREQUENCY_MAP_WARNING` and continues remaining windows,planes,energies
+and finalization. Fourier accumulation,unit conversion and MPI aggregation order
+are unchanged;an output error never skips a later aggregation. No communication
+or physical recomputation is added. Only successfully opened owned units are
+closed;warnings are bounded within each finalization.
+
+This support applies to the SALMON batch FDTD path. The current native E/H
+coupling API's unsupported-diagnostic return15 is unchanged. Native protected
+stepping and save/restore with these accumulators are not newly supported.
+Missing/partial maps are not reconstructed or retried after finalization:check
+energy/plane/window coverage before analysis. Accumulator/staging allocation,
+ASE/ART and other output families,required restarts and filesystem-wide failures
+remain outside this bounded support.
+
+### Optional batch LR/ASE/ART spectra
+
+Fortran checks open/write/close for LR trajectories/response tables and ASE/ART
+spectral tables. Failure emits `SALMONPY_OPTIONAL_SPECTRUM_WARNING` and continues
+remaining outputs and cleanup. ASE/ART keep independent units,status and names
+for each window:one failed table never skips another window's integration,MPI
+aggregation or output. Failed LR trajectory I/O does not skip Fourier processing
+or the subsequent response table. Numerical formulas,units and normal formatting
+are unchanged;no MPI communication or physical recomputation is added. Warnings
+are bounded within each finalization.
+
+This is the SALMON batch path;native E/H's unsupported-diagnostic return15 is
+unchanged. Missing/partial spectra are not reconstructed or retried after
+finalization. Check trajectory/energy/window coverage before analysis. This
+optional-output policy does not silently accept failed required restart saves
+or guarantee recovery from allocation/filesystem-wide failures.
+
+### Required native checkpoint-save failures
+
+Unlike optional diagnostics,`sp_eh_checkpoint(...,0)` returns nonzero on save
+failure. It uses `status='new'` without replacing existing files and agrees
+failure within the owning group. Detached payloads leave live field/LD state
+and clocks unchanged. After catching the error,the host can repair the destination
+or select a new one and retry from the same state. Never label a failed required
+save as successful.
+
+The low-level API does not provide atomic multi-file publication. New files
+written by healthy ranks still belong to a failed set and are not an approved
+checkpoint. Preserve committed data and quarantine failed-attempt files. Prefer
+a new empty destination for retry;never delete/replace prior committed data to
+reuse a path. Ranks must supply distinct names,and a higher layer publishes only
+after every save and integrity check succeeds.
+
+Same-configuration/topology normal states are verified with rank-local existing
+file/directory collisions and missing parents,state retention,repaired saves and
+direct restore. This validates existing recovery;no numerical routine or format
+change was needed. Mid-stream full-disk,close-only,process/MPI failures and every
+legacy batch `data_for_restart` writer remain outside the measured scope.
+
+### Legacy batch EM restart-file saves
+
+Legacy `data_for_restart` text/binary writers stage into an exclusively created adjacent `.salmonpy-pending` file rather than truncating the destination. Only successful open/write/close is followed by rename publication. Failed pending files remain as evidence. Before retry, move the affected pending file aside and retain existing good data.
+
+The internal Fortran writers require `io_status`, initialized to zero by the caller at the start of each save phase. The first error is retained and skips subsequent local saves. Each initial-metadata/checkpoint phase makes one failure agreement within its owning MPI group. Required-save failure exits the batch with a nonzero status rather than reporting success. Ordinary non-checkpoint steps gain no agreement. This unpublished API has no omitted-status legacy fallback.
+
+This is per-file staging. Binary payload publication waits until sidecar writing/close succeeds, but there is no atomic transaction across files/ranks or fsync durability guarantee. A failed phase can leave mixed generations; do not restart from that set. Retain a separately completed restart directory. This is distinct from native FDTD protected restoration using independent candidates.

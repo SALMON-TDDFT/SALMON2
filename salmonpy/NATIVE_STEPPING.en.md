@@ -51,7 +51,7 @@ accepted records. Default `step()` retains its previous path and arithmetic.
 
 Only private regular single-link `.data` streams are audited. Different output
 roots/subfolders, auxiliary density/microscopic-current/ELF/electrostatic,
-projection, TTM, ASE/ART, frequency-observation or restart-output profiles are
+projection, ASE/ART, frequency-observation or restart-output profiles are
 rejected before stepping where applicable. Options are not silently disabled.
 File replacement/removal or an unexpected new stream fails closed instead of
 being silently deleted. Do not use concurrent readers/writers or move live

@@ -32,57 +32,137 @@ module lorentz_drude
                            ez_old_ld(:,:,:)                        !
   end type s_ld_state
 contains
-  subroutine ld_allocate(ld,lo,hi)
+  subroutine ld_allocate(ld,lo,hi,status &
+#ifdef SALMONPY_RECOVERY_TESTING
+                         ,failure_slot &
+#endif
+                         )
     type(s_ld_state), intent(inout) :: ld
     integer, intent(in) :: lo(3),hi(3)
-    allocate(ld%rjx_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    integer,optional,intent(out) :: status
+    logical :: failed
+#ifdef SALMONPY_RECOVERY_TESTING
+    integer,optional,intent(in) :: failure_slot
+    integer :: slot
+    slot=0
+#endif
+    failed=.false.
+    if(present(status))status=0
+    call allocate4(ld%rjx_ld)
+    if(failed)return
     ld%rjx_ld=0.0d0
-    allocate(ld%rjx_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%rjx_old_ld)
+    if(failed)return
     ld%rjx_old_ld=0.0d0
-    allocate(ld%rjy_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%rjy_ld)
+    if(failed)return
     ld%rjy_ld=0.0d0
-    allocate(ld%rjy_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%rjy_old_ld)
+    if(failed)return
     ld%rjy_old_ld=0.0d0
-    allocate(ld%rjz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%rjz_ld)
+    if(failed)return
     ld%rjz_ld=0.0d0
-    allocate(ld%rjz_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%rjz_old_ld)
+    if(failed)return
     ld%rjz_old_ld=0.0d0
-    allocate(ld%px_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%px_ld)
+    if(failed)return
     ld%px_ld=0.0d0
-    allocate(ld%py_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%py_ld)
+    if(failed)return
     ld%py_ld=0.0d0
-    allocate(ld%pz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%pz_ld)
+    if(failed)return
     ld%pz_ld=0.0d0
-    allocate(ld%c1_jx_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%c1_jx_ld)
+    if(failed)return
     ld%c1_jx_ld=0.0d0
-    allocate(ld%c2_jx_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%c2_jx_ld)
+    if(failed)return
     ld%c2_jx_ld=0.0d0
-    allocate(ld%c3_jx_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%c3_jx_ld)
+    if(failed)return
     ld%c3_jx_ld=0.0d0
-    allocate(ld%c1_jy_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%c1_jy_ld)
+    if(failed)return
     ld%c1_jy_ld=0.0d0
-    allocate(ld%c2_jy_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%c2_jy_ld)
+    if(failed)return
     ld%c2_jy_ld=0.0d0
-    allocate(ld%c3_jy_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%c3_jy_ld)
+    if(failed)return
     ld%c3_jy_ld=0.0d0
-    allocate(ld%c1_jz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%c1_jz_ld)
+    if(failed)return
     ld%c1_jz_ld=0.0d0
-    allocate(ld%c2_jz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%c2_jz_ld)
+    if(failed)return
     ld%c2_jz_ld=0.0d0
-    allocate(ld%c3_jz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+    call allocate4(ld%c3_jz_ld)
+    if(failed)return
     ld%c3_jz_ld=0.0d0
-    allocate(ld%rjx_fdtd_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+    call allocate3(ld%rjx_fdtd_ld)
+    if(failed)return
     ld%rjx_fdtd_ld=0.0d0
-    allocate(ld%rjy_fdtd_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+    call allocate3(ld%rjy_fdtd_ld)
+    if(failed)return
     ld%rjy_fdtd_ld=0.0d0
-    allocate(ld%rjz_fdtd_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+    call allocate3(ld%rjz_fdtd_ld)
+    if(failed)return
     ld%rjz_fdtd_ld=0.0d0
-    allocate(ld%ex_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+    call allocate3(ld%ex_old_ld)
+    if(failed)return
     ld%ex_old_ld=0.0d0
-    allocate(ld%ey_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+    call allocate3(ld%ey_old_ld)
+    if(failed)return
     ld%ey_old_ld=0.0d0
-    allocate(ld%ez_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+    call allocate3(ld%ez_old_ld)
+    if(failed)return
     ld%ez_old_ld=0.0d0
+  contains
+    ! Keep allocation and zero-initialization order; an optional status gives
+    ! native owners a recoverable local return, without an MPI dependency here.
+    subroutine allocate4(array)
+      real(8),allocatable,intent(out) :: array(:,:,:,:)
+      integer :: ios
+      if(present(status))then
+        ios=0
+#ifdef SALMONPY_RECOVERY_TESTING
+        slot=slot+1
+        if(present(failure_slot))then
+          if(slot==failure_slot)ios=1
+        endif
+#endif
+        if(ios==0)allocate(array(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld),stat=ios)
+        if(ios/=0)then
+          status=1
+          failed=.true.
+        endif
+      else
+        allocate(array(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
+      endif
+    end subroutine allocate4
+    subroutine allocate3(array)
+      real(8),allocatable,intent(out) :: array(:,:,:)
+      integer :: ios
+      if(present(status))then
+        ios=0
+#ifdef SALMONPY_RECOVERY_TESTING
+        slot=slot+1
+        if(present(failure_slot))then
+          if(slot==failure_slot)ios=1
+        endif
+#endif
+        if(ios==0)allocate(array(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=ios)
+        if(ios/=0)then
+          status=1
+          failed=.true.
+        endif
+      else
+        allocate(array(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+      endif
+    end subroutine allocate3
   end subroutine ld_allocate
   subroutine ld_coefficients(media_ld,pole_num_ld,gamma_ld,omega_ld,f_ld,omega_p_ld,dt_em,pi, &
                              tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld,epsilon_infinity)

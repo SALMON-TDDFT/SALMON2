@@ -20,7 +20,7 @@ CONTAINS
 
 !===================================================================================================================================
 
-subroutine init_communicator_dft(comm,info)
+subroutine init_communicator_dft(comm,info,status)
   use salmon_global, only: process_allocation, method_poisson, yn_ffte
 #ifdef USE_FFTW
   use salmon_global, only: yn_fftw
@@ -31,6 +31,7 @@ subroutine init_communicator_dft(comm,info)
   implicit none
   integer             ,intent(in) :: comm
   type(s_parallel_info)           :: info
+  integer,optional,intent(out)    :: status
   !
   integer :: myrank,nproc
   integer :: nproc_k,nproc_ob
@@ -42,6 +43,7 @@ subroutine init_communicator_dft(comm,info)
   integer :: iret
 #endif
 
+  if(present(status))status=0
   call comm_get_groupinfo(comm, myrank, nproc)
 
   nproc_k   = info%npk
@@ -104,11 +106,18 @@ subroutine init_communicator_dft(comm,info)
       end do
       end do
     else
+      if(present(status))then
+        status=1;return
+      endif
       stop 'undefined: process_allocation'
     end if
 
-    if (nl /= info%isize_rko-1) &
+    if (nl /= info%isize_rko-1)then
+      if(present(status))then
+        status=2;return
+      endif
       stop '[FATAL ERROR] init_communicator_dft'
+    endif
 #ifdef __FUJITSU
   end if
 #endif
@@ -296,7 +305,10 @@ subroutine init_communicator_dft(comm,info)
         end do
         end do
       else
-        stop 'undefined: process_allocation'
+        if(present(status))then
+        status=1;return
+      endif
+      stop 'undefined: process_allocation'
       end if
 ! end: definition of iaddress_isolated_ffte
 
@@ -423,7 +435,10 @@ subroutine init_communicator_dft(comm,info)
         end do
         end do
       else
-        stop 'undefined: process_allocation'
+        if(present(status))then
+        status=1;return
+      endif
+      stop 'undefined: process_allocation'
       end if
 ! end: definition of iaddress_isolated_fftw
 

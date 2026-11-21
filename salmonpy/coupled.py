@@ -156,6 +156,7 @@ class NativeEHField:
         self._write_manifest()
         self.native=NativeParallelContext(context,library,sha)
         embedded._used=True
+        retryable_initialization=False
         try:
             code=self._call(lib.sp_eh_init,b'inputfile',len(self.point_ids),np.array(indices,dtype=np.int32,order='C'))
             self.initialized=(code==0)
@@ -165,12 +166,37 @@ class NativeEHField:
                       1004: 'reduced atomic coordinates require a periodic system',
                       1005: 'cannot open atomic coordinate file; check the input path',
                       1006: 'cannot read atomic coordinates; check row count and column format',
+                      1101: 'inconsistent grid specification; set two of al_em, dl_em and num_rgrid_em',
+                      1102: 'incompatible boundary settings; check periodicity and paired faces',
+                      1103: 'inconsistent duration, step count and time step specification',
+                      1104: 'native FDTD time step must be below the existing whole-domain CFL bound',
+                      1110: 'LD diagonal/tensor material sidecar is missing or invalid; check the staged material file',
+                      1111: 'LD diagonal/tensor update coefficients are nonfinite; inspect material scales and dt',
+                      1112: 'off-diagonal tensor FDTD does not implement nonzero Bloch phase',
+                      1114: 'subpixel update coefficients are invalid; inspect profile rates and dt',
+                      1113: 'reference-frequency subpixel material profile is missing or invalid',
+                      1120: 'native material/boundary coefficient allocation failed; release memory or reduce per-rank grid and retry',
+                      1119: 'native LD state array allocation failed; reduce per-rank grid or pole count, or release memory and retry',
+                      1118: 'native FDTD core array allocation failed; reduce per-rank grid or release memory and retry',
+                      1117: 'automatic MPI partition is unavailable for this rank count; supply an explicit spatial grid',
+                      1115: 'cannot read the material-ID cube; check file availability, format, grid counts and values',
+                      1116: 'material-ID reader staging allocation failed',
+                      1105: 'Maxwell MPI partition must match attached ranks and use k/orbital factors of one',
+                      1107: 'MPI mapper does not implement this process_allocation',
+                      1106: 'local MPI grid is below the existing stencil support; adjust the spatial decomposition or grid size',
                       1010: 'unsupported propagator',
                       1011: 'source-support ACE is deferred',
                       1012: 'hse_sr_tolerance must be zero in the supported profile',
                       1013: "a yn_* option only accepts y or n (case-insensitive)"}.get(
                           code, 'native field initialization rejected')
-            _agree(comm,f'{reason} (native status {code})' if code else None)
+            init_codes=comm.allgather(int(code))
+            if any(init_codes):
+                retryable_initialization=embedded._admission_rejected(self.lib,
+                    [(value,True) for value in init_codes],
+                    allowed=(1101,1102,1103,1104,1105,1106,1107,
+                             1110,1111,1112,1113,1114,1115,1116,1117,1118,1119,1120),
+                    query_name='sp_eh_init_recovery_protocol')
+                raise InputError(f'{reason} (native statuses {init_codes})')
             query=getattr(lib,'sp_eh_current_mask',None)
             if query is not None and getattr(lib,'sp_eh_step_owned',None) is not None:
                 query.argtypes=[c.c_int,np.ctypeslib.ndpointer(dtype=np.int32,ndim=1,flags='C_CONTIGUOUS')]
@@ -185,7 +211,9 @@ class NativeEHField:
 
         except BaseException:
             self.failed=True
-            self.close();raise
+            self.close()
+            if retryable_initialization:embedded._used=False
+            raise
 
     @property
     def timing(self):

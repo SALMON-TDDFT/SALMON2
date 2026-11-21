@@ -2,7 +2,7 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## Current actionable queue — 2026-11-21 (resource inventory and operational follow-ups)
+## Current actionable queue — 2026-11-22 (resource inventory and operational follow-ups)
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
@@ -35,8 +35,156 @@ results/residual diagnostics and pauses the downstream workflow for user review
   subpixel modules completed below; historical pending optical checkboxes are superseded.
 - [x] Operational FDTD input-only staging and site launcher argv verified below.
 - [x] Fresh DFT and explicit native RT input-only staging verified below.
+- [x] Recent FDTD cold-init recovery is verified within recorded scopes:
+  early grid/boundary/time1101–1104, explicit MPI/grid/mapping1105/1106/1107, automatic factorization1117,
+  material-ID CUBE1115/1116, LD/subpixel file1110/1113 and coefficient/special-mode
+  returns1111/1112/1114. Source/installed GNU MPI1/2 controls match prior fields,
+  point/material/shape data and direct checkpoints. Automatic-factorization
+  failure→explicit retry is additionally measured on local MPI7.
+  Tiny reader staging-allocation1116 has not been fault-injected; this is not
+  blanket allocation/OOM/process-failure recovery. Bloch/tensor evolution remains
+  unsupported; safe rejection/retry does not implement that mode.
+- [x] Owned file units for ordinary point/plane/shape, common EM restart/copy,
+  LR/Fourier-plane and ASE/ART output. Caller units600/601/602/700/701 are checked
+  in the relevant separate fixtures. Six spectral cases × GNU MPI1/2 compare
+  occupied/unoccupied/prior-runtime outputs exactly; periodic LR output now closes.
+- [x] TTM cancelled/removed by the project lead: implementation, automatic
+  activation, build references, examples, tests and utility removed. Obsolete
+  input is inert. Current sdist/wheel exclude TTM and historical source archives;
+  frozen original records/archives remain local evidence, not supported engines.
+- [x] Native core3D allocation STAT failures return1118 after field-group
+  phase agreement; partially allocated material/core E/H arrays and MPI caches/
+  child communicators are released. Source/installed GNU MPI1/2 tests inject
+  partial material and field failures, retry twice each and directly resume.
+  Normal production/test/wheel fields, observations, shape and checkpoint bytes
+  match the previous control. External-CUBE MPI2 controls also match. Production
+  has no injection hook. Two startup field-group agreements, no extra step
+  collectives; memory-budget excess still warns. LD-pole/PML/other auxiliary
+  allocation, physical OOM/process/MPI failures remain outside this bounded scope.
+- [x] Initial LD-state allocation1119:24 owned pole/current/polarization/
+  coefficient/history arrays return STAT failure. Source/installed GNU MPI1/2
+  scalar/off-diagonal-tensor tests fail after partial4D and3D allocation,
+  release resources and retry twice each; combined core/LD fixtures also
+  retain1118 behavior.32-step normal/direct-resume results match prior controls
+  byte-for-byte. Shared native/solver kernels remain identical; production has
+  no injection hook. One LD startup field-group agreement,zero new step
+  collectives. Material/coefficient scratch,tensor auxiliary,subpixel-specific
+  reallocation,PML/observation allocation and OS/MPI failures remain excluded.
+- [x] Material/boundary vector allocation1120:three material and six E/H
+  boundary coefficient vectors return STAT failure before coefficient use or
+  communication. Partial-state cleanup and protocol-gated Python retry verified
+  in source/installed GNU MPI1/2 scalar/off-diagonal-tensor fixtures. The material
+  gate now shares the existing LD-state agreement (retaining1119);only one new
+  startup field-group agreement with LD,zero new step collectives. Combined
+  core1118/LD1119/aux1120 regressions and direct continuation match prior bytes.
+  PML bulk3D coefficients were already covered by1118;small automatic PML
+  workspaces are not a separate bulk-allocation implementation gap.
+- [x] Optional point-output I/O:Fortran header/append open/write/close status
+  checks warn and continue physical evolution. Only owned successfully opened
+  units are closed;warning is bounded per state/output-owner rank. No new MPI
+  communication. Real directory/read-only-file failures and destination repair
+  measured on source/installed GNU MPI1/2;later rows resume,missing rows remain
+  explicitly incomplete. Fields,shape/info and physical checkpoints match normal
+  controls;normal scalar/tensor output bytes remain unchanged. Caller file unit
+  lifetime is verified through initialization,steps,direct restore and finalize.
+  Other outputs and filesystem-wide failures remain separate scoped work.
+- [x] Optional plane-integral output:Fortran header/append open/write/close
+  status checks warn and continue without skipping any existing plane/MPI sums.
+  Owned warning state,no extra collective,caller file units retained. Source/
+  installed GNU MPI1/2 real directory/read-only faults and repairs preserve
+  fields/checkpoints;unaffected yz/xz planes and point files remain complete.
+  Normal scalar/tensor integral bytes match prior controls. Missing/partial rows
+  are reported as incomplete,not replayed. Other output families remain scoped work.
+- [x] Optional final observation-info output:obs0_info.data open/write/close
+  errors warn and proceed through normal state/MPI cleanup. Completed physics
+  is kept separate from missing animation metadata;no data deletion or extra
+  collective/recomputation. Source/installed GNU MPI1/2 real directory/read-only
+  faults preserve time series,integrals and checkpoints;caller files survive.
+  Normal scalar/tensor metadata and other output bytes match prior controls.
+  Required restart errors and other output families retain separate policies.
+- [x] Optional plane-snapshot I/O:open/write/close failures warn and retain
+  every existing plane/component aggregation and workspace release. State-owned
+  warning flag,no extra MPI collective. Source/installed GNU MPI1/2 directory/
+  read-only faults continue physical evolution;repair plus explicit continuation
+  after direct restore writes the affected frame. Normal scalar/tensor output
+  bytes and physical checkpoints match prior controls;caller files survive.
+  Snapshot staging allocation and frequency-resolved maps remain separate scopes.
+- [x] Batch frequency-resolved plane-map I/O:header/row/close failures warn
+  and continue remaining windows,planes,energies and cleanup. Fourier sums and
+  MPI order unchanged,no new collective. Source/installed GNU MPI1/2 compare
+  two energies×three planes×two windows exactly to prior controls. Eight real
+  directory/read-only fault cases preserve other11 maps/time series and caller
+  units600/601/602;map units are checked closed. Native coupled unsupported
+  return15 remains unchanged;native spectral transactions/restart are not claimed.
+- [x] Batch LR/ASE/ART optional spectra:Fortran open/write/close errors warn
+  and retain Fourier processing,per-window integrals/MPI sums and cleanup.
+  Separate window units/status/names;no extra collective or global selector.
+  Source/installed GNU MPI1/2 isolated/periodic/non-unit-background LR,ASE,ART:
+  20 normal-configuration comparisons match prior bytes;40 directory/read-only
+  faults preserve all other outputs and caller units600/601/602. Spectral units
+  are checked closed. Native unsupported return15 and required-save policy unchanged.
+- [x] Existing native required-checkpoint save contract verified without numerical
+  changes: source/installed scalar/tensor GNU MPI1/2, rank-local existing-file,
+  directory and missing-parent failures return group errors and preserve live
+  field/LD bytes, clocks and observations. Existing target retained; failed partial
+  sets quarantined as evidence, never published as archives. Repair/retry and
+  isolated direct restore require zero evolution. 72 state comparisons and72
+  normal-control file comparisons match exactly. No multi-file atomic-save claim;
+  disk-full/close-only faults and legacy batch restart writers remain separate.
+  Record: calc2026/salmonpy-fdtd-required-save-verification-20261122/summary.json.
+- [x] Legacy batch required EM writers: exclusive sibling staging and checked
+  open/write/close/rename; explicit required sticky io_status, no unpublished-API
+  compatibility fallback. One owning-group failure agreement per metadata/state
+  save phase, none on ordinary steps; batch fails nonzero rather than claiming
+  saved data. Original overwrite-before-sidecar-failure reproduced, then fixed.
+  Source/installed GNU MPI1/2 helper failures repair/retry;106 normal payload files
+  per distribution match old bytes. Caller units600/601/700/701 and remap reads
+  remain intact. Real LD+FDTD batch metadata/payload failures terminate without
+  hangs,normal outputs match old controls. Four native scalar/tensor source/wheel
+  MPI2 regressions preserve prior field/checkpoint bytes and direct restoration.
+  Per-file publication only: failed sets can mix generations; preserve a separate
+  completed directory. Legacy readers/directory setup, disk-full/close-only faults,
+  fsync and atomic multi-file publication are not claimed.
+  Record: calc2026/salmonpy-legacy-em-save-recovery-20261122/summary.json.
+- [x] Latest source/installed suites:679 executed,one optional skip,no failures.
+  Paired current manuals and AI JSON synchronized. These latest local records
+  do not supersede older MPI4/6, multi-platform or physical-convergence evidence.
+- [x] Integration checkpoint: verified grid/layout/input/output/TTM and required
+  save changes consolidated for the requested2026-11-22 commit/push. Required
+  source-integrity CI remains enabled; no optional heavy workflow is dispatched.
 - [ ] Remaining operational scope: initial-guess staging, site runtime/layout validation and multi-node evidence.
   Group5 R3/R4 and group3 remain open; groups1/2 stay deferred.
+
+### Next work after this reconciliation
+
+1. **Group5 R3:** bounded remaining initialization/IO work, not a conversion
+   of every standalone STOP in every legacy mode. Early1101–1104 native/Python
+   retry classification is now reconciled and tested below; other unhandled
+   startup returns must be evaluated against the supported profile, not assumed safe.
+   Core material/field3D allocation1118 and initial owned LD-state allocation1119
+   and material/boundary vectors1120 are now covered below. Remaining separate
+   work is selected restart-reader/directory setup and initialization/helper I/O (native saves and legacy batch writers verified above) and selected auxiliary allocations (LD scratch,
+   tensor/subpixel/observation and snapshot staging buffers) in
+   supported paths; owned file numbers alone do not establish IO-error recovery.
+   Do not add restrictions on valid/custom inputs or promise recovery from
+   arbitrary STOP, OS OOM, trapped FP, broken MPI or process termination.
+2. **Group5 R4:** stable native ABI/version negotiation and remaining host
+   operations/profile/platform conformance. Existing C/Fortran lifecycle tests
+   are completed evidence, not a blanket stable ABI declaration.
+3. **Then group3:** maintained-runtime NLCC force capability certification and
+   legacy SALMON eV/Hartree versus Python CODATA audit; preserve existing results
+   until any numerical change is explicitly justified. New GS campaigns need
+   their applicable authorization.
+
+Separate operational/extensions queue: generalized initial-guess staging;
+site-MPI/multi-node/receipt-filesystem evidence; scale and observation-IO cost;
+Ag fit refinement; optional packed/tiled/sparse/cross-platform migrations and GPU
+prerequisites. Preparation-only DFT/TDDFT/FDTD and customizable launcher argument
+construction already exist; remaining site evidence must not be reported as
+missing implementations. Ag is still a non-default fit requiring refinement.
+Groups1/2 and molecular work remain deferred. TTM is deleted, not deferred.
+Historical unchecked entries below are scope-at-the-time notes, not additional
+independent tasks or a mandate to generalize every possible configuration.
 
 ### User-directed execution order (2026-11-19)
 
@@ -3196,3 +3344,375 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
 - [x] Pending step/restore candidates cannot sample or publish. Optional no-overwrite archives warn on failure; existing observations and native state stay usable. Mixed sample opts in with --planes-x/--plane-stride and saves one final archive.
 - [x] LD serial/MPI2 monitor off/on, protected rollback/retry and direct restore preserve traces and point-output bytes; prior batch E/H and flux agree (max field difference below8e-19). Active checkpoint payloads agree. Source/installed679 tests, one optional skip; installed native MPI2 matches source.
 - [x] Unused fe%coo padding now zero-initialized before unchanged coordinate arithmetic. Old NaN/Inf poison test fails, repaired GNU probe passes periodic/odd/even cases. Serial/MPI2 currents, E/H and point bytes match prior runtime; full checkpoint bytes now match after protected/direct restore on every rank. Historical validation records retain the earlier padding difference. Source/wheel679 tests, one skip; installed SDK probe and native MPI2 full-byte comparisons pass. Existing CI gains only a small synthetic check, with no manual dispatch. Batch restart launching remains explicit native/site input.
+
+
+### 2026-11-21 R3 local MPI grid initialization return
+
+- [x] Commit9eb6f2d6 records plane restart/committed embedded observations and deterministic coordinate padding; no push requested/performed here.
+- [x] Optional status in init_grid_parallel recognizes the same existing minimum across its already replicated domain table; no extra collective/new restriction. Native E/H propagates1106 before cache creation; standalone status-absent behavior unchanged.
+- [x] Explicit sp_eh_init_recovery_protocol1 + unanimous1106 lets Python release the failed native lifetime reservation after detach. Corrected constructor/new work directory retries on the same caller communicator.
+- [x] Old validated binary reproduces process STOP (exit0 with no validation record). New GNU MPI1/2 tests repeat low-level and public rejections twice, including last-rank-only short domain, release all children, retain parent MPI, then complete32 steps/direct resume. Old normal A/E/H arrays and point files match exactly.
+- [ ] Other MPI mapping/setup, allocation, specialized initialization and R4 ABI stability remain open; no arbitrary STOP/OOM/process/MPI recovery claim. Groups1/2 and molecular work remain deferred.
+- [x] Source/installed-wheel679 tests, one optional skip; installed SDK MPI2 repeats public/raw initialization retries and direct resume, matching source arrays/output. Normal midpoint checkpoint bytes also match old controls on every rank. JP/EN/AI synced.
+- Records:calc2026/salmonpy-fdtd-grid-init-recovery-20261121; no GS collection or manual Actions dispatch.
+
+
+### 2026-11-21 R3 explicit MPI layout/mapping returns
+
+- [x] Old validated runtime reproduces host termination for explicit unsupported Maxwell MPI factors, with exit0 and no completed validation record.
+- [x] Optional status in init_communicator_dft returns from actual unimplemented mapping/count branches; preserve status-absent legacy behavior and Fujitsu/custom branch selection. No outer mapping whitelist added.
+- [x] Native E/H forwards1105/1107 through the existing cold cleanup/protocol, alongside1106. Python releases failed attachment/reservation only for unanimous known statuses/protocol1. No new collective or valid-input restriction.
+- [x] Existing E/H regression tool consolidates27 admission/retry checks per GNU MPI1/2 layout, child/caller lifetime, normal32-step/direct-resume comparisons; old A/E/H, point bytes and checkpoints exactly match. Existing alternate orbital mapping remains usable on MPI2.
+- [ ] Automatic layout factorization, Fujitsu topology, later allocation/IO/specialized initialization and R4 stable ABI are still open. Groups1/2, molecular work and group3 physical certification are not implicitly resumed.
+- [x] Source/installed-wheel679 tests, one optional skip. Installed SDK MPI2 repeats27 checks and direct resume; fields, point bytes and checkpoints match source/old controls. Paired manuals/AI JSON synchronized.
+- Records:calc2026/salmonpy-fdtd-mpi-layout-recovery-20261121; no GS collection or manual Actions dispatch.
+
+### 2026-11-21 R3 material-ID shape input recovery
+
+- [x] Native owned-unit streaming CUBE reader returns1115 for supported IO/data/grid failures,1116 for reported tiny staging allocation failure. Preserve conversion and standalone path; scalar finite checks include partial records.
+- [x] External-input initialization only: one field-group agreement before halo exchange; partial-rank read failure returns collectively. Known cold failures release cache/children/reservation for retry.
+- [x] GNU MPI1/2 retries/direct resume match prior generated-shape field, point and checkpoint bytes. Host unit600 remains owned through rejected input attempts.
+- [x] Ordinary point/plane observation and generated-shape output unit ownership addressed below. General OOM, device/MPI/process failure and specialized initialization remain open.
+- Records:calc2026/salmonpy-fdtd-shape-input-recovery-20261121. No GS collection or manual CI dispatch.
+- [x] Source and isolated sdist→wheel suites679 tests, one optional skip. Installed SDK MPI2 repeats the full shape-input rejection/retry test and exact source field/point/checkpoint bytes. JP/EN/AI synchronized.
+
+### 2026-11-21 ordinary E/H observation file-unit ownership
+
+- [x] Reproduce host-owned unit600 closed by the prior validated runtime after normal32-step/direct-resume execution; preserve failed-run evidence.
+- [x] Local newunit ownership for point/plane headers, point append, final observation information, plane snapshots/integrals and material-ID CUBE writer. Preserve helper signatures, filenames, formats, loop order and communications. Unimplemented shape-output formats no longer close a caller-owned unit.
+- [x] Audited maintained source and all application objects; Git-only inventory export prepared and built in a new external directory. Preserve old runtime and records.
+- [x] Legacy restart/helper units isolated below; linear-response/spectral/ASE/ART and TTM file units remain to audit/isolate. No claim of general output IO-error/OOM recovery; Fujitsu execution is not available here.
+- Records:calc2026/salmonpy-fdtd-output-unit-20261121. No GS collection, push or manual CI dispatch.
+- [x] GNU MPI1/2 preserve caller unit600 throughout normal initialization,32 steps,direct restore/finalize. Prior fields/checkpoint/shape bytes and point/plane outputs match exactly (77 data files with planes enabled). Source/isolated-wheel679 tests,one skip; installed SDK MPI2 matches source. JP/EN/AI synchronized.
+
+### 2026-11-21 common Maxwell restart/helper file-unit ownership
+
+- [x] Prior audited runtime passes unoccupied synthetic control but closes a host-owned unit in the occupied variant (STOP81). Preserve failed run.
+- [x] Use owned newunit for text/binary single/all restart data and metadata and remapping reads; copy helper owns its two units. Keep signatures/paths/bytes/array order/communication; no new collective.
+- [x] Existing native I/O fixture consolidates real/complex1–5D, text, same-layout/cyclic target-domain remapping, inactive payload and copy checks. GNU MPI1/2 preserve units600/601/700/701; control/occupied and prior-runtime bytes identical.
+- [x] New Git-only export prepared/built with source and application-object prohibition audits. Normal LD+FDTD/direct-resume MPI2 is unchanged; no GS collection.
+- [x] Linear-response/spectral/ASE/ART file units isolated below; TTM remains open. No general IO-error recovery, full legacy batch restart matrix or Fujitsu/multi-node execution claim.
+- Records:calc2026/salmonpy-fdtd-restart-io-20261121. No commit/push or manual CI dispatch requested/performed.
+- [x] Source/final installed-wheel679 tests,one optional skip. Installed SDK synthetic MPI1/2 helper tests and normal native MPI2/direct resume match source and old controls exactly. Fixed fixture-only writer/read phase synchronization; no solver collective added. Initial failed fixture/launcher evidence retained. JP/EN/AI synchronized.
+
+### 2026-11-21 spectral output file-unit ownership
+
+- [x] Prior validated runtime completes small LD+FDTD without host files but loses occupied unit600 at spectral finalization (STOP81); evidence retained.
+- [x] Local owned newunit for LR trajectories/spectra and Fourier planes; two local handles for simultaneous ASE/ART window variants. Explicit close for periodic LR response file; no new global selector or communication.
+- [x] Updated maintained inventory/profiles and audited Git-only source export plus all application objects before linking new library.
+- [x] Source and installed SDK:6 cases × GNU MPI1/2, occupied600/601/602, named spectral files closed, expected outputs finite/nonempty; all control/occupied/prior-runtime and source/wheel output bytes match. Normal MPI2/direct-resume fields, point/plane/shape/checkpoint bytes also match prior runtime.
+- [x] TTM ownership work cancelled by removal below. General IO-error recovery remains part of R3; no full material/convergence, multi-node or Fujitsu certification. Embedded spectral-mode restrictions unchanged.
+- Records:calc2026/salmonpy-fdtd-spectrum-io-20261121. No GS collection, commit/push or manual CI dispatch.
+- [x] Source/installed679 tests,one optional skip; JP/EN/AI JSON synchronized. Test-input construction failures retained and corrected without solver restrictions or new communication. TTM was queued at that checkpoint, then cancelled by removal below.
+
+### 2026-11-21 TTM removal by project lead
+
+- [x] Supersedes earlier pending TTM ownership work: remove unpublished TTM from maintained solver, build paths, examples, test suite and utility. Remove automatic activation and native dependency. Preserve frozen historical evidence.
+- [x] Git-only clean build and source/object audits; old TTM input inert;6 spectral cases × MPI1/2 preserve caller files and previous outputs. Final installed SDK normal MPI2/direct-resume fields,point/plane/shape/checkpoint bytes match. Source/wheel679 tests,one skip. sdist/wheel exclude TTM implementation and archived source payloads; original local archives preserved. No GS collection or manual CI dispatch.
+- [x] Corrected sdist force-include overriding archive exclusion; restrict runtime includes to maintained sources/manifests/docs. Current JP/EN/AI manuals and constraints synchronized. Earlier TTM-development tasks are cancelled by removal, not deferred.
+
+### 2026-11-21 checklist reconciliation after TTM removal
+
+- [x] Reviewed current implementation, recorded results and top queue. Fold recent R3 and file-unit work into completed scope; TTM removed, not a pending implementation.
+- [x] Preserve active order5→3 after measured dense group4 completion; groups1/2 and molecules remain paused. Stable ABI, general supported initialization/IO cleanup and site evidence are still open.
+- [x] Distinguish completed input-only staging/launcher construction from remaining site validation and initial-guess staging. No new calculation, GS collection, commit/push or CI in this reconciliation.
+
+### 2026-11-21 automatic MPI factorization return
+
+- [x] Reproduce prior native host termination on automatic7-rank assignment; no numerical/partition restriction added.
+- [x] Optional helper status plus native1117 uses existing cold cleanup and status agreement; recognized unanimous/protocol1 lets Python retry. Legacy status-absent behavior and C signature retained; no new collective.
+- [x] Helper MPI1/2 automatic choices match prior controls;1/2/7 status/continuation checks pass. Native MPI7 raw/public retries, child cleanup, caller survival, explicit32-step/direct-resume fields/points/checkpoint bytes match old controls.
+- [x] Source/installed679 tests,one optional skip. Installed SDK helper MPI1/2/7 and native MPI7 repeat13 rejection/retry checks; fields,point/shape/checkpoint bytes match source/old controls. JP/EN/AI synchronized; TTM remains absent from sdist/wheel. Remaining R3: allocation/IO/specialized initialization; Fujitsu topology/MPI/process failure are outside this proof. R4 remains open.
+- Records:calc2026/salmonpy-fdtd-auto-layout-recovery-20261121. No GS collection or manual CI dispatch.
+
+### 2026-11-21 material-input cold rejection lifetime release
+
+- [x] Reproduce native-cleaned1110 but Python lifetime remains consumed. Reuse the unchanged source/object-audited runtime by SHA256; no Fortran build/extra startup audit.
+- [x] Recognize unanimous1110/1113 only with recovery protocol1; identify material errors, release failed Python lifetime/attachment. No numerical/input/communication changes or broader unknown-error retry.
+- [x] Existing tool adds3 material modes with missing/header/truncated/nonfinite failures repeated twice; GNU MPI1/2 complete public rejection/cleanup/retry,32-step/direct-resume tests. Pre-change Python and installed SDK controls verify fields,point/material assets and direct checkpoint bytes exactly. Source/installed679 tests,one optional skip. Shared native library unchanged; JP/EN/AI synchronized.
+- [ ] At that milestone coefficient returns were open;1111/1112/1114 are completed below. Remaining R3 is early-return Python classification plus unchecked supported allocations/IO and other unhandled returns; no arbitrary OS/MPI/process-failure recovery claim. R4 remains open; groups1/2 and molecules stay deferred.
+- Records:calc2026/salmonpy-fdtd-material-input-recovery-20261121. No GS collection or manual CI dispatch.
+- [x] Completed6 mode/rank combinations;8 rejected-input retries each in source and installed SDK. Runtime SHA256 verified, no solver rebuild or communication added. TTM remains absent from sdist/wheel.
+
+### 2026-11-21 handled coefficient/mode cold-rejection retry
+
+- [x] Reproduce1111/1112/1114: native cleans state/children but Python retains failed lifetime. Existing audited binary reused with recorded SHA256; no native source/binary changes.
+- [x] Recognize only unanimous1111/1112/1114 with init recovery protocol1; improve diagnostics. Preserve formulas, finite checks and unsupported-mode boundaries; no new collective or silent input edits.
+- [x] Existing fixture combines reader and coefficient/mode rejection; GNU MPI1/2 per3 material modes complete repeated rejection, parent/candidate cleanup, valid32-step/direct restore. Pre-change/installed SDK fields,point/material assets and checkpoint bytes match exactly. Source/installed679 tests,one optional skip; JP/EN/AI synchronized.
+- [ ] Remaining R3: unhandled initialization/allocations/IO; arbitrary trapped FP/MPI/process/device failures not claimed. Stable ABI R4 remains open. Groups1/2 and molecules remain deferred.
+- Records:calc2026/salmonpy-fdtd-initial-coefficient-recovery-20261121. No GS collection or manual CI dispatch.
+- [x] All6 mode/rank combinations passed in source and installed SDK with10 repeated reader/coefficient rejections each. Parent MPI and resources preserved; valid retry/direct resume match old controls byte for byte. Solver SHA256 unchanged; no solver rebuild/communication added. TTM remains excluded from sdist/wheel.
+
+### 2026-11-21 checklist reconciliation after handled coefficient returns
+
+- [x] Re-read current native/Python error paths and latest passed summary records; mark known1111/1112/1114 recovery complete, not broad specialized-mode support.
+- [x] Identify next bounded gap: native early1101–1104 returns versus Python recognized cold-return set. Keep larger allocation and output-IO recovery separate; historical STOP listings do not each become a new task.
+- [x] Active sequence remains group5 R3→R4, then group3 NLCC-force/unit audit; groups1/2 and molecular work deferred, TTM deleted. Operational/site/large-scale and optional storage extensions remain separate.
+- [x] Latest source/wheel evidence679 tests,one optional skip; six material/rank combinations with repeated reader/coefficient rejection and exact old controls. Recent implementations remain uncommitted. No new calculation, build, GS collection, commit/push or CI in this checklist review.
+
+### 2026-11-21 early native grid/boundary/time cold-return retry
+
+- [x] Reproduce clean1101 with consumed Python lifetime before fix; existing native already returns1101–1104 and cleans cold state/children.
+- [x] Recognize only unanimous1101–1104 with init recovery protocol1, add actionable reasons. Preserve input/CFL rules, native binary and existing communication; no automatic repair/resubmission.
+- [x] Existing grid-init/geometry fixture combines raw and public paths: GNU MPI1/2 each35 rejected-input/retry checks, parent/child cleanup, valid32-step/direct restore. Field/point/shape/checkpoint bytes match prior valid controls.
+- [x] Source/installed679 tests,one optional skip; installed SDK MPI1/2 each35 rejection/retry checks and direct restore. Old/source/installed field,point/shape/checkpoint bytes exactly match. JP/EN/AI synchronized. Remaining R3: unhandled supported startup, bulk allocation/IO; arbitrary OOM/FP/MPI/process/device failures not claimed. R4 remains open; groups1/2 and molecules deferred.
+- Records:calc2026/salmonpy-fdtd-early-init-recovery-20261121. No GS collection or manual CI dispatch.
+- [x] Runtime SHA256 unchanged; no solver rebuild, input/CFL rule change or collective added. TTM remains excluded from sdist/wheel; recent changes still uncommitted.
+
+
+## 2026-11-21 — bounded core FDTD allocation recovery
+
+Implemented `allocate(...,stat=...)` for material-ID/scratch and split-E/H,
+coefficient and optional saved-E/H 3D arrays on the native status path. All ranks
+agree before entering the next communication/setup phase; normalize nonzero STAT
+values to a common failure flag (including negative implementation codes). Cold
+failure1118 reuses existing owned cleanup and the protocol-gated Python lifetime
+release. Standalone status-absent behavior is preserved. No budget-based stop.
+
+Validation record: `salmonpy-fdtd-core-allocation-recovery-20261121/summary.json`
+in the canonical calc2026 results store. GNU/macOS MPI1/2 source and installed
+wheel: two partial-allocation sites, two attempts each; parent MPI survives,
+owned resource counts return to zero.32-step controls and direct checkpoint
+restore (zero replay) compare byte-for-byte with previous runtime outputs.
+External material CUBE MPI2 uses the same injected failure/retry/control checks.
+Production and testing builds were source/object-audited; production exports no
+fault hook. Source and installed suites each679 run,one optional skip,no failures.
+Paired manuals and embedded AI guide text synchronized. No new GS,CI dispatch,
+commit/push or confirmed cloud synchronization. This is deterministic STAT-path
+injection, not a real OS-OOM campaign, Fujitsu or multi-node certification.
+
+
+## 2026-11-21 — initial LD state allocation recovery
+
+The initial LD allocation path now checks STAT for18 pole4D arrays and6
+current/old-E3D arrays, retains original allocation/zero/arithmetic order and
+returns a normalized failure flag. An owning-field-group agreement returns1119
+before subsequent coefficients use incomplete state. The native owner releases
+partially allocated components/caches/communicators; Python requires unanimous
+known1119 plus the declared init-recovery protocol before retry. No new global
+selectors or step collectives; memory-budget excess still warns.
+
+Validation: `salmonpy-fdtd-ld-allocation-recovery-20261121/summary.json` in canonical
+calc2026. GNU/macOS single-node MPI1/2, scalar and off-diagonal-tensor LD; both
+source and installed wheels inject failures in the second4D pole/history array
+and second3D FDTD-current array, twice each. Existing1118 cases are retained.
+After cleanup caller MPI is alive and owner/resource counts return zero. All12
+new production/testing/installed controls match the preceding runtime's fields,
+material/observation data and direct checkpoint bytes;32-step direct continuation
+requires zero replay. Both Python suites679 run,one optional skip,no failures.
+Shared kernels are byte-identical; production/test source/object audits pass
+and production contains no injection hook. The wheel enables preprocessing of
+this shared kernel explicitly; no import-time compilation. Paired manuals and
+AI guide text updated. No GS collection or optional CI dispatch.
+
+Only the first LD-state allocation is covered. Material/coefficient scratch,
+tensor auxiliary and subpixel-specific reallocation/PML/observation allocations,
+OS kill/physical OOM/broken MPI remain outside this scope. State partial cleanup
+is not a universal initialization-failure or Fujitsu/multi-node certificate.
+
+
+## 2026-11-21 — material/boundary vector allocation and PML inventory
+
+PML uses the existing split-field3D coefficient arrays already covered by1118.
+Its helper has only small automatic workspaces for the existing eight layers;
+no new bulk PML allocation was needed. Do not turn every automatic local array
+into a recovery framework or claim OS/memory/MPI failure recovery.
+
+Added STAT/partial-state recovery for three material coefficient vectors and
+six E/H boundary vectors, returned as1120. The material gate coalesces with the
+previous LD admission:allocation/initialization/arithmetic order is preserved,
+1119 is retained,and only the boundary agreement is newly added when LD is
+used. Without LD,both material and boundary gates are needed. No new step or
+application-wide collective and no memory-budget stop.
+
+Final record: `salmonpy-fdtd-aux-allocation-recovery-v2-20261121/summary.json` in
+canonical calc2026. GNU/macOS single-node MPI1/2 source/installed scalar and
+non-diagonal-tensor LD:partial material/boundary failures,owned cleanup and retry,
+plus retained core/LD cases. All12 new production/testing/installed controls
+match preceding runtime fields,shape/observations/sidecars and checkpoint bytes;
+32-step direct continuation has zero replay. Both Python suites679 run,one
+optional skip,no failures. Production/test source and object audits pass;
+production exports no fault hook. Paired manuals/AI guides synchronized.
+
+The prior uncoalesced validation and failed fixture-preparation attempt remain
+preserved as records,not the final implementation. No new GS or optional CI
+execution. R3 remains bounded:next inspect supported output-IO failures and
+selected auxiliary buffers,then R4 and group3. No commit/push was requested.
+
+
+## 2026-11-21 — optional point-observation I/O failure handling
+
+`obsN_at_point_rt.data` headers and appends now check open/write/close status in
+one private Fortran helper. Optional diagnostic errors emit a bounded warning
+and continue physical evolution,not an automatic solver abort. Successful
+open owns the unit;close retains any earlier write error. A subsequent append
+retries after the path/header is repaired. Missing/partially written rows are
+not reconstructed. Warning state is owned by the field context and omitted
+from physical checkpoints. No new MPI communication or import-time behavior.
+
+Record:`salmonpy-fdtd-point-output-recovery-20261121/summary.json` in canonical
+calc2026. The prior runtime stops on a real directory collision (retained red
+record). New source/installed GNU macOS MPI1/2 covers header/append directory
+collisions and read-only writes (actual IOSTAT5007).18 source/installed/caller-unit
+fault cases continue32 steps,release owned resources,retain caller MPI,repair
+future output and directly restore with zero replay. Normal scalar/tensor point
+output and all physical checkpoints match previous bytes. Failed-output cases
+match normal fields/shape/info/checkpoints;post-repair point rows match the exact
+expected suffix with deliberately missing rows. Caller file lifetime is verified
+through initialization,steps,direct restore and finalization on MPI2.
+
+Both suites679 run,one optional skip,no failures. Native source/object audits,
+Git-only source preparation/build,and sdist→wheel installation passed. Paired
+manuals and AI guide text synchronized. No new GS or optional CI dispatch.
+Close errors are checked,but a close-only failure was not injected. This is not
+protection for plane-integral/info/restart output,arbitrary filesystem failures
+or automatic reconstruction of diagnostics. Continue bounded R3 work,then R4
+and group3;do not overgeneralize optional-output warnings to required restarts.
+
+
+## 2026-11-21 — optional plane-integral output I/O
+
+Plane-integral headers/appends now check IOSTAT in a private Fortran writer;
+optional output failure warns rather than aborting evolution. The field context
+owns the warning flag;physical checkpoint layout/numbers are unchanged. Existing
+integration and MPI summations remain in their original order,including all
+subsequent planes after root write failure. No new MPI communication. Successful
+opens own their units;failed writes still close them and preserve the first error.
+The public Fortran routine keeps existing source calls valid with an optional
+trailing warning flag;no new process-global selector.
+
+Record:`salmonpy-fdtd-integral-output-recovery-20261121/summary.json` in canonical
+calc2026. Old runtime stops on a real directory collision (retained red record).
+New source/installed GNU macOS MPI1/2 cover18 header/append directory/read-only/
+caller-unit fault cases. Read-only writes return actual IOSTAT5007. Filesystem
+repair resumes later rows;deliberately missing rows are not fabricated. Normal
+scalar/tensor integral/point outputs and physical checkpoints match old bytes.
+Failed xy output leaves yz/xz files and physical fields/checkpoints unchanged;
+32-step zero-replay direct continuation and caller-file/MPI lifetimes pass.
+
+Both suites679 run,one optional skip,no failures. Source/object prohibition audits,
+tracked-only source preparation/build and sdist→wheel installation pass. Paired
+manuals/AI guides synchronized. No GS collection or optional CI dispatch.
+Close errors are handled but close-only failure was not injected. Plane snapshots,
+frequency-space maps,info/restart outputs and arbitrary filesystem-wide failures
+remain outside this bounded scope. Continue bounded R3,then R4 and group3.
+
+
+## 2026-11-21 — optional final observation information
+
+The obs0_info.data animation helper file now checks open/write/close IOSTAT.
+A failed optional metadata write emits SALMONPY_OBSERVATION_INFO_WARNING and
+continues normal field/state/MPI finalization. Preserve the first error,close
+only a successfully opened owned unit,and do not delete earlier results or
+silently reinterpret failed required restart saves. No new collective,global
+state,checkpoint layout or numerical calculation. No automatic retry after
+finalization;check missing/incomplete metadata before visualization/analysis.
+
+Record:`salmonpy-fdtd-info-output-recovery-20261121/summary.json` in canonical
+calc2026. The corrected red fixture reproduces a prior-runtime Fortran directory
+collision at finalization;the initial fixture-listing failure is also preserved.
+New source/installed GNU macOS MPI1/2 cover10 real directory/read-only/caller-file
+fault cases (write IOSTAT5007),completed32-step trajectories and zero-replay direct
+continuation. Normal scalar/tensor info/output bytes match prior controls.
+Faulted metadata leaves time series,integrals,shape and physical checkpoints
+unchanged;state/MPI counts return zero and caller files/parent MPI survive.
+
+Both suites679 run,one optional skip,no failures. Final native source/object
+audits,Git-only preparation/build and sdist→wheel install pass. Added guards
+fit standard132-column free-form lines without relaxing compiler limits;initial
+build evidence remains preserved. Paired manuals/AI guides synchronized.
+No GS collection or optional CI dispatch. Close-only failure was not injected.
+Remaining R3 work:snapshots/frequency maps,other optional metadata,required
+restart I/O and selected auxiliary buffers;then R4 and group3 in the active order.
+
+
+## 2026-11-22 — optional plane-snapshot I/O
+
+Time-resolved E/H plane snapshots now check open/write/close IOSTAT and warn
+instead of aborting valid physical evolution. Keep original plane aggregation,
+unit conversion,component order and MPI sums;failed root writes never skip a
+later collective. Workspaces are released as before. Warning state is field-owned
+and excluded from physical checkpoint layout;no new global flag or collective.
+The optional final warning argument preserves existing Fortran source calls.
+
+Record:`salmonpy-fdtd-snapshot-output-recovery-20261122/summary.json` in canonical
+calc2026. The old runtime stops at a real snapshot-directory collision. New
+source/installed GNU macOS MPI1/2:10 directory/read-only/caller-file fault cases
+continue,repair the destination and perform zero-replay direct restoration.
+The validation then explicitly advances17/18 again;that continuation writes
+frame18 successfully and matches the previously obtained physical trajectory.
+All90 sampled frame files and other outputs match normal controls. Normal
+scalar/non-diagonal-tensor outputs/checkpoints match prior runtime bytes.
+Caller-file/state/parent-MPI lifetimes pass. Observation stride6 limits test
+file count;this is not a new default or output-size restriction.
+
+Both suites679 run,one optional skip,no failures. Native source/object audits,
+Git-only preparation/build and sdist→wheel install pass. Paired manuals and AI
+text synchronized. No GS collection or optional CI dispatch. Read-only faults
+were measured on a non-root Mac;close-only failure was not injected.
+Missing/partial frames are not automatically reconstructed. Staging allocation,
+frequency maps,required restart I/O and arbitrary filesystem failures remain
+separate scopes. Continue bounded R3 work,then R4 and group3 as already ordered.
+
+
+## 2026-11-22 — batch frequency-resolved plane-map I/O
+
+Added IOSTAT checks to frequency-map header/row/close writes. Root failure warns
+once per finalization and continues every remaining window/plane/energy and
+existing Fourier aggregation. Close only successfully opened owned units and
+retain the first error. No new global selector,collective or physical numerical
+operation. Missing/partial maps are not reconstructed or retried after finalize.
+
+Scope is the SALMON batch FDTD path. The native E/H API already rejects these
+accumulators with15;those guards are intentionally unchanged. This work does not
+certify native protected stepping or direct spectral-state save/restore.
+
+Record:`salmonpy-fdtd-frequency-output-recovery-20261122/summary.json` in canonical
+calc2026. Prior runtime stops on a real map-file directory collision. New source/
+installed GNU macOS MPI1/2:two energies,three planes,two windows;all12 normal maps
+and other outputs match prior runtime bytes. Eight directory/read-only fault
+cases preserve other11 maps,point time series and info output. Actual read-only
+write IOSTAT5007;caller units600/601/602 retain before/after content and all tested
+map units are closed before returning to the host. Host/MPI programs finish.
+Existing consolidated spectrum probe is reused;focused mode suppresses redundant
+time snapshots and limits the trajectory to64 steps. No new Python test module.
+
+Both suites679 run,one optional skip,no failures. Final runtime and new host
+probe source/object audits,Git-only preparation/build and sdist→wheel install
+pass. Standard132-column free-form source retained. Early environment-import
+failure,old-runtime red run and an unused pre-edit build remain preserved as
+evidence;only the final source-verified runtime is used for positive results.
+Paired manuals/AI text synchronized. No GS collection or optional CI dispatch.
+Close-only failure was not injected;non-root Mac permission semantics measured.
+LR/ASE/ART output,required restarts,staging allocation and arbitrary filesystem
+failure remain separate scopes. Continue bounded R3,then R4 and group3.
+
+
+## 2026-11-22 — batch LR/ASE/ART optional spectral I/O
+
+Added shared private open/close helpers within eh_finalize,checking IOSTAT and
+closing only owned opened units while preserving the first error. LR trajectory
+and response writes are independently guarded;failed raw I/O never skips Fourier
+processing/subsequent tables. ASE/ART windows keep separate units,status and names
+through their energy loops,so one failed file does not contaminate the other.
+Physical formulas,normal formatting and every existing integration/MPI sum remain
+unchanged. A local per-finalization warning flag bounds messages;no new global
+selector,collective or numerical recomputation. No public/native C ABI expansion.
+
+Record:`salmonpy-fdtd-optional-spectra-recovery-20261122/summary.json` in canonical
+calc2026. The old runtime stops on a real ART directory collision. New source/
+installed GNU macOS MPI1/2 cover isolated LR,periodic LR,non-unit-background raw
+LR,ASE and ART:20 normal-configuration comparisons match prior byte payloads;
+40 directory/read-only fault cases retain all other output bytes,caller files
+and spectral-unit cleanup. Actual read-only write IOSTAT5007. Programs complete
+MPI normally. The non-unit-background legacy normalization warning/omission is
+preserved. Existing consolidated host probe reused;no new Python test module.
+
+Both suites679 run,one optional skip,no failures. Runtime/host source and object
+audits,Git-only build and sdist→wheel install pass. Standard132-column source
+retained. Paired manuals/AI text synchronized. No GS or optional CI dispatch.
+Native E/H diagnostic rejection15 is unchanged;native spectral protected stepping/
+restart is not certified by this batch test. Missing/partial spectra are not
+fabricated/retried;close-only failure was not injected. Non-root Mac permissions
+measured. Required restarts,initialization/helper I/O and selected auxiliary
+allocation remain bounded R3 work,then R4 and group3 in the agreed order.

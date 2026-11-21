@@ -109,7 +109,6 @@ integer(c_int) function sp_eh_step_transaction_protocol() bind(C)
 end function
 integer(c_int) function sp_eh_step_transaction(mode) bind(C)
   use communication,only:comm_get_max
-  use ttm,only:use_ttm
   use salmon_global,only:yn_obs_plane_em,yn_obs_plane_integral_em,base_directory
   integer(c_int),value::mode
   integer::reference,status
@@ -124,7 +123,7 @@ integer(c_int) function sp_eh_step_transaction(mode) bind(C)
   if(mode==0)then
     if(allocated(step_saved).or.allocated(pending))status=14
     if(trim(base_directory)/='./'.and.trim(base_directory)/='.')status=15
-    if(use_ttm.or.state%fe%flag_lr.or.state%fe%flag_ase.or.state%fe%flag_art.or.state%fe%flag_o_restart)status=15
+    if(state%fe%flag_lr.or.state%fe%flag_ase.or.state%fe%flag_art.or.state%fe%flag_o_restart)status=15
     if(any(yn_obs_plane_em=='y').or.any(yn_obs_plane_integral_em=='y'))status=15
     if(allocated(state%fe%iobs_num_ene))then
       if(any(state%fe%iobs_num_ene>0))status=15
@@ -157,15 +156,26 @@ integer(c_int) function sp_eh_checkpoint_protocol() bind(C)
   sp_eh_checkpoint_protocol=1
 end function
 
+  ! Known layout/shape statuses follow cold-init state/child cleanup before return.
+  integer(c_int) function sp_eh_init_recovery_protocol() bind(C)
+    sp_eh_init_recovery_protocol=1
+  end function
+
   integer(c_int) function sp_eh_init(path,npoints,indices) bind(C)
     use inputoutput, only: read_input,s_input_parser
     use math_constants, only: set_math_constants
     use salmon_global, only: theory,nt_em,yn_restart
+#ifdef SALMONPY_RECOVERY_TESTING
+    use parallelization, only: nproc_id_global
+#endif
     character(c_char),intent(in) :: path(*)
     integer(c_int),value :: npoints
     integer(c_int),intent(in) :: indices(3,npoints)
     character(4096) :: filename
     integer :: i,p,lo(3),hi(3),child_status,admission
+#ifdef SALMONPY_RECOVERY_TESTING
+    integer :: allocation_failure_slot
+#endif
     logical :: exists,grid_ready
     type(s_input_parser) :: parser
     sp_eh_init=1
@@ -212,7 +222,26 @@ end function
     ! Only the documented early parameter failures are retryable. Unhandled
     ! later numerical/I/O/allocation failures still consume this lifetime.
     used=.true.
+#ifdef SALMONPY_RECOVERY_TESTING
+    allocation_failure_slot=0
+    if(fault_stage>=24.and.fault_stage<=29)then
+      if(nproc_id_global==fault_rank)then
+        select case(fault_stage)
+        case(24,25)
+          allocation_failure_slot=merge(2,11,fault_stage==24)
+        case(26,27)
+          allocation_failure_slot=merge(-2,-20,fault_stage==26)
+        case(28,29)
+          allocation_failure_slot=merge(102,105,fault_stage==28)
+        end select
+      endif
+      fault_stage=0;fault_rank=-1
+    endif
+    call eh_init(state%fs,state%fe,state%ld,admission,grid_ready,excluded_response_points=indices, &
+                 allocation_failure_slot=allocation_failure_slot)
+#else
     call eh_init(state%fs,state%fe,state%ld,admission,grid_ready,excluded_response_points=indices)
+#endif
     call comm_get_max(admission,nproc_group_global)
     if(admission/=0)then
       ! Release communication caches before the child communicator they borrow.
@@ -243,7 +272,7 @@ end function
   integer(c_int) function sp_eh_test_fault(stage,rank) bind(C)
     integer(c_int),value :: stage,rank
     sp_eh_test_fault=1
-    if(stage<20.or.stage>23.or.rank<0)return
+    if(stage<20.or.stage>29.or.rank<0)return
     fault_stage=stage;fault_rank=rank;sp_eh_test_fault=0
   end function
 #endif
@@ -343,7 +372,6 @@ end function
 
   integer function step_checked_impl(npoints,J,E,A,owned) result(status)
     use salmon_global,only:dt_em,obs_samp_em
-    use ttm,only:use_ttm
     use communication,only:comm_get_max
     integer,intent(in) :: npoints
     real(8),intent(in) :: J(3,npoints)
@@ -372,7 +400,7 @@ end function
     if(npoints/=size(state%points,2))error=10
     if(state%step>=state%capacity)error=13
     if(allocated(pending))error=14
-    if(use_ttm.or.state%fe%flag_lr.or.state%fe%flag_ase.or.state%fe%flag_art)error=15
+    if(state%fe%flag_lr.or.state%fe%flag_ase.or.state%fe%flag_art)error=15
     if(allocated(state%fe%iobs_num_ene))then
       if(any(state%fe%iobs_num_ene>0))error=15
     endif

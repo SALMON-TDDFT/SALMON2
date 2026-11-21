@@ -14,6 +14,8 @@ endforeach()
 add_custom_target(ld_audit ALL
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/native"
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/salmonpy")
+# The shared LD kernel conditionally includes test-only allocation injection.
+set_source_files_properties("${ROOT}/native/lorentz_drude.f90" PROPERTIES Fortran_PREPROCESS ON)
 add_library(salmonpy_ld SHARED "${ROOT}/native/subpixel_smoothing.f90" "${ROOT}/native/lorentz_drude_tensor.f90" "${ROOT}/native/lorentz_drude_fit.f90" "${ROOT}/salmonpy/convergence_kernel.f90" "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90" "${ROOT}/salmonpy/ld_handles.f90"
   "${ROOT}/native/sbe_types.f90" "${ROOT}/native/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90" "${ROOT}/salmonpy/sbe_handles.f90")
 if(APPLE)
@@ -293,7 +295,7 @@ install(FILES "${ROOT}/docs/plans/2026-11-20-scf-declared-source-migration.md" D
 install(FILES "${ROOT}/tools/test_timer_context.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_timer_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
-install(FILES "${ROOT}/tools/test_io_ownership.py" "${ROOT}/tools/prepare_pz_state_fixture.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tools/test_em_restart_save.py" "${ROOT}/tools/test_io_ownership.py" "${ROOT}/tools/prepare_pz_state_fixture.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_io_ownership.f90" "${ROOT}/tests/native/test_native_protocol.c" "${ROOT}/tests/native/test_native_state.c" "${ROOT}/tests/native/test_native_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
 install(FILES "${ROOT}/tests/native/test_directory_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)

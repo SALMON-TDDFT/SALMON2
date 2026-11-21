@@ -37,6 +37,7 @@ module common_maxwell
   public :: input_r_bin_em
   public :: output_r_txt_em
   public :: output_r_bin_em
+  private :: restart_stage_open,restart_stage_close,restart_stage_commit,restart_save_status
   public :: txtfile_copy_em
   
 contains
@@ -405,7 +406,8 @@ contains
   
   !=========================================================================================
   != input i3d file ========================================================================
-  subroutine input_i3d_em(file_name,ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format)
+  subroutine input_i3d_em(file_name,ifn,ng_is,ng_ie,lg_is,lg_ie,Nd,imat,format,status)
+    use,intrinsic::ieee_arithmetic,only:ieee_is_finite
     use parallelization, only: nproc_id_global
     use communication,   only: comm_is_root
     implicit none
@@ -416,36 +418,56 @@ contains
                                        ng_is(2)-Nd:ng_ie(2)+Nd,&
                                        ng_is(3)-Nd:ng_ie(3)+Nd)
     character(2),  intent(in)  :: format
+    integer,optional,intent(out):: status
+    integer::u,ios,phase,close_status
+    logical::opened
     real(8),allocatable        :: rtmp1d(:)
     integer                    :: inum(3),inum_check(3)
     integer(8)                 :: ii
     integer                    :: ij,ix,iy,iz,iflag_x,iflag_y,iflag_z
     
     !open file
-    open(ifn,file=resolve_path(trim(file_name)), status='old')
+    u=ifn;ios=0;phase=1;opened=.false.
+    if(present(status))then
+      status=0;imat=0
+      open(newunit=u,file=resolve_path(trim(file_name)),status='old',action='read',iostat=ios)
+      if(ios/=0)goto 900
+    else
+      open(u,file=resolve_path(trim(file_name)),status='old')
+    endif
+    opened=.true.;phase=2
     
     if(trim(format)=='cu') then
       !check grid information
       inum(:)=lg_ie(:)-lg_is(:)+1
-      read(ifn,*); read (ifn,*); read (ifn,*); !skip
-      allocate(rtmp1d(4))
-      read (ifn,*) rtmp1d; inum_check(1)=int(rtmp1d(1)+1d-3);
-      read (ifn,*) rtmp1d; inum_check(2)=int(rtmp1d(1)+1d-3);
-      read (ifn,*) rtmp1d; inum_check(3)=int(rtmp1d(1)+1d-3);
+      call read_skip();if(ios/=0)goto 900
+      call read_skip();if(ios/=0)goto 900
+      call read_skip();if(ios/=0)goto 900
+      call allocate_values(4);if(ios/=0)goto 900
+      call read_values(.true.);if(ios/=0)goto 900
+      inum_check(1)=int(rtmp1d(1)+1d-3);
+      call read_values(.true.);if(ios/=0)goto 900
+      inum_check(2)=int(rtmp1d(1)+1d-3);
+      call read_values(.true.);if(ios/=0)goto 900
+      inum_check(3)=int(rtmp1d(1)+1d-3);
       deallocate(rtmp1d)
       do ii=1,3
         if(inum(ii)/=inum_check(ii)) then
+          if(present(status))then
+            phase=3;ios=1;goto 900
+          endif
           if(comm_is_root(nproc_id_global)) write(*,*) "al_em, dl_em or num_rgrid_em do not mutch shape file."
           stop
         end if
       end do
-      read (ifn,*); !skip
+      call read_skip();if(ios/=0)goto 900
+      phase=4
       
       !input data(general case)
-      allocate(rtmp1d(6))
+      call allocate_values(6);if(ios/=0)goto 900
       ix=lg_is(1); iy=lg_is(2); iz=lg_is(3);
       do ii=1,int(inum(1)*inum(2)*inum(3)/6)
-        read (ifn,*) rtmp1d
+        call read_values(.false.);if(ios/=0)goto 900
         do ij=1,6
           !check flag and write imat
           iflag_x=0; iflag_y=0; iflag_z=0;
@@ -468,8 +490,8 @@ contains
       
       !input data(special case)
       if(mod(inum(1)*inum(2)*inum(3),6)>0) then
-        allocate(rtmp1d(mod(inum(1)*inum(2)*inum(3),6)))
-        read (ifn,*) rtmp1d
+        call allocate_values(mod(inum(1)*inum(2)*inum(3),6));if(ios/=0)goto 900
+        call read_values(.false.);if(ios/=0)goto 900
         do ij=1,mod(inum(1)*inum(2)*inum(3),6)
           !check flag and write imat
           iflag_x=0; iflag_y=0; iflag_z=0;
@@ -491,12 +513,70 @@ contains
       end if
     elseif(trim(format)=='mp') then
       !This format is still unimplemented
+      if(present(status))then
+        phase=7;ios=1;goto 900
+      endif
     end if
     
     !close file
-    close(ifn)
-    
+    if(present(status))then
+      phase=6
+      close(u,iostat=ios)
+      if(ios/=0)goto 900
+    else
+      close(u)
+    endif
+    opened=.false.
     return
+900 continue
+    ! Only the status-aware path reaches here; preserve original failure phase
+    ! while releasing our own input unit and any partially allocated staging.
+    status=phase
+    if(opened)close(u,iostat=close_status)
+    if(allocated(rtmp1d))deallocate(rtmp1d)
+    return
+  contains
+    subroutine read_skip()
+      if(present(status))then
+        read(u,*,iostat=ios)
+      else
+        read(u,*)
+      endif
+    end subroutine
+    subroutine allocate_values(n)
+      integer,intent(in)::n
+      if(present(status))then
+        allocate(rtmp1d(n),stat=ios)
+        if(ios/=0)phase=5
+      else
+        allocate(rtmp1d(n))
+      endif
+    end subroutine
+    subroutine read_values(header)
+      logical,intent(in)::header
+      integer::k,n
+      real(8)::shifted
+      if(present(status))then
+        read(u,*,iostat=ios)rtmp1d
+        if(ios/=0)return
+        n=size(rtmp1d)
+        if(header)n=1 ! Only the used grid-count field is converted to integer.
+        do k=1,n
+          if(.not.ieee_is_finite(rtmp1d(k)))then
+            ios=1;return
+          endif
+          shifted=rtmp1d(k)+1d-3
+          if(.not.ieee_is_finite(shifted))then
+            ios=1;return
+          endif
+          if(shifted< -real(huge(0),8)-1d0.or.shifted>=real(huge(0),8)+1d0)then
+            ios=1;return
+          endif
+        enddo
+      else
+        read(u,*)rtmp1d
+      endif
+    end subroutine
   end subroutine input_i3d_em
   
   !=========================================================================================
@@ -517,7 +597,7 @@ contains
     integer,       intent(in) :: Nd
     real(8),       intent(in) :: coo(minval(lg%is(:))-Nd:maxval(lg%ie(:))+Nd,3)
     integer(8) :: ii
-    integer    :: ij,ik,ix,iy,iz
+    integer    :: ij,ik,ix,iy,iz,output_unit
     integer    :: i1d_tmp1(6),i1d_tmp2(6)
     real(8)    :: dx,dy,dz,conv
     
@@ -530,20 +610,20 @@ contains
       
       !open cube file and write basic information
       if(comm_is_root(nproc_id_global)) then
-        open(ifn,file=resolve_path(trim(file_name)//".cube"))
+        open(newunit=output_unit,file=resolve_path(trim(file_name)//".cube"))
         if(imessage==1) then
-          write(ifn,*) "An input shape described in a cube file."
+          write(output_unit,*) "An input shape described in a cube file."
           conv = ulength_from_au
         else
-          write(ifn,*) "None"
+          write(output_unit,*) "None"
           conv = 1.0d0
         end if
-        write(ifn,'(1X,A)') "All values here are in a.u. and A hydrogen atom is used to set the origin of the model."
-        write(ifn,'(I8,3(1X,E23.15E3))') 1,coo(lg%is(1),1)*conv,coo(lg%is(2),2)*conv,coo(lg%is(3),3)*conv
-        write(ifn,'(I8,3(1X,E23.15E3))') lg%num(1),dx*conv,0.0d0,0.0d0
-        write(ifn,'(I8,3(1X,E23.15E3))') lg%num(2),0.0d0,dy*conv,0.0d0
-        write(ifn,'(I8,3(1X,E23.15E3))') lg%num(3),0.0d0,0.0d0,dz*conv
-        write(ifn,'(I8,4(1X,E23.15E3))') 1,1.0d0,0.0d0,0.0d0,0.0d0
+        write(output_unit,'(1X,A)') "All values here are in a.u. and A hydrogen atom is used to set the origin of the model."
+        write(output_unit,'(I8,3(1X,E23.15E3))') 1,coo(lg%is(1),1)*conv,coo(lg%is(2),2)*conv,coo(lg%is(3),3)*conv
+        write(output_unit,'(I8,3(1X,E23.15E3))') lg%num(1),dx*conv,0.0d0,0.0d0
+        write(output_unit,'(I8,3(1X,E23.15E3))') lg%num(2),0.0d0,dy*conv,0.0d0
+        write(output_unit,'(I8,3(1X,E23.15E3))') lg%num(3),0.0d0,0.0d0,dz*conv
+        write(output_unit,'(I8,4(1X,E23.15E3))') 1,1.0d0,0.0d0,0.0d0,0.0d0
       end if
       
       !write 3d data
@@ -560,7 +640,7 @@ contains
         !(write data and reset i1d & ij) or (update ij)
         if(mod(ij,6)==0) then
           call comm_summation(i1d_tmp1(:),i1d_tmp2(:),6,nproc_group_global)
-          if(comm_is_root(nproc_id_global)) write(ifn,'(6(1X,I2))', advance="yes") i1d_tmp2(:)
+          if(comm_is_root(nproc_id_global)) write(output_unit,'(6(1X,I2))', advance="yes") i1d_tmp2(:)
           i1d_tmp1(:)=0; i1d_tmp2(:)=0;
           ij=1;
         else
@@ -582,7 +662,7 @@ contains
         if(ii==lg%num(1)*lg%num(2)*lg%num(3) .and. ij>1) then
           call comm_summation(i1d_tmp1(:),i1d_tmp2(:),6,nproc_group_global)
           do ik=1,(ij-1)
-            if(comm_is_root(nproc_id_global)) write(ifn,'(1X,I2)', advance="no") i1d_tmp2(ik)
+            if(comm_is_root(nproc_id_global)) write(output_unit,'(1X,I2)', advance="no") i1d_tmp2(ik)
           end do
         end if
       end do
@@ -591,7 +671,7 @@ contains
     end if
     
     !close file
-    if(comm_is_root(nproc_id_global)) close(ifn)
+    if(trim(format)=='cu'.and.comm_is_root(nproc_id_global)) close(output_unit)
     
     return
   end subroutine output_i3d_em
@@ -638,14 +718,16 @@ contains
     real(8),     intent(out),optional :: r0d
     real(8),     intent(out),optional :: r1d(is:ie)
     
+    integer :: io_unit
+
     if(comm_is_root(nproc_id_global)) then
-      open(ifn,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'.data'),status='old')
-      if    (present(i0d)) then; read(ifn,*) i0d   ;
-      elseif(present(i1d)) then; read(ifn,*) i1d(:);
-      elseif(present(r0d)) then; read(ifn,*) r0d   ;
-      elseif(present(r1d)) then; read(ifn,*) r1d(:);
+      open(newunit=io_unit,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'.data'),status='old')
+      if    (present(i0d)) then; read(io_unit,*) i0d   ;
+      elseif(present(i1d)) then; read(io_unit,*) i1d(:);
+      elseif(present(r0d)) then; read(io_unit,*) r0d   ;
+      elseif(present(r1d)) then; read(io_unit,*) r1d(:);
       end if
-      close(ifn)
+      close(io_unit)
     end if
     if    (present(i0d)) then; call comm_bcast(i0d   ,nproc_group_global);
     elseif(present(i1d)) then; call comm_bcast(i1d(:),nproc_group_global);
@@ -693,23 +775,25 @@ contains
     complex(8),allocatable :: c4d_p(:,:,:,:)
     complex(8),allocatable :: c5d_p(:,:,:,:,:)
     
+    integer :: io_unit
+
     select case(read_mode)
     case('single')
       if(comm_is_root(nproc_id_global)) then
-        open(ifn,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name// '.bin'),&
+        open(newunit=io_unit,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name// '.bin'),&
              status='old',form='unformatted',access='stream')
-        if    (present(r1d)) then; read(ifn) r1d(:)        ;
-        elseif(present(r2d)) then; read(ifn) r2d(:,:)      ;
-        elseif(present(r3d)) then; read(ifn) r3d(:,:,:)    ;
-        elseif(present(r4d)) then; read(ifn) r4d(:,:,:,:)  ;
-        elseif(present(r5d)) then; read(ifn) r5d(:,:,:,:,:);
-        elseif(present(c1d)) then; read(ifn) c1d(:)        ;
-        elseif(present(c2d)) then; read(ifn) c2d(:,:)      ;
-        elseif(present(c3d)) then; read(ifn) c3d(:,:,:)    ;
-        elseif(present(c4d)) then; read(ifn) c4d(:,:,:,:)  ;
-        elseif(present(c5d)) then; read(ifn) c5d(:,:,:,:,:);
+        if    (present(r1d)) then; read(io_unit) r1d(:)        ;
+        elseif(present(r2d)) then; read(io_unit) r2d(:,:)      ;
+        elseif(present(r3d)) then; read(io_unit) r3d(:,:,:)    ;
+        elseif(present(r4d)) then; read(io_unit) r4d(:,:,:,:)  ;
+        elseif(present(r5d)) then; read(io_unit) r5d(:,:,:,:,:);
+        elseif(present(c1d)) then; read(io_unit) c1d(:)        ;
+        elseif(present(c2d)) then; read(io_unit) c2d(:,:)      ;
+        elseif(present(c3d)) then; read(io_unit) c3d(:,:,:)    ;
+        elseif(present(c4d)) then; read(io_unit) c4d(:,:,:,:)  ;
+        elseif(present(c5d)) then; read(io_unit) c5d(:,:,:,:,:);
         end if
-        close(ifn)
+        close(io_unit)
       end if
       if    (present(r1d)) then; call comm_bcast(r1d(:)        ,nproc_group_global);
       elseif(present(r2d)) then; call comm_bcast(r2d(:,:)      ,nproc_group_global);
@@ -726,26 +810,28 @@ contains
       if(flag_same) then
         !read information
         ii = nproc_id_global; write(id_name,*) ii;
-        open(ifn+ii,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin'),&
+        open(newunit=io_unit,file= &
+             resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin'),&
              status='old',form='unformatted',access='stream')
-        read(ifn+ii) is_p; read(ifn+ii) ie_p; read(ifn+ii) i_inf; close(ifn+ii);
+        read(io_unit) is_p; read(io_unit) ie_p; read(io_unit) i_inf; close(io_unit);
         
         !read and input
         if(i_inf==1) then
-          open(ifn+ii,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin'),&
+          open(newunit=io_unit,file= &
+             resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin'),&
                status='old',form='unformatted',access='stream')
-          if    (present(r1d)) then; read(ifn+ii) r1d(:)        ;
-          elseif(present(r2d)) then; read(ifn+ii) r2d(:,:)      ;
-          elseif(present(r3d)) then; read(ifn+ii) r3d(:,:,:)    ;
-          elseif(present(r4d)) then; read(ifn+ii) r4d(:,:,:,:)  ;
-          elseif(present(r5d)) then; read(ifn+ii) r5d(:,:,:,:,:);
-          elseif(present(c1d)) then; read(ifn+ii) c1d(:)        ;
-          elseif(present(c2d)) then; read(ifn+ii) c2d(:,:)      ;
-          elseif(present(c3d)) then; read(ifn+ii) c3d(:,:,:)    ;
-          elseif(present(c4d)) then; read(ifn+ii) c4d(:,:,:,:)  ;
-          elseif(present(c5d)) then; read(ifn+ii) c5d(:,:,:,:,:);
+          if    (present(r1d)) then; read(io_unit) r1d(:)        ;
+          elseif(present(r2d)) then; read(io_unit) r2d(:,:)      ;
+          elseif(present(r3d)) then; read(io_unit) r3d(:,:,:)    ;
+          elseif(present(r4d)) then; read(io_unit) r4d(:,:,:,:)  ;
+          elseif(present(r5d)) then; read(io_unit) r5d(:,:,:,:,:);
+          elseif(present(c1d)) then; read(io_unit) c1d(:)        ;
+          elseif(present(c2d)) then; read(io_unit) c2d(:,:)      ;
+          elseif(present(c3d)) then; read(io_unit) c3d(:,:,:)    ;
+          elseif(present(c4d)) then; read(io_unit) c4d(:,:,:,:)  ;
+          elseif(present(c5d)) then; read(io_unit) c5d(:,:,:,:,:);
           end if
-          close(ifn+ii)
+          close(io_unit)
         else
           if    (present(r1d)) then; r1d(:)         = 0.0d0;
           elseif(present(r2d)) then; r2d(:,:)       = 0.0d0;
@@ -764,9 +850,10 @@ contains
           !read information
           if(comm_is_root(nproc_id_global)) then
             write(id_name,*) ii;
-            open(ifn,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin'),&
+            open(newunit=io_unit,file= &
+             resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin'),&
                  status='old',form='unformatted',access='stream')
-            read(ifn) is_p; read(ifn) ie_p; read(ifn) i_inf; close(ifn);
+            read(io_unit) is_p; read(io_unit) ie_p; read(io_unit) i_inf; close(io_unit);
           end if
           call comm_bcast( is_p,nproc_group_global);
           call comm_bcast( ie_p,nproc_group_global);
@@ -799,20 +886,21 @@ contains
             !read and share
             if(comm_is_root(nproc_id_global)) then
               write(id_name,*) ii;
-              open(ifn,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin'),&
+              open(newunit=io_unit,file= &
+             resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin'),&
                    status='old',form='unformatted',access='stream')
-              if    (present(r1d)) then; read(ifn) r1d_p(:)        ;
-              elseif(present(r2d)) then; read(ifn) r2d_p(:,:)      ;
-              elseif(present(r3d)) then; read(ifn) r3d_p(:,:,:)    ;
-              elseif(present(r4d)) then; read(ifn) r4d_p(:,:,:,:)  ;
-              elseif(present(r5d)) then; read(ifn) r5d_p(:,:,:,:,:);
-              elseif(present(c1d)) then; read(ifn) c1d_p(:)        ;
-              elseif(present(c2d)) then; read(ifn) c2d_p(:,:)      ;
-              elseif(present(c3d)) then; read(ifn) c3d_p(:,:,:)    ;
-              elseif(present(c4d)) then; read(ifn) c4d_p(:,:,:,:)  ;
-              elseif(present(c5d)) then; read(ifn) c5d_p(:,:,:,:,:);
+              if    (present(r1d)) then; read(io_unit) r1d_p(:)        ;
+              elseif(present(r2d)) then; read(io_unit) r2d_p(:,:)      ;
+              elseif(present(r3d)) then; read(io_unit) r3d_p(:,:,:)    ;
+              elseif(present(r4d)) then; read(io_unit) r4d_p(:,:,:,:)  ;
+              elseif(present(r5d)) then; read(io_unit) r5d_p(:,:,:,:,:);
+              elseif(present(c1d)) then; read(io_unit) c1d_p(:)        ;
+              elseif(present(c2d)) then; read(io_unit) c2d_p(:,:)      ;
+              elseif(present(c3d)) then; read(io_unit) c3d_p(:,:,:)    ;
+              elseif(present(c4d)) then; read(io_unit) c4d_p(:,:,:,:)  ;
+              elseif(present(c5d)) then; read(io_unit) c5d_p(:,:,:,:,:);
               end if
-              close(ifn)
+              close(io_unit)
             end if
             if    (present(r1d)) then; call comm_bcast(r1d_p(:)        ,nproc_group_global);
             elseif(present(r2d)) then; call comm_bcast(r2d_p(:,:)      ,nproc_group_global);
@@ -958,7 +1046,7 @@ contains
   
   !=========================================================================================
   != output restart txt file ===============================================================
-  subroutine output_r_txt_em(ifn,is,ie,write_mode,out_name,i0d,i1d,r0d,r1d)
+  subroutine output_r_txt_em(ifn,is,ie,write_mode,out_name,i0d,i1d,r0d,r1d,io_status)
     use parallelization, only: nproc_id_global
     use communication,   only: comm_is_root
     implicit none
@@ -972,34 +1060,52 @@ contains
     integer       :: ii
     character(16) :: id_name
     
+    integer,intent(inout) :: io_status
+    integer :: io_unit,ios
+    character(:),allocatable :: target
+    if(io_status/=0)return
+
     select case(write_mode)
     case('single')
       if(comm_is_root(nproc_id_global)) then
-        open(ifn,file=resolve_path('data_for_restart/'//out_name// '.data'),status='replace')
-        if    (present(i0d)) then; write(ifn,*) i0d   ;
-        elseif(present(i1d)) then; write(ifn,*) i1d(:);
-        elseif(present(r0d)) then; write(ifn,*) r0d   ;
-        elseif(present(r1d)) then; write(ifn,*) r1d(:);
+        target=resolve_path('data_for_restart/'//out_name// '.data')
+        call restart_stage_open(target,io_unit,ios,.false.)
+        if(ios/=0)then
+          call restart_save_status(target,ios,io_status)
+          return
+        endif
+        if    (present(i0d)) then; write(io_unit,*,iostat=ios) i0d   ;
+        elseif(present(i1d)) then; write(io_unit,*,iostat=ios) i1d(:);
+        elseif(present(r0d)) then; write(io_unit,*,iostat=ios) r0d   ;
+        elseif(present(r1d)) then; write(io_unit,*,iostat=ios) r1d(:);
         end if
-        close(ifn)
+        call restart_stage_close(io_unit,ios)
+        if(ios==0)call restart_stage_commit(target,ios)
+        call restart_save_status(target,ios,io_status)
       end if
     case('all')
       ii = nproc_id_global; write(id_name,*) ii;
-      open(ifn+ii,file=resolve_path('data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.data'),status='replace')
-      if    (present(i0d)) then; write(ifn+ii,*) i0d   ;
-      elseif(present(i1d)) then; write(ifn+ii,*) i1d(:);
-      elseif(present(r0d)) then; write(ifn+ii,*) r0d   ;
-      elseif(present(r1d)) then; write(ifn+ii,*) r1d(:);
+      target=resolve_path('data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.data')
+      call restart_stage_open(target,io_unit,ios,.false.)
+      if(ios/=0)then
+        call restart_save_status(target,ios,io_status)
+        return
+      endif
+      if    (present(i0d)) then; write(io_unit,*,iostat=ios) i0d   ;
+      elseif(present(i1d)) then; write(io_unit,*,iostat=ios) i1d(:);
+      elseif(present(r0d)) then; write(io_unit,*,iostat=ios) r0d   ;
+      elseif(present(r1d)) then; write(io_unit,*,iostat=ios) r1d(:);
       end if
-      close(ifn+ii)
+      call restart_stage_close(io_unit,ios)
+      if(ios==0)call restart_stage_commit(target,ios)
+      call restart_save_status(target,ios,io_status)
     end select
     
     return
   end subroutine output_r_txt_em
   
-  !=========================================================================================
-  != output restart binary file ============================================================
-  subroutine output_r_bin_em(ifn,is,ie,write_mode,out_name,r1d,r2d,r3d,r4d,r5d,c1d,c2d,c3d,c4d,c5d,ipe)
+
+  subroutine output_r_bin_em(ifn,is,ie,write_mode,out_name,r1d,r2d,r3d,r4d,r5d,c1d,c2d,c3d,c4d,c5d,ipe,io_status)
     use parallelization, only: nproc_id_global
     use communication,   only: comm_is_root
     implicit none
@@ -1020,22 +1126,34 @@ contains
     integer       :: ii,i_inf
     character(16) :: id_name
     
+    integer,intent(inout) :: io_status
+    integer :: io_unit,ios,info_unit,info_ios
+    character(:),allocatable :: target,info_target
+    if(io_status/=0)return
+
     select case(write_mode)
     case('single')
       if(comm_is_root(nproc_id_global)) then
-        open(ifn,file=resolve_path('data_for_restart/'//out_name// '.bin'),status='replace',form='unformatted',access='stream')
-        if    (present(r1d)) then; write(ifn) r1d(:)        ;
-        elseif(present(r2d)) then; write(ifn) r2d(:,:)      ;
-        elseif(present(r3d)) then; write(ifn) r3d(:,:,:)    ;
-        elseif(present(r4d)) then; write(ifn) r4d(:,:,:,:)  ;
-        elseif(present(r5d)) then; write(ifn) r5d(:,:,:,:,:);
-        elseif(present(c1d)) then; write(ifn) c1d(:)        ;
-        elseif(present(c2d)) then; write(ifn) c2d(:,:)      ;
-        elseif(present(c3d)) then; write(ifn) c3d(:,:,:)    ;
-        elseif(present(c4d)) then; write(ifn) c4d(:,:,:,:)  ;
-        elseif(present(c5d)) then; write(ifn) c5d(:,:,:,:,:);
+        target=resolve_path('data_for_restart/'//out_name// '.bin')
+        call restart_stage_open(target,io_unit,ios,.true.)
+        if(ios/=0)then
+          call restart_save_status(target,ios,io_status)
+          return
+        endif
+        if    (present(r1d)) then; write(io_unit,iostat=ios) r1d(:)        ;
+        elseif(present(r2d)) then; write(io_unit,iostat=ios) r2d(:,:)      ;
+        elseif(present(r3d)) then; write(io_unit,iostat=ios) r3d(:,:,:)    ;
+        elseif(present(r4d)) then; write(io_unit,iostat=ios) r4d(:,:,:,:)  ;
+        elseif(present(r5d)) then; write(io_unit,iostat=ios) r5d(:,:,:,:,:);
+        elseif(present(c1d)) then; write(io_unit,iostat=ios) c1d(:)        ;
+        elseif(present(c2d)) then; write(io_unit,iostat=ios) c2d(:,:)      ;
+        elseif(present(c3d)) then; write(io_unit,iostat=ios) c3d(:,:,:)    ;
+        elseif(present(c4d)) then; write(io_unit,iostat=ios) c4d(:,:,:,:)  ;
+        elseif(present(c5d)) then; write(io_unit,iostat=ios) c5d(:,:,:,:,:);
         end if
-        close(ifn)
+        call restart_stage_close(io_unit,ios)
+        if(ios==0)call restart_stage_commit(target,ios)
+        call restart_save_status(target,ios,io_status)
       end if
     case('all')
       !set i_inf
@@ -1047,31 +1165,95 @@ contains
       
       !output date
       ii = nproc_id_global; write(id_name,*) ii;
-      open(ifn+ii,file=resolve_path('data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.bin'),status='replace',&
-           form='unformatted',access='stream')
+      target=resolve_path('data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '.bin')
+      call restart_stage_open(target,io_unit,ios,.true.)
+      if(ios/=0)then
+        call restart_save_status(target,ios,io_status)
+        return
+      endif
       if(i_inf==1) then
-        if    (present(r1d)) then; write(ifn+ii) r1d(:)        ;
-        elseif(present(r2d)) then; write(ifn+ii) r2d(:,:)      ;
-        elseif(present(r3d)) then; write(ifn+ii) r3d(:,:,:)    ;
-        elseif(present(r4d)) then; write(ifn+ii) r4d(:,:,:,:)  ;
-        elseif(present(r5d)) then; write(ifn+ii) r5d(:,:,:,:,:);
-        elseif(present(c1d)) then; write(ifn+ii) c1d(:)        ;
-        elseif(present(c2d)) then; write(ifn+ii) c2d(:,:)      ;
-        elseif(present(c3d)) then; write(ifn+ii) c3d(:,:,:)    ;
-        elseif(present(c4d)) then; write(ifn+ii) c4d(:,:,:,:)  ;
-        elseif(present(c5d)) then; write(ifn+ii) c5d(:,:,:,:,:);
+        if    (present(r1d)) then; write(io_unit,iostat=ios) r1d(:)        ;
+        elseif(present(r2d)) then; write(io_unit,iostat=ios) r2d(:,:)      ;
+        elseif(present(r3d)) then; write(io_unit,iostat=ios) r3d(:,:,:)    ;
+        elseif(present(r4d)) then; write(io_unit,iostat=ios) r4d(:,:,:,:)  ;
+        elseif(present(r5d)) then; write(io_unit,iostat=ios) r5d(:,:,:,:,:);
+        elseif(present(c1d)) then; write(io_unit,iostat=ios) c1d(:)        ;
+        elseif(present(c2d)) then; write(io_unit,iostat=ios) c2d(:,:)      ;
+        elseif(present(c3d)) then; write(io_unit,iostat=ios) c3d(:,:,:)    ;
+        elseif(present(c4d)) then; write(io_unit,iostat=ios) c4d(:,:,:,:)  ;
+        elseif(present(c5d)) then; write(io_unit,iostat=ios) c5d(:,:,:,:,:);
         end if
       end if
-      close(ifn+ii)
+      call restart_stage_close(io_unit,ios)
+      if(ios/=0)then
+        call restart_save_status(target,ios,io_status)
+        return
+      endif
       
       !output information
-      open(ifn+ii,file=resolve_path('data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '_inf.bin'),status='replace',&
-           form='unformatted',access='stream')
-      write(ifn+ii) is(:); write(ifn+ii) ie(:); write(ifn+ii) i_inf; close(ifn+ii);
+      info_target=resolve_path('data_for_restart/'//out_name//'_'//trim(adjustl(id_name))// '_inf.bin')
+      call restart_stage_open(info_target,info_unit,info_ios,.true.)
+      if(info_ios/=0)then
+        call restart_save_status(info_target,info_ios,io_status)
+        return
+      endif
+      write(info_unit,iostat=info_ios) is(:)
+      if(info_ios==0)write(info_unit,iostat=info_ios) ie(:)
+      if(info_ios==0)write(info_unit,iostat=info_ios) i_inf
+      call restart_stage_close(info_unit,info_ios)
+      if(info_ios==0)call restart_stage_commit(info_target,info_ios)
+      if(info_ios==0)call restart_stage_commit(target,info_ios)
+      call restart_save_status(info_target,info_ios,io_status)
     end select
     
     return
   end subroutine output_r_bin_em
+
+  ! A pending sibling is exclusively created. Failed pending files are evidence;
+  ! callers must move them aside before retry. No fsync or multi-file transaction.
+  subroutine restart_stage_open(target,unit,ios,binary)
+    character(*),intent(in) :: target
+    integer,intent(out) :: unit,ios
+    logical,intent(in) :: binary
+    if(binary)then
+      open(newunit=unit,file=target//'.salmonpy-pending',status='new', &
+           form='unformatted',access='stream',iostat=ios)
+    else
+      open(newunit=unit,file=target//'.salmonpy-pending',status='new',iostat=ios)
+    endif
+  end subroutine restart_stage_open
+
+  subroutine restart_stage_close(unit,ios)
+    integer,intent(in) :: unit
+    integer,intent(inout) :: ios
+    integer :: close_ios
+    close(unit,iostat=close_ios)
+    if(ios==0)ios=close_ios
+  end subroutine restart_stage_close
+
+  subroutine restart_stage_commit(target,ios)
+    use,intrinsic :: iso_c_binding,only:c_int,c_char,c_null_char
+    character(*),intent(in) :: target
+    integer,intent(out) :: ios
+    interface
+      integer(c_int) function rename_file(old,new) bind(C,name='rename')
+        import c_int,c_char
+        character(c_char),intent(in) :: old(*),new(*)
+      end function
+    end interface
+    ios=int(rename_file(target//'.salmonpy-pending'//c_null_char,target//c_null_char))
+  end subroutine restart_stage_commit
+
+  subroutine restart_save_status(target,ios,status)
+    character(*),intent(in) :: target
+    integer,intent(in) :: ios
+    integer,intent(inout) :: status
+    if(ios/=0)then
+      status=ios
+      write(*,'(A,I0,2A)')'SALMONPY_RESTART_SAVE_ERROR iostat=',ios,' file=',target
+    endif
+  end subroutine restart_save_status
+
   
   !=========================================================================================
   != copy text file in fdtd ================================================================
@@ -1084,14 +1266,12 @@ contains
     character(len=1024) :: copy_txt
     
     if(comm_is_root(nproc_id_global)) then
-      !set unit number for input and output & I/O status
-      iun_inp  = 700
-      iun_out  = 701
+      !Each opened file owns its unit independently of the caller.
       istat_io = 0
   
       !open input and output files
-      open(iun_inp, file=resolve_path(file_inp), status='old'    , action='read' , iostat=istat_io)
-      open(iun_out, file=resolve_path(file_out), status='replace', action='write', iostat=istat_io)
+      open(newunit=iun_inp, file=resolve_path(file_inp), status='old'    , action='read' , iostat=istat_io)
+      open(newunit=iun_out, file=resolve_path(file_out), status='replace', action='write', iostat=istat_io)
   
       !copy
       do

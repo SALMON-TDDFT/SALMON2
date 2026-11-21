@@ -126,7 +126,6 @@ F90_SRCS = \
 ./rt/main_tddft.f90 \
 ./rt/taylor.f90 \
 ./rt/time_evolution_step.f90 \
-./ttm/ttm.f90 \
 ./maxwell/fdtd_eh.f90 \
 ./maxwell/main_maxwell.f90 \
 ./ms/input_checker_ms.f90 \

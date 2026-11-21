@@ -1,4 +1,449 @@
-#ifdef SALMONPY_TBMBJ_INPUT_PROBE
+#ifdef SALMONPY_AUTO_LAYOUT_PROBE
+program automatic_layout_host
+ use parallelization,only:setup_parallel,end_parallel,nproc_id_global,nproc_size_global
+ use set_numcpu,only:set_numcpu_general,iprefer_domain_distribution,check_numcpu
+ use parallelization,only:nproc_group_global
+ use structures,only:s_parallel_info
+ implicit none
+ type(s_parallel_info)::info
+ integer::status,u,expected(3)
+ call setup_parallel
+#ifdef SALMONPY_AUTO_LAYOUT_LEGACY
+ call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,info)
+ status=0
+#else
+ call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,info,status=status)
+#endif
+ if(nproc_size_global==7)then
+  if(status/=1)stop 71
+ else
+  if(status/=0.or..not.check_numcpu(nproc_group_global,info))stop 72
+  expected=1
+  if(nproc_size_global==2)expected(3)=2
+  if(any(info%nprgrid/=expected).or.info%npk/=1.or.info%nporbital/=1)stop 73
+  if(nproc_id_global==0)then
+   open(newunit=u,file='automatic-layout.data',status='new')
+   write(u,*)info%npk,info%nporbital,info%nprgrid
+   close(u)
+  endif
+ endif
+#ifndef SALMONPY_AUTO_LAYOUT_LEGACY
+ call set_numcpu_general(iprefer_domain_distribution,1,1,nproc_group_global,info,rspace_allowed=.false.,status=status)
+ if(nproc_size_global==1)then
+  if(status/=0)stop 74
+ else
+  if(status/=2)stop 75
+ endif
+#endif
+ ! A valid k-only split remains available to the general helper.
+#ifdef SALMONPY_AUTO_LAYOUT_LEGACY
+ call set_numcpu_general(iprefer_domain_distribution,nproc_size_global,1,nproc_group_global,info,rspace_allowed=.false.)
+#else
+ call set_numcpu_general(iprefer_domain_distribution,nproc_size_global,1,nproc_group_global,info, &
+                         rspace_allowed=.false.,status=status)
+ if(status/=0)stop 76
+#endif
+ if(.not.check_numcpu(nproc_group_global,info).or.any(info%nprgrid/=1))stop 77
+ if(nproc_id_global==0)print *,'automatic layout status and caller continuation PASS'
+ call end_parallel
+end program
+#elif defined(SALMONPY_FDTD_SPECTRUM_IO_PROBE)
+! Electromagnetic-only spectral lifecycle; no SCF/GS data.
+program fdtd_spectrum_io_host
+ use parallelization,only:setup_parallel,end_parallel,nproc_id_global
+ use math_constants,only:set_math_constants
+ use inputoutput,only:read_input,s_input_parser
+ use salmon_global,only:theory
+ use timer,only:timer_initialize
+ implicit none
+ type(s_input_parser)::parser
+ integer::status,j,held(3)=[600,601,602]
+ integer::map_energy,map_plane,map_window
+ character(2)::map_planes(3)
+ character(10)::map_windows(2)
+ character(128)::map_name
+ character(16)::mode,id,number
+ character(128)::names(3),actual
+ character(40)::outputs(7)=[character(40)::'fdtd_rt.data','fdtd_rt_e.data','fdtd_response.data', &
+   'fdtd_ase_with_wf.data','fdtd_ase_without_wf.data','fdtd_art_with_wf.data','fdtd_art_without_wf.data']
+ logical::opened
+ call set_math_constants
+ call setup_parallel
+ call read_input('inputfile',parser,status,native_host=.true.)
+ if(status/=0)stop 71
+ call timer_initialize
+ call get_command_argument(1,mode)
+ write(id,'(i0)')nproc_id_global
+ if(mode=='occupied')then
+  do j=1,3
+   write(number,'(i0)')held(j)
+   names(j)='host-'//trim(id)//'-'//trim(number)//'.data'
+   open(unit=held(j),file=trim(names(j)),status='new')
+   write(held(j),'(a)')'before'
+  enddo
+ endif
+ call main_maxwell
+ if(mode=='occupied')then
+  map_planes=['xy','yz','xz']
+  map_windows=[character(10)::'with_wf','without_wf']
+  do map_energy=1,2
+  do map_plane=1,3
+  do map_window=1,2
+   write(number,'(i0)')map_energy
+   map_name='obs1_ene'//trim(number)//'_'//map_planes(map_plane)//'_'//trim(map_windows(map_window))//'.data'
+   inquire(file=trim(map_name),opened=opened)
+   if(opened)stop 84
+  enddo
+  enddo
+  enddo
+  do j=1,size(outputs)
+   inquire(file=trim(outputs(j)),opened=opened)
+   if(opened)stop 83
+  enddo
+  do j=1,3
+   inquire(unit=held(j),opened=opened,name=actual)
+   if(.not.opened)stop 81
+   if(trim(actual)/=trim(names(j)))stop 82
+   write(held(j),'(a)')'after'
+   close(held(j))
+  enddo
+ endif
+ if(nproc_id_global==0)print *,'FDTD spectrum IO ownership PASS'
+ call end_parallel
+end program
+#elif defined(SALMONPY_FDTD_RESTART_IO_PROBE)
+! Synthetic electromagnetic restart arrays only; no electronic/GS data.
+program fdtd_restart_io_host
+ use mpi
+ use parallelization,only:setup_parallel,end_parallel,nproc_id_global,nproc_size_global,nproc_group_global
+ use salmon_global,only:directory_read_data
+ use common_maxwell,only:input_r_txt_em,output_r_txt_em,input_r_bin_em,output_r_bin_em,txtfile_copy_em
+ implicit none
+ integer::save_status=0
+ integer::is(5),ie(5),i,j,k,u,ierr,ri,ia(2),ib(2),held(4)=[600,601,700,701]
+ real(8)::rr,ra(2),rb(2),v(32),a1(2),a2(2,2),a3(2,2,2),a4(2,2,2,2),a5(2,2,2,2,2)
+ real(8)::b1(2),b2(2,2),b3(2,2,2),b4(2,2,2,2),b5(2,2,2,2,2)
+ complex(8)::c1(2),c2(2,2),c3(2,2,2),c4(2,2,2,2),c5(2,2,2,2,2)
+ complex(8)::d1(2),d2(2,2),d3(2,2,2),d4(2,2,2,2),d5(2,2,2,2,2)
+ character(16)::mode,id,name,kind
+ character(128)::host_names(4),actual
+ logical::occupied,opened
+ call setup_parallel
+ call get_command_argument(1,mode)
+ occupied=mode=='occupied'
+ write(id,'(i0)')nproc_id_global
+ if(nproc_id_global==0)call execute_command_line('mkdir data_for_restart')
+ call MPI_Barrier(nproc_group_global,ierr)
+ directory_read_data='data_for_restart'
+ if(occupied)then
+  do j=1,4
+   write(name,'(i0)')held(j)
+   host_names(j)='host-'//trim(id)//'-'//trim(name)//'.data'
+   open(unit=held(j),file=trim(host_names(j)),status='new')
+   write(held(j),'(a)')'before'
+  enddo
+ endif
+ ia=[7,11];ra=[.125d0,1.75d0]
+ call output_r_txt_em(600,1,1,'single','integer',i0d=7,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_txt_em(600,1,1,'integer',i0d=ri)
+ if(ri/=7)stop 31
+ call check_units
+ call output_r_txt_em(600,1,2,'single','integers',i1d=ia,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call input_r_txt_em(600,1,2,'integers',i1d=ib)
+ if(any(ib/=ia))stop 32
+ call output_r_txt_em(600,1,1,'single','real',r0d=.125d0,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call input_r_txt_em(600,1,1,'real',r0d=rr)
+ if(rr/=.125d0)stop 33
+ call output_r_txt_em(600,1,2,'single','reals',r1d=ra,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call input_r_txt_em(600,1,2,'reals',r1d=rb)
+ if(any(rb/=ra))stop 34
+ call check_units
+ call output_r_txt_em(600,1,2,'all','local_reals',r1d=ra,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_txt_em(600,1,2,'local_reals_0',r1d=rb)
+ if(any(rb/=ra))stop 35
+ call check_units
+ is=1;ie=2;is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ do i=1,32
+  v(i)=real(i,8)/8d0
+ enddo
+ a1=v(:2);a2=reshape(v(:4),shape(a2));a3=reshape(v(:8),shape(a3))
+ a4=reshape(v(:16),shape(a4));a5=reshape(v,shape(a5))
+ c1=cmplx(a1,-a1,8);c2=cmplx(a2,-a2,8);c3=cmplx(a3,-a3,8)
+ c4=cmplx(a4,-a4,8);c5=cmplx(a5,-a5,8)
+ call output_r_bin_em(600,is,ie,'single','single_r1',r1d=a1,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r1',r1d=b1)
+ if(any(a1/=b1))stop 41
+ call check_units
+ a1=a1+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_r1',r1d=a1,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r1',r1d=b1)
+ if(any(a1/=b1))stop 42
+ call check_units
+ b1=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r1',r1d=b1)
+ if(any(b1/=(a1+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ a1=a1-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'single','single_r2',r2d=a2,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r2',r2d=b2)
+ if(any(a2/=b2))stop 41
+ call check_units
+ a2=a2+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_r2',r2d=a2,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r2',r2d=b2)
+ if(any(a2/=b2))stop 42
+ call check_units
+ b2=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r2',r2d=b2)
+ if(any(b2/=(a2+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ a2=a2-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'single','single_r3',r3d=a3,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r3',r3d=b3)
+ if(any(a3/=b3))stop 41
+ call check_units
+ a3=a3+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_r3',r3d=a3,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r3',r3d=b3)
+ if(any(a3/=b3))stop 42
+ call check_units
+ b3=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r3',r3d=b3)
+ if(any(b3/=(a3+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ a3=a3-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'single','single_r4',r4d=a4,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r4',r4d=b4)
+ if(any(a4/=b4))stop 41
+ call check_units
+ a4=a4+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_r4',r4d=a4,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r4',r4d=b4)
+ if(any(a4/=b4))stop 42
+ call check_units
+ b4=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r4',r4d=b4)
+ if(any(b4/=(a4+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ a4=a4-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'single','single_r5',r5d=a5,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r5',r5d=b5)
+ if(any(a5/=b5))stop 41
+ call check_units
+ a5=a5+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_r5',r5d=a5,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r5',r5d=b5)
+ if(any(a5/=b5))stop 42
+ call check_units
+ b5=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r5',r5d=b5)
+ if(any(b5/=(a5+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ a5=a5-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'single','single_c1',c1d=c1,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c1',c1d=d1)
+ if(any(c1/=d1))stop 41
+ call check_units
+ c1=c1+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_c1',c1d=c1,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c1',c1d=d1)
+ if(any(c1/=d1))stop 42
+ call check_units
+ d1=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c1',c1d=d1)
+ if(any(d1/=(c1+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ c1=c1-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'single','single_c2',c2d=c2,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c2',c2d=d2)
+ if(any(c2/=d2))stop 41
+ call check_units
+ c2=c2+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_c2',c2d=c2,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c2',c2d=d2)
+ if(any(c2/=d2))stop 42
+ call check_units
+ d2=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c2',c2d=d2)
+ if(any(d2/=(c2+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ c2=c2-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'single','single_c3',c3d=c3,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c3',c3d=d3)
+ if(any(c3/=d3))stop 41
+ call check_units
+ c3=c3+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_c3',c3d=c3,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c3',c3d=d3)
+ if(any(c3/=d3))stop 42
+ call check_units
+ d3=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c3',c3d=d3)
+ if(any(d3/=(c3+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ c3=c3-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'single','single_c4',c4d=c4,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c4',c4d=d4)
+ if(any(c4/=d4))stop 41
+ call check_units
+ c4=c4+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_c4',c4d=c4,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c4',c4d=d4)
+ if(any(c4/=d4))stop 42
+ call check_units
+ d4=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c4',c4d=d4)
+ if(any(d4/=(c4+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ c4=c4-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'single','single_c5',c5d=c5,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c5',c5d=d5)
+ if(any(c5/=d5))stop 41
+ call check_units
+ c5=c5+real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','local_c5',c5d=c5,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c5',c5d=d5)
+ if(any(c5/=d5))stop 42
+ call check_units
+ d5=0
+ ! Cross-rank file reading requires every writer to have completed.
+ call MPI_Barrier(nproc_group_global,ierr)
+ k=mod(nproc_id_global+1,nproc_size_global)
+ is(1)=2*k+1;ie(1)=is(1)+1
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c5',c5d=d5)
+ if(any(d5/=(c5+real(k-nproc_id_global,8)*8d0)))stop 43
+ call check_units
+ is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
+ c5=c5-real(nproc_id_global,8)*8d0
+ call output_r_bin_em(600,is,ie,'all','inactive',r1d=a1,ipe=0,io_status=save_status)
+ if(save_status/=0)error stop "restart save failed"
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','inactive',r1d=b1)
+ if(any(b1/=0d0))stop 44
+ call check_units
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r1',r1d=b1,ipe=0)
+ if(any(b1/=0d0))stop 45
+ call check_units
+ if(nproc_id_global==0)then
+  open(newunit=u,file='copy-source.data',status='new')
+  write(u,'(a)')'first record'
+  write(u,'(a)')'second record  '
+  close(u)
+ endif
+ call txtfile_copy_em('copy-source.data','copy-result.data')
+ call check_units
+ if(occupied)then
+  do j=1,4
+   write(held(j),'(a)')'after'
+   close(held(j))
+  enddo
+ endif
+ call MPI_Barrier(nproc_group_global,ierr)
+ if(nproc_id_global==0)print *,'FDTD restart IO ownership PASS'
+ call end_parallel
+contains
+ subroutine check_units
+  integer::m
+  if(.not.occupied)return
+  do m=1,4
+   inquire(unit=held(m),opened=opened,name=actual)
+   if(.not.opened)stop 81
+   if(trim(actual)/=trim(host_names(m)))stop 82
+  enddo
+ end subroutine
+end program
+#elif defined(SALMONPY_TBMBJ_INPUT_PROBE)
 #include "config.h"
 program tbmbj_input_host
  use mpi
@@ -385,10 +830,14 @@ contains
   character(c_char),intent(in)::path(*)
   integer(c_int),value::mode
   character(4096)::filename
+#ifndef SALMONPY_HOST_UNIT_ID
+#define SALMONPY_HOST_UNIT_ID 30
+#endif
+  integer,parameter::held_unit=SALMONPY_HOST_UNIT_ID
   integer::i,ios
   logical::opened
   test_host_unit=1
-  inquire(unit=30,opened=opened,iostat=ios)
+  inquire(unit=held_unit,opened=opened,iostat=ios)
   if(ios/=0)return
   select case(mode)
   case(0)
@@ -399,15 +848,15 @@ contains
     filename(i:i)=path(i)
    enddo
    if(i>len(filename))return
-   open(unit=30,file=trim(filename),status='new',action='write',iostat=ios)
+   open(unit=held_unit,file=trim(filename),status='new',action='write',iostat=ios)
    if(ios/=0)return
-   write(30,'(a)',iostat=ios)'host-before'
+   write(held_unit,'(a)',iostat=ios)'host-before'
   case(1)
    if(.not.opened)return
-   write(30,'(a)',iostat=ios)'host-after'
+   write(held_unit,'(a)',iostat=ios)'host-after'
   case(2)
    if(.not.opened)return
-   close(30,iostat=ios)
+   close(held_unit,iostat=ios)
   case default
    return
   end select

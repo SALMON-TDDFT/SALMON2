@@ -739,7 +739,7 @@ end subroutine check_ffte_condition
 
 !===================================================================================================================================
 
-subroutine init_grid_parallel(info,lg,mg)
+subroutine init_grid_parallel(info,lg,mg,status)
   use communication, only: comm_is_root
   use salmon_global, only: yn_periodic, quiet
   use structures, only: s_rgrid,s_parallel_info
@@ -747,10 +747,12 @@ subroutine init_grid_parallel(info,lg,mg)
   type(s_parallel_info),intent(in)    :: info
   type(s_rgrid),        intent(inout) :: lg
   type(s_rgrid),        intent(inout) :: mg
+  integer,optional,intent(out) :: status
   !
   integer :: myrank,nproc,nproc_domain_orbital(3),nproc_k,nproc_ob
   integer :: i1,i2,i3,i4,i5,ibox,j,nsize,npo(3)
   
+  if(present(status))status=0
   myrank = info%id_rko
   nproc  = info%isize_rko
 
@@ -794,6 +796,14 @@ subroutine init_grid_parallel(info,lg,mg)
   mg%ie(:) = mg%ie_all(:,myrank)
 
   mg%num(:) = mg%ie(:)-mg%is(:)+1
+
+  ! Every rank already owns all domain bounds: reject the existing minimum
+  ! consistently without another collective, before any overlap allocation.
+  if(present(status))then
+    if(any(mg%ie_all-mg%is_all+1<Nd))then
+      status=1;return
+    endif
+  endif
 
   mg%is_overlap(1:3) = mg%is(1:3)-nd
   mg%ie_overlap(1:3) = mg%ie(1:3)+nd

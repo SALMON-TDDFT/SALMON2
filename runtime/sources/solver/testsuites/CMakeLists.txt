@@ -13,8 +13,7 @@ add_custom_target("check_test_requirements" COMMAND ${CMAKE_CTEST_COMMAND} DEPEN
 add_custom_target("test_preparations" ALL
                   COMMAND ${CMAKE_COMMAND} -E cmake_echo_color --cyan "generate ctest scripts"
                   COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/pseudo"  "${CMAKE_CURRENT_BINARY_DIR}/pseudo"
-                  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/samples"         "${CMAKE_BINARY_DIR}/samples"
-                  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src/ttm/example" "${CMAKE_BINARY_DIR}/example")
+                  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/samples"         "${CMAKE_BINARY_DIR}/samples")
 
 # test directories
 if (USE_OPENACC)
@@ -50,7 +49,6 @@ if (USE_OPENACC)
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/207_rt_wf_slice")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/301_classicEM_isolated_lr")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/302_classicEM_periodic_lr")
-  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/303_classicEM_isolated_pulse_ttm")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/401_bulk_Si_gs_dp_libxc_pz")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/410_bulk_Si_gs_initial_density")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/411_bulk_Si_gs_symmetry")
@@ -120,7 +118,6 @@ else ()
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/207_rt_wf_slice")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/301_classicEM_isolated_lr")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/302_classicEM_periodic_lr")
-  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/303_classicEM_isolated_pulse_ttm")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/401_bulk_Si_gs_dp_libxc_pz")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/410_bulk_Si_gs_initial_density")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/411_bulk_Si_gs_symmetry")

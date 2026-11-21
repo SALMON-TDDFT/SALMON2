@@ -14,11 +14,18 @@ def main():
     p.add_argument('--reference-build',type=Path)
     p.add_argument('--directory-scope',action='store_true')
     p.add_argument('--host-unit-library',action='store_true')
+    p.add_argument('--host-unit-number',type=int,default=30,help='explicit unit for the tiny host-ownership fixture')
     p.add_argument('--host-timer-library',action='store_true')
     p.add_argument('--host-mpi-library',action='store_true')
     p.add_argument('--checkpoint-scratch',action='store_true')
     p.add_argument('--scalar-inquiries',action='store_true')
     p.add_argument('--finite-source',type=Path)
+    p.add_argument('--auto-layout-kernel',action='store_true',help='automatic-layout status/legacy choice controls on MPI1/2/7')
+    p.add_argument('--removed-ttm-probe',action='store_true',help='verify obsolete TTM input is inert in the maintained solver')
+    p.add_argument('--spectrum-faults',action='store_true',help='test LR/ASE/ART optional-spectrum file failures')
+    p.add_argument('--plane-map-faults',action='store_true',help='focus plane spectra on two energies and optional-output failures')
+    p.add_argument('--fdtd-spectrum-io',action='store_true',help='EM spectral output/host-unit controls; no GS')
+    p.add_argument('--fdtd-restart-io',action='store_true',help='synthetic EM restart/helper file-unit ownership and exact-byte controls; no GS')
     p.add_argument('--field-close',action='store_true')
     p.add_argument('--abi-contract',action='store_true')
     p.add_argument('--legacy-settings-warning',action='store_true',help='check one-time HSE compatibility warning without GS creation')
@@ -35,6 +42,10 @@ def main():
     p.add_argument('--fc',default='mpifort');p.add_argument('--ranks',type=int,default=2)
     p.add_argument('--checker',type=Path,default=Path(__file__).with_name('check_forbidden_eigensolvers.py'))
     args=p.parse_args()
+    if args.spectrum_faults and (not args.fdtd_spectrum_io or args.plane_map_faults):
+        p.error('spectrum-faults requires fdtd-spectrum-io and excludes plane-map-faults')
+    if args.plane_map_faults and not args.fdtd_spectrum_io:
+        p.error('plane-map-faults requires fdtd-spectrum-io')
     if args.state_symmetry and not (args.abi_state and args.fast_hse):
         p.error('state-symmetry is a fast-HSE ABI-state fixture option')
     if args.build.is_dir():args.build=args.build/'build.json'
@@ -43,6 +54,193 @@ def main():
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=False)
     checker=args.checker.resolve();fixture=root/'tests/native/test_io_ownership.f90'
     subprocess.run([sys.executable,str(checker),'--source-root',str(fixture.parent)],check=True)
+    if args.auto_layout_kernel:
+        def compile_layout(receipt,label,legacy=False):
+            record=json.loads(receipt.read_text());library=Path(record['library'])
+            digest=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
+            if digest(library)!=record['sha256']:raise ValueError('runtime hash changed')
+            command=record.get('configure_command') or record['commands'][0]
+            build=Path(command[command.index('-B')+1]);obj=out/(label+'.o');exe=out/(label+'-host')
+            flags=['-DSALMONPY_AUTO_LAYOUT_PROBE']+(['-DSALMONPY_AUTO_LAYOUT_LEGACY'] if legacy else [])
+            subprocess.run([args.fc,'-cpp',*flags,'-I'+str(build),'-c',str(fixture),'-o',str(obj)],check=True)
+            for objects in (out,build.parent):
+                subprocess.run([sys.executable,str(checker),'--object-tree',str(objects)],check=True)
+            subprocess.run(mpi_link_command([args.fc,str(obj),str(library),'-o',str(exe)]),check=True)
+            return exe,library,record,digest(exe)
+        new=compile_layout(args.build,'layout')
+        old=compile_layout(args.reference_build,'reference',True) if args.reference_build else None
+        for ranks in (1,2,7):
+            for label,item in [('new',new)]+([('reference',old)] if old and ranks!=7 else []):
+                exe,library,record,exe_sha=item;work=out/f'{label}-{ranks}';work.mkdir()
+                if hashlib.sha256(exe.read_bytes()).hexdigest()!=exe_sha or hashlib.sha256(library.read_bytes()).hexdigest()!=record['sha256']:
+                    raise ValueError('validated executable/runtime changed')
+                with (work/'run.log').open('w') as log:
+                    subprocess.run([args.mpiexec,'-n',str(ranks),str(exe)],cwd=work,check=True,timeout=120,
+                        stdout=log,stderr=subprocess.STDOUT,env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'})
+                if 'automatic layout status and caller continuation PASS' not in (work/'run.log').read_text():raise ValueError('incomplete layout fixture')
+            if old and ranks!=7:
+                if (out/f'new-{ranks}/automatic-layout.data').read_bytes()!=(out/f'reference-{ranks}/automatic-layout.data').read_bytes():
+                    raise ValueError('automatic layout choice changed')
+        (out/'result.json').write_text(json.dumps({'status':'passed','ranks':[1,2,7],
+            'old_automatic_choices_exact':bool(old),'unsupported_prime_status':1,'nonorthogonal_no_split_status':2,
+            'supported_k_only_continuation':True,'GS_data_collected':False},indent=2)+'\n')
+        return
+    if args.fdtd_spectrum_io:
+        import numpy as np
+        from salmonpy.fdtd import FDTD,Impulse,PlaneWave,Boundaries
+        from salmonpy.geometry import Grid,Geometry,Shape
+        from salmonpy.ld import LorentzDrude
+        from salmonpy.fields import AcosPulse
+        def compile_spectrum(receipt,label):
+            record=json.loads(receipt.read_text());library=Path(record['library'])
+            if hashlib.sha256(library.read_bytes()).hexdigest()!=record['sha256']:raise ValueError('runtime hash changed')
+            command=record.get('configure_command') or record['commands'][0]
+            build=Path(command[command.index('-B')+1]);obj=out/(label+'.o');exe=out/(label+'-host')
+            subprocess.run([args.fc,'-cpp','-DSALMONPY_FDTD_SPECTRUM_IO_PROBE','-I'+str(build),
+                            '-c',str(fixture),'-o',str(obj)],check=True)
+            for objects in (out,build.parent):
+                subprocess.run([sys.executable,str(checker),'--object-tree',str(objects)],check=True)
+            subprocess.run(mpi_link_command([args.fc,str(obj),str(library),'-o',str(exe)]),check=True)
+            return exe,library,record,hashlib.sha256(exe.read_bytes()).hexdigest()
+        new=compile_spectrum(args.build,'spectrum')
+        old=compile_spectrum(args.reference_build,'reference') if args.reference_build else None
+        cases=(('planes',) if args.plane_map_faults else ('art','ase','lr-isolated','lr-periodic','lr-background') if args.spectrum_faults else ('art','ase','lr-isolated','lr-periodic','lr-background','planes'))
+        def inputs(case,ranks):
+            periodic=case in ('lr-periodic','art')
+            grid=Grid((40,40,40),(2.,2.,2.))
+            geometry=Geometry(grid,(Shape('box',(2.,4.,4.),(7.,1.,1.),material=1),))
+            material=LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[0.],damping=[2.],
+                                 epsilon_infinity=1.7 if case=='lr-background' else 1.)
+            source=Impulse() if case.startswith('lr-') else PlaneWave(AcosPulse(.001,20.,.15),0,16. if case=='art' else -21. if case=='ase' else -16.)
+            calc=FDTD(geometry,(material,),.003,64 if args.plane_map_faults else 160 if case in ('ase','art') else 128,source=source,observations=((1.,1.,1.),),observation_stride=8,boundaries=Boundaries(('pml','pml','periodic','periodic','periodic','periodic')) if case=='art' else (Boundaries(('periodic',)*6) if periodic else Boundaries()))
+            text=calc.input_text()+f'\n&parallel\n nproc_k=1, nproc_ob=1, nproc_rgrid=1,{ranks},1\n/\n'
+            if periodic:text=text.replace("yn_periodic = 'n'","yn_periodic = 'y'",1)
+            if case=='art':
+                # Native periodic batch coordinates use0..L; the Python geometry
+                # builder describes centered coordinates. Shift this native input.
+                text=re.sub(r'ori_s\(1,:\)\s*=.*','ori_s(1,:) = 32,40,40',text)
+            extra=''
+            if case=='planes':extra=("obs_plane_ene_em(1,1:2)=0.2,0.4" if args.plane_map_faults else "obs_plane_ene_em(1,1)=0.2, yn_obs_plane_em(1)='y'")
+            if case=='ase':extra=("ase_num_em=3, ase_ene_min_em=.2, ase_ene_max_em=.6, "
+                "ase_smedia_id_em=0, ase_box_cent_em=8,0,0, ase_box_size_em=8,12,12")
+            if case=='art':extra=("art_num_em=3, art_ene_min_em=.2, art_ene_max_em=.6, "
+                "art_smedia_id_em=0, art_plane_bot_em=24,0,0, art_plane_top_em=48,0,0")
+            return text.replace('&maxwell','&maxwell\n '+extra,1),calc.input_assets()
+        def payloads(work):
+            return {str(f.relative_to(work)):f.read_bytes() for f in work.rglob('*')
+                    if f.is_file() and f.name not in ('inputfile','run.log','ttm.inp_ttm') and not f.name.startswith('host-')}
+        results=[]
+        for ranks in sorted({1,args.ranks}):
+            for case in cases:
+                text,assets=inputs(case,ranks)
+                for mode,item in [('control',new),('occupied',new)]+([('reference',old)] if old else [])+([('fault-open',new),('fault-write',new)] if args.plane_map_faults or args.spectrum_faults else []):
+                    exe,library,record,exe_sha=item
+                    work=out/f'{case}-{mode}-{ranks}';work.mkdir();(work/'inputfile').write_text(text)
+                    for name,value in assets.items():(work/name).write_text(value)
+                    if mode.startswith('fault-'):
+                        target=work/('obs1_ene1_xy_with_wf.data' if args.plane_map_faults else 'fdtd_ase_with_wf.data' if case=='ase' else 'fdtd_art_with_wf.data' if case=='art' else 'fdtd_rt.data')
+                        if mode=='fault-open':target.mkdir()
+                        else:
+                            target.write_bytes(b'');target.chmod(0o400)
+                    if args.removed_ttm_probe and mode!='reference':
+                        (work/'ttm.inp_ttm').write_text('obsolete malformed TTM input must never be read\n')
+                    if hashlib.sha256(exe.read_bytes()).hexdigest()!=exe_sha or hashlib.sha256(library.read_bytes()).hexdigest()!=record['sha256']:
+                        raise ValueError('validated executable/runtime changed')
+                    with (work/'run.log').open('w') as log:
+                        subprocess.run([args.mpiexec,'-n',str(ranks),str(exe),'occupied' if mode.startswith('fault-') else mode if mode!='reference' else 'control'],
+                            cwd=work,check=True,timeout=120,stdout=log,stderr=subprocess.STDOUT,
+                            env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'})
+                    if 'FDTD spectrum IO ownership PASS' not in (work/'run.log').read_text():raise ValueError('incomplete spectrum probe')
+                    if mode=='occupied' or mode.startswith('fault-'):
+                        hosts=list(work.glob('host-*.data'))
+                        if len(hosts)!=3*ranks or any(f.read_text()!='before\nafter\n' for f in hosts):raise ValueError('host files modified')
+                work=out/f'{case}-occupied-{ranks}'
+                expected={'lr-isolated':['fdtd_rt.data','fdtd_response.data'],
+                    'lr-periodic':['fdtd_rt.data','fdtd_rt_e.data','fdtd_response.data'],
+                    'lr-background':['fdtd_rt.data'],
+                    'ase':['fdtd_ase_with_wf.data','fdtd_ase_without_wf.data'],
+                    'art':['fdtd_art_with_wf.data','fdtd_art_without_wf.data']}.get(case,[])
+                if case=='planes':
+                    expected=[f.name for f in work.glob('obs1_*with*wf*.data')]
+                    if len(expected)!=(12 if args.plane_map_faults else 6):raise ValueError('missing plane spectra')
+                for name in expected:
+                    values=np.loadtxt(work/name)
+                    if not values.size or not np.isfinite(values).all():raise ValueError('nonfinite/empty spectral output: '+name)
+                if args.removed_ttm_probe and (work/'ttm_rt.data').exists():raise ValueError('removed TTM activated')
+                control=payloads(out/f'{case}-control-{ranks}')
+                if control!=payloads(out/f'{case}-occupied-{ranks}'):raise ValueError('occupied spectrum output changed: '+case)
+                if old and control!=payloads(out/f'{case}-reference-{ranks}'):raise ValueError('previous spectrum output changed: '+case)
+                if args.plane_map_faults or args.spectrum_faults:
+                    target=('obs1_ene1_xy_with_wf.data' if args.plane_map_faults else 'fdtd_ase_with_wf.data' if case=='ase' else 'fdtd_art_with_wf.data' if case=='art' else 'fdtd_rt.data')
+                    retained={k:v for k,v in control.items() if k!=target}
+                    for fault in ('fault-open','fault-write'):
+                        work=out/f'{case}-{fault}-{ranks}'
+                        actual={k:v for k,v in payloads(work).items() if k!=target}
+                        if actual!=retained:raise ValueError('other output changed after failed plane map: '+fault)
+                        warnings=[line for line in (work/'run.log').read_text().splitlines() if ('SALMONPY_FREQUENCY_MAP_WARNING' if args.plane_map_faults else 'SALMONPY_OPTIONAL_SPECTRUM_WARNING') in line]
+                        if len(warnings)!=1:raise ValueError('missing/repeated map warning: '+fault)
+                        if fault=='fault-write' and 'iostat=5007' not in warnings[0]:raise ValueError('read-only write was not tested')
+                results.append({'case':case,'ranks':ranks,'output_files':len(control)})
+        (out/'result.json').write_text(json.dumps({'status':'passed','cases':results,'host_units':[600,601,602],
+            'GS_data_collected':False,'obsolete_ttm_input_inert':args.removed_ttm_probe,'previous_runtime_bytes_exact':bool(old),
+            'control_occupied_output_bytes_exact':True,'plane_map_faults':args.plane_map_faults,'spectrum_faults':args.spectrum_faults,'native_coupled_profile_extended':False},indent=2)+'\n')
+        return
+    if args.fdtd_restart_io:
+        record=json.loads(args.build.read_text());library=Path(record['library'])
+        digest=lambda path:hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest(library)!=record['sha256']:raise ValueError('runtime hash changed')
+        command=record.get('configure_command') or record['commands'][0]
+        build=Path(command[command.index('-B')+1]);obj=out/'restart-io.o';exe=out/'restart-io-host'
+        subprocess.run([args.fc,'-cpp','-DSALMONPY_FDTD_RESTART_IO_PROBE','-I'+str(build),
+                        '-c',str(fixture),'-o',str(obj)],check=True)
+        for objects in (out,build.parent):
+            subprocess.run([sys.executable,str(checker),'--object-tree',str(objects)],check=True)
+        subprocess.run(mpi_link_command([args.fc,str(obj),str(library),'-o',str(exe)]),check=True)
+        exe_sha=digest(exe)
+        old_exe=None;old_sha=None;old_library=None;old_record=None
+        if args.reference_build:
+            old_record=json.loads(args.reference_build.read_text());old_library=Path(old_record['library'])
+            if digest(old_library)!=old_record['sha256']:raise ValueError('reference runtime hash changed')
+            command=old_record.get('configure_command') or old_record['commands'][0]
+            old_build=Path(command[command.index('-B')+1]);old_obj=out/'reference.o';old_exe=out/'reference-host'
+            subprocess.run([args.fc,'-cpp','-DSALMONPY_FDTD_RESTART_IO_PROBE','-I'+str(old_build),
+                            '-c',str(fixture),'-o',str(old_obj)],check=True)
+            for objects in (out,old_build.parent):
+                subprocess.run([sys.executable,str(checker),'--object-tree',str(objects)],check=True)
+            subprocess.run(mpi_link_command([args.fc,str(old_obj),str(old_library),'-o',str(old_exe)]),check=True)
+            old_sha=digest(old_exe)
+        for ranks in sorted({1,args.ranks}):
+            for mode in ('control','occupied'):
+                work=out/f'{mode}-{ranks}';work.mkdir()
+                if digest(exe)!=exe_sha or digest(library)!=record['sha256']:raise ValueError('validated executable/runtime changed')
+                with (work/'run.log').open('w') as log:
+                    subprocess.run([args.mpiexec,'-n',str(ranks),str(exe),mode],cwd=work,check=True,timeout=120,
+                        env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'},stdout=log,stderr=subprocess.STDOUT)
+                if 'FDTD restart IO ownership PASS' not in (work/'run.log').read_text():raise ValueError('incomplete fixture')
+                if mode=='occupied':
+                    for f in work.glob('host-*.data'):
+                        if f.read_text()!='before\nafter\n':raise ValueError('host file modified')
+            def payloads(directory):
+                return {str(f.relative_to(directory)):f.read_bytes() for f in directory.rglob('*')
+                        if f.is_file() and f.name!='run.log' and not f.name.startswith('host-')}
+            if payloads(out/f'control-{ranks}')!=payloads(out/f'occupied-{ranks}'):
+                raise ValueError('restart/helper output bytes changed')
+            if old_exe is not None:
+                work=out/f'reference-{ranks}';work.mkdir()
+                if digest(old_exe)!=old_sha or digest(old_library)!=old_record['sha256']:
+                    raise ValueError('validated reference executable/runtime changed')
+                with (work/'run.log').open('w') as log:
+                    subprocess.run([args.mpiexec,'-n',str(ranks),str(old_exe),'control'],cwd=work,check=True,timeout=120,
+                        env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'},stdout=log,stderr=subprocess.STDOUT)
+                if 'FDTD restart IO ownership PASS' not in (work/'run.log').read_text():raise ValueError('incomplete reference')
+                if payloads(work)!=payloads(out/f'control-{ranks}'):
+                    raise ValueError('previous-runtime restart/helper output bytes changed')
+        (out/'result.json').write_text(json.dumps({'status':'passed','ranks':sorted({1,args.ranks}),
+            'runtime_sha256':record['sha256'],'executable_sha256':exe_sha,'host_units':[600,601,700,701],
+            'synthetic_only':True,'GS_data_collected':False,'real_complex_array_dimensions':[1,2,3,4,5],
+            'same_and_remapping_paths':True,'previous_runtime_bytes_exact':old_exe is not None,
+            'reference_runtime_sha256':old_record['sha256'] if old_record else None,'control_occupied_output_bytes_exact':True},indent=2)+'\n')
+        return
     if args.tbmbj_input:
         import numpy as np
         from importlib.resources import files
@@ -386,12 +584,14 @@ end subroutine
             extra=['-DSALMONPY_HOST_MPI_PROBE' if args.host_mpi_library else '-DSALMONPY_HOST_TIMER_PROBE','-I'+str(build)]
             libraries=[str(runtime)]
             subprocess.run([sys.executable,str(checker),'--object-tree',str(build.parent)],check=True)
+        if args.host_unit_number<1:raise ValueError('positive host unit required')
+        extra.append('-DSALMONPY_HOST_UNIT_ID='+str(args.host_unit_number))
         subprocess.run([args.fc,'-cpp','-DSALMONPY_HOST_UNIT_PROBE',*extra,'-fPIC','-J'+str(out),
                         '-c',str(fixture),'-o',str(obj)],check=True)
         subprocess.run([sys.executable,str(checker),'--object-tree',str(out)],check=True)
         subprocess.run(mpi_link_command([args.fc,str(obj),*libraries,'-o',str(lib)],shared=True),check=True)
         (out/'result.json').write_text(json.dumps({'library':str(lib),
-            'sha256':hashlib.sha256(lib.read_bytes()).hexdigest(),'runtime_sha256':record['sha256'] if args.host_timer_library or args.host_mpi_library else None,'status':'built-and-audited'})+'\n')
+            'sha256':hashlib.sha256(lib.read_bytes()).hexdigest(),'runtime_sha256':record['sha256'] if args.host_timer_library or args.host_mpi_library else None,'host_unit':args.host_unit_number,'status':'built-and-audited'})+'\n')
         return
     def compile_fixture(receipt,label,fixture=fixture):
         record=json.loads(receipt.read_text());library=Path(record['library'])
