@@ -116,6 +116,7 @@ class NativeEHField:
         self.context=context;self.lib=lib;self.dt=calculation.dt;self.capacity=calculation.steps
         self.step_index=0;self.A=np.zeros((len(self.point_ids),3));self.E=np.zeros_like(self.A)
         self.closed=False;self.initialized=False;self.failed=False
+        self.current_rows=None;self.current_rows_by_rank=None
         from .field_input import _real
         xyz=np.column_stack([calculation.geometry.grid.coordinates[d][indices[:,d]] for d in range(3)])
         self.sample_positions=_real(xyz,(len(self.point_ids),3),'macro sample positions')
@@ -146,6 +147,18 @@ class NativeEHField:
                       1013: "a yn_* option only accepts y or n (case-insensitive)"}.get(
                           code, 'native field initialization rejected')
             _agree(comm,f'{reason} (native status {code})' if code else None)
+            query=getattr(lib,'sp_eh_current_mask',None)
+            if query is not None and getattr(lib,'sp_eh_step_owned',None) is not None:
+                query.argtypes=[c.c_int,np.ctypeslib.ndpointer(dtype=np.int32,ndim=1,flags='C_CONTIGUOUS')]
+                query.restype=c.c_int
+                mask=np.empty(len(self.point_ids),dtype=np.int32)
+                code=self._call(query,len(self.point_ids),mask)
+                _agree(comm,'native current ownership query failed' if code else None)
+                self.current_rows=np.flatnonzero(mask).astype(np.intp)
+                self.current_rows_by_rank=tuple(np.asarray(rows,dtype=np.intp) for rows in comm.allgather(self.current_rows.tolist()))
+                covered={int(row) for rows in self.current_rows_by_rank for row in rows}
+                _agree(comm,'native current ownership does not cover mapped points' if covered!=set(range(len(self.point_ids))) else None)
+
         except BaseException:
             self.failed=True
             self.close();raise
@@ -211,17 +224,27 @@ class NativeEHField:
         return _directory_call(self.lib,self.context.solver_comm,self.directory,fn,*args,minimum_protocol=3)
 
     def advance(self,J_previous):
+        """Advance with identical global point currents on every field rank."""
+        return self._advance(J_previous,owned=False)
+
+    def advance_owned(self,J_previous):
+        """Coupling path: only current_rows are meaningful off the field leader."""
+        if self.current_rows is None:return self.advance(J_previous)
+        return self._advance(J_previous,owned=True)
+
+    def _advance(self,J_previous,*,owned):
         comm=self.context.solver_comm;error=None
         try:
             if self.closed or self.failed or self.step_index>=self.capacity:raise InputError('closed, failed or exhausted field')
             J=np.array(J_previous,dtype=np.float64,order='C')
             if J.shape!=self.A.shape or not np.isfinite(J).all():raise InputError('finite point currents required')
             if self.step_index==0 and np.any(J):raise InputError('initial feedback current must be zero')
+            if owned:J=np.ascontiguousarray(J[self.current_rows])
             E=np.empty_like(self.A)
         except Exception as exc:error=f'{type(exc).__name__}: {exc}'
         # One admission exchange contains both local validity and exact values.
         # Every member makes the same decision, including on remote failure.
-        checks=comm.allgather((error,None if error else J.tolist()))
+        checks=comm.allgather((error,None if error or owned else J.tolist()))
         errors=[item[0] for item in checks]
         if any(errors):raise InputError(str(errors))
         values=[item[1] for item in checks]
@@ -229,7 +252,12 @@ class NativeEHField:
             raise InputError('field currents differ across ranks')
         try:
             checked=getattr(self.lib,'sp_eh_step_checked',None)
-            if checked is not None:
+            if owned:
+                floats=np.ctypeslib.ndpointer(dtype=np.float64,flags='C_CONTIGUOUS')
+                fn=self.lib.sp_eh_step_owned
+                fn.argtypes=[c.c_int,c.c_int,floats,floats,floats];fn.restype=c.c_int
+                code=self._call(fn,len(self.point_ids),len(self.current_rows),J,self.A,E)
+            elif checked is not None:
                 floats=np.ctypeslib.ndpointer(dtype=np.float64,flags='C_CONTIGUOUS')
                 checked.argtypes=[c.c_int,floats,floats,floats]
                 checked.restype=c.c_int
@@ -398,6 +426,15 @@ class CoupledStepper:
         response.agree(error)
         self.timing=self._check_timing(response,field)
         self.J=np.zeros((len(context.plan.point_ids),3))
+        self._configure_current_routing()
+
+    def _configure_current_routing(self):
+        field=self.field
+        if isinstance(field,NativeEHField) and getattr(field,'current_rows_by_rank',None) is not None:
+            self.response._field_current_rows_by_rank=field.current_rows_by_rank
+            field.manifest['current_routing']='spatial-owned'
+            field.manifest['current_rows_by_field_rank']=[rows.tolist() for rows in field.current_rows_by_rank]
+            field._write_manifest()
 
     @staticmethod
     def _check_timing(response,field):
@@ -493,7 +530,11 @@ class CoupledStepper:
             r.failed=True
             raise
         if self.field is not None:
-            try:A=self.field.advance(self.J)
+            try:
+                if isinstance(self.field,NativeEHField) and getattr(self.field,'current_rows',None) is not None:
+                    A=self.field.advance_owned(self.J)
+                else:
+                    A=self.field.advance(self.J)
             except Exception as exc:error=str(exc)
         try:r.agree(error)
         except Exception:
@@ -574,6 +615,7 @@ class PacketCoupledStepper:
         if cxt.is_leader:record=cxt.leaders.bcast(record,root=cxt.field_group)
         self.timing=cxt.solver_comm.bcast(record,root=0)
         self.J=np.zeros((len(cxt.plan.point_ids),3))
+        CoupledStepper._configure_current_routing(self)
 
     def step(self):
         from .field_input import FieldPacket,FieldValue
@@ -591,7 +633,10 @@ class PacketCoupledStepper:
             error=None
             if self.field is not None:
                 try:
-                    self.field.advance(self.J)
+                    if isinstance(self.field,NativeEHField) and getattr(self.field,'current_rows',None) is not None:
+                        self.field.advance_owned(self.J)
+                    else:
+                        self.field.advance(self.J)
                     samples=self.field.sample_fields()
                 except Exception as exc:error=f'{type(exc).__name__}: {exc}'
             r.agree(error)

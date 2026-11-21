@@ -3062,5 +3062,15 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
 - [x] MPI6 custom routing, MPI4 LD and native field+LD+two SBE points, MPI3 packet
   admission/failure, MPI6 protected mixed step and old/new direct restore checked.
   No new GS or real-material TDDFT/HSE/multinode claim.
-- [ ] Remaining communication: outer error agreement scheduling and native field
-  spatial J ownership; preserve numerical recovery and caller/custom interfaces.
+- [x] Native field spatial J ownership implemented; see the spatial-current routing plan.
+- [ ] Remaining communication: outer error agreement scheduling; preserve numerical recovery and caller/custom interfaces.
+
+
+## Spatial current routing (2026-11-21)
+- [x] Native owner map from actual Yee deposit edges; boundary duplication and
+  zero-point field ranks; packed J step ABI with legacy full-input fallback.
+- [x] CoupledStepper/PacketCoupledStepper route owned J within the field group;
+  reporting leader retains globally ordered output/checkpoint J.
+- [x] Local MPI4/6 owner and boundary tests, preceding-binary/legacy-path bitwise comparisons,
+  owned/full-row direct resume and protected failure/retry; source/wheel668 tests
+  (one optional skip). See 2026-11-21-spatial-current-routing.md and canonical record.

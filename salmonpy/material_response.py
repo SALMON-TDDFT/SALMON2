@@ -368,7 +368,9 @@ class ResponseSession:
         m = self._measurements
         local = {'group': c.group.name, 'solver_rank': c.solver_comm.rank,
                  'seconds': dict(m.seconds), 'calls': dict(m.calls),
-                 'measurement_errors': list(m.errors)}
+                 'measurement_errors': list(m.errors),
+                 'received_current_rows': (len(self._field_current_rows_by_rank[c.solver_comm.rank])
+                    if hasattr(self,'_field_current_rows_by_rank') else None)}
         rows = c.solver_comm.gather(local, root=0)
         groups = c.leaders.allgather(rows) if c.is_leader else None
         groups = c.solver_comm.bcast(groups, root=0)
@@ -386,8 +388,11 @@ class ResponseSession:
     def _step(self,A,*,field_packets=False):
         """Collective everywhere. Only field leader supplies (points,3) A.
 
-        Returns ordered physical current on every field rank, None on material
-        ranks. User callbacks may use solver_comm but not any outer communicator.
+        Returns ordered physical current on field ranks, None on material
+        ranks. Native spatial coupling retains full J on the field leader; only
+        configured owner rows are meaningful on other field ranks. Standalone
+        sessions retain the replicated result. User callbacks may use solver_comm
+        but not any outer communicator.
         """
         from mpi4py import MPI
         c=self.context;error=None
@@ -465,7 +470,20 @@ class ResponseSession:
             c.leaders.Gatherv(currents.ravel(),[packed,counts,MPI.DOUBLE] if packed is not None else None,root=c.field_group)
             if packed is not None:
                 result=np.ascontiguousarray(packed.reshape(-1,3)[self._return_rows])
-        if c.group.role=='field': result=c.solver_comm.bcast(result,root=0)
+        if c.group.role=='field':
+            rows_by_rank=getattr(self,'_field_current_rows_by_rank',None)
+            if rows_by_rank is None:
+                result=c.solver_comm.bcast(result,root=0)
+            else:
+                rows=rows_by_rank[c.solver_comm.rank]
+                local=np.empty((len(rows),3),dtype=np.float64)
+                counts=[3*len(r) for r in rows_by_rank]
+                send=np.concatenate([result[r].ravel() for r in rows_by_rank]) if c.is_leader else None
+                c.solver_comm.Scatterv([send,counts,MPI.DOUBLE] if c.is_leader else None,local,root=0)
+                if not c.is_leader:
+                    result=np.zeros((len(c.plan.point_ids),3),dtype=np.float64)
+                    result[rows]=local
+
         self._measurements.stop('j_collection', started)
         if not field_packets:
             # Keep the checkpoint's global-indexed shape, not replicated drives.

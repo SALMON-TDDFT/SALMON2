@@ -252,3 +252,5 @@ For optional LD-only interface smoothing, add `--subpixel` to `fdtd_waveplate`. 
 `mpi_runtime_receipt` measures explicit within-job validation I/O. Preview is default; even --run never launches SALMON. See RUNTIME.en.md.
 
 Mixed MPI sessions route A/field packets only to owning points; J return order is unchanged. See communication_report for the ownership layout.
+
+With a matching spatial-current native runtime, mpi_mixed_native also routes J by field ownership. Only owned coupling-J rows are meaningful off the field leader; use leader output for full-point analysis. See COUPLED.en.md.

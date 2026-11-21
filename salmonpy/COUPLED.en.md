@@ -626,3 +626,31 @@ Native FDTD now returns four existing early `eh_init` errors without terminating
 MPI registry slots may remain for reuse: check live/field-owned counts, not zero slot capacity. Standalone callers omitting optional status keep their original diagnostics/termination. Recovery is limited to these early returns, not failures inside `eh_mpi_grid_sr`, later material/source/I/O stages, general allocation failure, OOM or MPI faults. No checker or calculation is automatically run on a management node.
 
 The field parser route is selected explicitly with `read_input(..., status=..., native_host=.true.)`. Passing status alone does not skip ordinary preprocessing/checks. `native_host` defaults to false: returned errors and backend scope are separate choices.
+
+
+## Spatially owned native FDTD current routing
+
+With a matching runtime, CoupledStepper and PacketCoupledStepper query
+`sp_eh_current_mask` once after field initialization. A point current is sent by
+Scatterv to every field rank owning an edge touched by its transpose sample-map
+deposit, rather than only the rank owning the point center. Boundary-crossing
+points reach both sides; empty owners receive zero current entries. The three
+components of an owned point travel together; this is not component-level compression.
+
+The field leader retains globally ordered J for output and checkpoints. Other
+field ranks retain the global array shape, but only owned rows are meaningful.
+Use leader output for full-point analysis. A/E samples, edge weights, the
+E→LD→H update order, collective failure decisions and restore guarantees are unchanged.
+
+The new `sp_eh_step_owned` ABI accepts packed local point currents. The existing
+`NativeEHField.advance(J)` still requires identical full-point J on every field
+rank. Older runtimes without this ABI, Multiscale1D and standalone ResponseSession
+keep replicated results. Build explicitly; importing or starting a calculation
+does not rebuild a runtime automatically.
+
+Checkpoint formats and MPI compatibility rules are unchanged. Full-row J saved
+with the same compatible runtime and decomposition can resume by selecting the
+owned rows. This does not bypass binary or MPI-layout compatibility checks.
+The field manifest records `current_routing` and `current_rows_by_field_rank`;
+explicit `communication_report()` rank records expose `received_current_rows`.
+These are logical point counts, not measured network bytes.

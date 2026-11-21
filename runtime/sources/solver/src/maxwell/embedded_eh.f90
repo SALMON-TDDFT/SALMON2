@@ -248,6 +248,63 @@ end function
   end function
 #endif
 
+  logical function owns_current_point(p) result(owned)
+    implicit none
+    integer,intent(in) :: p
+    integer :: d,side,index(3)
+    owned=.false.
+    do d=1,3
+      do side=0,1
+        index=state%points(:,p);index(d)=index(d)-side
+        if(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie))owned=.true.
+      enddo
+    enddo
+  end function
+
+  integer(c_int) function sp_eh_current_mask(npoints,mask) bind(C) result(status)
+    implicit none
+    integer(c_int),value :: npoints
+    integer(c_int),intent(out) :: mask(npoints)
+    integer :: p
+    status=10;mask=0
+    if(.not.allocated(state))return
+    if(npoints/=size(state%points,2))return
+    do p=1,npoints
+      if(owns_current_point(p))mask(p)=1
+    enddo
+    status=0
+  end function
+
+  integer(c_int) function sp_eh_step_owned(npoints,nlocal,J,A,E) bind(C) result(status)
+    implicit none
+    integer(c_int),value :: npoints,nlocal
+    real(c_double),intent(in) :: J(3,nlocal),A(3,npoints)
+    real(c_double),intent(out) :: E(3,npoints)
+    real(8),allocatable :: local_J(:,:)
+    integer :: p,k,error,expected
+    ! Validate counts collectively before touching input or advancing any state.
+    error=0;expected=0;E=0d0
+    if(.not.allocated(state))then
+      error=12
+    else if(npoints/=size(state%points,2).or.nlocal<0)then
+      error=10
+    else
+      do p=1,npoints
+        if(owns_current_point(p))expected=expected+1
+      enddo
+      if(nlocal/=expected)error=10
+    endif
+    call comm_get_max(error,nproc_group_global)
+    status=error
+    if(error/=0)return
+    allocate(local_J(3,npoints));local_J=0d0;k=0
+    do p=1,npoints
+      if(.not.owns_current_point(p))cycle
+      k=k+1;local_J(:,p)=J(:,k)
+    enddo
+    status=step_checked(npoints,local_J,E,A,owned=.true.)
+  end function
+
   integer(c_int) function sp_eh_step(npoints,J,E) bind(C)
     integer(c_int),value :: npoints
     real(c_double),intent(in) :: J(3,npoints)
@@ -262,10 +319,11 @@ end function
     sp_eh_step_checked=step_checked(npoints,J,E,A)
   end function
 
-  integer function step_checked(npoints,J,E,A) result(status)
+  integer function step_checked(npoints,J,E,A,owned) result(status)
     integer,intent(in)::npoints
     real(8),intent(in)::J(3,npoints)
     real(8),intent(in),optional::A(3,npoints)
+    logical,intent(in),optional :: owned
     real(8),intent(out)::E(3,npoints)
     logical::entered
     status=0;E=0d0
@@ -276,34 +334,37 @@ end function
     entered=status==0
     call comm_get_max(status,nproc_group_global)
     if(status==0)then
-      status=step_checked_impl(npoints,J,E,A)
+      status=step_checked_impl(npoints,J,E,A,owned)
     else
       status=16
     endif
     if(entered)call comm_end_children(state%mpi_child_owner)
   end function
 
-  integer function step_checked_impl(npoints,J,E,A) result(status)
+  integer function step_checked_impl(npoints,J,E,A,owned) result(status)
     use salmon_global,only:dt_em,obs_samp_em
     use ttm,only:use_ttm
     use communication,only:comm_get_max
     integer,intent(in) :: npoints
     real(8),intent(in) :: J(3,npoints)
     real(8),intent(in),optional :: A(3,npoints)
+    logical,intent(in),optional :: owned
     real(8),intent(out) :: E(3,npoints)
     type(restore_candidate) :: before
     real(8) :: local_E(3,npoints),reference(3,npoints)
     integer :: p,d,side,index(3),i,jj,k,error,mode
-    logical :: finite_input
+    logical :: finite_input,local_current
     status=10;E=0d0;error=0
     if(.not.allocated(state))error=12
     call comm_get_max(error,nproc_group_global)
     if(error/=0)then
       status=error;return
     endif
-    mode=merge(1,0,present(A))
+    local_current=.false.
+    if(present(owned))local_current=owned
+    mode=merge(1,0,present(A))+merge(2,0,local_current)
     call comm_bcast(mode,nproc_group_global)
-    if(mode/=merge(1,0,present(A)))error=11
+    if(mode/=merge(1,0,present(A))+merge(2,0,local_current))error=11
     call comm_get_max(error,nproc_group_global)
     if(error/=0)then
       status=error;return
@@ -323,9 +384,11 @@ end function
     if(error/=0)then
       status=error;return
     endif
-    reference=J
-    call comm_bcast(reference,nproc_group_global)
-    if(any(reference/=J))error=11
+    if(.not.local_current)then
+      reference=J
+      call comm_bcast(reference,nproc_group_global)
+      if(any(reference/=J))error=11
+    endif
     if(present(A))then
       reference=A
       call comm_bcast(reference,nproc_group_global)

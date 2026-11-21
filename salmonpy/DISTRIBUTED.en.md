@@ -175,7 +175,7 @@ broadcasts those rows only within that material group. Field groups receive no
 response-service input payload; singleton groups need no subgroup broadcast.
 Field packets are similarly scattered as per-owner dictionaries, preserving
 values, units, positions and clocks. J already gathers local owner contributions;
-its return to field ranks and the callback/native update order are unchanged.
+the callback/native update order is unchanged. Native spatial return routing is described in COUPLED.en.md.
 
 Root need not be first in plan order; point IDs and owning groups may interleave
 and own different counts. Cached routing indexes restore global J order without
@@ -188,6 +188,33 @@ owned rows are current on material ranks, and only the field leader retains full
 response-service A history. Nonowned/private rows are placeholders, not replicated
 output. Use field-leader point archives for global observations. Old checkpoints
 with full rows remain readable. Native field A/E and physical state data are not
-replaced by placeholders. Remaining outer agreements and field-internal spatial
-J ownership require separate validation; full solver communication is not claimed
-optimal.
+replaced by placeholders. Native spatial J routing is described in COUPLED.en.md.
+Outer agreements remain a separate task; full solver communication is not claimed optimal.
+
+
+## Spatially owned native FDTD current routing
+
+With a matching runtime, CoupledStepper and PacketCoupledStepper query
+`sp_eh_current_mask` once after field initialization. A point current is sent by
+Scatterv to every field rank owning an edge touched by its transpose sample-map
+deposit, rather than only the rank owning the point center. Boundary-crossing
+points reach both sides; empty owners receive zero current entries. The three
+components of an owned point travel together; this is not component-level compression.
+
+The field leader retains globally ordered J for output and checkpoints. Other
+field ranks retain the global array shape, but only owned rows are meaningful.
+Use leader output for full-point analysis. A/E samples, edge weights, the
+E→LD→H update order, collective failure decisions and restore guarantees are unchanged.
+
+The new `sp_eh_step_owned` ABI accepts packed local point currents. The existing
+`NativeEHField.advance(J)` still requires identical full-point J on every field
+rank. Older runtimes without this ABI, Multiscale1D and standalone ResponseSession
+keep replicated results. Build explicitly; importing or starting a calculation
+does not rebuild a runtime automatically.
+
+Checkpoint formats and MPI compatibility rules are unchanged. Full-row J saved
+with the same compatible runtime and decomposition can resume by selecting the
+owned rows. This does not bypass binary or MPI-layout compatibility checks.
+The field manifest records `current_routing` and `current_rows_by_field_rank`;
+explicit `communication_report()` rank records expose `received_current_rows`.
+These are logical point counts, not measured network bytes.

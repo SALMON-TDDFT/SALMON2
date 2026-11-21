@@ -759,7 +759,7 @@ broadcasts those rows only within that material group. Field groups receive no
 response-service input payload; singleton groups need no subgroup broadcast.
 Field packets are similarly scattered as per-owner dictionaries, preserving
 values, units, positions and clocks. J already gathers local owner contributions;
-its return to field ranks and the callback/native update order are unchanged.
+the callback/native update order is unchanged. Native spatial return routing is described in COUPLED.en.md.
 
 Root need not be first in plan order; point IDs and owning groups may interleave
 and own different counts. Cached routing indexes restore global J order without
@@ -772,6 +772,5 @@ owned rows are current on material ranks, and only the field leader retains full
 response-service A history. Nonowned/private rows are placeholders, not replicated
 output. Use field-leader point archives for global observations. Old checkpoints
 with full rows remain readable. Native field A/E and physical state data are not
-replaced by placeholders. Remaining outer agreements and field-internal spatial
-J ownership require separate validation; full solver communication is not claimed
-optimal.
+replaced by placeholders. Native spatial J routing is described in COUPLED.en.md.
+Outer agreements remain a separate task; full solver communication is not claimed optimal.

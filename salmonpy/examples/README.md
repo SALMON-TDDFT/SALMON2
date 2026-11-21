@@ -249,3 +249,5 @@ epsilon = dielectric_function(sigma)
 `mpi_runtime_receipt` はジョブ内の検証I/Oだけを測るサンプルです。表示が既定で、`--run` でもSALMON計算を開始しません。RUNTIME.mdを参照してください。
 
 混在MPIのA／場パケットは担当点だけへ配ります。Jの場への返却順は同じです。通信の情報はcommunication_reportで確認できます。
+
+担当J配信に対応するnativeランタイムでは、通常のmpi_mixed_native例も場の空間分割に応じてJを配信します。代表ランク以外の結合J配列は担当行だけが有効です。全点の後処理には代表の保存出力を使ってください。詳しくはCOUPLED.mdを参照してください。
