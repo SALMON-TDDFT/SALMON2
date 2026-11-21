@@ -918,11 +918,19 @@ contains
         write(*,*) "**************************"
       end if
       
-      !make directory
-      if(comm_is_root(nproc_id_global)) call create_directory('data_for_restart/')
-      call comm_sync_all
-      
+      ! Replace the creation barrier with one status agreement. A root-only
+      ! filesystem failure must not leave other ranks waiting or report success.
       restart_io=0
+      if(comm_is_root(nproc_id_global))call create_directory('data_for_restart/',iret=restart_io)
+      restart_bad=0
+      if(restart_io/=0)restart_bad=1
+      call comm_summation(restart_bad,restart_total,nproc_group_global)
+      if(restart_total/=0)then
+        if(comm_is_root(nproc_id_global))write(*,'(A,I0)') &
+          'SALMONPY_RESTART_DIRECTORY_ERROR status=',restart_io
+        error stop 'Required EM restart directory creation failed'
+      endif
+
       !output nproc_size_global, nt_em, and obs_samp_em
       call output_r_txt_em(fe%ifn,1,1,'single','nproc_size_global',i0d=nproc_size_global, &
             io_status=restart_io)

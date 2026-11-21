@@ -117,6 +117,7 @@ program fdtd_restart_io_host
  use mpi
  use parallelization,only:setup_parallel,end_parallel,nproc_id_global,nproc_size_global,nproc_group_global
  use salmon_global,only:directory_read_data
+ use filesystem,only:create_directory
  use common_maxwell,only:input_r_txt_em,output_r_txt_em,input_r_bin_em,output_r_bin_em,txtfile_copy_em
  implicit none
  integer::save_status=0
@@ -135,6 +136,11 @@ program fdtd_restart_io_host
  if(nproc_id_global==0)call execute_command_line('mkdir data_for_restart')
  call MPI_Barrier(nproc_group_global,ierr)
  directory_read_data='data_for_restart'
+ ! Existing output directories must return success, never an undefined status.
+ ierr=37
+ call create_directory('data_for_restart',iret=ierr)
+ if(ierr/=0)error stop 'existing restart directory must return zero status'
+
  if(occupied)then
   do j=1,4
    write(name,'(i0)')held(j)

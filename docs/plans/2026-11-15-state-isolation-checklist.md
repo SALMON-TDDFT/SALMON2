@@ -146,12 +146,24 @@ results/residual diagnostics and pauses the downstream workflow for user review
   completed directory. Legacy readers/directory setup, disk-full/close-only faults,
   fsync and atomic multi-file publication are not claimed.
   Record: calc2026/salmonpy-legacy-em-save-recovery-20261122/summary.json.
+- [x] Required batch EM restart-directory creation:existing directories now
+  return defined status0 (old undefined output reproduced). Root creation uses
+  explicit status and replaces the existing barrier with one owning-group
+  agreement;all ranks fail nonzero on creation errors. No new collective count
+  or step communication. GNU MPI1/2 fresh/existing/directory-symlink LD+FDTD
+  controls match prior data and restart bytes;file and file-symlink collisions
+  preserve originals and terminate without hangs. Source/installed ownership,
+  normal writer-byte controls,679 tests(one skip),and four native MPI2 direct
+  save/restore regressions pass. Not a directory-writability preflight;later
+  writes remain checked by writers. Current follow-up is uncommitted.
+  Record: calc2026/salmonpy-restart-directory-recovery-20261122/summary.json.
 - [x] Latest source/installed suites:679 executed,one optional skip,no failures.
   Paired current manuals and AI JSON synchronized. These latest local records
   do not supersede older MPI4/6, multi-platform or physical-convergence evidence.
 - [x] Integration checkpoint: verified grid/layout/input/output/TTM and required
   save changes consolidated for the requested2026-11-22 commit/push. Required
   source-integrity CI remains enabled; no optional heavy workflow is dispatched.
+  Published commit:a7073552 to salmonpy/codex/salmonpy-state-inputs-recovery.
 - [ ] Remaining operational scope: initial-guess staging, site runtime/layout validation and multi-node evidence.
   Group5 R3/R4 and group3 remain open; groups1/2 stay deferred.
 
@@ -163,7 +175,7 @@ results/residual diagnostics and pauses the downstream workflow for user review
    startup returns must be evaluated against the supported profile, not assumed safe.
    Core material/field3D allocation1118 and initial owned LD-state allocation1119
    and material/boundary vectors1120 are now covered below. Remaining separate
-   work is selected restart-reader/directory setup and initialization/helper I/O (native saves and legacy batch writers verified above) and selected auxiliary allocations (LD scratch,
+   work is selected restart-reader and initialization/helper I/O (native saves,legacy batch writers and directory creation verified above) and selected auxiliary allocations (LD scratch,
    tensor/subpixel/observation and snapshot staging buffers) in
    supported paths; owned file numbers alone do not establish IO-error recovery.
    Do not add restrictions on valid/custom inputs or promise recovery from

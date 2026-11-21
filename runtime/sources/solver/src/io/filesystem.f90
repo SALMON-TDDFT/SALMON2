@@ -135,6 +135,7 @@ contains
     character(*), intent(in) :: dirpath
     integer, intent(out), optional :: iret
     integer(c_int) :: retcode
+    if(present(iret))iret=0
     if (.not. directory_exists(dirpath)) then
       call posix_mkdir(resolve_path(adjustl(trim(dirpath)))//c_null_char, retcode)
       if (present(iret)) then

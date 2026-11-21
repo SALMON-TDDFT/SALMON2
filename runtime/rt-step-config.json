@@ -13,7 +13,7 @@
     "src/rt/dip.f90"
   ],
   "patch_sha256_role": "historical migration identity; no patch is applied",
-  "base_source_tree_sha256": "e4454f4bdcd1b6e858425599d0f5ef2cdf6fb87e16fde38132407668a5af94f2",
+  "base_source_tree_sha256": "a6b1b0650a401bc364897d6076d5a7355331c2173b8434b48914b6daa886d496",
   "integrated": true,
-  "source_tree_sha256": "e4454f4bdcd1b6e858425599d0f5ef2cdf6fb87e16fde38132407668a5af94f2"
+  "source_tree_sha256": "a6b1b0650a401bc364897d6076d5a7355331c2173b8434b48914b6daa886d496"
 }
