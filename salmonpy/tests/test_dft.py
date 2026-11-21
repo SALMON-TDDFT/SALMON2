@@ -114,7 +114,7 @@ class WarmStartTest(unittest.TestCase):
                         electrons=4, states=8, grid=(12,)*3, kmesh=(2,)*3)
             def native(*args, **kw):
                 work = Path(kw['cwd'])
-                kw['stdout'].write('end SALMON\n'); kw['stdout'].flush()
+                kw['stdout'].write(''.join(f' iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec = {i} {r}\n' for i,r in enumerate((.1,.02,.001,.0001,.00001),1))+'end SALMON\n'); kw['stdout'].flush()
                 (work/'gs_status.dat').write_text('SALMONPY_GS_V1\n0 5\n1e-5 1e-9 -1.0\nrho_dne\n')
                 (work/'gs_forces.dat').write_text('SALMONPY_FORCES_V1\n1\n0 0 0\n')
                 if "write_gs_restart_data='no'" not in kw['input']:
@@ -122,11 +122,41 @@ class WarmStartTest(unittest.TestCase):
                     for name in ('info.bin','occupation.bin','wfn.bin'):
                         (restart/name).write_bytes(name.encode())
                 return SimpleNamespace(returncode=0)
+            from salmonpy.errors import SCFReviewRequired
             with patch('subprocess.run', side_effect=native), self.assertWarns(RuntimeWarning):
-                source = model.run(engine, root/'source')
+                with self.assertRaises(SCFReviewRequired) as stopped:
+                    model.run(engine, root/'review-default')
+            retained = stopped.exception.result
+            self.assertFalse(retained.converged)
+            with patch('subprocess.run') as never:
+                with self.assertRaisesRegex(TypeError,'allow_unconverged'):
+                    model.run(engine, root/'invalid-review', allow_unconverged='yes')
+                never.assert_not_called()
+            self.assertEqual(json.loads((retained.directory/'ground-state.json').read_text())['status'],'complete')
+            report = stopped.exception.report_directory
+            self.assertEqual(len((report/'residuals.csv').read_text().splitlines()),6)
+            with patch.dict('sys.modules',{'matplotlib.figure':None}), self.assertWarns(UserWarning):
+                csv_only=retained.write_scf_report(root/'csv-only')
+            self.assertTrue((csv_only/'residuals.csv').is_file())
+            self.assertEqual(json.loads((csv_only/'report.json').read_text())['plot_status'],'unavailable')
+            self.assertEqual(json.loads((report/'report.json').read_text())['history_source'],'native-stdout-rho_dne')
+            self.assertTrue((retained.directory/'native/data_for_restart/wfn.bin').is_file())
+            def converged_native(*args, **kw):
+                result=native(*args, **kw)
+                (Path(kw['cwd'])/'gs_status.dat').write_text('SALMONPY_GS_V1\n1 5\n1e-10 1e-9 -1.0\nrho_dne\n')
+                return result
+            with patch('subprocess.run',side_effect=converged_native):
+                complete=model.run(engine,root/'converged')
+            self.assertTrue(complete.converged)
+            self.assertFalse((root/'converged-scf-review').exists())
+            with patch('salmonpy.tddft.TDDFTInitialState.from_salmon') as load, self.assertWarns(RuntimeWarning):
+                with self.assertRaises(SCFReviewRequired):retained.tddft_initial_state(executable=engine)
+                load.assert_not_called()
+            with patch('subprocess.run', side_effect=native), self.assertWarns(RuntimeWarning):
+                source = model.run(engine, root/'source',allow_unconverged=True)
             self.assertFalse(source.converged)
             with patch('subprocess.run',side_effect=native), self.assertWarns(RuntimeWarning):
-                scalar=model.run(engine,root/'scalar',save_restart=False)
+                scalar=model.run(engine,root/'scalar',save_restart=False,allow_unconverged=True)
             self.assertFalse(scalar.restart_saved)
             np.testing.assert_array_equal(scalar.forces_hartree_per_bohr,[[0,0,0]])
             self.assertFalse(list(scalar.directory.rglob('wfn.bin')))
@@ -146,7 +176,7 @@ class WarmStartTest(unittest.TestCase):
                     for name in names:(restart/name).write_bytes(b'synthetic')
                     return result
                 with patch('subprocess.run',side_effect=extra_output),self.assertWarnsRegex(RuntimeWarning,'runtime wrote restart output'):
-                    unexpected=model.run(engine,root/('extra-'+str(len(names))),save_restart=False)
+                    unexpected=model.run(engine,root/('extra-'+str(len(names))),save_restart=False,allow_unconverged=True)
                 self.assertEqual(unexpected.restart_saved,len(names)==3)
             legacy_path=source.directory/'ground-state.json'
             original=legacy_path.read_bytes();legacy=json.loads(original);legacy.pop('restart_saved')
@@ -156,7 +186,7 @@ class WarmStartTest(unittest.TestCase):
             original = (source.directory/'ground-state.json').read_bytes()
             displaced = replace(model, fractional_positions=[[.01,0,0]])
             with patch('subprocess.run', side_effect=native) as run:
-                result = displaced.run(engine, root/'warm', initial_guess=source)
+                result = displaced.run(engine, root/'warm', initial_guess=source,allow_unconverged=True)
                 text = run.call_args.kwargs['input']
                 for flag in ("yn_restart='y'", "read_gs_restart_data='wfn'", "yn_reset_step_restart='y'", "directory_read_data='./initial_guess/'"):
                     self.assertIn(flag, text)
@@ -171,7 +201,7 @@ class WarmStartTest(unittest.TestCase):
                 self.assertIn("yn_restart='n'", text)
                 return object()
             with patch('salmonpy.tddft.TDDFTInitialState.from_salmon', side_effect=load_transverse):
-                result.tddft_initial_state(executable=engine)
+                result.tddft_initial_state(executable=engine,allow_unconverged=True)
             for change in ({'cell':np.eye(3)*11}, {'grid':(16,)*3}, {'kmesh':(1,)*3},
                            {'states':9}, {'electrons':6}, {'xc':'libxc_pz'},
                            {'pseudopotentials':[Pseudopotential(14,2,'_rps.dat',b'changed')]}):
@@ -185,7 +215,7 @@ class WarmStartTest(unittest.TestCase):
             tb=replace(model,xc='tbmbj',cval=1.2)
             with patch('subprocess.run',side_effect=native),warnings.catch_warnings(record=True) as seen:
                 warnings.simplefilter('always')
-                tb_result=tb.run(engine,root/'tb')
+                tb_result=tb.run(engine,root/'tb',allow_unconverged=True)
             self.assertTrue(any('TB-mBJ' in str(w.message) for w in seen))
             tb_record=json.loads((tb_result.directory/'ground-state.json').read_text())
             self.assertEqual(tb_record['cval'],1.2)
@@ -205,7 +235,7 @@ class WarmStartTest(unittest.TestCase):
                 self.assertIn('cval=1.19999999999999996e+00',text)
                 return object()
             with patch('salmonpy.tddft.TDDFTInitialState.from_salmon',side_effect=load_tb):
-                tb_result.tddft_initial_state(executable=engine)
+                tb_result.tddft_initial_state(executable=engine,allow_unconverged=True)
             for value in (None,1.3):
                 with patch('subprocess.run') as run,warnings.catch_warnings():
                     warnings.simplefilter('ignore')

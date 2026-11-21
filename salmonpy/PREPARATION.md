@@ -171,3 +171,61 @@ SalmonExecutable.runは、直列Pythonが明示的に子プロセスを起動す
 MPIランク内の二重起動拒否は残しています。Python自体をMPIアプリにする場合は、
 COUPLED.mdのParallelContextとnative埋め込み部品を集合的に使ってください。
 DFT／TDDFTのバッチ投入経路をこの追加だけで共通化したとは扱わないでください。
+
+
+## DFT／TDDFTも準備だけで終了する
+
+`prepare_dft(model, new_directory, scf=None, save_restart=True)`は、DFT.input_textと
+同じ入力・擬ポテンシャル・対称性ファイルを保存し、Pathを返します。SCFもプロセスも
+起動しません。既定のsave_restart=Trueは将来実行するDFTでGSを保存・再利用する設定で、
+準備時にGSを作る意味ではありません。Falseなら将来の再開データ出力を無効にします。
+既存のDFT.run、初期推定GSを使うwarm start、未収束を警告して継続する方針は変えません。
+新しい入口はfresh DFT入力用で、warm startのGSコピーや互換検査を自動では行いません。
+
+```python
+from salmonpy.preparation import prepare_dft
+from salmonpy.dft import SCFSettings
+
+folder = prepare_dft(model, "dft-input", scf=SCFSettings(max_iterations=300))
+# modelはDFTまたはASE連携で作成済みのモデル。ここで終了します。
+```
+
+`prepare_tddft(rt_input_file, new_directory, files=None)`は、指定したnative RT入力を
+バイト単位で保持し、filesで明示したローカルファイルだけをコピーします。dt、波形、
+ゲージ、並列分割、directory_read_dataなどを自動変更しません。GSや実行ファイルの
+存在を管理ノードへ要求せず、GSを自動探索・読込・複製しません。
+
+```python
+from salmonpy.preparation import prepare_tddft
+
+folder = prepare_tddft("rt.inp", "tddft-input",
+                       files={"pseudo1_rps.dat": "Si_rps.dat"})
+# GS参照はrt.inpに記述したまま。投入・計算は別操作です。
+```
+
+filesの名前は入力内の参照と合わせてください。依存ファイルを自動推定しません。
+明示した大きなファイルもストリームコピー・ハッシュ計算し、GSを転送する場合は
+利用者が対象ファイルを明示して管理します。入力内の既存GS参照は計算ノード側で
+解決してください。設定、GS形式／XC／格子・擬ポテンシャルの整合性、実行ランタイム、
+サイトの並列条件や収束を認証する入口ではありません。
+
+各ディレクトリにはsalmonpy-prepared-dft.json／salmonpy-prepared-tddft.jsonを保存し、
+status=prepared-not-runとファイルのSHA256・サイズを記録します。これは
+prepare_inputsの物質アーカイブとは別形式です。既存ディレクトリは上書きしません。
+
+```sh
+python -m salmonpy.examples.prepare_electrons dft Si_rps.dat NEW_DIRECTORY
+python -m salmonpy.examples.prepare_electrons tddft rt.inp NEW_DIRECTORY --asset pseudo1_rps.dat Si_rps.dat
+```
+
+このサンプルも準備で終了します。runやsubmitの自動継続はありません。DFTの例は
+小さなSi入力の作り方で、物理収束を保証しません。計算は割当済みジョブ内で、
+同じ機能を持つ監査済みSALMONへgs.inpまたはrt.inpをstdinから渡して明示的に起動します。
+実行ファイルの記録済みSHA256を照合し、ソース／オブジェクト監査を毎回繰り返しません。
+HSEを使う場合は高速PR版のみで、prepare_dftはそのprovenance／capability検査を
+置き換えません。従来のDFT.runからHSE batch実行を解禁する変更ではありません。
+
+PythonのA→Jワーカーを使う場合も、準備とは別です。TDDFTInitialState.from_salmonは
+既存GS束のsnapshot loaderで、new_stateはワーカーを起動します。管理ノードの
+入力準備だけを意図した時に、これらを自動で続けて呼ばないでください。
+caller-owned MPI内では既存のnative埋め込み経路を使います。

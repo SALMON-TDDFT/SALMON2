@@ -196,6 +196,52 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):self.api.prepare_fdtd(calculation,prepared,mpi=mpi)
 
 
+    def test_dft_preparation_only_matches_existing_renderer(self):
+        import os
+        import numpy as np
+        from unittest.mock import patch
+        from salmonpy.dft import DFT,Pseudopotential,SCFSettings
+        pseudo_file=self.root/'Si_rps.dat';pseudo_file.write_bytes(b'synthetic PP bytes')
+        pseudo=Pseudopotential.from_file(pseudo_file,atomic_number=14,local_channel=2)
+        model=DFT([14],np.eye(3)*10.26,[[0.,0.,0.]],[pseudo],electrons=4,states=4,grid=(12,12,12),kmesh=(1,1,1))
+        scf=SCFSettings(max_iterations=7,tolerance=1e-6)
+        with patch.dict(os.environ,{'SLURM_PROCID':'0'}), \
+             patch('subprocess.run',side_effect=AssertionError('unexpected solver')), \
+             patch('subprocess.Popen',side_effect=AssertionError('unexpected worker')):
+            folder=self.api.prepare_dft(model,self.root/'dft-input',scf=scf,save_restart=False)
+        expected=model.input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
+        self.assertEqual((folder/'gs.inp').read_bytes(),expected.encode())
+        for name,data in model.input_assets:self.assertEqual((folder/name).read_bytes(),data)
+        record=json.loads((folder/'salmonpy-prepared-dft.json').read_text())
+        self.assertEqual(record['status'],'prepared-not-run');self.assertFalse(record['save_restart'])
+        self.assertFalse((folder/'stdout.log').exists())
+        self.assertFalse((folder/'data_for_restart').exists())
+        with self.assertRaises(FileExistsError):self.api.prepare_dft(model,folder)
+
+    def test_tddft_preparation_preserves_input_and_copies_only_explicit_files(self):
+        import os
+        from unittest.mock import patch
+        from salmonpy.tddft import TDDFTInitialState
+        source=self.root/'rt.inp'
+        data=b"&calculation\n theory='tddft_pulse'\n/\n&control\n directory_read_data='/compute/existing-gs/'\n/\n"
+        source.write_bytes(data)
+        (self.root/'do-not-discover.bin').write_bytes(b'unselected')
+        with patch.dict(os.environ,{'OMPI_COMM_WORLD_RANK':'0'}), \
+             patch('subprocess.run',side_effect=AssertionError('unexpected solver')), \
+             patch('subprocess.Popen',side_effect=AssertionError('unexpected worker')), \
+             patch.object(TDDFTInitialState,'from_salmon',side_effect=AssertionError('unexpected GS loader')):
+            folder=self.api.prepare_tddft(source,self.root/'rt-input',files={'pseudo/Si.dat':self.root/'source.dat'})
+        self.assertEqual((folder/'rt.inp').read_bytes(),data)
+        self.assertEqual((folder/'pseudo/Si.dat').read_bytes(),(self.root/'source.dat').read_bytes())
+        self.assertFalse((folder/'do-not-discover.bin').exists())
+        self.assertFalse((folder/'data_for_restart').exists())
+        record=json.loads((folder/'salmonpy-prepared-tddft.json').read_text())
+        self.assertEqual(record['status'],'prepared-not-run')
+        self.assertEqual(set(record['files']),{'rt.inp','pseudo/Si.dat'})
+        self.assertEqual(record['restart_policy'],'external-user-managed')
+        with self.assertRaises(FileExistsError):self.api.prepare_tddft(source,folder)
+
+
 class JobPreflightTests(unittest.TestCase):
     setUp = PreparationTests.setUp
     prepare = PreparationTests.prepare

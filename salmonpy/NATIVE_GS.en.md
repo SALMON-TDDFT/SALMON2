@@ -39,7 +39,7 @@ Lightweight LD/SBE components remain individually usable.
 
 session.run computes SCF. state.info returns total Hartree energy, residual,
 tolerance, iteration count, the native recorded convergence flag, atom and band
-counts. Unconverged SCF warns and retains the last iterate. material_id and the
+counts. Unconverged SCF retains the last iterate and pauses for review. material_id and the
 immutable calculation remain attached to the state.
 
 state.array(quantity) returns NativeGSArray(values, lower_indices, quantity, unit).
@@ -81,7 +81,7 @@ platforms require their own verification.
 
 Work directory/input/pseudopotential visibility and content are checked on every
 rank before native calls. General Fortran STOP/allocation/MPI/process failure
-recovery is not promised. Numerical update order and warning-only SCF policy stay.
+recovery is not promised. Numerical update order and SCF thresholds stay unchanged; terminal nonconvergence now pauses for review.
 The example `mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT`
 uses coarse grids/four iterations for ownership verification, not converged
 material properties. It writes normal native diagnostics/progress, but no automatic
@@ -510,7 +510,7 @@ and Libxc-PBE, periodic full-k scalar fixed-ion middlepoint A/c response are
 supported. Material IDs persist; returned current is electric charge current j.
 
 HSE-disabled builds expose session.run for SCF, energy, forces and eigenvalues.
-Nonconvergence warns and retains the last iterate. Imported metadata remains None.
+Terminal nonconvergence retains the last iterate and pauses for review. Imported metadata remains None.
 Computed GS owners connect to explicit export_archive; this validation inspected
 assembled export arrays in RAM without writing a GS archive. Source GS close, new independent states and direct
 RT restart do not require GS-file copying or step replay. Model seed copies
@@ -548,7 +548,7 @@ the first GS owner and advances its independent RT states for 16 steps:
 mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD_JSON NEW_OUTPUT --current-steps 16
 ```
 
-This tiny example is not physically converged. SCF nonconvergence only warns.
+This tiny example is not physically converged. Terminal SCF nonconvergence pauses for review.
 It writes GS scalar summaries and charge currents to JSON, without GS wavefunction
 or restart output. Material IDs persist; two independent states receive an A/c
 drive with x/y/z components. Existing --import-bundle usage remains available.
@@ -704,8 +704,8 @@ owner pointers are rebound to the same live context, not to the saved payload.
 A subsequent natural PBE→HSE transition still builds the target exchange as in a
 continuous calculation; that is future work, not restore-time replay.
 
-A target-HSE iteration cap without convergence warns and retains the last
-iterate, including after PBE pre-SCF; it is not labelled converged. An unfinished
+A target-HSE iteration cap without convergence retains the last
+iterate and pauses for review, including after PBE pre-SCF; it is not labelled converged. An unfinished
 PBE-only pre-stage is still not a target-HSE result. SCF thresholds in the small
 phase-transition tests are control-flow settings, not physical certification.
 The snapshots remain memory-only, same owner/build/decomposition. Reduced-k
@@ -841,8 +841,8 @@ PZ/Libxc-PZ/PBE and fast-PR HSE controls cover k-MPI2, ordinary-XC spatial-MPI2,
 C2 reduced k and the PBE-prestage→HSE boundary: save at3 plus5 iterations in a fresh
 process exactly matches continuous8. A corrupt rank file is rejected before
 state creation; native read failure preserves the existing state. These are
-execution regressions, not physical convergence certification. Nonconvergence
-still warns and retains the result.
+execution regressions, not physical convergence certification. Terminal nonconvergence
+retains the result and pauses for residual-history review.
 
 The existing scf_resume sample accepts `--save-scf NEW_CHECKPOINT` to save the
 paused boundary. A separate invocation uses `--restart CHECKPOINT`; keep material
@@ -1391,3 +1391,40 @@ remain sequential on the main thread; this is not concurrent solver reentrancy.
 
 GS and TDDFT share path admission/cleanup. Retained GS accepts scope1/2;
 standard TDDFT and fast-PR HSE require scope2 for their expanded RT file paths.
+
+
+## Review pause for unconverged SCF (2026-11-21)
+
+`DFT.run()` and `NativeGSSession.run()` warn and raise `SCFReviewRequired`
+when SCF exhausts its iteration cap without convergence. Automatic downstream
+computation stops for review. Completed data are retained: `exception.result`
+is the saved batch result or still-live native owner; `exception.report_directory`
+points to residual CSV, optional PNG, and report.json. Missing Matplotlib does
+not prevent CSV output. A report-writing failure still pauses continuation and
+warns to inspect the original native output. Normal GS saving settings remain;
+`save_restart=False` does not collect a new GS restart dataset.
+
+```python
+from salmonpy.errors import SCFReviewRequired
+try:
+    gs = model.run(engine, 'new-gs-output')
+except SCFReviewRequired as review:
+    gs = review.result
+    print('Review SCF residuals:', review.report_directory)
+    # End here and inspect residual trends, threshold and input conditions.
+    # Do not automatically start TDDFT from this handler.
+```
+
+Inspect decreasing, stalled or oscillating residuals before adjusting iteration
+or mixing settings. Only explicit user approval after review warrants
+`allow_unconverged=True`; an AI must not automatically retry with this option.
+`GroundStateResult.open()`, reading/saving diagnostics, and warm starts remain
+available. `band_initial_state()` and `tddft_initial_state()` also pause for a
+known unconverged batch GS unless the reviewed override is supplied.
+
+Intentional native step budgets (`run(..., steps=K)` and
+`continue_scf(steps=M)`) returning `paused=True` are normal partial SCF states.
+Only terminal nonconvergence pauses for review. The native owner remains live
+for diagnosis or saving. All solver ranks must agree on `allow_unconverged`.
+Numerical update order and SCF thresholds are unchanged. This replaces the old
+policy of automatically proceeding after an unconverged-SCF warning.

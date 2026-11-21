@@ -250,3 +250,90 @@ epsilon = dielectric_function(sigma)
 
 
 追加入口: salmonpy.preparation.prepare_fdtd(calculation, directory, mpi=None)は新規のnative FDTD入力群を保存し、Pathを返すだけです。FDTDMPI.rank_argumentsとcommand(executable)はargvの構成・プレビュー用です。実行は自動で始まりません。詳細はPREPARATION.mdを参照してください。
+
+入力準備専用: prepare_dft(model, directory, scf=None, save_restart=True)とprepare_tddft(input_file, directory, files=None)はPathだけを返し、SCF／TDDFT worker／MPI／ジョブ投入を起動しません。PREPARATION.mdを参照してください。
+
+
+## SCF未収束時の確認待ち（2026-11-21）
+
+`DFT.run()` と `NativeGSSession.run()` は、反復上限で未収束なら警告し、
+`SCFReviewRequired` を送出して後続計算への自動継続を止めます。
+失敗した実行としてデータを消すことはしません。バッチの保存済み結果／nativeの生存状態は
+例外の `result` に保持し、`report_directory` に残差CSV・任意のPNG・report.jsonを保存します。
+MatplotlibがなくてもCSVは利用できます。図の生成失敗と計算失敗を混同しません。
+レポートの保存に失敗しても確認待ちは維持し、元の出力を確認するよう警告します。
+通常のGS保存設定を維持し、`save_restart=False` なら新たなGS再開データは保存しません。
+
+```python
+from salmonpy.errors import SCFReviewRequired
+try:
+    gs = model.run(engine, 'new-gs-output')
+except SCFReviewRequired as review:
+    gs = review.result
+    print('Review SCF residuals:', review.report_directory)
+    # ここで終了し、残差の推移・閾値・入力条件を利用者が確認する。
+    # このexcept節からTDDFTを自動で開始しない。
+```
+
+残差が下がっているか、停滞／振動しているかを確認し、反復上限・混合条件などを見直します。
+確認後に未収束状態を使うと利用者が明示した場合だけ `allow_unconverged=True` を指定できます。
+AIが自動的にこの指定で再実行してはいけません。既存結果の `GroundStateResult.open()` や
+残差の読取・保存・warm startは引き続き可能です。既知の未収束GSからの
+`band_initial_state()`／`tddft_initial_state()` にも同じ確認待ちを適用します。
+
+nativeの `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
+止めた `paused=True` の状態は正常な途中状態です。全反復上限に達した未収束終了だけが
+確認待ちになります。確認待ち後もnative状態は閉じず、保存や診断に利用できます。
+ランク間で `allow_unconverged` の指定を揃えます。計算の更新順・収束閾値は変更しません。
+この方針は以前の「未収束でも警告のみで自動継続」を置き換えます。
+
+
+## FDTD／マルチスケールのエネルギー収支
+
+`analysis.absorbed_energy_density(time, E, j, units='atomic_gaussian',
+current_convention='charge', field_kind='total')` は各マクロ点の `∫j·E dt` を
+Fortranで台形積分します。E/jは同時刻・同位置の `(時刻数, マクロ点数, 3)`、
+返り値は点ごとのHartree/bohr³です。SALMONの物質電流Jは明示的にj=−Jへ変換します。
+この値は可逆な物質の蓄積を含む正味の仕事で、散逸熱だけではありません。
+TDDFTの電子エネルギー変化やLDの分極蓄積をもう一度加算しません。
+
+`analysis.reflection_transmission` は分離済みの入射・反射・透過E/H
+（それぞれ `(時刻数, 3)`）からR(ω)/T(ω)を返します。法線は入射側から透過側へ。
+複素Poynting流束の比なので偏光を1方向に固定せず、Eだけの振幅比に置き換えません。
+同じ面積の一様な平面ポートが対象です。全電場をそのまま反射波にせず、参照計算などで
+**場を分離してから**渡します。Yee格子のE/Hは時刻・空間位置を揃えてください。
+弱い入射スペクトルの点は `valid=False`・NaNとし、クリップや偽の0を返しません。
+
+```python
+from salmonpy.analysis import absorbed_energy_density, reflection_transmission
+from salmonpy.fdtd import energy_balance
+
+work = absorbed_energy_density(time, E_points, charge_j_points,
+    units='atomic_gaussian', current_convention='charge', field_kind='total')
+ports = reflection_transmission(time, E_inc, H_inc, E_ref, H_ref, E_tr, H_tr,
+    normal=(0, 0, 1), units='atomic_gaussian', window='none')
+check = energy_balance(work, point_volumes, ports,
+    material_ids=material_ids, transverse_area=area,
+    field_energy_change=delta_field_energy, other_outgoing_energy=other_outflow,
+    units='atomic_gaussian', rtol=.01)
+print(check.residual, check.relative_residual, check.within_tolerance)
+# ports.omega, ports.R, ports.T, ports.valid; workは各マクロ点の順序を保持。
+```
+
+収支は `入射−反射−透過−Σ(work×担当体積)−場のエネルギー変化−その他の流出`。
+体積はbohr³、面積はbohr²、総エネルギーはHartreeです。物質IDは計算由来のものを維持し、
+同じIDの複数点も個別に扱います。必須の場のエネルギー変化には瞬時背景ε∞の蓄積を含め、
+物質への仕事を二重計上しません。ポートが拾わない側面流出・PML吸収等は別途計上します。
+PMLの外へ置いたポートとPML吸収を同時に加えないなど、領域境界を揃えます。
+
+R/Tは選んだ窓のスペクトルですが、総収支には窓を掛けないE/Hから積分した流束を使います。
+R/Tの単純平均や、駆動帯域の `1−R−T` だけで全吸収を推定しません。非線形な周波数変換も
+時間領域流束には含まれます。有限時間の残留場・遅い放出・観測不足は診断に現れます。
+既定1%は検査の目安で物理精度の認定ではありません。超過は警告し、計算を止めたり
+ソルバー状態を変更したりしません。ゼロ入射・非有限入力など計算不能な診断入力は拒否します。
+再開データでは重複する境界サンプルを除いて時系列を連結し、同じ始終状態で比較します。
+追加のMPI通信・自動ダウンロード・計算開始はなく、担当ランクで解析できます。
+3Dで非一様な面・回折次数の総和はこの一様ポートAPIが自動処理する範囲外です。
+
+保存済みNPZを使う例は `python -m salmonpy.examples.fdtd_energy INPUT.npz NEW_OUTPUT`。
+入力キーと単位はそのサンプルの説明を参照します。ソルバーは起動しません。

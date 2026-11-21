@@ -7,6 +7,77 @@ from salmonpy.geometry import Grid, Shape, Geometry
 from salmonpy.analysis import read_table, spectrum, optical_conductivity, dielectric_function, optical_linearity, optical_sum_rule
 
 class UtilityTests(unittest.TestCase):
+    def test_fdtd_point_work_ports_and_energy_budget(self):
+        from salmonpy.analysis import absorbed_energy_density,reflection_transmission
+        from salmonpy.fdtd import energy_balance
+        t=np.arange(128)*.1
+        f=np.sin(2*np.pi*7*np.arange(128)/128)
+        E=np.zeros((len(t),3));H=E.copy();E[:,0]=f;H[:,1]=f
+        R,T=.25,.5
+        ports=reflection_transmission(t,E,H,E*np.sqrt(R),-H*np.sqrt(R),E*np.sqrt(T),H*np.sqrt(T),
+                                      normal=(0,0,1),units='atomic_gaussian')
+        np.testing.assert_allclose(ports.R[ports.valid],R,atol=1e-14)
+        np.testing.assert_allclose(ports.T[ports.valid],T,atol=1e-14)
+        self.assertEqual(ports.valid.dtype,np.dtype(bool))
+        impedance=reflection_transmission(t,E,H,E*np.sqrt(R),-H*np.sqrt(R),
+            E*np.sqrt(T/2),H*np.sqrt(T*2),normal=(0,0,1),units='atomic_gaussian')
+        np.testing.assert_allclose(impedance.T[impedance.valid],T,atol=1e-14)
+        volume=np.array([2.,3.]);area=2.
+        local_E=np.zeros((len(t),2,3));local_E[:,:,0]=1
+        j=np.zeros_like(local_E)
+        j[:,:,0]=f[:,None]**2*(137.035999084/(4*np.pi)*(1-R-T)*area)*np.array([.2,.8])/volume
+        old=j.copy()
+        work=absorbed_energy_density(t,local_E,j,units='atomic_gaussian',current_convention='charge',field_kind='total')
+        expected=137.035999084/(4*np.pi)*np.trapezoid(f*f,t)*(1-R-T)*area*np.array([.2,.8])/volume
+        np.testing.assert_allclose(work,expected,rtol=1e-14)
+        np.testing.assert_array_equal(j,old)
+        left=absorbed_energy_density(t[:65],local_E[:65],j[:65],units='atomic_gaussian',current_convention='charge',field_kind='total')
+        right=absorbed_energy_density(t[64:],local_E[64:],j[64:],units='atomic_gaussian',current_convention='charge',field_kind='total')
+        np.testing.assert_allclose(left+right,work,rtol=1e-14)
+        report=energy_balance(work,volume,ports,material_ids=('film','film'),transverse_area=area,
+                              field_energy_change=0.,units='atomic_gaussian',rtol=1e-12)
+        self.assertTrue(report.within_tolerance)
+        self.assertAlmostEqual(report.relative_residual,0.,places=14)
+        for a in (work,ports.R,ports.T,ports.valid,report.absorbed_energy_density):
+            with self.assertRaises(ValueError):a.setflags(write=True)
+        # Stored fields and other outgoing flux are separate from material work.
+        missing=report.incident_energy*.1
+        with self.assertWarnsRegex(UserWarning,'energy imbalance'):
+            bad=energy_balance(work,volume,ports,material_ids=('a','b'),transverse_area=area,
+                               field_energy_change=missing,units='atomic_gaussian')
+        self.assertFalse(bad.within_tolerance)
+        self.assertAlmostEqual(bad.relative_residual,-.1,places=14)
+        good=energy_balance(work*.5,volume,ports,material_ids=('a','b'),transverse_area=area,
+                            field_energy_change=report.material_work*.25,
+                            other_outgoing_energy=report.material_work*.25,units='atomic_gaussian',rtol=1e-12)
+        self.assertTrue(good.within_tolerance)
+        vacuum=reflection_transmission(t,E,H,E*0,H*0,E,H,normal=(0,0,2),units='atomic_gaussian',window='hann')
+        self.assertEqual(vacuum.incident_fluence,vacuum.transmitted_fluence)
+        np.testing.assert_allclose(vacuum.R[vacuum.valid],0)
+        np.testing.assert_allclose(vacuum.T[vacuum.valid],1)
+
+    def test_energy_diagnostics_reject_bad_contracts_and_native_nonfinite(self):
+        import ctypes as c
+        from salmonpy.analysis import absorbed_energy_density,reflection_transmission,_energy_native
+        t=np.arange(4,dtype=float);a=np.ones((4,1,3))
+        args=dict(units='atomic_gaussian',current_convention='charge',field_kind='total')
+        for value in (float('nan'),float('inf')):
+            bad=a.copy();bad[1,0,1]=value
+            with self.assertRaises(ValueError):absorbed_energy_density(t,bad,a,**args)
+            # Direct native path also checks every element using scalar IEEE.
+            out=np.empty(1)
+            fn=_energy_native('sp_absorbed_work',[c.c_int,c.c_int]+[c.c_void_p]*4)
+            self.assertNotEqual(fn(4,1,t.ctypes.data,bad.ctypes.data,a.ctypes.data,out.ctypes.data),0)
+        with self.assertRaisesRegex(ValueError,'charge'):absorbed_energy_density(t,a,a,**dict(args,current_convention='matter'))
+        with self.assertRaises(ValueError):absorbed_energy_density(t,a[:,:,0],a,**args)
+        with self.assertRaises(ValueError):absorbed_energy_density(t[::-1],a,a,**args)
+        fields=np.ones((4,3))
+        with self.assertRaises(ValueError):reflection_transmission(t,*([fields]*6),normal=(0,0,0),units='atomic_gaussian')
+        with self.assertWarnsRegex(UserWarning,'unresolved'):
+            empty=reflection_transmission(t,*([fields*0]*6),normal=(0,0,1),units='atomic_gaussian')
+        self.assertFalse(np.any(empty.valid))
+        self.assertTrue(np.isnan(empty.R).all())
+
     def test_pulse_and_composition(self):
         pulse=AcosPulse(amplitude=.1,omega=2.,duration=4.,start=1.,polarization=(1,0,0))
         t=np.linspace(0,6,601);a=pulse.sample(t)

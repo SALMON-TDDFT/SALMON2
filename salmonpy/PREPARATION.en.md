@@ -201,3 +201,64 @@ nested-launch protection inside MPI ranks stays enabled. For Python itself as a
 caller-owned MPI application, use ParallelContext and native embedded components
 collectively as described in COUPLED.en.md. This addition does not unify the
 separate DFT/TDDFT batch paths.
+
+
+## Preparation-only DFT and TDDFT
+
+`prepare_dft(model, new_directory, scf=None, save_restart=True)` writes the same
+fresh DFT input, pseudopotentials and symmetry assets as the existing renderer,
+then returns a Path. It starts no SCF or process. Default save_restart=True
+retains normal GS saving/reuse in the future calculation; preparation itself
+creates no GS. False disables restart output in that future run. Existing
+DFT.run, warm starts and warning-only SCF nonconvergence are unchanged. The new
+helper prepares fresh DFT inputs, without automatically copying or validating
+an initial-guess GS.
+
+```python
+from salmonpy.preparation import prepare_dft
+from salmonpy.dft import SCFSettings
+
+folder = prepare_dft(model, "dft-input", scf=SCFSettings(max_iterations=300))
+# model was created using DFT or the ASE bridge. Stop here.
+```
+
+`prepare_tddft(rt_input_file, new_directory, files=None)` preserves a supplied
+native RT input byte-for-byte and copies only explicitly listed local files. It
+does not rewrite dt, waveform, gauge, parallel layout or directory_read_data.
+It requires no executable/compute-node GS on the management node and does not
+automatically discover, load or duplicate GS data.
+
+```python
+from salmonpy.preparation import prepare_tddft
+
+folder = prepare_tddft("rt.inp", "tddft-input",
+                       files={"pseudo1_rps.dat": "Si_rps.dat"})
+# Existing GS references remain as supplied. Submission/execution is separate.
+```
+
+Match asset names to input references; dependencies are not inferred. Explicit
+large files use streaming copies and hashes. If transferring GS files, select
+and manage them explicitly. Resolve existing GS references on the compute node.
+This helper does not certify input semantics, GS format/XC/grid/pseudopotential
+compatibility, runtime capabilities, site layout or physical convergence.
+
+The folders contain salmonpy-prepared-dft.json or salmonpy-prepared-tddft.json,
+with prepared-not-run status and file hashes/sizes. These are not prepare_inputs
+material archives. Existing directories are never overwritten.
+
+```sh
+python -m salmonpy.examples.prepare_electrons dft Si_rps.dat NEW_DIRECTORY
+python -m salmonpy.examples.prepare_electrons tddft rt.inp NEW_DIRECTORY --asset pseudo1_rps.dat Si_rps.dat
+```
+
+Both examples stop after preparation, without run/submit continuation. The small
+Si DFT fixture is not a convergence certificate. Explicitly launch a matching
+audited SALMON in an allocated site job, passing gs.inp or rt.inp through stdin.
+Verify the recorded executable SHA256 without repeating source/object startup
+audits. HSE must use the fast-PR profile; prepare_dft does not replace provenance
+or capability checks or enable the existing DFT.run HSE batch path.
+
+Python A→J workers are a separate execution mode: TDDFTInitialState.from_salmon
+is a GS snapshot loader, and new_state starts a worker. Do not automatically
+follow preparation with these when only management-node staging was requested.
+Use the existing native embedded path inside caller-owned MPI applications.

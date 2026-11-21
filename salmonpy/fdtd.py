@@ -463,3 +463,75 @@ class SalmonExecutable:
             raise
         finally:
             manifest.write_text(json.dumps(record,indent=2))
+
+
+@dataclass(frozen=True, slots=True)
+class EnergyBalance:
+    material_ids: tuple
+    absorbed_energy_density: np.ndarray
+    incident_energy: float
+    reflected_energy: float
+    transmitted_energy: float
+    material_work: float
+    field_energy_change: float
+    other_outgoing_energy: float
+    residual: float
+    relative_residual: float
+    within_tolerance: bool
+    spectrum: object
+    config: object
+
+
+def energy_balance(absorbed, volumes, ports, *, material_ids, transverse_area,
+                   field_energy_change, other_outgoing_energy=0., units,
+                   rtol=.01, atol=0.):
+    """FDTD/multiscale energy budget, all energies Hartree, volumes bohr**3.
+
+    absorbed is absorbed_energy_density() output, point order matches material_ids
+    and volumes (one representative volume per macro point). Repeated material IDs
+    are valid; each entry is an independent macro point. No MPI or solver calls.
+    Work includes dispersive/electronic storage. field_energy_change must include
+    instantaneous background field storage, NOT that work again. Supply lateral
+    flux/PML losses not represented by the ports via other_outgoing_energy.
+    A nonconserved runnable calculation warns; it is never stopped or altered.
+    """
+    import ctypes as c
+    import warnings
+    from types import MappingProxyType
+    from .analysis import PortSpectrum, _energy_native
+    from .fields import _readonly
+    from .ld import _array
+    if units != 'atomic_gaussian' or not isinstance(ports,PortSpectrum):
+        raise InputError('require atomic_gaussian units and reflection_transmission() output')
+    if ports.config.get('units') != units: raise InputError('port units differ')
+    w = np.ascontiguousarray(_array(absorbed,'absorbed'),dtype=np.float64)
+    v = np.ascontiguousarray(_array(volumes,'volumes'),dtype=np.float64)
+    if w.ndim != 1 or w.size < 1 or v.shape != w.shape:
+        raise InputError('absorbed and volumes require one entry per macro point')
+    if isinstance(material_ids,(str,bytes)): raise InputError('material_ids must be a sequence')
+    ids = tuple(material_ids)
+    if len(ids) != len(w) or any(not isinstance(i,str) or not i for i in ids):
+        raise InputError('one nonempty material ID per macro point required')
+    if len(w) > 2**31-1: raise InputError('observation dimensions exceed native ABI')
+    area = _positive(transverse_area,'transverse_area')
+    tolerance = _positive(rtol,'rtol',zero=True); absolute = _positive(atol,'atol',zero=True)
+    # Scalar inputs are checked before ctypes sees them; numerical balance is native.
+    delta = _array(field_energy_change,'field_energy_change')
+    other = _array(other_outgoing_energy,'other_outgoing_energy')
+    if delta.shape != () or other.shape != (): raise InputError('field/other energy must be scalar')
+    terms = np.ascontiguousarray([ports.incident_fluence,ports.reflected_fluence,
+                                 ports.transmitted_fluence,float(delta),float(other)],dtype=np.float64)
+    stats = np.empty(6); accepted = c.c_int()
+    fn = _energy_native('sp_energy_balance',[c.c_int]+[c.c_void_p]*3+[c.c_double]*3+[c.c_void_p]*2)
+    if fn(len(w),w.ctypes.data,v.ctypes.data,terms.ctypes.data,area,tolerance,absolute,stats.ctypes.data,c.byref(accepted)):
+        raise InputError('native energy budget requires positive incident energy/volumes and finite arithmetic')
+    if not accepted.value:
+        warnings.warn(f'FDTD energy imbalance {stats[4]:.6g} hartree ({stats[5]:.3%} of incident); '
+                      'inspect time coverage, collocation, volume weights, ports and stored field energy',
+                      UserWarning,stacklevel=2)
+    config = MappingProxyType(dict(units=units,energy_unit='hartree',point_volume_unit='bohr^3',
+                    transverse_area=area,rtol=tolerance,atol=absolute,
+                    formula='incident-reflected-transmitted-material_work-field_change-other_outgoing',
+                    diagnostic_only=True,scope='finite-time net material work; not irreversible heat or a convergence certificate'))
+    return EnergyBalance(ids,_readonly(w),*map(float,stats[:3]),float(stats[3]),float(delta),float(other),
+                         float(stats[4]),float(stats[5]),bool(accepted.value),ports,config)

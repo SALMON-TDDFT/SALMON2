@@ -623,3 +623,101 @@ def k_current_contributions(decomposed,*,dt,current_convention,units,time0=0.,
         components=components,total_current_comparison=comparison,weights='already applied; never reweighted',
         source_convention=current_convention,output_convention='charge',units=units,dt=delta,time0=start,
         entries=len(labels),certified=False,scope='only supplied entries; no proof of k/band completeness or k-sampling convergence')))
+
+
+@dataclass(frozen=True, slots=True)
+class PortSpectrum:
+    """Directional flux ratios and unwindowed time-domain fluences."""
+    omega: np.ndarray
+    R: np.ndarray
+    T: np.ndarray
+    valid: np.ndarray
+    incident_fluence: float
+    reflected_fluence: float
+    transmitted_fluence: float
+    config: object
+
+
+def _energy_native(name, signature):
+    import ctypes as c
+    from ._sbe_handles import default_api
+    from .errors import RuntimeFailure
+    try:
+        fn = getattr(default_api().library, name)
+    except AttributeError as exc:
+        raise RuntimeFailure('Energy diagnostic ABI missing; install a matching wheel or explicitly rebuild kernels') from exc
+    fn.argtypes = signature
+    fn.restype = c.c_int
+    return fn
+
+
+def absorbed_energy_density(time, electric_field, current, *, units, current_convention,
+                            field_kind):
+    """Integral of collocated total E dot charge j, independently per macro point.
+
+    Arrays are (time, point, xyz); returns Hartree/bohr**3 in Gaussian AU.
+    This is net work including reversible material storage, NOT heat alone.
+    Negative work is retained. No solver state or observations are modified.
+    """
+    import ctypes as c
+    if units != 'atomic_gaussian' or current_convention != 'charge' or field_kind != 'total':
+        raise InputError('require atomic_gaussian, charge current j=-J, and total E')
+    t = np.ascontiguousarray(_times(time), dtype=np.float64)
+    e = np.ascontiguousarray(_array(electric_field,'electric_field'), dtype=np.float64)
+    j = np.ascontiguousarray(_array(current,'current'), dtype=np.float64)
+    if e.ndim != 3 or e.shape != j.shape or e.shape[0] != len(t) or e.shape[1] < 1 or e.shape[2] != 3:
+        raise InputError('E and j must both have shape (time, macro_point, 3)')
+    if max(len(t),e.shape[1]) > 2**31-1: raise InputError('observation dimensions exceed native ABI')
+    work = np.empty(e.shape[1], dtype=np.float64)
+    fn = _energy_native('sp_absorbed_work', [c.c_int,c.c_int]+[c.c_void_p]*4)
+    if fn(len(t),e.shape[1],t.ctypes.data,e.ctypes.data,j.ctypes.data,work.ctypes.data):
+        raise InputError('native material work rejected input or nonfinite arithmetic')
+    return _readonly(work)
+
+
+def reflection_transmission(time, incident_E, incident_H, reflected_E, reflected_H,
+                            transmitted_E, transmitted_H, *, normal, units,
+                            window='none', drive_rtol=1e-8):
+    """R=-Re(Er x Hr*)·n / Pi and T=Re(Et x Ht*)·n / Pi.
+
+    Explicit direction-separated plane-port fields, shape (N,3), equal port area.
+    n points from incident to transmitted side. Match E/H time and position first;
+    never pass staggered Yee samples, total fields as reflected fields, or A/J.
+    Does not infer incident-wave subtraction or integrate a nonuniform surface.
+    """
+    import ctypes as c
+    import warnings
+    from .ld import _positive
+    if units != 'atomic_gaussian': raise InputError('require atomic_gaussian E/H units')
+    threshold = _positive(drive_rtol,'drive_rtol',zero=True)
+    if threshold >= 1: raise InputError('drive_rtol must be less than one')
+    t = np.ascontiguousarray(_times(time), dtype=np.float64)
+    n = np.ascontiguousarray(_array(normal,'normal'), dtype=np.float64)
+    if n.shape != (3,): raise InputError('normal must have shape (3,)')
+    arrays = [np.ascontiguousarray(_array(v,'port field'), dtype=np.float64)
+              for v in (incident_E,incident_H,reflected_E,reflected_H,transmitted_E,transmitted_H)]
+    if any(a.shape != (len(t),3) for a in arrays): raise InputError('port fields must have shape (N,3)')
+    if len(t) > 2**31-1: raise InputError('observation dimensions exceed native ABI')
+    transforms = [spectrum(t,a,window=window) for a in arrays]
+    values = [np.ascontiguousarray(a.values, dtype=np.complex128) for a in transforms]
+    size = len(transforms[0].omega)
+    R = np.empty(size); T = np.empty(size); valid = np.empty(size,dtype=np.int32)
+    fn = _energy_native('sp_port_spectra',[c.c_int]+[c.c_void_p]*7+[c.c_double]+[c.c_void_p]*3)
+    if fn(size,*(a.ctypes.data for a in values),n.ctypes.data,threshold,R.ctypes.data,T.ctypes.data,valid.ctypes.data):
+        raise InputError('native spectral flux rejected input or nonfinite arithmetic')
+    fn = _energy_native('sp_port_fluence',[c.c_int]+[c.c_void_p]*5)
+    fluences = []
+    for E,H in zip(arrays[::2],arrays[1::2]):
+        value = c.c_double()
+        if fn(len(t),t.ctypes.data,E.ctypes.data,H.ctypes.data,n.ctypes.data,c.byref(value)):
+            raise InputError('native time-domain fluence rejected input or nonfinite arithmetic')
+        fluences.append(value.value)
+    if not np.any(valid): warnings.warn('Incident spectral flux is unresolved; R/T are invalid',UserWarning,stacklevel=2)
+    if np.any(R[valid!=0] < 0) or np.any(T[valid!=0] < 0):
+        warnings.warn('Negative directional R/T: inspect port decomposition and normal',UserWarning,stacklevel=2)
+    config = dict(transforms[0].config, observable='reflection_transmission',units=units,
+                  drive_rtol=threshold,normal=tuple(n),fluence_unit='hartree/bohr^2',
+                  fluence_window='none',ratio_normalization='directional E cross conjugate(H)',
+                  scope='equal-area uniform plane ports; complete time trace and separated incident/reflected waves required')
+    return PortSpectrum(transforms[0].omega,_readonly(R),_readonly(T),np.frombuffer((valid!=0).tobytes(),dtype=np.bool_),
+                        fluences[0],-fluences[1],fluences[2],MappingProxyType(config))

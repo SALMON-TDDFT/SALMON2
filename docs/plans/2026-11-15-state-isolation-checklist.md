@@ -33,7 +33,8 @@ retains results. GS saving/reuse is the normal workflow. Collected GS validation
 - [x] Optical duration/window/k diagnostics and reference-frequency LD-only
   subpixel modules completed below; historical pending optical checkboxes are superseded.
 - [x] Operational FDTD input-only staging and site launcher argv verified below.
-- [ ] Remaining operational scope: DFT/TDDFT batch staging and site evidence.
+- [x] Fresh DFT and explicit native RT input-only staging verified below.
+- [ ] Remaining operational scope: initial-guess staging, site runtime/layout validation and multi-node evidence.
   Group5 R3/R4 and group3 remain open; groups1/2 stay deferred.
 
 ### User-directed execution order (2026-11-19)
@@ -3122,5 +3123,37 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
 - [x] Source/wheel669 tests (one optional skip), preparation-only installed CLI,
   two-rank default/custom native launch and tensor sidecar parity verified.
   Dedicated plan and canonical record retain the bounded evidence.
-- [ ] Remaining HPC scope: DFT/TDDFT preparation/launcher integration and real
-  site/multi-node evidence. General init/ABI/NLCC work remains in its own queue.
+- [ ] Remaining HPC scope: generalized initial-guess staging and real site
+  launcher/runtime/multi-node evidence. Fresh DFT/RT staging is complete below.
+  General init/ABI/NLCC work remains in its own queue.
+
+
+## DFT/TDDFT input-only preparation (2026-11-21)
+- [x] prepare_dft stages fresh native input plus PP/symmetry bytes, preserving
+  default GS saving and existing run/warm-start/HSE execution contracts.
+- [x] prepare_tddft streams only supplied native input/explicit local files;
+  no GS discovery/snapshot, namelist changes, worker, MPI or job submission.
+- [x] Short native DFT input/status/forces parity with restart output disabled;
+  TDDFT current/energy parity reading existing GS in place. No new GS records;
+  existing GS hashes unchanged. This is parity evidence, not physical convergence.
+- [x] Source/wheel671 tests (one optional skip), management-only CLI, preceding
+  wheel DFT parity and native RT current/energy parity verified. Existing GS
+  unchanged and no new GS records collected. Dedicated plan/record retained.
+- [ ] Actual site/multi-node launch evidence and generalized warm-start staging
+  remain separate. Group5 R3/R4 and group3 are not closed by this work.
+
+
+### 2026-11-21 SCF未収束時の確認待ち
+
+- [x] バッチDFTとnative GSの反復上限未収束をデータ保持＋確認待ちへ変更。
+- [x] 残差CSV・任意PNGと警告を案内。意図的な部分SCFは通常継続可能。
+- [x] 日英マニュアル・AI向けJSONの自動継続案内を更新。
+- [x] 実計算で従来出力との不変性を確認。Si8の8反復・6種類の出力が従来wheelとバイト一致。GS保存なし。記録: calc2026/salmonpy-scf-review-20261121/record.json。
+
+
+### 2026-11-21 FDTD energy observations
+
+- [x] Native per-macro-point charge j dot total E work, separated E/H R/T and unwindowed fluences.
+- [x] FDTD budget with volumes/area/field storage/other outflow; warnings without stopping runnable solver.
+- [x] Uniform-port scope, reversible-storage accounting and no extra MPI communication documented in JP/EN/AI catalog.
+- [ ] Nonuniform 3D surface integration/automatic directional monitor collection remain outside this first uniform-port diagnostic.

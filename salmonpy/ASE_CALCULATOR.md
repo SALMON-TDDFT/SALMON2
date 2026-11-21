@@ -80,7 +80,7 @@ gs = atoms.calc.last_ground_state
 同じCalculatorインスタンスを複数スレッドから同時使用することは想定しません。
 
 モデル設定は構築時に固定し、`set(...)` による変更は拒否します。格子などを変更する場合は
-新しいCalculatorを作って `atoms.calc` に設定します。SCF未収束だけでは停止せず、警告を出して今回のエネルギー・力を返します。`last_ground_state.converged` はFalseになり、保存JSONに残差・閾値・反復数も残ります。未収束状態からのwarm startやTDDFT接続も可能です。実行完了は収束を意味しません。実行失敗・破損出力・非有限値の場合は結果と `last_ground_state` を消去し、古い力を返しません。失敗ログは計算ディレクトリに残ります。
+新しいCalculatorを作って `atoms.calc` に設定します。SCF未収束時は警告と `SCFReviewRequired` で構造最適化などの自動継続を止めます。保存結果は例外の `result` に残り、残差履歴は `report_directory` から確認できます。未収束の力はCalculator結果に登録しません。残差と入力条件を確認してから再計算します。実行失敗・破損出力・非有限値の場合は結果と `last_ground_state` を消去し、古い力を返しません。失敗ログは計算ディレクトリに残ります。
 
 `GroundStateResult.forces_hartree_per_bohr` で本体の力を原子単位で読み出せます。
 このプロパティには新しい力報告ファイルが必要です。過去の報告なしGSを読み直せても、

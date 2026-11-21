@@ -489,4 +489,161 @@ contains
       if(ieee_is_finite(ratio))stats(5)=ratio
     endif
   end function
+
+  ! Collocated total E and physical charge j, time-major logical arrays.
+  integer(c_int) function sp_absorbed_work(nt,np,time,e,j,work) bind(c)
+    integer(c_int),value::nt,np
+    real(c_double),intent(in)::time(nt),e(3,np,nt),j(3,np,nt)
+    real(c_double),intent(out)::work(np)
+    real(c_double)::dt,previous,power,increment
+    integer::t,p,k
+    sp_absorbed_work=4;work=0d0
+    if(nt<2.or.np<1)return
+    do t=1,nt
+      if(.not.ieee_is_finite(time(t)))return
+      if(t>1)then
+        dt=time(t)-time(t-1)
+        if(.not.ieee_is_finite(dt).or.dt<=0d0)return
+      endif
+      do p=1,np
+        do k=1,3
+          if(.not.ieee_is_finite(e(k,p,t)).or..not.ieee_is_finite(j(k,p,t)))return
+        enddo
+      enddo
+    enddo
+    do p=1,np
+      previous=dot_product(e(:,p,1),j(:,p,1))
+      if(.not.ieee_is_finite(previous))return
+      do t=2,nt
+        power=dot_product(e(:,p,t),j(:,p,t))
+        if(.not.ieee_is_finite(power))return
+        increment=(time(t)-time(t-1))*(0.5d0*previous+0.5d0*power)
+        work(p)=work(p)+increment
+        if(.not.ieee_is_finite(work(p)))return
+        previous=power
+      enddo
+    enddo
+    sp_absorbed_work=0
+  end function
+
+  ! All six port spectra use the same FFT/window/time convention.
+  integer(c_int) function sp_port_spectra(n,ei,hi,er,hr,et,ht,normal,rtol,r,t,valid) bind(c)
+    integer(c_int),value::n
+    complex(c_double_complex),intent(in)::ei(3,n),hi(3,n),er(3,n),hr(3,n),et(3,n),ht(3,n)
+    real(c_double),intent(in)::normal(3)
+    real(c_double),value::rtol
+    real(c_double),intent(out)::r(n),t(n)
+    integer(c_int),intent(out)::valid(n)
+    real(c_double)::flux(n,3),peak,v(3),length
+    complex(c_double_complex)::a(3),b(3)
+    integer::i,k,port
+    sp_port_spectra=4;valid=0
+    r=ieee_value(0d0,ieee_quiet_nan);t=r
+    if(n<1.or..not.ieee_is_finite(rtol))return
+    if(rtol<0d0.or.rtol>=1d0)return
+    do k=1,3
+      if(.not.ieee_is_finite(normal(k)))return
+    enddo
+    length=sqrt(dot_product(normal,normal))
+    if(.not.ieee_is_finite(length).or.length<=0d0)return
+    do i=1,n
+      do port=1,3
+        select case(port)
+        case(1);a=ei(:,i);b=hi(:,i)
+        case(2);a=er(:,i);b=hr(:,i)
+        case(3);a=et(:,i);b=ht(:,i)
+        end select
+        do k=1,3
+          if(.not.ieee_is_finite(real(a(k))).or..not.ieee_is_finite(aimag(a(k))))return
+          if(.not.ieee_is_finite(real(b(k))).or..not.ieee_is_finite(aimag(b(k))))return
+        enddo
+        v=[real(a(2)*conjg(b(3))-a(3)*conjg(b(2))), &
+           real(a(3)*conjg(b(1))-a(1)*conjg(b(3))), &
+           real(a(1)*conjg(b(2))-a(2)*conjg(b(1)))]
+        flux(i,port)=dot_product(v,normal)/length
+        if(.not.ieee_is_finite(flux(i,port)))return
+      enddo
+    enddo
+    peak=maxval(flux(:,1))
+    do i=1,n
+      if(flux(i,1)<=0d0.or.flux(i,1)<=rtol*peak)cycle
+      r(i)=-flux(i,2)/flux(i,1);t(i)=flux(i,3)/flux(i,1)
+      if(.not.ieee_is_finite(r(i)).or..not.ieee_is_finite(t(i)))return
+      valid(i)=1
+    enddo
+    sp_port_spectra=0
+  end function
+
+  integer(c_int) function sp_port_fluence(nt,time,e,h,normal,fluence) bind(c)
+    integer(c_int),value::nt
+    real(c_double),intent(in)::time(nt),e(3,nt),h(3,nt),normal(3)
+    real(c_double),intent(out)::fluence
+    real(c_double)::length,power,previous,v(3),dt
+    integer::i,k
+    sp_port_fluence=4;fluence=0d0
+    if(nt<2)return
+    do k=1,3
+      if(.not.ieee_is_finite(normal(k)))return
+    enddo
+    length=sqrt(dot_product(normal,normal))
+    if(.not.ieee_is_finite(length).or.length<=0d0)return
+    previous=0d0
+    do i=1,nt
+      if(.not.ieee_is_finite(time(i)))return
+      do k=1,3
+        if(.not.ieee_is_finite(e(k,i)).or..not.ieee_is_finite(h(k,i)))return
+      enddo
+      v=[e(2,i)*h(3,i)-e(3,i)*h(2,i),e(3,i)*h(1,i)-e(1,i)*h(3,i), &
+         e(1,i)*h(2,i)-e(2,i)*h(1,i)]
+      power=137.035999084d0/(4d0*acos(-1d0))*dot_product(v,normal)/length
+      if(.not.ieee_is_finite(power))return
+      if(i>1)then
+        dt=time(i)-time(i-1)
+        if(.not.ieee_is_finite(dt).or.dt<=0d0)return
+        fluence=fluence+dt*(0.5d0*previous+0.5d0*power)
+        if(.not.ieee_is_finite(fluence))return
+      endif
+      previous=power
+    enddo
+    sp_port_fluence=0
+  end function
+
+  integer(c_int) function sp_energy_balance(n,work,volumes,terms,area,rtol,atol,stats,accepted) bind(c)
+    integer(c_int),value::n
+    real(c_double),intent(in)::work(n),volumes(n),terms(5)
+    real(c_double),value::area,rtol,atol
+    real(c_double),intent(out)::stats(6)
+    integer(c_int),intent(out)::accepted
+    real(c_double)::total,residual,limit,energy(3)
+    integer::i
+    sp_energy_balance=4;accepted=0;stats=0d0
+    if(n<1)return
+    if(.not.ieee_is_finite(rtol).or..not.ieee_is_finite(atol))return
+    if(rtol<0d0.or.atol<0d0)return
+    do i=1,5
+      if(.not.ieee_is_finite(terms(i)))return
+    enddo
+    if(.not.ieee_is_finite(area).or.area<=0d0)return
+    energy=terms(1:3)*area
+    do i=1,3
+      if(.not.ieee_is_finite(energy(i)))return
+    enddo
+    if(energy(1)<=0d0)return
+    total=0d0
+    do i=1,n
+      if(.not.ieee_is_finite(work(i)).or..not.ieee_is_finite(volumes(i)))return
+      if(volumes(i)<=0d0)return
+      total=total+work(i)*volumes(i)
+      if(.not.ieee_is_finite(total))return
+    enddo
+    residual=energy(1)-energy(2)-energy(3)-total-terms(4)-terms(5)
+    limit=atol+rtol*energy(1)
+    stats=[energy,total,residual,residual/energy(1)]
+    do i=1,6
+      if(.not.ieee_is_finite(stats(i)))return
+    enddo
+    if(.not.ieee_is_finite(limit))return
+    accepted=merge(1,0,abs(residual)<=limit)
+    sp_energy_balance=0
+  end function
 end module

@@ -102,10 +102,11 @@ Longitudinal is an explicitly chosen field component, not a default.
 
 ## Unconverged SCF results
 
-Failure to meet the SCF threshold is advisory: the Calculator returns the current
-finite energy/forces with a RuntimeWarning and retains the result for warm start
-and TDDFT. Inspect `last_ground_state.converged` (False when unconverged).
-`ground-state.json` retains `converged`, residual, tolerance and iterations;
-`status="complete"` means execution completed, not SCF convergence. Invalid or
-missing output, nonfinite values and failed native execution remain errors.
-The same policy applies to `DFT.run` and `GroundStateResult.open`.
+SCF iteration-cap nonconvergence warns and raises `SCFReviewRequired`, pausing
+optimization and other automatic downstream work. Saved results remain available
+as `exception.result`; inspect residual history in `exception.report_directory`.
+The Calculator does not publish unconverged forces or retain an old force result.
+Readjust SCF settings after inspection. `ground-state.json` remains complete
+with `converged=false`; completion of execution is distinct from convergence.
+Opening saved results for inspection remains allowed. Invalid/missing output,
+nonfinite values and failed native execution remain errors.

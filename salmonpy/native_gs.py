@@ -515,7 +515,7 @@ class NativeGSSession:
         finally:
             if boundary is not None:self._check(boundary(1))
 
-    def run(self,calculation,*,scf=None,material_id='material',steps=None,restart=None,repartition=False,compatible_runtime=False):
+    def run(self,calculation,*,scf=None,material_id='material',steps=None,restart=None,repartition=False,compatible_runtime=False,allow_unconverged=False):
         from .dft import DFT,SCFSettings
         from .config import _identifier
         self._live();error=None
@@ -561,6 +561,8 @@ class NativeGSSession:
                 if calculation.xc not in ('pz','libxc_pz','libxc_pbe','hse06'):
                     raise InputError('active SCF currently supports periodic scalar PZ/Libxc-PZ/PBE/fast-PR HSE06')
                 _configure_scf(self.lib)
+            from .dft import _review_option
+            _review_option(allow_unconverged)
             scf=SCFSettings() if scf is None else scf
             _identifier(material_id,'material_id')
             text=calculation.input_text(scf)
@@ -578,7 +580,7 @@ class NativeGSSession:
                 descriptor+=(str(restart),saved)
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
-        _agree(self.comm,'DFT inputs/material IDs differ' if any(v!=(descriptor,steps) for v in self.comm.allgather((descriptor,steps))) else None)
+        _agree(self.comm,'DFT inputs/material IDs differ' if any(v!=(descriptor,steps,allow_unconverged) for v in self.comm.allgather((descriptor,steps,allow_unconverged))) else None)
         work=None;error=None
         if self.comm.rank==0:
             try:
@@ -650,9 +652,8 @@ class NativeGSSession:
         state._identity='salmonpy.retained-gs/1/'+hashlib.sha256(json.dumps(
             [descriptor,self.backend.sha256,self.backend.decomposition,vars(info)],sort_keys=True).encode()).hexdigest()
         if not info.converged and ((steps is None and restart is None) or not state.scf_status['paused']):
-            warnings.warn(f'SCF not converged after {info.iterations} iterations '
-                          f'(residual={info.residual:g}, tolerance={info.tolerance:g}); retaining the last iterate',
-                          RuntimeWarning,stacklevel=2)
+            from .dft import _review_scf
+            _review_scf(state, allow_unconverged)
         return state
 
     def load(self,directory,input_file='rt.inp',*,material_id='material'):
@@ -937,17 +938,21 @@ class NativeGSState:
         candidate=target.stage_restore()
         return candidate.publish()
 
-    def continue_scf(self,*,steps):
+    def continue_scf(self,*,steps,allow_unconverged=False):
         self._live();error=None
-        try:steps=_integer(steps,'steps',1,2**31-2)
+        try:
+            from .dft import _review_option
+            _review_option(allow_unconverged)
+            steps=_integer(steps,'steps',1,2**31-2)
         except Exception as exc:error=str(exc)
         _agree(self.session.comm,error)
-        _agree(self.session.comm,'SCF step budgets differ' if any(x!=steps for x in self.session.comm.allgather(steps)) else None)
+        _agree(self.session.comm,'SCF step budgets differ' if any(x!=(steps,allow_unconverged) for x in self.session.comm.allgather((steps,allow_unconverged))) else None)
         self._scf_ready()
         self.session._check(self.session._gs_call(self.directory,self.session.lib.sp_gs_continue,self._token,steps))
         self._metadata_converged=self.info.converged
         if not self.scf_status['paused'] and not self._metadata_converged:
-            warnings.warn('SCF iteration cap reached without convergence; retaining the last iterate',RuntimeWarning,stacklevel=2)
+            from .dft import _review_scf
+            _review_scf(self, allow_unconverged)
         return self.info
     def snapshot(self):
         self._scf_ready();token=c.c_int64()

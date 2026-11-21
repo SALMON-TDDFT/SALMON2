@@ -1,5 +1,5 @@
 """ASE-independent, fixed-ion periodic ground-state workflow (one MPI rank)."""
-from .errors import InputError, InputTypeError, RuntimeFailure
+from .errors import InputError, InputTypeError, RuntimeFailure, SCFReviewRequired
 from dataclasses import dataclass, field
 from pathlib import Path
 import hashlib
@@ -10,6 +10,44 @@ from .fdtd import SalmonExecutable
 from .sbe import _integer
 from .ld import _positive
 from .tddft import _digest, _copy_bundle
+
+
+
+def _review_option(value):
+    if type(value) is not bool:
+        raise InputTypeError('allow_unconverged must be boolean')
+
+
+def _review_scf(result, allow_unconverged=False):
+    """Retain completed data/owners and pause downstream work for review."""
+    _review_option(allow_unconverged)
+    if result.converged:
+        return
+    if allow_unconverged:
+        warnings.warn('SCF not converged; explicitly reviewed continuation uses the last iterate',
+                      RuntimeWarning, stacklevel=2)
+        return
+    # Deterministic sibling name also agrees across ranks of a native owner.
+    directory = result.directory.parent / (result.directory.name + '-scf-review')
+    suffix = 0
+    while directory.exists():
+        suffix += 1
+        directory = result.directory.parent / (result.directory.name + f'-scf-review-{suffix}')
+    report = None
+    try:
+        report = result.write_scf_report(directory)
+    except Exception as exc:
+        warnings.warn('SCF report unavailable; inspect retained native output: ' + str(exc),
+                      RuntimeWarning, stacklevel=2)
+    pause = SCFReviewRequired(result, report)
+    warnings.warn(str(pause), RuntimeWarning, stacklevel=2)
+    raise pause
+
+
+def _restart_output_text(text,save_restart):
+    """Keep fresh-run and preparation output controls byte-identical."""
+    if type(save_restart) is not bool:raise InputTypeError('save_restart must be boolean')
+    return text if save_restart else text.replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
 
 
 def _frozen(value,shape):
@@ -91,7 +129,7 @@ def _read_status(path):
         if residual<0 or tolerance<=0: raise InputError('invalid residual or tolerance')
         converged=bool(flag==1 and residual<tolerance)
         if not converged:
-            warnings.warn(f'SCF not converged after {iterations} iterations (residual={residual:.6g}, tolerance={tolerance:.6g}); continuing with the last iterate', RuntimeWarning, stacklevel=2)
+            warnings.warn(f'SCF not converged after {iterations} iterations (residual={residual:.6g}, tolerance={tolerance:.6g}); last iterate retained; inspect residual history before continuing', RuntimeWarning, stacklevel=2)
         return dict(iterations=iterations,residual=residual,tolerance=tolerance,energy_hartree=energy,converged=converged)
     except (OSError,ValueError) as exc:
         raise RuntimeFailure('Invalid or missing GS status; inspect gs_status.dat and stdout.log') from exc
@@ -250,9 +288,14 @@ class DFT:
         if self.symmetry is not None:value['symmetry']={'directions':self.symmetry.directions,'sha256':self.symmetry.sha256}
         return value
 
-    def run(self,executable,directory,*,scf=SCFSettings(),threads=1,timeout=600.,initial_guess=None,save_restart=True):
+    def run(self,executable,directory,*,scf=SCFSettings(),threads=1,timeout=600.,initial_guess=None,save_restart=True,allow_unconverged=False):
+        """Run SCF; terminal nonconvergence retains results and pauses for review.
+
+        allow_unconverged=True requires explicit review, never automatic retry.
+        """
         import os,subprocess
         import shutil
+        _review_option(allow_unconverged)
         if not isinstance(executable,SalmonExecutable): raise InputTypeError('expected SalmonExecutable')
         if self.xc=='hse06':
             raise InputError('HSE06 GS uses NativeGSBackend with a declared fast-PR compute runtime; batch HSE selection requires fast-PR provenance')
@@ -260,8 +303,7 @@ class DFT:
         if self.xc=='tbmbj':
             warnings.warn('TB-mBJ is a model potential for states/bands/response; total energy and forces '
                           'are unvalidated diagnostics, not an ASE optimization capability.',RuntimeWarning,stacklevel=2)
-        text=self.input_text(scf)
-        if not save_restart:text=text.replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
+        text=_restart_output_text(self.input_text(scf),save_restart)
         threads=_integer(threads,'threads',1,2**31-1);timeout=_positive(timeout,'timeout')
         if _digest(executable.path)!=executable.sha256: raise InputError('executable checksum mismatch')
         dest=Path(directory).expanduser().resolve()
@@ -326,7 +368,9 @@ class DFT:
             record.update(status='failed',error=str(exc));raise
         finally:
             manifest.write_text(json.dumps(record,indent=2))
-        return GroundStateResult.open(dest)
+        result = GroundStateResult.open(dest)
+        _review_scf(result, allow_unconverged)
+        return result
 
 
 @dataclass(frozen=True)
@@ -374,6 +418,52 @@ class GroundStateResult:
             raise InputError('inconsistent GS convergence metadata')
         return cls(root,status['energy_hartree'],status['iterations'],status['converged'],saved)
 
+    def write_scf_report(self, directory):
+        """Write actual native residual history and an optional plot, without SCF."""
+        import csv
+        verified = self.open(self.directory)
+        status = _read_status(verified.directory/'native/gs_status.dat')
+        rows = []
+        log = verified.directory/'native/stdout.log'
+        if log.is_file():
+            for line in log.read_text().splitlines():
+                if line.strip().startswith('iter and int_x|rho_i(x)-rho_i-1(x)|dx/nelec'):
+                    fields = line.rsplit('=', 1)[-1].split()
+                    if len(fields) == 2:
+                        iteration, residual = int(fields[0]), float(fields[1].replace('D','e').replace('d','e'))
+                        if iteration > 0 and np.isfinite(residual) and residual >= 0:
+                            rows.append((iteration, residual, status['tolerance']))
+        source = 'native-stdout-rho_dne' if rows else 'final-status-only'
+        if not rows:
+            rows = [(status['iterations'], status['residual'], status['tolerance'])]
+        directory = Path(directory).expanduser().resolve()
+        directory.mkdir(parents=True, exist_ok=False)
+        with (directory/'residuals.csv').open('w', newline='') as stream:
+            writer = csv.writer(stream)
+            writer.writerow(['iteration','residual','threshold'])
+            writer.writerows(rows)
+        report = dict(status, metric='rho_dne', history_source=source, plot_status='unavailable')
+        figure = None
+        try:
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
+            figure = Figure(figsize=(7,4)); FigureCanvasAgg(figure)
+            axis = figure.subplots()
+            axis.semilogy([r[0] for r in rows], [r[1] for r in rows], marker='o', label='Residual')
+            axis.axhline(status['tolerance'], linestyle='--', label='Threshold')
+            axis.set(xlabel='SCF iteration', ylabel='rho_dne',
+                     title='SCF converged' if status['converged'] else 'SCF not converged — review required')
+            axis.grid(True, which='both', alpha=.25); axis.legend(); figure.tight_layout()
+            figure.savefig(directory/'residuals.png', dpi=150)
+            report['plot_status'] = 'saved'
+        except Exception as exc:
+            report['plot_error'] = str(exc)
+            warnings.warn('SCF residual CSV saved; plot unavailable: ' + str(exc), UserWarning, stacklevel=2)
+        finally:
+            if figure is not None: figure.clear()
+        (directory/'report.json').write_text(json.dumps(report, indent=2)+'\n')
+        return directory
+
     def _with_restart(self):
         verified=self.open(self.directory)
         if not verified.restart_saved:
@@ -396,16 +486,18 @@ class GroundStateResult:
         if not isinstance(converter,GammaRestartConverter):raise InputTypeError('GammaRestartConverter required')
         return converter.export_archive(self._with_restart(),directory,orbital_block=orbital_block,timeout=timeout)
 
-    def band_initial_state(self,*,executable):
+    def band_initial_state(self,*,executable,allow_unconverged=False):
         from .bands import BandInitialState
         verified=self._with_restart()
+        _review_scf(verified, allow_unconverged)
         return BandInitialState.from_salmon(verified.directory/'native','gs.inp',executable=executable)
 
-    def tddft_initial_state(self,*,executable,max_steps=1000,threads=1,timeout=300.):
+    def tddft_initial_state(self,*,executable,max_steps=1000,threads=1,timeout=300.,allow_unconverged=False):
         import tempfile
         from .bands import _input_groups
         from .tddft import TDDFTInitialState
         verified=self._with_restart()
+        _review_scf(verified, allow_unconverged)
         with tempfile.TemporaryDirectory(prefix='salmonpy-gs-to-rt-') as tmp:
             bundle=Path(tmp)/'bundle';_copy_bundle(verified.directory/'native',bundle)
             groups=_input_groups((bundle/'gs.inp').read_text())

@@ -17,7 +17,7 @@ import unicodedata
 from .config import _copy_json, resolve_materials
 from .errors import InputError
 
-__all__ = ['prepare_inputs', 'prepare_fdtd', 'verify_inputs', 'preflight_inputs', 'check_job']
+__all__ = ['prepare_inputs', 'prepare_fdtd', 'prepare_dft', 'prepare_tddft', 'verify_inputs', 'preflight_inputs', 'check_job']
 _SCHEMA = 'salmonpy.input-bundle/1'
 _GENERATED = {'materials.json', 'resolved.json', 'manifest.json'}
 _DIGEST = re.compile(r'[0-9a-f]{64}\Z')
@@ -103,13 +103,30 @@ def _publish_stage(stage,dest):
         raise
 
 
-def prepare_fdtd(calculation,directory,*,mpi=None):
-    """Write native FDTD inputs only; return a NEW directory, never execute.
+def _prepare_native(directory,kind,input_name,input_data,assets,metadata):
+    """Common input-only publication for native payloads and explicit files."""
+    dest=Path(directory).expanduser().absolute()
+    if dest.exists() or dest.is_symlink():raise FileExistsError(dest)
+    manifest=f'salmonpy-prepared-{kind}.json'
+    if set(assets)&{input_name,manifest}:raise InputError('asset collides with a prepared input filename')
+    _names([*assets,input_name,manifest])
+    payloads={input_name:input_data,**assets}
+    dest.parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f'.salmonpy-{kind}-',dir=dest.parent) as temporary:
+        stage=Path(temporary);entries={}
+        for name,data in payloads.items():
+            target=stage/name;target.parent.mkdir(parents=True,exist_ok=True)
+            if isinstance(data,bytes):target.write_bytes(data)
+            else:shutil.copyfile(data,target)
+            digest,size=_hash(target);entries[name]={'sha256':digest,'size':size}
+        _write(stage/manifest,{'schema':f'salmonpy.prepared-{kind}/1','status':'prepared-not-run',
+                              'input':input_name,**metadata,'files':entries})
+        _publish_stage(stage,dest)
+    return dest
 
-    No executable is required or inspected. No subprocess, MPI initialization,
-    compilation, installation, job submission or automatic next step occurs.
-    Existing input-bundle verify_inputs is a different archive schema.
-    """
+
+def prepare_fdtd(calculation,directory,*,mpi=None):
+    """Write native FDTD inputs only; return a NEW directory, never execute."""
     from .fdtd import FDTD,FDTDMPI
     from .errors import InputTypeError
     if not isinstance(calculation,FDTD):raise InputTypeError('calculation must be FDTD')
@@ -117,24 +134,46 @@ def prepare_fdtd(calculation,directory,*,mpi=None):
     dest=Path(directory).expanduser().absolute()
     if dest.exists() or dest.is_symlink():raise FileExistsError(dest)
     text=calculation.input_text() if mpi is None else mpi.input_text(calculation)
-    assets=calculation.input_assets()
-    manifest='salmonpy-prepared-fdtd.json'
-    if set(assets)&{'inputfile',manifest}:raise InputError('FDTD asset collides with a prepared input filename')
-    _names([*assets,'inputfile',manifest])
-    payloads={name:value.encode('utf-8') for name,value in assets.items()}
-    payloads['inputfile']=text.encode('utf-8')
-    dest.parent.mkdir(parents=True,exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='.salmonpy-fdtd-',dir=dest.parent) as temporary:
-        stage=Path(temporary)
-        for name,data in payloads.items():
-            target=stage/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
-        _write(stage/manifest,{'schema':'salmonpy.prepared-fdtd/1','status':'prepared-not-run',
-            'input':'inputfile','ranks':1 if mpi is None else mpi.ranks,
-            'mpi_grid':None if mpi is None else list(mpi.grid),
-            'files':{name:{'sha256':hashlib.sha256(data).hexdigest(),'size':len(data)}
-                     for name,data in payloads.items()}})
-        _publish_stage(stage,dest)
-    return dest
+    assets={name:value.encode('utf-8') for name,value in calculation.input_assets().items()}
+    return _prepare_native(directory,'fdtd','inputfile',text.encode('utf-8'),assets,
+                           {'ranks':1 if mpi is None else mpi.ranks,
+                            'mpi_grid':None if mpi is None else list(mpi.grid)})
+
+
+def prepare_dft(calculation,directory,*,scf=None,save_restart=True):
+    """Write a fresh DFT input and immutable PP/symmetry assets, without SCF.
+
+    Default restart saving is unchanged. No initial-guess state is loaded or
+    copied; the existing run(initial_guess=...) path remains separate.
+    """
+    from .dft import DFT,SCFSettings,_restart_output_text
+    from .errors import InputTypeError
+    if not isinstance(calculation,DFT):raise InputTypeError('calculation must be DFT')
+    scf=SCFSettings() if scf is None else scf
+    text=_restart_output_text(calculation.input_text(scf),save_restart)
+    metadata={'xc':calculation.xc,'save_restart':save_restart}
+    if calculation.xc=='hse06':metadata['required_runtime_profile']='fast-pr'
+    return _prepare_native(directory,'dft','gs.inp',text.encode('utf-8'),dict(calculation.input_assets),metadata)
+
+
+def prepare_tddft(input_file,directory,*,files=None):
+    """Stage supplied RT input bytes and explicitly selected local files only.
+
+    No executable/worker/GS loader, discovery or namelist rewriting. Restart
+    paths and dependencies remain user-managed; an offline management node
+    need not have the compute node's GS directory. Copies stream to disk.
+    """
+    source=Path(input_file).expanduser()
+    if not source.is_file():raise InputError('TDDFT input_file must be a local regular file')
+    files={} if files is None else files
+    if type(files) is not dict:raise InputError('files must map relative names to explicit local paths')
+    assets={}
+    for name,path in files.items():
+        path=Path(path).expanduser()
+        if not path.is_file():raise InputError(f'missing local TDDFT asset: {name}')
+        assets[name]=path
+    return _prepare_native(directory,'tddft','rt.inp',source,assets,
+                           {'restart_policy':'external-user-managed','validation_scope':'explicit-files-only'})
 
 
 def prepare_inputs(data, directory, *, registry, base_directory, files, provenance=None):

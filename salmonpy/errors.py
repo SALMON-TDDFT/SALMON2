@@ -5,7 +5,7 @@ An exception type alone does not guarantee that a whole coupled run rolled back.
 """
 
 __all__ = ['SalmonpyError', 'InputError', 'InputTypeError', 'NumericalError',
-           'RuntimeFailure', 'SnapshotError']
+           'RuntimeFailure', 'SnapshotError', 'SCFReviewRequired']
 
 
 class SalmonpyError(Exception):
@@ -30,3 +30,20 @@ class RuntimeFailure(SalmonpyError, RuntimeError):
 
 class SnapshotError(InputError):
     """A snapshot is incompatible or invalid; restore leaves the state intact."""
+
+
+class SCFReviewRequired(SalmonpyError, RuntimeError):
+    """SCF ended unconverged; inspect retained data before continuing.
+
+    result is the saved GroundStateResult or live NativeGSState (not closed).
+    report_directory contains diagnostics, or None if report writing failed.
+    """
+
+    def __init__(self, result, report_directory):
+        self.result = result
+        self.report_directory = report_directory
+        location = str(report_directory) if report_directory is not None else str(result.directory)
+        super().__init__('SCF not converged: automatic continuation paused. '
+                         'Inspect residual history and threshold in ' + location +
+                         '. Retained results/state remain available as exception.result; '
+                         'do not bypass review automatically.')

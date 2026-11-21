@@ -623,6 +623,41 @@ class NativeGSLinkTests(unittest.TestCase):
             self.assertEqual(tool.mpi_link_command(original),original)
             probe.assert_not_called()
 
+    def test_unconverged_scf_review_retains_native_owner_and_partial_steps(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, PropertyMock
+        from salmonpy.native_gs import NativeGSState
+        from salmonpy.errors import SCFReviewRequired
+        import tempfile
+        comm=SimpleNamespace(allgather=lambda value:[value])
+        session=SimpleNamespace(comm=comm,_live=lambda:None,lib=Mock(),
+                                _check=Mock(),_gs_call=Mock(return_value=0))
+        with tempfile.TemporaryDirectory() as tmp:
+            state=NativeGSState(session,1,Path(tmp)/'owner','A',None)
+            state._scf_ready=Mock()
+            state.write_scf_report=Mock(side_effect=lambda path:path)
+            info=SimpleNamespace(converged=False)
+            with patch.object(NativeGSState,'info',new_callable=PropertyMock,return_value=info), patch.object(
+                    NativeGSState,'scf_status',new_callable=PropertyMock) as status:
+                status.return_value={'paused':True}
+                self.assertIs(state.continue_scf(steps=2),info)
+                state.write_scf_report.assert_not_called()
+                status.return_value={'paused':False}
+                with self.assertWarns(RuntimeWarning),self.assertRaises(SCFReviewRequired) as stopped:
+                    state.continue_scf(steps=2)
+                self.assertIs(stopped.exception.result,state)
+                self.assertFalse(state.closed)
+                state.write_scf_report.assert_called_once()
+                state.write_scf_report.reset_mock()
+                self.assertIs(state.continue_scf(steps=2,allow_unconverged=True),info)
+                state.write_scf_report.assert_not_called()
+                state.write_scf_report.side_effect=OSError('diagnostic disk unavailable')
+                with self.assertWarns(RuntimeWarning),self.assertRaises(SCFReviewRequired) as failed_report:
+                    state.continue_scf(steps=2)
+                self.assertIsNone(failed_report.exception.report_directory)
+                self.assertIs(failed_report.exception.result,state)
+                self.assertFalse(state.closed)
+
     def test_scf_snapshot_owner_and_step_admission_precede_native_calls(self):
         from types import SimpleNamespace
         from unittest.mock import Mock

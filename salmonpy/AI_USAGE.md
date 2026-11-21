@@ -89,7 +89,7 @@ BANDS.mdを参照してください。`bands.BandStructure.from_salmon` と `.pl
 明示してください。経路上の価電子帯上端を全域のVBMと呼ばないでください。
 
 バンドの計算入口は `BandInitialState.from_salmon` → `run(BandPath, ...)`。
-初期束の外の新規保存先、対応した監査済み実行ファイルを使い、SCF未収束だけでは停止せず警告して後続へ進めます。実行完了とSCF収束を区別し、`GroundStateResult.converged` と `ground-state.json` の `converged` を確認して未収束を収束済みと説明しません。残差・閾値・反復数は保存されます。破損出力・非有限値・native実行失敗は引き続きエラーです。
+初期束の外の新規保存先、対応した監査済み実行ファイルを使い、SCFが反復上限で未収束なら警告とSCFReviewRequiredで一旦止め、残差履歴を利用者が確認するまで後続へ進めません。実行完了とSCF収束を区別し、`GroundStateResult.converged` と `ground-state.json` の `converged` を確認して未収束を収束済みと説明しません。残差・閾値・反復数は保存されます。破損出力・非有限値・native実行失敗は引き続きエラーです。
 
 ASE連携は任意の独立モジュール `salmonpy.ase`。ASE.mdを参照。
 `run_bands` は構造を照合し、ASEのk点列をそのまま計算します。Calculator・力は独立したASE_CALCULATOR.mdの対応範囲を参照してください。
@@ -774,7 +774,7 @@ context_mpi_protocol1の新しい高速PRランタイムでは、rt_open初期�
 
 開発優先順位は4（SCFの完全保存・再開）→5（共有状態・初期化・異常復帰・native ABI）→3（NLCC・単位換算）です。1（高速HSEノルム）・2（物理格子収束確認）は保留し、分子作業も保留を維持します。共通ソースのSCF進捗の状態所有は、完全なSCF継続APIの実装とは区別してください。
 
-通常PZ/Libxc-PZ/PBEのSCFはsession.run(..., steps=K)で反復境界に停止し、continue_scf(steps=M)、snapshot()/restore()で混合履歴を保ったメモリ内継続ができます。実測した初期化／実行反復カウンタを確認し、波動関数だけのwarm startを完全なSCF復元と呼ばないでください。スナップショットは同じ生存状態・ビルド・MPI分割に限定し、ディスク／プロセス再開を実装済みと案内しないでください。新APIでもSCF未収束は警告して結果を保持します。
+通常PZ/Libxc-PZ/PBEのSCFはsession.run(..., steps=K)で反復境界に停止し、continue_scf(steps=M)、snapshot()/restore()で混合履歴を保ったメモリ内継続ができます。実測した初期化／実行反復カウンタを確認し、波動関数だけのwarm startを完全なSCF復元と呼ばないでください。スナップショットは同じ生存状態・ビルド・MPI分割に限定し、ディスク／プロセス再開を実装済みと案内しないでください。新APIでも終端のSCF未収束は結果を保持して確認待ちにします。意図的なpaused=Trueの途中停止は対象外です。
 
 高速PR版HSE06も同じSCFメモリ保存APIに対応します。全k点CPU・k点MPIでHSE対応ビルドを使い、低速HSEへ落とさないでください。混合履歴・PBE事前SCFの進捗・交換演算子の数値キャッシュを保持し、FFT/backend資源は複製しません。復元時の初期化／過去反復の再計算は0です。本来の将来のPBE→HSE切替処理と復元時の再計算を区別してください。HSE移行後の未収束は警告して保持します。対称性・ディスク再開の最新範囲はNATIVE_GS各節を参照してください。SOC/+U/DCは未対応です。
 
@@ -1028,3 +1028,58 @@ J後の結果通知、H前の合意、受信検査と保護付き再試行は残
 FDTDMPI.commandはプレビューのみ。rank_argumentsの{ranks}置換以外のシェル解釈はありません。
 既定のrunとMPIランク内二重起動拒否は変更しません。既にMPIアプリ内ならCOUPLEDの
 caller-owned埋め込み入口を使います。DFT/TDDFTのバッチ投入共通化はまだ別課題です。
+
+
+### DFT／TDDFTの管理ノード準備
+prepare_dftはfresh DFT入力と不変PP／対称性ファイルのみを保存します。save_restartの
+既定Trueは将来の計算でGSを保存する設定です。準備そのものはGSを生成しません。
+prepare_tddftは明示したnative RT入力とfilesだけを保持し、GS探索・読込・snapshot化、
+dtや波形などの書換をしません。計算ノード側の既存GSを管理ノードへ要求しません。
+どちらもprepared-not-runのPathを返して終了し、実行ファイル、MPI初期化、SCF、worker、
+ビルド、ジョブ投入へ自動継続しません。典型例はexamples.prepare_electronsです。
+計算が依頼されていない入力準備でTDDFTInitialState.from_salmonやnew_stateへ進まないで
+ください。実行・転送は指定された計算ノード／ジョブで別操作です。これらは完全な物理・
+restart整合性検査ではなく、HSE高速PR限定や既存実行入口の制約を解除しません。
+
+
+## SCF未収束時の確認待ち（2026-11-21）
+
+`DFT.run()` と `NativeGSSession.run()` は、反復上限で未収束なら警告し、
+`SCFReviewRequired` を送出して後続計算への自動継続を止めます。
+失敗した実行としてデータを消すことはしません。バッチの保存済み結果／nativeの生存状態は
+例外の `result` に保持し、`report_directory` に残差CSV・任意のPNG・report.jsonを保存します。
+MatplotlibがなくてもCSVは利用できます。図の生成失敗と計算失敗を混同しません。
+レポートの保存に失敗しても確認待ちは維持し、元の出力を確認するよう警告します。
+通常のGS保存設定を維持し、`save_restart=False` なら新たなGS再開データは保存しません。
+
+```python
+from salmonpy.errors import SCFReviewRequired
+try:
+    gs = model.run(engine, 'new-gs-output')
+except SCFReviewRequired as review:
+    gs = review.result
+    print('Review SCF residuals:', review.report_directory)
+    # ここで終了し、残差の推移・閾値・入力条件を利用者が確認する。
+    # このexcept節からTDDFTを自動で開始しない。
+```
+
+残差が下がっているか、停滞／振動しているかを確認し、反復上限・混合条件などを見直します。
+確認後に未収束状態を使うと利用者が明示した場合だけ `allow_unconverged=True` を指定できます。
+AIが自動的にこの指定で再実行してはいけません。既存結果の `GroundStateResult.open()` や
+残差の読取・保存・warm startは引き続き可能です。既知の未収束GSからの
+`band_initial_state()`／`tddft_initial_state()` にも同じ確認待ちを適用します。
+
+nativeの `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
+止めた `paused=True` の状態は正常な途中状態です。全反復上限に達した未収束終了だけが
+確認待ちになります。確認待ち後もnative状態は閉じず、保存や診断に利用できます。
+ランク間で `allow_unconverged` の指定を揃えます。計算の更新順・収束閾値は変更しません。
+この方針は以前の「未収束でも警告のみで自動継続」を置き換えます。
+
+## FDTDのエネルギー保存診断
+
+API.mdのエネルギー収支節を参照。マクロ点Eとcharge jの仕事はabsorbed_energy_density、
+分離したE/Hポートはreflection_transmission、総収支はfdtd.energy_balanceを使います。
+E/Hの位置・時刻、jの符号、担当体積・面積、場の始終エネルギーを利用者の設定から確認します。
+足りない観測量をゼロと推測して保存則が成立したと説明しません。E/JやAだけからR/Tを作らず、
+物質の可逆蓄積を熱と呼ばず、TDDFT/LD蓄積を仕事と二重計上しません。診断超過は警告のみ。
+一様ポートの範囲を超える3D面積積分や回折次数は未実装として明示します。

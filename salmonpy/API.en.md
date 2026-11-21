@@ -306,3 +306,98 @@ converged real-material optical calculation.
 
 
 Additive API: salmonpy.preparation.prepare_fdtd(calculation, directory, mpi=None) writes a new native FDTD input folder and returns its Path only. FDTDMPI.rank_arguments and command(executable) configure/preview argv, without execution. See PREPARATION.en.md.
+
+Preparation-only API: prepare_dft(model, directory, scf=None, save_restart=True) and prepare_tddft(input_file, directory, files=None) return a Path without SCF, TDDFT workers, MPI initialization or submission. See PREPARATION.en.md.
+
+
+## Review pause for unconverged SCF (2026-11-21)
+
+`DFT.run()` and `NativeGSSession.run()` warn and raise `SCFReviewRequired`
+when SCF exhausts its iteration cap without convergence. Automatic downstream
+computation stops for review. Completed data are retained: `exception.result`
+is the saved batch result or still-live native owner; `exception.report_directory`
+points to residual CSV, optional PNG, and report.json. Missing Matplotlib does
+not prevent CSV output. A report-writing failure still pauses continuation and
+warns to inspect the original native output. Normal GS saving settings remain;
+`save_restart=False` does not collect a new GS restart dataset.
+
+```python
+from salmonpy.errors import SCFReviewRequired
+try:
+    gs = model.run(engine, 'new-gs-output')
+except SCFReviewRequired as review:
+    gs = review.result
+    print('Review SCF residuals:', review.report_directory)
+    # End here and inspect residual trends, threshold and input conditions.
+    # Do not automatically start TDDFT from this handler.
+```
+
+Inspect decreasing, stalled or oscillating residuals before adjusting iteration
+or mixing settings. Only explicit user approval after review warrants
+`allow_unconverged=True`; an AI must not automatically retry with this option.
+`GroundStateResult.open()`, reading/saving diagnostics, and warm starts remain
+available. `band_initial_state()` and `tddft_initial_state()` also pause for a
+known unconverged batch GS unless the reviewed override is supplied.
+
+Intentional native step budgets (`run(..., steps=K)` and
+`continue_scf(steps=M)`) returning `paused=True` are normal partial SCF states.
+Only terminal nonconvergence pauses for review. The native owner remains live
+for diagnosis or saving. All solver ranks must agree on `allow_unconverged`.
+Numerical update order and SCF thresholds are unchanged. This replaces the old
+policy of automatically proceeding after an unconverged-SCF warning.
+
+
+## FDTD/multiscale energy budget
+
+`analysis.absorbed_energy_density(time, E, j, units='atomic_gaussian',
+current_convention='charge', field_kind='total')` integrates collocated total
+E dot physical charge current j per macro point in Fortran (trapezoidal rule).
+E/j have shape (time, point, 3); output is Hartree/bohr³. Explicitly convert
+SALMON matter current J to j=-J first. This is net work including reversible
+material storage, not heat alone. Do not add LD pole storage or electronic
+energy change again when counting this work.
+
+`analysis.reflection_transmission` takes separated incident/reflected/transmitted
+E/H arrays, each (time,3), and returns R(omega), T(omega) and a validity mask.
+The normal points from incident to transmitted side. Ratios use complex Poynting
+flux, retaining polarization and impedance, not an E-only amplitude ratio.
+Scope: uniform equal-area plane ports. Separate wave fields with a reference run
+or a directional decomposition first; a total field is not a reflected field.
+Collocate Yee E/H in both space and time. Weak-drive bins remain invalid/NaN.
+
+```python
+from salmonpy.analysis import absorbed_energy_density, reflection_transmission
+from salmonpy.fdtd import energy_balance
+
+work = absorbed_energy_density(time, E_points, charge_j_points,
+    units='atomic_gaussian', current_convention='charge', field_kind='total')
+ports = reflection_transmission(time, E_inc, H_inc, E_ref, H_ref, E_tr, H_tr,
+    normal=(0, 0, 1), units='atomic_gaussian', window='none')
+check = energy_balance(work, point_volumes, ports,
+    material_ids=material_ids, transverse_area=area,
+    field_energy_change=delta_field_energy, other_outgoing_energy=other_outflow,
+    units='atomic_gaussian', rtol=.01)
+print(check.residual, check.relative_residual, check.within_tolerance)
+# ports.omega/R/T/valid; work retains the macro-point order.
+```
+
+Residual = incident-reflected-transmitted-sum(work*volume)-field_change-other_outflow.
+Volumes are bohr³, area bohr², total energies Hartree. Preserve material IDs;
+repeated IDs still refer to independent macro points. Required field_change
+includes instantaneous epsilon_infinity field storage, excluding material work
+already counted. Include unmeasured lateral flux/PML absorption separately,
+with one consistent region boundary; never count the same outgoing energy twice.
+
+Spectra use the selected window; total-energy fluences always integrate raw,
+unwindowed E/H. Do not average R/T or infer all absorption from drive-band
+1-R-T alone. Time-domain flux also includes frequency conversion. Truncated
+traces, residual fields and delayed emission can affect the budget. The default
+1% is advisory, not accuracy certification. Excess warns without stopping or
+changing a solver. Zero incident energy and nonfinite diagnostic inputs are
+rejected. After restart, join traces without duplicate boundary samples and
+compare the same initial/final states. No added MPI communication or implicit
+solver execution. Nonuniform 3D surfaces/diffraction-order sums are not
+silently treated as uniform plane ports.
+
+Stored-array example: `python -m salmonpy.examples.fdtd_energy INPUT.npz NEW_OUTPUT`.
+See its module docstring for NPZ keys/units. It never launches a solver.

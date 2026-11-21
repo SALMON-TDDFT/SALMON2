@@ -98,7 +98,7 @@ TB-mBJの新規GSは直列の `DFT(xc="tbmbj", cval=None).run(...)` で作成で
 DFT(..., xc="hse06")は高速PR版のNativeGSBackend session.run用に使用できます。
 HSE06は全k点・k点方向のMPI分割が対象で、計算機能を宣言した新しいビルドが必要です。
 詳細はNATIVE_GS.mdを参照してください。バッチDFT.runのHSE出力は未接続です。
-HSE入力ではPBE予備SCFを無効にし、指定反復をHSEで実行します。未収束は警告です。
+HSE入力ではPBE予備SCFを無効にし、指定反復をHSEで実行します。未収束時は確認待ちです。
 
 ## 再開用配列を保存せず、エネルギー・力を得る
 
@@ -112,7 +112,7 @@ print(gs.energy_hartree, gs.forces_hartree_per_bohr, gs.restart_saved)
 ```
 
 対象はバッチ入口のPZ／Libxc-PZ／PBEです。4反復は接続確認用で、物理的な収束を保証しません。
-未収束でも警告とともに結果を返します。restart_savedは実際に再開用3ファイルが揃ったかを
+未収束時は結果を保持して確認待ちにします。restart_savedは実際に再開用3ファイルが揃ったかを
 示し、省略した場合はFalseです。エネルギー・力の読み込みは可能ですが、バンド初期化、
 TDDFT初期化、warm start、GSアーカイブ出力には再開用配列を保存した結果が必要です。
 save_restartを記録していない従来の結果は保存ありとして扱います。
@@ -129,3 +129,40 @@ Siサンプルは--no-restartと--max-iterationsに対応します。
 ### TB-mBJの直列GS入口
 
 `DFT(..., xc="tbmbj", cval=None)` または `dft_from_atoms(..., xc="tbmbj", cval=1.2)` を使います。JSONの物質レシピでも `xc` と任意の `cval` を指定できます。係数はGS記録、warm startの整合性検査、TDDFT入力へ引き継ぎます。TB-mBJはモデルポテンシャルのため、全エネルギーと力は未検証の診断値として警告し、計算は続行します。ASE Calculatorによる最適化の対象にはしません。サンプルは `python -m salmonpy.examples.dft_tbmbj --help` で確認できます。今回の確認は合成密度のネイティブXC評価とインターフェース検査であり、実材料の物理精度保証ではありません。
+
+
+管理ノードで入力保存だけを行う場合はpreparation.prepare_dftを使います。既存runやwarm startとは別で、自動的に計算へ進みません。日英のPREPARATION.md／PREPARATION.en.mdを参照してください。
+
+
+## SCF未収束時の確認待ち（2026-11-21）
+
+`DFT.run()` と `NativeGSSession.run()` は、反復上限で未収束なら警告し、
+`SCFReviewRequired` を送出して後続計算への自動継続を止めます。
+失敗した実行としてデータを消すことはしません。バッチの保存済み結果／nativeの生存状態は
+例外の `result` に保持し、`report_directory` に残差CSV・任意のPNG・report.jsonを保存します。
+MatplotlibがなくてもCSVは利用できます。図の生成失敗と計算失敗を混同しません。
+レポートの保存に失敗しても確認待ちは維持し、元の出力を確認するよう警告します。
+通常のGS保存設定を維持し、`save_restart=False` なら新たなGS再開データは保存しません。
+
+```python
+from salmonpy.errors import SCFReviewRequired
+try:
+    gs = model.run(engine, 'new-gs-output')
+except SCFReviewRequired as review:
+    gs = review.result
+    print('Review SCF residuals:', review.report_directory)
+    # ここで終了し、残差の推移・閾値・入力条件を利用者が確認する。
+    # このexcept節からTDDFTを自動で開始しない。
+```
+
+残差が下がっているか、停滞／振動しているかを確認し、反復上限・混合条件などを見直します。
+確認後に未収束状態を使うと利用者が明示した場合だけ `allow_unconverged=True` を指定できます。
+AIが自動的にこの指定で再実行してはいけません。既存結果の `GroundStateResult.open()` や
+残差の読取・保存・warm startは引き続き可能です。既知の未収束GSからの
+`band_initial_state()`／`tddft_initial_state()` にも同じ確認待ちを適用します。
+
+nativeの `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
+止めた `paused=True` の状態は正常な途中状態です。全反復上限に達した未収束終了だけが
+確認待ちになります。確認待ち後もnative状態は閉じず、保存や診断に利用できます。
+ランク間で `allow_unconverged` の指定を揃えます。計算の更新順・収束閾値は変更しません。
+この方針は以前の「未収束でも警告のみで自動継続」を置き換えます。

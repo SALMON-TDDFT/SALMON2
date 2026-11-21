@@ -40,7 +40,7 @@ with backend.open(context) as session:
 メインスレッドで順次実行します。LD/SBEなどの軽い部品は引き続き個別に利用できます。
 
 `session.run` はSCFを実行します。`state.info` はエネルギー、残差、許容値、反復数、
-SALMON本体が記録した収束フラグ、原子数、バンド数を返します。SCF未収束は警告のみで、
+SALMON本体が記録した収束フラグ、原子数、バンド数を返します。SCF未収束時は確認待ちにし、
 最後の反復状態を保持します。`material_id` と不変の `calculation` も状態に残ります。
 
 ## 配列とMPI
@@ -84,7 +84,7 @@ Linuxの既存リンク方式は維持します。今回の実測はApple Silico
 
 仕事用フォルダ・入力・擬ポテンシャルが全ランクで同じ内容に見えることを、native呼出し前に検査します。
 一般のFortran STOP、メモリ不足、MPI／プロセス障害の復帰は保証しません。
-正常計算の更新順を維持し、未収束を理由に停止する制限は追加していません。
+正常計算の更新順を維持し、未収束時は下記の確認待ち方針を適用します。
 
 同梱例：`mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT`。
 これは粗い格子・4反復の所有確認用です。物性の収束確認を済ませた入力ではありません。
@@ -146,7 +146,7 @@ if archive is not None:  # サブグループのrootのみ。他ランクはNone
 占有数と波動関数からバンド順に再構成し、元の混合密度は保存しません。
 物質ID・GS識別子・ランタイムのハッシュ・記録された収束フラグ・反復数・
 擬ポテンシャルのハッシュと局所チャネルを来歴として残します。
-擬ポテンシャル本体は同梱しません。SCF未収束は警告のみで最後の状態を保存します。
+擬ポテンシャル本体は同梱しません。SCF未収束時は最後の状態を保持し、確認待ちにします。
 既存の保存先は上書きせず、書き込み失敗時は新規作成中の不完全な保存先を除去します。
 
 現段階の対象は、DFT設定を保持する周期・非スピン分極・固定イオン・通常k点メッシュ・
@@ -207,7 +207,7 @@ MPI通信自体の故障やプロセス消失からの復帰は対象外です�
 メモリ上のGS→TDDFTモデルにも引き継ぎます。引用符内のファイル名の `!` は保持し、
 実際のコメントだけを除去します。必要な参照ファイルが欠けた場合はnative初期化前に
 拒否し、既存GS・TDDFT状態は変更しません。必須ファイルを読めない場合は初期化できず、
-数値の未収束を警告だけにする方針とは区別します。
+数値の未収束時に結果を保持して確認待ちにする方針とは区別します。
 
 既存GSの共通比較ランナーに `--external-k` を追加しました。
 
@@ -483,7 +483,7 @@ PZ・TB-mBJ・Libxc-PZ／PBE、周期全k点・スカラー・固定イオン・
 物質IDを継承し、電荷電流密度jを返します。
 
 HSE無効構成ではsession.runでSCFを実行し、エネルギー・固有値・力を取得できます。
-SCF未収束は警告とし、最終反復の状態を保持します。session.loadしたGSの未計算メタデータはNoneです。
+SCF未収束は警告して確認待ちにし、最終反復の状態を保持します。session.loadしたGSの未計算メタデータはNoneです。
 計算済みGSは明示的なexport_archiveに接続します。今回の検証は出力配列の組立てまでを
 メモリ上で確認し、GSアーカイブ自体は保存していません。GS終了後の独立状態作成と
 直接RT再開にGSファイルの複製・時間発展の再実行は不要です。初期配列のコピー分は
@@ -513,7 +513,7 @@ retained_gsサンプルの--import-bundle／--current-steps 16も利用できま
 mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD_JSON NEW_OUTPUT --current-steps 16
 ```
 
-この小さい例は物理的収束の例ではありません。SCF未収束は警告だけです。波動関数や
+この小さい例は物理的収束の例ではありません。SCF未収束時は確認待ちです。波動関数や
 GS再開ファイルは保存せず、結果JSONにGSの数値要約と電荷電流を記録します。
 物質IDを引き継ぎ、x/y/zを含むA/cで独立した2状態を駆動します。
 既存GSを読む場合の--import-bundleも引き続き使用できます。
@@ -535,7 +535,7 @@ mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD_JSON NEW_OUTPUT --xc 
 ```
 
 新しいHSE入力はexx_pre_scf_threshold=0を明示し、指定したSCF反復を最初からHSEで行います。
-PBE予備SCFの進捗をHSE収束と誤認しません。未収束は警告とし最終反復の状態を返します。
+PBE予備SCFの進捗をHSE収束と誤認しません。未収束時は最終反復の状態を保持して確認待ちにします。
 HSEのバッチDFT.runは出力レポートが未接続のため、この入口へ案内します。
 通常HSEへのフォールバックはありません。力の物理的収束・精度の検証は別途必要です。
 
@@ -555,7 +555,7 @@ print(gs.energy_hartree, gs.forces_hartree_per_bohr, gs.restart_saved)
 ```
 
 対象はバッチ入口のPZ／Libxc-PZ／PBEです。4反復は接続確認用で、物理的な収束を保証しません。
-未収束でも警告とともに結果を返します。restart_savedは実際に再開用3ファイルが揃ったかを
+未収束時は結果を保持して確認待ちにします。restart_savedは実際に再開用3ファイルが揃ったかを
 示し、省略した場合はFalseです。エネルギー・力の読み込みは可能ですが、バンド初期化、
 TDDFT初期化、warm start、GSアーカイブ出力には再開用配列を保存した結果が必要です。
 save_restartを記録していない従来の結果は保存ありとして扱います。
@@ -1295,3 +1295,37 @@ directory scope1/2対応ランタイムでは、保持GSの作成・継続・数
 
 GSとTDDFTのパス準備・ランク合意・解除は共通処理です。保持GSはscope1/2、
 通常TDDFT／高速PR HSEはRT経路まで対応したscope2を使用します。
+
+
+## SCF未収束時の確認待ち（2026-11-21）
+
+`DFT.run()` と `NativeGSSession.run()` は、反復上限で未収束なら警告し、
+`SCFReviewRequired` を送出して後続計算への自動継続を止めます。
+失敗した実行としてデータを消すことはしません。バッチの保存済み結果／nativeの生存状態は
+例外の `result` に保持し、`report_directory` に残差CSV・任意のPNG・report.jsonを保存します。
+MatplotlibがなくてもCSVは利用できます。図の生成失敗と計算失敗を混同しません。
+レポートの保存に失敗しても確認待ちは維持し、元の出力を確認するよう警告します。
+通常のGS保存設定を維持し、`save_restart=False` なら新たなGS再開データは保存しません。
+
+```python
+from salmonpy.errors import SCFReviewRequired
+try:
+    gs = model.run(engine, 'new-gs-output')
+except SCFReviewRequired as review:
+    gs = review.result
+    print('Review SCF residuals:', review.report_directory)
+    # ここで終了し、残差の推移・閾値・入力条件を利用者が確認する。
+    # このexcept節からTDDFTを自動で開始しない。
+```
+
+残差が下がっているか、停滞／振動しているかを確認し、反復上限・混合条件などを見直します。
+確認後に未収束状態を使うと利用者が明示した場合だけ `allow_unconverged=True` を指定できます。
+AIが自動的にこの指定で再実行してはいけません。既存結果の `GroundStateResult.open()` や
+残差の読取・保存・warm startは引き続き可能です。既知の未収束GSからの
+`band_initial_state()`／`tddft_initial_state()` にも同じ確認待ちを適用します。
+
+nativeの `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
+止めた `paused=True` の状態は正常な途中状態です。全反復上限に達した未収束終了だけが
+確認待ちになります。確認待ち後もnative状態は閉じず、保存や診断に利用できます。
+ランク間で `allow_unconverged` の指定を揃えます。計算の更新順・収束閾値は変更しません。
+この方針は以前の「未収束でも警告のみで自動継続」を置き換えます。

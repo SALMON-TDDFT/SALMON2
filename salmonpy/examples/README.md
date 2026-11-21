@@ -253,3 +253,7 @@ epsilon = dielectric_function(sigma)
 担当J配信に対応するnativeランタイムでは、通常のmpi_mixed_native例も場の空間分割に応じてJを配信します。代表ランク以外の結合J配列は担当行だけが有効です。全点の後処理には代表の保存出力を使ってください。詳しくはCOUPLED.mdを参照してください。
 
 準備だけ: `python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-grid 2 1 1` はFDTD入力保存で終了し、計算・投入はしません。PREPARATION.mdを参照してください。
+
+電子計算の準備だけ: `python -m salmonpy.examples.prepare_electrons dft Si_rps.dat NEW_DIRECTORY` または `tddft rt.inp NEW_DIRECTORY --asset pseudo1_rps.dat Si_rps.dat`。計算・GS探索・ジョブ投入はしません。PREPARATION.mdを参照してください。
+
+`fdtd_energy`: 保存済みマクロ点E/j・分離済みE/Hポートから吸収仕事、R/T、収支を診断（ソルバー起動なし）。

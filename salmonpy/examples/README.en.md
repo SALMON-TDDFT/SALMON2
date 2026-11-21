@@ -256,3 +256,7 @@ Mixed MPI sessions route A/field packets only to owning points; J return order i
 With a matching spatial-current native runtime, mpi_mixed_native also routes J by field ownership. Only owned coupling-J rows are meaningful off the field leader; use leader output for full-point analysis. See COUPLED.en.md.
 
 Preparation only: `python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-grid 2 1 1` writes FDTD inputs and stops, without solver execution or submission. See PREPARATION.en.md.
+
+Electronic input preparation only: `python -m salmonpy.examples.prepare_electrons dft Si_rps.dat NEW_DIRECTORY` or `tddft rt.inp NEW_DIRECTORY --asset pseudo1_rps.dat Si_rps.dat`. No solver, GS discovery or submission. See PREPARATION.en.md.
+
+`fdtd_energy`: diagnose macro-point work, R/T and energy balance from stored collocated E/j and separated E/H ports; no solver launch.
