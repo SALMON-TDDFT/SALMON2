@@ -10,7 +10,7 @@ import json
 import hashlib
 import time
 import math
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 import numpy as np
 from salmonpy.coupled import NativeEHField, CoupledStepper
@@ -19,7 +19,7 @@ from salmonpy.embedded_tddft import NativeTDDFTMaterialProvider, NativeTDDFTBack
 from salmonpy.material_response import MaterialBinding, ResponseSession
 from salmonpy.materials import bind_material
 from salmonpy.examples.mpi_mixed_multiscale import models
-from salmonpy.fdtd import FDTD, FDTDMPI, PlaneWave, SalmonExecutable
+from salmonpy.fdtd import FDTD, FDTDMPI, PlaneWave, SalmonExecutable, Boundaries, PlaneMonitor, combine_plane_samples
 from salmonpy.geometry import Grid, Geometry, Shape
 from salmonpy.ld import LorentzDrude
 from salmonpy.fields import AcosPulse
@@ -68,6 +68,8 @@ def main():
     parser.add_argument('--field-grid', type=int, nargs=3, default=(1, 1, 1), metavar=('PX', 'PY', 'PZ'))
     parser.add_argument('--compare', type=Path, help='compare against an existing same-physics run with another MPI decomposition')
     parser.add_argument('--steps', type=int, default=128)
+    parser.add_argument('--planes-x',type=float,nargs=2,metavar=('FRONT','BACK'),help='opt-in transverse-periodic x planes; collect only after committed steps')
+    parser.add_argument('--plane-stride',type=int,default=16,help='explicit plane-snapshot interval; fields gathered only on these steps')
     parser.add_argument('--protect-steps', action='store_true', help='explicit whole-step numerical/ordinary-output rollback; requires current native transaction ABI')
     parser.add_argument('--without-ld', action='store_true', help='vacuum control for local LD regions')
     parser.add_argument('--save-at', type=int, help='stop after this step and save a replay checkpoint')
@@ -108,6 +110,7 @@ def main():
     if args.memory_budget_gib is not None and (not np.isfinite(args.memory_budget_gib) or args.memory_budget_gib <= 0):
         parser.error('positive finite memory-budget-gib required')
     if args.steps < 1: parser.error('positive steps required')
+    if args.plane_stride<1:parser.error('positive plane-stride required')
     if any(v < 1 for v in args.field_grid): parser.error('positive field-grid entries required')
     field_ranks = int(np.prod(args.field_grid))
     from mpi4py import MPI
@@ -200,6 +203,10 @@ def main():
         if (args.tddft_materials is None and 'si-tddft' in selected) or ('hse-point' in selected and args.hse_bundle is None):
             assets = {str(p.relative_to(args.bundle)): digest_file(p)
                       for p in sorted(args.bundle.rglob('*')) if p.is_file()}
+        if args.planes_x is not None:
+            calculation=replace(calculation,
+                boundaries=Boundaries(('pml','pml','periodic','periodic','periodic','periodic')),
+                planes=tuple(PlaneMonitor(0,x) for x in args.planes_x))
         signature = {'input': FDTDMPI(tuple(args.field_grid)).input_text(calculation),
                      'points': {str(k): list(v) for k,v in points.items()},
                      'materials': {str(k): v.key for k,v in bindings.items()},
@@ -317,9 +324,17 @@ def main():
         if args.protect_steps:
             from salmonpy.native_steps import native_step_targets
             step_targets=native_step_targets(coupled)
+        plane_history=[]
+        if args.planes_x is not None and field is not None and start%args.plane_stride==0:
+            sample=field.sample_planes()
+            if sample:plane_history.append(sample)
         loop_start=_clock()
         for index in range(start, stop):
             frame = coupled.step_protected(step_targets) if step_targets is not None else coupled.step()
+            # Whole-step guards have committed/released before any observer runs.
+            if args.planes_x is not None and field is not None and (index+1)%args.plane_stride==0:
+                sample=field.sample_planes()
+                if sample:plane_history.append(sample)
             if frame is not None:
                 if restored is not None and index < metadata['step']:
                     for key, values in restored.items():
@@ -346,6 +361,20 @@ def main():
             live_advice(world,budget,memory_reports,memory_path,
                         children=any(hasattr(state,"_process") for state in session.states.values()),
                         label='mixed_segment_end')
+        if plane_history:
+            try:
+                from salmonpy.outputs import save_arrays
+                series=combine_plane_samples(*plane_history);arrays={}
+                for number,plane in enumerate(series):
+                    arrays.update({f'plane{number}_E':plane.E,f'plane{number}_H':plane.H,
+                        f'plane{number}_time':plane.time,f'plane{number}_area':plane.area_weights})
+                    for d,coordinate in enumerate(plane.coordinates):arrays[f'plane{number}_coordinate{d}']=coordinate
+                save_arrays(output/'plane-series',arrays,metadata=dict(units='atomic_gaussian',
+                    schema='salmonpy.embedded-planes/1',step_interval=args.plane_stride,
+                    planes=[dict(axis=p.axis,position=p.position) for p in series]))
+            except Exception as exc:
+                import warnings
+                warnings.warn(f'Plane archive unavailable; calculation results retained: {exc}',UserWarning)
         session.close()
         if field is not None: field.close()
         context.close()

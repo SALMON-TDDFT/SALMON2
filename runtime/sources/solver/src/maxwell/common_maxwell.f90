@@ -52,6 +52,8 @@ contains
     character(1),intent(in) :: peri
     integer :: ii,ij
     
+    ! Axis domains can differ; define unused rectangular padding for checkpoints.
+    coo=0d0
     do ii=1,3
       select case(peri)
       case('n')

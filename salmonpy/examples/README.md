@@ -259,3 +259,5 @@ epsilon = dielectric_function(sigma)
 `fdtd_energy`: 保存済みマクロ点E/j・分離済みE/Hポートから吸収仕事、R/T、収支を診断（ソルバー起動なし）。
 
 `fdtd_periodic_slab --native-planes`: native所有タイルから横断面を取得・位置合わせして流束を表示。対応ランタイムが必要で、未対応なら計算結果を保持して警告します。
+
+混在nativeサンプルは任意の`--planes-x FRONT BACK --plane-stride 16`で横周期境界の面を確定後だけ取得し、最後にplane-seriesへまとめます。既定は取得しません。

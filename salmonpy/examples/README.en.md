@@ -262,3 +262,5 @@ Electronic input preparation only: `python -m salmonpy.examples.prepare_electron
 `fdtd_energy`: diagnose macro-point work, R/T and energy balance from stored collocated E/j and separated E/H ports; no solver launch.
 
 `fdtd_periodic_slab --native-planes`: native owner-local plane streams, automatic colocation and integrated flux; unmatched runtime warns without discarding the calculation.
+
+The mixed native sample optionally accepts `--planes-x FRONT BACK --plane-stride 16`: transverse-periodic planes captured only after committed steps, saved once as plane-series. Disabled by default.

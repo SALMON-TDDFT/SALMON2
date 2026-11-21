@@ -315,3 +315,7 @@ install(FILES "${ROOT}/salmonpy/subpixel.py" DESTINATION salmonpy)
 install(FILES "${ROOT}/salmonpy/OPTICAL_CORRECTION.md" "${ROOT}/salmonpy/OPTICAL_CORRECTION.en.md" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/salmonpy/OPTICAL_TRAJECTORIES.md" "${ROOT}/salmonpy/OPTICAL_TRAJECTORIES.en.md" DESTINATION salmonpy)
+
+# Small, explicit GS-free coordinate initialization regression from installed SDK.
+install(FILES "${ROOT}/tools/test_fdtd_coordinates.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_fdtd_coordinates.f90" DESTINATION salmonpy/_runtime_source/tests/native)

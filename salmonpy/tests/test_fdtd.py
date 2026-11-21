@@ -17,7 +17,7 @@ class FDTDTests(unittest.TestCase):
 
     def test_native_plane_tiles_colocation_and_incomplete_data(self):
         import struct
-        from salmonpy.fdtd import PlaneMonitor,read_native_planes
+        from salmonpy.fdtd import PlaneMonitor,read_native_planes,join_plane_segments
         from dataclasses import replace
         for axis in range(3):
             with self.subTest(axis=axis),tempfile.TemporaryDirectory() as tmp:
@@ -86,9 +86,101 @@ class FDTDTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,'nonfinite'):
                         read_native_planes(root/'serial',calc)
                 serial.write_bytes(original)
+                # Explicit prefix and resumed streams share a global observation clock.
+                frame=4+2*6*np.prod(dims)*8
+                prefix=root/'prefix';prefix.mkdir()
+                resumed=root/'resumed';resumed.mkdir()
+                name=serial.name
+                (prefix/name).write_bytes(original[:124+2*frame])
+                header=bytearray(original[:124]);header[112:116]=struct.pack('<i',1)
+                (resumed/name).write_bytes(header+original[124+2*frame:])
+                a=read_native_planes(prefix,calc,stop_step=1)
+                b=read_native_planes(resumed,calc,start_step=1)
+                joined=join_plane_segments(a,b)[0]
+                np.testing.assert_array_equal(joined.time,full.time)
+                np.testing.assert_array_equal(joined.E,full.E)
+                np.testing.assert_array_equal(joined.H,full.H)
+                self.assertFalse(joined.E.flags.writeable)
+                with self.assertRaisesRegex(ValueError,'clock differs'):
+                    read_native_planes(resumed,calc)
+                with self.assertRaisesRegex(ValueError,'gap, overlap'):
+                    join_plane_segments(a,a)
+                with self.assertRaises(ValueError):read_native_planes(resumed,calc,start_step=True)
+                # Checkpoint between observation times: no invented boundary sample.
+                coarse=replace(calc,observation_stride=2)
+                header=bytearray(original[:124]);header[100:104]=struct.pack('<i',2)
+                (prefix/name).write_bytes(header+original[124:124+frame])
+                header[112:116]=struct.pack('<i',1)
+                (resumed/name).write_bytes(header+original[124+2*frame:])
+                selected=join_plane_segments(read_native_planes(prefix,coarse,stop_step=1),
+                    read_native_planes(resumed,coarse,start_step=1))[0]
+                np.testing.assert_array_equal(selected.time,full.time[::2])
+                np.testing.assert_array_equal(selected.E,full.E[::2])
+
                 invalid=list(boundary);invalid[2*tangent[0]:2*tangent[0]+2]=['pec','pec']
                 with self.assertRaisesRegex(ValueError,'periodic'):
                     replace(calc,boundaries=Boundaries(tuple(invalid)))
+
+    def test_embedded_plane_snapshot_is_readonly_and_transaction_safe(self):
+        import ctypes as c
+        from types import SimpleNamespace
+        from dataclasses import replace
+        from salmonpy.coupled import NativeEHField
+        from salmonpy.fdtd import PlaneMonitor
+        calc=replace(self.calculation(),planes=(PlaneMonitor(0,1.),),
+            boundaries=Boundaries(('pml','pml','periodic','periodic','periodic','periodic')))
+        shape=calc.geometry.grid.counts;lo=np.array([-n//2+1 for n in shape]);hi=lo+shape-1
+        index=int(lo[0]+np.argmin(abs(calc.geometry.grid.coordinates[0]-1.)))
+        header=[16909060,1,1,index,index-1,*lo,*hi,*lo,*hi,1,calc.steps,0,1]
+        class Read:
+            calls=0
+            def __call__(self,axis,offset,count,info,data):
+                self.calls+=1
+                np.ctypeslib.as_array(c.cast(info,c.POINTER(c.c_int)),shape=(21,))[:]=header
+                if count:
+                    values=np.ctypeslib.as_array(c.cast(data,c.POINTER(c.c_double)),shape=(count,))
+                    values[:]=np.tile([1.,2.,3.,4.,5.,6.],count//6)
+                return 0
+        class Comm:
+            rank=0;calls=0;remote_error=None
+            def gather(self,report,root):
+                self.calls+=1
+                return [report] if self.remote_error is None else [report,(self.remote_error,[])]
+        comm=Comm();read=Read();owner=object.__new__(NativeEHField)
+        owner.context=SimpleNamespace(solver_comm=comm);owner.calculation=calc
+        owner.native=SimpleNamespace(_live=lambda:None);owner.lib=SimpleNamespace(sp_eh_plane_read=read)
+        owner.closed=False;owner.failed=False;owner.step_index=1;owner.capacity=calc.steps
+        owner.A=np.array([[.1,.2,.3]]);original=owner.A.copy()
+        result=owner.sample_planes()
+        self.assertEqual(comm.calls,1);self.assertEqual(read.calls,2)
+        np.testing.assert_array_equal(result[0].E,np.broadcast_to([1.,2.,3.],result[0].E.shape))
+        np.testing.assert_array_equal(result[0].H,np.broadcast_to([4.,5.,6.],result[0].H.shape))
+        self.assertFalse(result[0].E.flags.writeable)
+        from salmonpy.fdtd import combine_plane_samples
+        owner.step_index=2;header[-1]=2
+        second=owner.sample_planes();series=combine_plane_samples(result,second)
+        np.testing.assert_array_equal(series[0].time,[calc.dt,2*calc.dt])
+        with self.assertRaisesRegex(ValueError,'increase uniformly'):combine_plane_samples(second,result)
+        with tempfile.TemporaryDirectory() as tmp:
+            destination=Path(tmp)/'planes'
+            self.assertIsNotNone(owner.sample_planes(output_directory=destination))
+            archive_original=(destination/'arrays.npz').read_bytes()
+            with self.assertWarnsRegex(UserWarning,'archive unavailable'):
+                self.assertIsNotNone(owner.sample_planes(output_directory=destination))
+            self.assertEqual((destination/'arrays.npz').read_bytes(),archive_original)
+        owner.step_index=1;header[-1]=1
+        calls=read.calls
+        owner._step_guard=object()
+        with self.assertWarnsRegex(UserWarning,'committed'):self.assertIsNone(owner.sample_planes())
+        self.assertEqual(read.calls,calls)
+        owner._step_guard=None;owner._restore_candidate=object()
+        with self.assertWarnsRegex(UserWarning,'committed'):self.assertIsNone(owner.sample_planes())
+        owner._restore_candidate=None;comm.remote_error='injected remote diagnostic failure'
+        with self.assertWarnsRegex(UserWarning,'remote diagnostic'):self.assertIsNone(owner.sample_planes())
+        self.assertFalse(owner.failed);self.assertEqual(owner.step_index,1)
+        np.testing.assert_array_equal(owner.A,original)
+        comm.remote_error=None
+        np.testing.assert_array_equal(owner.sample_planes()[0].E,result[0].E)
 
     def test_plane_diagnostic_failure_preserves_completed_calculation(self):
         from dataclasses import replace

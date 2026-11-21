@@ -78,10 +78,6 @@ class NativeEHField:
             if threading.current_thread() is not threading.main_thread():raise InputError('main thread required')
             if not isinstance(calculation,FDTD) or not isinstance(calculation.source,PlaneWave):
                 raise InputError('zero-initialized plane-wave FDTD required')
-            if calculation.planes and comm.rank==0:
-                import warnings
-                warnings.warn('Automatic PlaneMonitor streams currently require batch SalmonExecutable.run; '
-                              'embedded field calculation continues without plane streams.',UserWarning,stacklevel=2)
             parallel=FDTDMPI(tuple(grid))
             if parallel.ranks!=comm.size:raise InputError('field decomposition must match group size')
             text=parallel.input_text(calculation)
@@ -140,6 +136,7 @@ class NativeEHField:
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         self.checkpoint_decomposition=tuple(grid)
+        self.calculation=calculation
         self.context=context;self.lib=lib;self.dt=calculation.dt;self.capacity=calculation.steps
         self.step_index=0;self.A=np.zeros((len(self.point_ids),3));self.E=np.zeros_like(self.A)
         self.closed=False;self.initialized=False;self.failed=False
@@ -210,6 +207,97 @@ class NativeEHField:
                                  self.A[None,:,:],'A/c:au'),
                 'E':SampledField('E',[self.step_index*self.dt],self.sample_positions,
                                  self.E[None,:,:],'E:au')}
+
+    def sample_planes(self,*,output_directory=None):
+        """Collective explicit read: immutable planes on field rank0, None elsewhere.
+
+        One gather coalesces diagnostics and owner-local tiles. Never advances,
+        changes checkpoint state or samples an uncommitted transaction.
+        Optional output_directory saves a separate no-overwrite archive only
+        after capture succeeds; archive failure warns and returns the samples.
+        Failures warn only on field rank0 and leave the calculation usable.
+        """
+        comm=self.context.solver_comm;error=None;tiles=[]
+        try:
+            if self.closed or self.failed:raise InputError('usable native field required')
+            if getattr(self,'_step_guard',None) is not None or getattr(self,'_restore_candidate',None) is not None:
+                raise InputError('sample planes after the protected step/restore is committed')
+            if threading.current_thread() is not threading.main_thread():raise InputError('main thread required')
+            self.native._live()
+            fn=getattr(self.lib,'sp_eh_plane_read',None)
+            if fn is None:raise InputError('runtime lacks read-only embedded plane ABI; explicitly rebuild')
+            fn.argtypes=[c.c_int,c.c_int,c.c_int,c.c_void_p,c.c_void_p];fn.restype=c.c_int
+            for monitor in self.calculation.planes:
+                info=np.empty(21,dtype=np.int32);dummy=np.empty(0,dtype=np.float64)
+                offset=int(np.argmin(abs(self.calculation.geometry.grid.coordinates[monitor.axis]-monitor.position)))
+                status=fn(monitor.axis+1,offset,0,info.ctypes.data,dummy.ctypes.data)
+                if status:raise InputError(f'native plane unavailable at step{self.step_index}: status{status}')
+                if (tuple(info[:3])!=(16909060,1,monitor.axis+1)
+                    or info[3]!=info[5+monitor.axis]+offset or info[4]!=info[3]-1
+                    or info[17]!=self.calculation.observation_stride or info[18]!=self.capacity
+                    or np.any(info[11:14]<info[5:8]) or np.any(info[14:17]>info[8:11])
+                    or np.any(info[14:17]<info[11:14])):
+                    raise InputError('native plane ABI geometry/configuration differs')
+                tangent=[d for d in range(3) if d!=monitor.axis]
+                owns=[q for q,index in enumerate(info[3:5]) if info[11+monitor.axis]<=index<=info[14+monitor.axis]]
+                values=None
+                if owns:
+                    sizes=info[14:17]-info[11:14]+1
+                    n1,n2=(int(sizes[d]) for d in tangent)
+                    values=np.empty(12*n1*n2,dtype=np.float64)
+                    status=fn(monitor.axis+1,offset,len(values),info.ctypes.data,values.ctypes.data)
+                    if status:raise InputError(f'native plane tile rejected: status{status}')
+                    values=values.reshape(2,n2,n1,6).transpose(0,2,1,3)
+                tiles.append((info,values))
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        reports=comm.gather((error,tiles),root=0)
+        if comm.rank!=0:return None
+        try:
+            failures=[error for error,_ in reports if error]
+            if failures:raise InputError(str(failures))
+            from .fdtd import _plane_data
+            result=[]
+            for number,monitor in enumerate(self.calculation.planes):
+                tangent=[d for d in range(3) if d!=monitor.axis]
+                shape=tuple(self.calculation.geometry.grid.counts[d] for d in tangent)
+                raw=np.empty((2,1,*shape,6));covered=np.zeros((2,*shape),dtype=bool)
+                global_box=None
+                for _,owned in reports:
+                    info,values=owned[number]
+                    if info[20]!=self.step_index:raise InputError('native plane clocks differ across ranks')
+                    if global_box is None:global_box=tuple(info[5:11])
+                    if tuple(info[5:11])!=global_box:raise InputError('native plane bounds differ across ranks')
+                    if tuple(info[8:11]-info[5:8]+1)!=self.calculation.geometry.grid.counts:
+                        raise InputError('native plane grid differs')
+                    if values is None:continue
+                    lo=info[11:14];hi=info[14:17]
+                    spans=tuple(slice(int(lo[d]-info[5+d]),int(hi[d]-info[5+d]+1)) for d in tangent)
+                    for q,index in enumerate(info[3:5]):
+                        if not lo[monitor.axis]<=index<=hi[monitor.axis]:continue
+                        if np.any(covered[(q,*spans)]):raise InputError('overlapping native plane tiles')
+                        raw[(q,0,*spans,slice(None))]=values[q];covered[(q,*spans)]=True
+                if not np.all(covered):raise InputError('incomplete native plane coverage')
+                result.append(_plane_data(self.calculation,monitor,raw,[self.step_index],dict(
+                    requested_position=monitor.position,source='explicit embedded snapshot',raw_tiles=len(reports))))
+            if output_directory is not None:
+                try:
+                    from .outputs import save_arrays
+                    arrays={}
+                    for number,plane in enumerate(result):
+                        for name,value in (('E',plane.E),('H',plane.H),('time',plane.time),('area',plane.area_weights)):
+                            arrays[f'plane{number}_{name}']=value
+                        for d,coordinates in enumerate(plane.coordinates):arrays[f'plane{number}_coordinate{d}']=coordinates
+                    save_arrays(output_directory,arrays,metadata=dict(
+                        schema='salmonpy.embedded-planes/1',step=self.step_index,
+                        planes=[dict(axis=p.axis,position=p.position,**dict(p.config)) for p in result]))
+                except Exception as exc:
+                    import warnings
+                    warnings.warn(f'Plane archive unavailable; field and returned samples preserved: {exc}',UserWarning,stacklevel=2)
+            return tuple(result)
+        except Exception as exc:
+            import warnings
+            warnings.warn(f'Plane diagnostic unavailable; field state preserved: {exc}',UserWarning,stacklevel=2)
+            return None
 
     def sample_magnetic_field(self):
         """Collective field-group read of macro-centered raw H at (n+1/2)dt.

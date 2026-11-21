@@ -112,7 +112,9 @@ for line in sys.stdin:
     def test_timeout_and_protocol_failure_invalidate_and_reap(self):
         for marker, timeout in [('hang', .3), ('bad-response', 2.)]:
             with self.subTest(marker=marker):
-                state = self.state(timeout=timeout)
+                # Exercise the injected step timeout, not interpreter startup.
+                state = self.state(timeout=2.)
+                state._timeout = timeout
                 (state.work / marker).touch()
                 with self.assertRaises(RuntimeFailure):
                     state.step([0, 0, 0])

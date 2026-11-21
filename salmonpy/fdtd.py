@@ -644,19 +644,24 @@ class PlaneData:
         return surface_flux(self.time,self.E,self.H,normal=normal,area_weights=self.area_weights,units='atomic_gaussian')
 
 
-def read_native_planes(directory,calculation,*,ranks=1):
+def read_native_planes(directory,calculation,*,ranks=1,start_step=0,stop_step=None):
     """Read owner-local stream tiles and collocate periodic Yee planes in Fortran.
 
-    Batch fresh-run profile only. H is already at E time; no temporal averaging.
+    Fresh or explicit native batch restart segment. H is already at E time.
+    start_step is the checkpoint step; resumed streams contain later stride samples.
     No solver launch, compilation or MPI call; incomplete observations are rejected.
     """
-    import ctypes as c
-    from types import MappingProxyType
-    from .analysis import _energy_native
-    from .fields import _readonly
     if not isinstance(calculation,FDTD):raise InputTypeError('FDTD configuration required')
     ranks=_integer(ranks,'ranks');directory=Path(directory).expanduser().resolve()
-    times=np.arange(0,calculation.steps+1,calculation.observation_stride,dtype=np.int64)
+    if isinstance(start_step,bool) or not isinstance(start_step,(int,np.integer)) or start_step<0:
+        raise InputError('start_step must be a nonnegative integer')
+    start_step=int(start_step)
+    stop_step=calculation.steps if stop_step is None else _integer(stop_step,'stop_step')
+    if stop_step>calculation.steps:raise InputError('plane stop_step exceeds configured final step')
+    if start_step>=stop_step:raise InputError('plane segment must contain a later observation')
+    first=0 if start_step==0 else (start_step//calculation.observation_stride+1)*calculation.observation_stride
+    times=np.arange(first,stop_step+1,calculation.observation_stride,dtype=np.int64)
+    if not len(times):raise InputError('plane segment has no observation samples')
     result=[]
     for number,monitor in enumerate(calculation.planes,1):
         tangent=tuple(d for d in range(3) if d!=monitor.axis)
@@ -675,7 +680,7 @@ def read_native_planes(directory,calculation,*,ranks=1):
                 dtbytes=stream.read(8)
                 if len(dtbytes)!=8:raise InputError('truncated plane timestep')
                 dt=float(np.frombuffer(dtbytes,dtype=endian+'f8')[0])
-                if (h[0]!=16909060 or h[1]!=1 or h[2]!=monitor.axis+1 or h[20]!=0
+                if (h[0]!=16909060 or h[1]!=1 or h[2]!=monitor.axis+1 or h[20]!=start_step
                     or h[17]!=calculation.observation_stride or h[18]!=calculation.steps or dt!=calculation.dt):
                     raise InputError('plane stream version/configuration/initial clock differs')
                 if global_box is None:global_box=tuple(h[5:11])
@@ -707,17 +712,101 @@ def read_native_planes(directory,calculation,*,ranks=1):
                         raw[(q,ti,*spans,slice(None))]=tile
                 if stream.read(1):raise InputError('unexpected trailing plane data')
         if not np.all(covered):raise InputError('native plane coverage is incomplete')
-        fields=[np.ascontiguousarray(raw[q,:,:,:,i:i+3]) for q,i in ((0,0),(0,3),(1,0),(1,3))]
-        E=np.empty_like(fields[0]);H=np.empty_like(E)
-        fn=_energy_native('sp_collocate_yee_plane',[c.c_int]*4+[c.c_void_p]*6)
-        if fn(len(times),*shape,monitor.axis+1,*(a.ctypes.data for a in fields),E.ctypes.data,H.ctypes.data):
-            raise InputError('native plane colocation rejected nonfinite fields or geometry')
-        coordinates=tuple(_readonly(calculation.geometry.grid.coordinates[d]) for d in tangent)
-        weights=np.full(shape,np.prod([calculation.geometry.grid.spacing[d] for d in tangent]),dtype=np.float64)
-        position=float(calculation.geometry.grid.coordinates[monitor.axis][index])
-        result.append(PlaneData(monitor.axis,position,_readonly(times*calculation.dt),coordinates,
-            _readonly(E),_readonly(H),_readonly(weights),MappingProxyType(dict(
-                units='atomic_gaussian',native_H_time='already centered at E time',
-                spatial_interpolation='native Yee: two E edges, four H faces; periodic transverse wrap',
-                raw_tiles=len(files),requested_position=monitor.position,source='native owner-local plane streams'))))
+        result.append(_plane_data(calculation,monitor,raw,times,dict(
+                raw_tiles=len(files),requested_position=monitor.position,source='native owner-local plane streams',
+                start_step=start_step,stop_step=stop_step)))
+    return tuple(result)
+
+
+def join_plane_segments(*segments):
+    """Join complete chronological batch observation segments, without replay.
+
+    Each argument is one read_native_planes result. No interpolation, gap filling,
+    duplicate removal, solver calls or mutation of caller arrays is performed.
+    """
+    from types import MappingProxyType
+    from .fields import _readonly
+    if not segments or not segments[0]:raise InputError('nonempty plane segments required')
+    count=len(segments[0]);result=[]
+    if any(len(part)!=count for part in segments):raise InputError('plane counts differ')
+    for number in range(count):
+        planes=[part[number] for part in segments];first=planes[0]
+        keys=('dt','observation_stride','total_steps','requested_position','calculation_sha256')
+        for before,after in zip(planes,planes[1:]):
+            if (after.axis!=first.axis or after.position!=first.position
+                or any(after.config.get(k)!=first.config.get(k) for k in keys)
+                or len(after.coordinates)!=len(first.coordinates)
+                or any(not np.array_equal(a,b) for a,b in zip(after.coordinates,first.coordinates))
+                or not np.array_equal(after.area_weights,first.area_weights)):
+                raise InputError('plane segment geometry or configuration differs')
+            dt=first.config.get('dt');stride=first.config.get('observation_stride')
+            if dt is None or stride is None:raise InputError('native plane segment clock metadata required')
+            checkpoint=after.config.get('start_step')
+            if checkpoint is None or not len(before.time) or not len(after.time):raise InputError('plane segment clock metadata required')
+            previous_step=int(round(float(before.time[-1])/dt))
+            if (checkpoint!=before.config.get('stop_step') or checkpoint<previous_step or checkpoint>=previous_step+stride
+                or not np.isclose(after.time[0],(previous_step+stride)*dt,rtol=1e-12,atol=0.)):
+                raise InputError('plane segments have a gap, overlap or inconsistent restart clock')
+        metadata=dict(first.config);metadata['stop_step']=planes[-1].config['stop_step'];metadata['segments']=tuple(dict(p.config) for p in planes)
+        result.append(PlaneData(first.axis,first.position,_readonly(np.concatenate([p.time for p in planes])),
+            first.coordinates,_readonly(np.concatenate([p.E for p in planes])),
+            _readonly(np.concatenate([p.H for p in planes])),first.area_weights,MappingProxyType(metadata)))
+    return tuple(result)
+
+
+def _plane_data(calculation,monitor,raw,steps,metadata):
+    """Common Fortran colocation for decoded batch tiles and embedded snapshots."""
+    import ctypes as c
+    from types import MappingProxyType
+    from .analysis import _energy_native
+    from .fields import _readonly
+    tangent=tuple(d for d in range(3) if d!=monitor.axis)
+    shape=tuple(calculation.geometry.grid.counts[d] for d in tangent)
+    fields=[np.ascontiguousarray(raw[q,:,:,:,i:i+3]) for q,i in ((0,0),(0,3),(1,0),(1,3))]
+    E=np.empty_like(fields[0]);H=np.empty_like(E)
+    fn=_energy_native('sp_collocate_yee_plane',[c.c_int]*4+[c.c_void_p]*6)
+    if fn(len(steps),*shape,monitor.axis+1,*(a.ctypes.data for a in fields),E.ctypes.data,H.ctypes.data):
+        raise InputError('native plane colocation rejected nonfinite fields or geometry')
+    coordinates=tuple(_readonly(calculation.geometry.grid.coordinates[d]) for d in tangent)
+    weights=np.full(shape,np.prod([calculation.geometry.grid.spacing[d] for d in tangent]),dtype=np.float64)
+    index=int(np.argmin(abs(calculation.geometry.grid.coordinates[monitor.axis]-monitor.position)))
+    config=dict(units='atomic_gaussian',native_H_time='already centered at E time',
+        spatial_interpolation='native Yee: two E edges, four H faces; periodic transverse wrap',
+        calculation_sha256=hashlib.sha256(calculation.input_text().encode()).hexdigest(),
+        dt=calculation.dt,observation_stride=calculation.observation_stride,total_steps=calculation.steps,**metadata)
+    return PlaneData(monitor.axis,float(calculation.geometry.grid.coordinates[monitor.axis][index]),
+        _readonly(np.asarray(steps)*calculation.dt),coordinates,_readonly(E),_readonly(H),
+        _readonly(weights),MappingProxyType(config))
+
+
+def combine_plane_samples(*samples):
+    """Assemble explicitly acquired embedded snapshots into a uniform time series.
+
+    Array assembly only. Flux/spectra still use the native observation kernels.
+    Samples must be chronological, same-profile one-frame observations. No
+    interpolation, replay, duplicate removal or solver communication occurs.
+    """
+    from types import MappingProxyType
+    from .fields import _readonly
+    if not samples or not samples[0]:raise InputError('nonempty plane snapshots required')
+    count=len(samples[0]);result=[]
+    if any(len(part)!=count for part in samples):raise InputError('plane counts differ')
+    for number in range(count):
+        planes=[part[number] for part in samples];first=planes[0]
+        keys=('dt','observation_stride','total_steps','calculation_sha256')
+        for plane in planes:
+            if (len(plane.time)!=1 or plane.axis!=first.axis or plane.position!=first.position
+                or any(plane.config.get(k)!=first.config.get(k) for k in keys)
+                or any(not np.array_equal(a,b) for a,b in zip(plane.coordinates,first.coordinates))
+                or not np.array_equal(plane.area_weights,first.area_weights)):
+                raise InputError('one-frame matching plane snapshots required')
+        times=np.concatenate([p.time for p in planes])
+        if len(times)>1:
+            intervals=np.diff(times)
+            if intervals[0]<=0 or not np.allclose(intervals,intervals[0],rtol=1e-12,atol=0.):
+                raise InputError('plane sample times must increase uniformly; no gap filling')
+        metadata=dict(first.config);metadata['source']='combined explicit embedded snapshots'
+        result.append(PlaneData(first.axis,first.position,_readonly(times),first.coordinates,
+            _readonly(np.concatenate([p.E for p in planes])),_readonly(np.concatenate([p.H for p in planes])),
+            first.area_weights,MappingProxyType(metadata)))
     return tuple(result)

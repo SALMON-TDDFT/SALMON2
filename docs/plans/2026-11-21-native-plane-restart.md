@@ -1,0 +1,8 @@
+# Native plane restart segments
+
+Goal: read existing native restart streams and join completed observation segments without replay or changes to solver updates.
+Architecture: retain native owner-local V1 streams; explicitly match checkpoint start/end and original stride/total steps in Python I/O. Continue using the existing Fortran Yee colocation/flux/budget kernels. No new MPI communication or native build. Embedded transactional observers remain separate.
+
+Validation: extend the existing all-axis tile test for prefix/restart clocks and immutable exact reconstruction; compare actual serial/MPI2 midpoint-checkpoint restarts against continuous E/H, point values and complete final EM checkpoints; compare energy budgets. Run source and installed-wheel suites; synchronize JP/EN/AI manuals. No GS collected; audited executable reused by SHA only.
+
+Completed: explicit start_step/stop_step native segment decoding and join_plane_segments, preserving read-only independent arrays and original Fortran colocation. Actual serial/MPI2 midpoint restarts produce bit-identical E/H and final EM checkpoint bytes, equal point values, identical energy residual -0.00010658958279643208. Native point text whitespace differs through the existing restart copy. Installed sdist→wheel suite:678 tests, one skip, no failures. Existing mock timeout test now separates startup from the injected step timeout, without production changes. JP/EN/AI guides and checklist synchronized. Canonical results:calc2026/salmonpy-restarted-planes-final-20261121. Embedded transactional output remains pending; no GS collected, no cloud-sync claim.

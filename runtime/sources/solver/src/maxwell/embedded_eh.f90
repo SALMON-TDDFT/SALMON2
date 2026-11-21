@@ -517,6 +517,74 @@ end function
 
   ! Read raw H at (step+1/2)*dt, centered spatially on each macro cell.
   ! Each rank contributes only owned Yee faces; no diagonal halo assumption.
+  ! Read-only, rank-local plane tiles. No MPI, files, timers or state changes.
+  ! Query with nvalues=0; values then has no referenced elements.
+  integer(c_int) function sp_eh_plane_read(axis,offset,nvalues,info,values) bind(C)
+    use salmon_global,only:obs_samp_em,nt_em
+    use parallelization,only:nproc_id_global
+    integer(c_int),value::axis,offset,nvalues
+    integer(c_int),intent(out)::info(21)
+    real(c_double),intent(out)::values(*)
+    integer::d,idx,tangent(2),j,a,b,q,k,pos,ijk(3),i1,i2,i3,n1,n2
+    real(8)::v(6)
+    sp_eh_plane_read=1;info=0
+    if(.not.allocated(state))return
+    if(allocated(pending))return
+    d=axis
+    if(d<1.or.d>3)return
+    idx=state%fs%lg%is(d)+offset
+    if(idx<=state%fs%lg%is(d).or.idx>state%fs%lg%ie(d))return
+    if(.not.state%fe%flag_save)return
+    if(mod(state%step,obs_samp_em)/=0)then
+      sp_eh_plane_read=2;return
+    endif
+    info=[16909060,1,d,idx,idx-1,state%fs%lg%is,state%fs%lg%ie, &
+          state%fs%mg%is,state%fs%mg%ie,obs_samp_em,nt_em,nproc_id_global,state%step]
+    if(nvalues==0)then
+      sp_eh_plane_read=0;return
+    endif
+    j=0
+    do a=1,3
+      if(a==d)cycle
+      j=j+1;tangent(j)=a
+    enddo
+    n1=state%fs%mg%ie(tangent(1))-state%fs%mg%is(tangent(1))+1
+    n2=state%fs%mg%ie(tangent(2))-state%fs%mg%is(tangent(2))+1
+    if(nvalues/=12*n1*n2)return
+    pos=0
+    do q=0,1
+      ijk(d)=idx-q
+      do b=1,n2
+        ijk(tangent(2))=state%fs%mg%is(tangent(2))+b-1
+        do a=1,n1
+          ijk(tangent(1))=state%fs%mg%is(tangent(1))+a-1
+          v=0d0
+          if(idx-q>=state%fs%mg%is(d).and.idx-q<=state%fs%mg%ie(d))then
+            i1=ijk(1);i2=ijk(2);i3=ijk(3)
+            if(state%step==0)then
+              v=[state%fe%ex_y(i1,i2,i3)+state%fe%ex_z(i1,i2,i3), &
+                 state%fe%ey_z(i1,i2,i3)+state%fe%ey_x(i1,i2,i3), &
+                 state%fe%ez_x(i1,i2,i3)+state%fe%ez_y(i1,i2,i3), &
+                 state%fe%hx_y(i1,i2,i3)+state%fe%hx_z(i1,i2,i3), &
+                 state%fe%hy_z(i1,i2,i3)+state%fe%hy_x(i1,i2,i3), &
+                 state%fe%hz_x(i1,i2,i3)+state%fe%hz_y(i1,i2,i3)]
+            else
+              v=[state%fe%ex_s(i1,i2,i3),state%fe%ey_s(i1,i2,i3),state%fe%ez_s(i1,i2,i3), &
+                 state%fe%hx_s(i1,i2,i3),state%fe%hy_s(i1,i2,i3),state%fe%hz_s(i1,i2,i3)]
+            endif
+          endif
+          do k=1,6
+            if(.not.ieee_is_finite(v(k)))then
+              sp_eh_plane_read=3;return
+            endif
+            pos=pos+1;values(pos)=v(k)
+          enddo
+        enddo
+      enddo
+    enddo
+    sp_eh_plane_read=0
+  end function sp_eh_plane_read
+
   integer(c_int) function sp_eh_sample_h(npoints,H) bind(C)
     integer(c_int),value :: npoints
     real(c_double),intent(out) :: H(3,npoints)

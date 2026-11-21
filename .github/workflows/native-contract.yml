@@ -33,6 +33,9 @@ jobs:
         run: |
           python tools/prepare_salmon_runtime.py "$RUNNER_TEMP/source"
           python tools/check_forbidden_eigensolvers.py --source-root "$RUNNER_TEMP/source/src"
+      - name: Small coordinate and unused-padding contract (no solver job)
+        working-directory: ${{ runner.temp }}/export
+        run: python tools/test_fdtd_coordinates.py "$RUNNER_TEMP/coordinates" --source-root "$RUNNER_TEMP/source"
       - name: Build audited MPI host library from export (no GS calculation)
         working-directory: ${{ runner.temp }}/export
         run: |
@@ -60,6 +63,8 @@ jobs:
           path: |
             ${{ runner.temp }}/host-build/build.json
             ${{ runner.temp }}/host-build/build.log
+            ${{ runner.temp }}/coordinates/result.json
+            ${{ runner.temp }}/coordinates/build.log
             ${{ runner.temp }}/query/result.json
             ${{ runner.temp }}/parser/result.json
             ${{ runner.temp }}/parser/ranks-*/stdout.log

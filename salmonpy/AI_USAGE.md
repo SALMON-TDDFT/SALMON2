@@ -1100,3 +1100,10 @@ result.reflection_transmission(reference)／energy_balanceで診断へ接続し�
 明示的な観測値を使います。旧ランタイムや面診断失敗をFDTD計算失敗と混同しません。
 この入口はfresh batch用であり、NativeEHFieldや再開ストリームの自動統合を対応済みと案内しません。
 管理ノードではprepare_fdtdまで、runは利用者が計算環境で明示的に呼びます。
+
+
+## 埋め込みFDTDの面取得
+
+NativeEHField.sample_planesは場の全ランクから、保護付きstep/復元が確定し候補を解放した後に明示的に呼びます。場のrank0だけに不変PlaneDataを返し、診断失敗は警告+Noneで計算状態を変えません。Fortranの局所読み出しは状態更新/MPI/IOなし、Pythonは場の群のgather一度だけです。観測時刻で取得し、combine_plane_samplesで等間隔時系列にして既存の流束/R/T/収支へ渡します。output_directoryは単一サンプルの任意保存で上書き禁止、失敗時も既存出力と計算を保ちます。確定前に呼んで投機状態を公開しないこと。後の復元が以前の独立観測アーカイブを自動削除するとは案内しません。混在サンプルの--planes-x/--plane-strideは明示的な横周期境界と確定後の間引き取得を選択します。仕事・場の蓄積差は観測期間に合わせて明示します。
+
+新しいnative FDTDでは未使用座標領域をゼロ初期化し、計算で使う座標・haloは従来式のままです。既存のソース/保存ファイルを一括書換えしません。再現用の小さな明示的テストはtools/test_fdtd_coordinates.pyで、SALMONジョブ・MPI・GSは実行せず、任意指定コンパイラで依存のない座標ルーチンだけを検査します。GNU検証済み、Fujitsu未検証です。

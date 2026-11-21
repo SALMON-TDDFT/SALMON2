@@ -449,8 +449,8 @@ Eは隣接する2本の辺、Hは4面をFortranで補間し、周期端も折り
 nativeが保存用に中心化済みのHをそのまま使い、時間平均は重ねません。
 面と直前の隣接面を持つランクだけが、観測面ごとにストリームを追記します。
 所有タイルを読み込んで全面を組み直す処理に追加のMPI集団通信はありません。
-この初版はバッチの新規FDTD実行が対象です。embedded NativeEHField、途中再開の面ストリーム
-統合は未接続で、既存の埋め込み計算は警告付きで継続します。従来の保存/再開の数値契約は変更しません。
+バッチの新規FDTDと、下記の明示的な再開区間の読み取り・連結に対応します。
+embedded NativeEHFieldは下記の明示的なsample_planesスナップショットで取得します。従来の保存/再開の数値契約は変更しません。
 
 `plane.time` は0と観測間隔ごとの時刻です。stepsがobservation_strideで割り切れない場合、
 最終観測は最後のstride境界です。物質への仕事と場の始終差もこの時間範囲へ合わせます。
@@ -468,3 +468,76 @@ nativeが保存用に中心化済みのHをそのまま使い、時間平均は�
 バイト一致しました。横方向2ランク分割でも自動取得から収支まで一致し、残差は約0.0107%。
 面と隣接面が別ランクになる法線方向分割でも、非ゼロの位置合わせ済みE/Hが逐次版と
 ビット一致しました。これらは局所実装検証で、多ノード性能や光学物性の収束保証ではありません。
+
+### バッチ再開の面観測データ
+
+既存nativeの再開処理・更新式は変更しません。再開側には、保存ステップより後の
+観測間隔に沿ったサンプルだけが入ります。時刻ゼロの補充やHの再平均はしません。
+native再開入力は元の`nt_em`と観測間隔を維持し、利用者が計算ノードで明示的に実行します。
+次の読み取り・連結処理は計算を起動しません。
+
+```python
+from salmonpy.fdtd import read_native_planes, join_plane_segments, FDTDResult
+from pathlib import Path
+# calculationは元の総ステップ数・形状を保持。
+# early_dirは保存ステップで終わる完結した区間の出力。
+early = read_native_planes(early_dir, calculation, ranks=2, stop_step=checkpoint_step)
+late = read_native_planes(restart_dir, calculation, ranks=2, start_step=checkpoint_step)
+planes = join_plane_segments(early, late)
+result = FDTDResult(Path(restart_dir), (), planes)
+budget = result.energy_balance(reference, work, volumes,
+    material_ids=ids, field_energy_change=stored_delta)
+```
+
+`stop_step`の既定は元の最終ステップです。その時刻までの全サンプルが必要で、余分な
+データも拒否します。書き込み中のファイルは渡さず、完結した区間を保存してください。
+連結時は面の形状・全体時刻・観測間隔・総予定ステップ・保存ステップの接続を検査し、
+欠落・重複・設定不一致を診断のエラーとして通知します。再計算・補間・重複の黙示削除は
+しません。元配列は変えず、連結後も読み取り専用です。参照計算・仕事・場の蓄積差は
+連結した全期間に合わせます。埋め込み実行では下記の確定後だけ取得する入口を使います。
+
+### 埋め込みFDTD：確定後だけ面を取得する
+
+同じ`FDTD.planes`を指定し、場の群の全ランクから`field.sample_planes()`を明示的に呼びます。
+取得できるのはステップ0か`observation_stride`の観測時刻です。Fortranの`sp_eh_plane_read`は
+担当する保存済みE/Hを読むだけで、MPI・ファイル出力・状態変更を行いません。Python側は面と
+エラー情報を場の群の一度のgatherで集め、場のrank0だけに読み取り専用PlaneDataを返します。
+他ランクはNoneです。全体通信・毎ステップの自動取得・再計算は追加しません。Hの再平均も不要です。
+古いライブラリや診断不能時は場のrank0だけが警告し、Noneを返して計算を継続できます。
+
+保護付きstep/復元の確定・候補解放後に呼んでください。未確定の候補がある間は警告してNoneを返し、
+途中の状態を公開せずファイルも作りません。任意の`output_directory=NEW_DIR`で単一面サンプルを
+既存の上書き禁止アーカイブへ保存できます。保存失敗も警告にとどめ、取得済みサンプルは返します。
+計算状態と既存出力は保ちます。これは独立した観測記録であり、後日の巻き戻しで既存記録を削除する
+機能ではありません。別の計算分岐には新しい保存先を使います。クラッシュ/OOM/MPI障害までの保証はしません。
+
+```python
+from salmonpy.fdtd import combine_plane_samples, FDTDResult
+snapshots = []
+for step in range(steps):
+    coupled.step_protected(targets)  # 全参加群から呼ぶ
+    if field is not None and (step + 1) % snapshot_interval == 0:
+        sample = field.sample_planes()  # 場の全ランクから呼ぶ
+        if sample is not None:
+            snapshots.append(sample)   # 場のrank0だけ
+if snapshots:
+    planes = combine_plane_samples(*snapshots)
+    result = FDTDResult(output_directory, (), planes)
+    budget = result.energy_balance(reference, work, volumes,
+        material_ids=ids, field_energy_change=stored_delta)
+```
+
+スナップショットは設定が同じで時刻が等間隔・昇順である必要があります。補間や重複削除はしません。
+流束・スペクトルには最低2サンプルが必要で、場の変化を解像する取得間隔と同じ時刻の参照計算を使います。
+仕事・場の蓄積差は取得した期間に合わせて明示的に渡します。面積×サンプル数に比例したメモリを使うので、
+間隔を選んでください。混在サンプルの`--planes-x FRONT BACK --plane-stride 16`は横方向を周期境界にし、
+確定したステップだけで取得して最後に一つの`plane-series`アーカイブへ保存します。既定の実行は変えません。
+
+LDの実計算で直列/MPI2の直接・保護付き復元と再試行を検証し、場の履歴と点出力は一致しました。
+従来バッチ版とのE/H差は最大8e-19未満（比較条件rtol1e-12/atol1e-14）です。保存された数値状態は一致します。
+以前からある未使用の座標配列領域は独立プロセス間で値が不定なので、全MPIランクの保存ファイル全体の
+バイト一致とは区別しています。
+
+座標保存の追補（2026-11-21）：新しいランタイムでは未使用の座標配列領域をゼロ初期化します。
+有効な座標・halo・更新式は変えず、直列/MPI2で従来の場・電流・点出力に一致し、
+保存/復元後も全ランクのチェックポイントがバイト一致しました。上記の未使用領域の差は修正前の記録です。

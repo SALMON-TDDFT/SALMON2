@@ -519,8 +519,8 @@ PlaneData E/H have shape(time,N1,N2,3), area_weights(N1,N2). Fortran averages
 Native saved H is already centered at E time: no second temporal average.
 Only ranks owning the plane/preceding plane append per-plane streams. Offline
 tile assembly and colocation add no MPI collectives. This first entry is fresh
-batch FDTD; embedded NativeEHField and partial-restart plane-stream stitching
-are not connected. Embedded calculations warn and continue without these streams;
+batch FDTD, with explicit restart-segment reading/joining as described below;
+embedded NativeEHField uses explicit sample_planes snapshots, described below;
 existing numerical checkpoint/restart contracts are unchanged.
 
 Times include0 and each observation stride. If steps is not divisible by stride,
@@ -543,3 +543,91 @@ automatically acquired planes/budgets (~0.0107% residual). A separate normal spl
 placed the plane/preceding plane on different ranks and retained bit-identical
 nonzero colocated E/H. These are local implementation checks, not multi-node
 scaling or converged real-material optical accuracy.
+
+### Native batch restart observation segments
+
+The existing native restart loader/solver is unchanged. A restarted stream records
+only samples strictly after the checkpoint, at the original global stride; do not
+insert a zero sample or average H again. Native batch restart keeps the original
+`nt_em` and observation stride. Launch the restart explicitly on the compute node
+using existing native inputs; these reading functions never launch a solver.
+
+```python
+from salmonpy.fdtd import read_native_planes, join_plane_segments, FDTDResult
+from pathlib import Path
+# calculation retains the original total steps and geometry.
+# early_dir contains a complete stream ending at the checkpoint (not a full run).
+early = read_native_planes(early_dir, calculation, ranks=2, stop_step=checkpoint_step)
+late = read_native_planes(restart_dir, calculation, ranks=2, start_step=checkpoint_step)
+planes = join_plane_segments(early, late)
+result = FDTDResult(Path(restart_dir), (), planes)
+budget = result.energy_balance(reference, work, volumes,
+    material_ids=ids, field_energy_change=stored_delta)
+```
+
+`stop_step` defaults to the original final step. All expected samples through
+that step must exist and trailing data are rejected: archive a complete segment,
+never pass a still-growing file. Joining verifies plane geometry, global clock,
+stride, total planned steps and exact checkpoint continuity; gaps, overlaps and
+configuration differences are errors in the diagnostic only. No replay, sample
+invention or implicit removal of duplicates occurs. Source arrays stay unchanged
+and joined arrays are read-only. Reference/work/storage must cover the joined
+interval. Embedded sampling/publication uses the explicit committed-only entry below.
+
+### Embedded FDTD: committed-only plane snapshots
+
+Set the same `FDTD.planes`, then all field-group ranks explicitly call
+`field.sample_planes()` at step0 or an `observation_stride` boundary. The native
+`sp_eh_plane_read` ABI reads only owned saved E/H tiles, without MPI, file writes
+or mutation. Python performs one field-group gather containing tiles and errors;
+only field rank0 receives immutable PlaneData. Other ranks return None. No world
+collective, per-step automatic communication or replay is added. H is already
+centered at E time. An older library or unavailable diagnostic warns on field
+rank0 and returns None, leaving the calculation usable.
+
+Call after `step_protected`/protected restore has committed and released its
+candidate. During `_step_guard`/restore-candidate ownership, sampling/publication
+warns and returns None, without exposing a speculative frame or creating files.
+`output_directory=NEW_DIR` optionally saves that single snapshot via the existing
+no-overwrite output archive. Archive failure warns and still returns samples;
+existing archives and field state are preserved. This is a separate immutable
+observation, not a live stream automatically rewound by future restores. For a
+new branch use a new destination. Crash/OOM/MPI failure atomicity is not claimed.
+
+```python
+from salmonpy.fdtd import combine_plane_samples, FDTDResult
+# Every field rank calls, only at committed steps and native observation times.
+snapshots = []
+for step in range(steps):
+    coupled.step_protected(targets)  # called by all participating groups
+    if field is not None and (step + 1) % snapshot_interval == 0:
+        sample = field.sample_planes()
+        if sample is not None:
+            snapshots.append(sample)  # field rank0 only
+if snapshots:
+    planes = combine_plane_samples(*snapshots)
+    result = FDTDResult(output_directory, (), planes)
+    budget = result.energy_balance(reference, work, volumes,
+        material_ids=ids, field_energy_change=stored_delta)
+```
+
+Snapshots must form a matching, strictly increasing uniform time series; no gap
+filling/duplicate dropping occurs. Use at least two samples for flux/spectra, a
+sample interval resolving the fields and a reference on identical times. Align
+explicit material work/storage to this observation interval. Storing snapshots
+costs memory proportional to plane area × number of samples; select a stride.
+`mpi_mixed_native --planes-x FRONT BACK --plane-stride 16` explicitly selects
+transverse-periodic boundaries, captures only after completed steps, and writes
+one `plane-series` archive at the end. Existing default sample behavior is unchanged.
+
+Local LD fixture: direct/protected restore/retry and serial/MPI2 planes preserve
+traces and point-output bytes. Across the prior batch build E/H agree within
+1e-12 relative/1e-14 absolute (maximum observed difference below8e-19). Numerical
+checkpoint payloads match; legacy unused coordinate padding may differ across
+independent processes, so full-file equality is not claimed for every MPI rank.
+
+Coordinate-persistence update (2026-11-21): new runtimes zero unused coordinate
+padding before unchanged coordinate/halo arithmetic. Serial/MPI2 currents, fields
+and point outputs match the prior build; complete checkpoint files now match on
+every rank after protected/direct restore. The padding difference above records
+the pre-fix validation, not an unresolved issue in the new runtime.
