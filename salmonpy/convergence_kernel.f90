@@ -755,4 +755,65 @@ contains
     enddo
     sp_surface_port_spectra=0
   end function
+
+  integer(c_int) function sp_collocate_yee_plane(nt,n1,n2,axis,e,h,ep,hp,oe,oh) bind(c)
+    integer(c_int),value::nt,n1,n2,axis
+    real(c_double),intent(in)::e(3,n2,n1,nt),h(3,n2,n1,nt),ep(3,n2,n1,nt),hp(3,n2,n1,nt)
+    real(c_double),intent(out)::oe(3,n2,n1,nt),oh(3,n2,n1,nt)
+    integer::i,a,b,k,tangent(2),j,d,u,v,s1,s2,aa,bb,previous
+    sp_collocate_yee_plane=4
+    if(nt<1.or.n1<1.or.n2<1.or.axis<1.or.axis>3)return
+    j=0
+    do d=1,3
+      if(d==axis)cycle
+      j=j+1;tangent(j)=d
+    enddo
+    do i=1,nt
+      do a=1,n1
+        do b=1,n2
+          do k=1,3
+            if(.not.ieee_is_finite(e(k,b,a,i)).or..not.ieee_is_finite(h(k,b,a,i)))return
+            if(.not.ieee_is_finite(ep(k,b,a,i)).or..not.ieee_is_finite(hp(k,b,a,i)))return
+          enddo
+        enddo
+      enddo
+    enddo
+    do i=1,nt
+      do a=1,n1
+        do b=1,n2
+          do k=1,3
+            if(k==axis)then
+              oe(k,b,a,i)=.5d0*e(k,b,a,i)+.5d0*ep(k,b,a,i)
+            elseif(k==tangent(1))then
+              aa=modulo(a-2,n1)+1
+              oe(k,b,a,i)=.5d0*e(k,b,a,i)+.5d0*e(k,b,aa,i)
+            else
+              bb=modulo(b-2,n2)+1
+              oe(k,b,a,i)=.5d0*e(k,b,a,i)+.5d0*e(k,bb,a,i)
+            endif
+            u=mod(k,3)+1;v=mod(k+1,3)+1
+            oh(k,b,a,i)=0d0
+            do s1=0,1
+              do s2=0,1
+                aa=a;bb=b;previous=0
+                if(u==axis)previous=s1
+                if(v==axis)previous=s2
+                if(u==tangent(1))aa=modulo(a-1-s1,n1)+1
+                if(v==tangent(1))aa=modulo(a-1-s2,n1)+1
+                if(u==tangent(2))bb=modulo(b-1-s1,n2)+1
+                if(v==tangent(2))bb=modulo(b-1-s2,n2)+1
+                if(previous==0)then
+                  oh(k,b,a,i)=oh(k,b,a,i)+.25d0*h(k,bb,aa,i)
+                else
+                  oh(k,b,a,i)=oh(k,b,a,i)+.25d0*hp(k,bb,aa,i)
+                endif
+              enddo
+            enddo
+            if(.not.ieee_is_finite(oe(k,b,a,i)).or..not.ieee_is_finite(oh(k,b,a,i)))return
+          enddo
+        enddo
+      enddo
+    enddo
+    sp_collocate_yee_plane=0
+  end function
 end module

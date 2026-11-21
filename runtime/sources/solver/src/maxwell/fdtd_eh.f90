@@ -22,7 +22,14 @@ module fdtd_eh
     subpixel_at,subpixel_bulk,subpixel_spd_bound
   implicit none
   
+  ! Batch-only diagnostic resources; embedded contexts leave these unallocated.
+  type s_eh_plane_output
+    integer :: axis=0,index=0,unit=0
+    real(8),allocatable :: buffer(:,:,:)
+  end type s_eh_plane_output
+
   type ls_fdtd_eh
+    type(s_eh_plane_output),allocatable :: plane_output(:)
     logical :: tensor_enabled=.false.,tensor_failed=.false.,subpixel_enabled=.false.
     real(8)::subpixel_reference=0d0
     real(8),allocatable::subpixel_corr(:,:,:,:,:,:)
@@ -182,6 +189,138 @@ contains
   
   !===========================================================================================
   != initialize eh-FDTD ======================================================================
+  subroutine eh_planes_open(fs,fe)
+    use iso_c_binding,only:c_int32_t,c_double
+    use structures,only:s_fdtd_system
+    use parallelization,only:nproc_id_global
+    use salmon_global,only:obs_samp_em,nt_em,dt_em
+    type(s_fdtd_system),intent(in)::fs
+    type(ls_fdtd_eh),intent(inout)::fe
+    character(64)::magic
+    character(32)::file_magic
+    character(128)::name
+    integer::input,ios,n,m,d,offset,tangent(2),j,a,idx,u
+    integer(c_int32_t)::header(21)
+    logical::exists,owns
+    inquire(file=resolve_path('salmonpy-planes.dat'),exist=exists)
+    if(.not.exists)return
+    if(.not.fe%flag_save)then
+      write(*,*)'SALMONPY_PLANE_WARNING: saved E/H unavailable';return
+    endif
+    open(newunit=input,file=resolve_path('salmonpy-planes.dat'),status='old',iostat=ios)
+    if(ios/=0)return
+    read(input,'(a)',iostat=ios)magic
+    if(ios/=0.or.trim(magic)/='SALMONPY_NATIVE_PLANES_V1')then
+      close(input);write(*,*)'SALMONPY_PLANE_WARNING: invalid plane asset';return
+    endif
+    n=0
+    read(input,*,iostat=ios)n
+    if(ios/=0.or.n<1)then
+      close(input);return
+    endif
+    allocate(fe%plane_output(n),stat=ios)
+    if(ios/=0)then
+      close(input);write(*,*)'SALMONPY_PLANE_WARNING: allocation failed';return
+    endif
+    do m=1,n
+      d=0;offset=-1
+      read(input,*,iostat=ios)d,offset
+      if(ios/=0)exit
+      if(d<1.or.d>3)exit
+      idx=fs%lg%is(d)+offset
+      if(idx<=fs%lg%is(d).or.idx>fs%lg%ie(d))exit
+      fe%plane_output(m)%axis=d;fe%plane_output(m)%index=idx
+      owns=(idx>=fs%mg%is(d).and.idx<=fs%mg%ie(d)).or. &
+           (idx-1>=fs%mg%is(d).and.idx-1<=fs%mg%ie(d))
+      if(.not.owns)cycle
+      j=0
+      do a=1,3
+        if(a==d)cycle
+        j=j+1;tangent(j)=a
+      enddo
+      allocate(fe%plane_output(m)%buffer(6, &
+        fs%mg%ie(tangent(1))-fs%mg%is(tangent(1))+1, &
+        fs%mg%ie(tangent(2))-fs%mg%is(tangent(2))+1),stat=ios)
+      if(ios/=0)cycle
+      write(name,'("salmonpy_plane_",i4.4,"_rank_",i8.8,".bin")')m,nproc_id_global
+      open(newunit=u,file=resolve_path(trim(name)),status='new',access='stream',form='unformatted',iostat=ios)
+      if(ios/=0)then
+        write(*,*)'SALMONPY_PLANE_WARNING: cannot create ',trim(name);cycle
+      endif
+      fe%plane_output(m)%unit=u
+      header=int([16909060,1,d,idx,idx-1,fs%lg%is,fs%lg%ie,fs%mg%is,fs%mg%ie, &
+                  obs_samp_em,nt_em,nproc_id_global,fe%iter_sta-1],c_int32_t)
+      file_magic='SALMONPY_NATIVE_PLANES_V1'
+      write(u,iostat=ios)file_magic,header,real(dt_em,c_double)
+      if(ios/=0)then
+        close(u,iostat=ios);fe%plane_output(m)%unit=0
+      endif
+    enddo
+    close(input)
+    if(fe%iter_sta==1)call eh_planes_write(fs,fe,0,.true.)
+  end subroutine eh_planes_open
+
+  subroutine eh_planes_write(fs,fe,iter,initial)
+    use iso_c_binding,only:c_int32_t
+    use structures,only:s_fdtd_system
+    type(s_fdtd_system),intent(in)::fs
+    type(ls_fdtd_eh),intent(inout)::fe
+    integer,intent(in)::iter
+    logical,optional,intent(in)::initial
+    integer::m,d,u,ios,q,idx,tangent(2),j,a,b,ijk(3),i1,i2,i3
+    logical::first
+    if(.not.allocated(fe%plane_output))return
+    first=.false.
+    if(present(initial))first=initial
+    do m=1,size(fe%plane_output)
+      u=fe%plane_output(m)%unit
+      if(u==0)cycle
+      d=fe%plane_output(m)%axis;idx=fe%plane_output(m)%index
+      j=0
+      do a=1,3
+        if(a==d)cycle
+        j=j+1;tangent(j)=a
+      enddo
+      write(u,iostat=ios)int(iter,c_int32_t)
+      do q=0,1
+        if(ios/=0)exit
+        if(idx-q<fs%mg%is(d).or.idx-q>fs%mg%ie(d))cycle
+        ijk(d)=idx-q
+        do b=1,size(fe%plane_output(m)%buffer,3)
+          ijk(tangent(2))=fs%mg%is(tangent(2))+b-1
+          do a=1,size(fe%plane_output(m)%buffer,2)
+            ijk(tangent(1))=fs%mg%is(tangent(1))+a-1
+            i1=ijk(1);i2=ijk(2);i3=ijk(3)
+            if(first)then
+              fe%plane_output(m)%buffer(:,a,b)=[ &
+                fe%ex_y(i1,i2,i3)+fe%ex_z(i1,i2,i3),fe%ey_z(i1,i2,i3)+fe%ey_x(i1,i2,i3), &
+                fe%ez_x(i1,i2,i3)+fe%ez_y(i1,i2,i3),fe%hx_y(i1,i2,i3)+fe%hx_z(i1,i2,i3), &
+                fe%hy_z(i1,i2,i3)+fe%hy_x(i1,i2,i3),fe%hz_x(i1,i2,i3)+fe%hz_y(i1,i2,i3)]
+            else
+              fe%plane_output(m)%buffer(:,a,b)=[fe%ex_s(i1,i2,i3),fe%ey_s(i1,i2,i3),fe%ez_s(i1,i2,i3), &
+                fe%hx_s(i1,i2,i3),fe%hy_s(i1,i2,i3),fe%hz_s(i1,i2,i3)]
+            endif
+          enddo
+        enddo
+        write(u,iostat=ios)fe%plane_output(m)%buffer
+      enddo
+      if(ios/=0)then
+        write(*,*)'SALMONPY_PLANE_WARNING: diagnostic write failed at step ',iter
+        close(u,iostat=ios);fe%plane_output(m)%unit=0
+      endif
+    enddo
+  end subroutine eh_planes_write
+
+  subroutine eh_planes_close(fe)
+    type(ls_fdtd_eh),intent(inout)::fe
+    integer::m,ios
+    if(.not.allocated(fe%plane_output))return
+    do m=1,size(fe%plane_output)
+      if(fe%plane_output(m)%unit/=0)close(fe%plane_output(m)%unit,iostat=ios)
+    enddo
+    deallocate(fe%plane_output)
+  end subroutine eh_planes_close
+
   subroutine eh_init(fs,fe,ld,status,grid_ready,excluded_response_points)
     use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
     use salmon_global,   only: al_em,dl_em,num_rgrid_em,at_em,dt_em,nt_em,boundary_em,yn_periodic,         &
@@ -4141,6 +4280,7 @@ contains
 !$omp end do
 !$omp end parallel
         call eh_sendrecv(fs,fe,'s')
+        call eh_planes_write(fs,fe,iter)
         
         !observation point and plane data
         if(fe%flag_obs) then

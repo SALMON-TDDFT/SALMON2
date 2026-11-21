@@ -403,8 +403,7 @@ validマスク、警告、時間窓と観測面位置を確認します。負の
 `surface_flux` 自身はMPI通信を行いません。分割面では担当群でpower/energyを加算でき、
 R/Tは分割ごとの比を平均せず、全横断面で評価します。閉曲面の自動配置や回折次数ごとの
 分解、空間補間は自動実行しません。nativeの通常point観測とplane出力は別であり、
-大きい面の自動収集を追加したわけではありません。nativeのplane出力等で取得した
-位置合わせ済み配列を渡します。point観測だけのFDTD入口には既存の200点上限があります。
+バッチFDTDの自動取得は下記PlaneMonitorで指定できます。任意の外部配列も渡せます。旧point観測には200点上限が残ります。
 
 Fortranでの面積・時間積分を使い、既存の一様ポート入口は変更しません。
 エネルギーの二重計上を防ぐため `transverse_area` は記録された面積と一致させます。
@@ -415,3 +414,57 @@ NPZサンプル `examples.fdtd_energy` も任意の `area_weights` を読み取�
 入射の約10.1%に相当する透過分を取りこぼしました。最終場の蓄積もnativeの
 電磁場保存データから評価しています。これは局所的な結合・観測の実装検証であり、
 一般の3D材料の光学精度や多ノード性能の保証ではありません。
+
+
+### Native FDTDの面取得と自動位置合わせ
+
+バッチの `FDTD(..., planes=(PlaneMonitor(axis, position), ...))` で面を指定できます。
+軸は0/1/2、位置はbohrです。最も近い格子面を選び、要求値と実位置を記録します。
+横方向は周期境界、面と隣接面は通常の計算領域内でPMLから離して指定します。
+旧来の点観測の200点上限とは別の経路なので、大きい面も点観測へ展開しません。
+
+```python
+from dataclasses import replace
+from salmonpy.fdtd import PlaneMonitor
+from salmonpy.geometry import Geometry
+
+# calculationは横方向周期・通常のFDTD設定。管理ノードでは構築/prepareだけで終了。
+monitored = replace(calculation,
+    planes=(PlaneMonitor(0, x_front), PlaneMonitor(0, x_back)))
+# 以下のrunは計算ノード/許可された計算環境で明示的に呼ぶ。
+reference = engine.run(replace(monitored,
+    geometry=Geometry(monitored.geometry.grid), materials=(), smoothing=None),
+    'new-vacuum-reference')
+result = engine.run(monitored, 'new-material-run')
+plane = result.planes[0]
+print(plane.time, plane.E.shape, plane.position)
+net = plane.flux()                         # 取得・位置合わせ済みの面全体の流束
+ports = result.reflection_transmission(reference)
+check = result.energy_balance(reference, point_work, point_volumes,
+    material_ids=material_ids, field_energy_change=delta_field_energy)
+```
+
+`PlaneData` のE/Hは `(時刻数, N1, N2, 3)`、area_weightsは `(N1,N2)` です。
+Eは隣接する2本の辺、Hは4面をFortranで補間し、周期端も折り返して同じ空間位置へ揃えます。
+nativeが保存用に中心化済みのHをそのまま使い、時間平均は重ねません。
+面と直前の隣接面を持つランクだけが、観測面ごとにストリームを追記します。
+所有タイルを読み込んで全面を組み直す処理に追加のMPI集団通信はありません。
+この初版はバッチの新規FDTD実行が対象です。embedded NativeEHField、途中再開の面ストリーム
+統合は未接続で、既存の埋め込み計算は警告付きで継続します。従来の保存/再開の数値契約は変更しません。
+
+`plane.time` は0と観測間隔ごとの時刻です。stepsがobservation_strideで割り切れない場合、
+最終観測は最後のstride境界です。物質への仕事と場の始終差もこの時間範囲へ合わせます。
+面データだけから材料の蓄積や仕事をゼロと推定しません。これらは利用者が観測から明示します。
+参照計算は同じ格子・入射・時刻設定と面配置を使います。E/Hは返却後読み取り専用です。
+保存済み出力は `read_native_planes(directory, calculation, ranks=...)` でも再取得できます。
+
+対応ランタイムには `SALMONPY_NATIVE_PLANES_V1` が必要です。旧ランタイム、面出力の失敗や
+不完全なデータは警告して診断不可と記録し、正常終了したFDTDの点観測と計算結果は保持します。
+`result.energy_balance` は不完全な面から収支を捏造しません。importや準備時に自動ビルドせず、
+必要な場合だけ明示的に対応ランタイムを取得/構築します。観測のrawデータ量の目安は
+面ごとに `8×6×2×N1×N2×(1+steps//stride)` bytesです。時刻タグとタイルヘッダーが加わります。
+
+実回折格子では観測なし/ありの既存点出力128個と、全電磁場保存データが従来実行ファイルと
+バイト一致しました。横方向2ランク分割でも自動取得から収支まで一致し、残差は約0.0107%。
+面と隣接面が別ランクになる法線方向分割でも、非ゼロの位置合わせ済みE/Hが逐次版と
+ビット一致しました。これらは局所実装検証で、多ノード性能や光学物性の収束保証ではありません。

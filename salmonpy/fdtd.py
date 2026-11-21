@@ -90,6 +90,23 @@ class PlaneWave:
 
 
 @dataclass(frozen=True,slots=True)
+class PlaneMonitor:
+    """Complete transverse-periodic plane; nearest grid location is recorded."""
+    axis: int
+    position: float
+
+    def __post_init__(self):
+        if isinstance(self.axis,(bool,np.bool_)) or not isinstance(self.axis,(int,np.integer)) or self.axis not in (0,1,2):
+            raise InputError('plane axis must be 0, 1 or 2')
+        from .ld import _array
+        if isinstance(self.position,(bool,np.bool_)):raise InputError('plane position must be a real scalar')
+        position=_array(self.position,'plane position')
+        if position.shape!=():raise InputError('plane position must be scalar')
+        object.__setattr__(self,'axis',int(self.axis))
+        object.__setattr__(self,'position',float(position))
+
+
+@dataclass(frozen=True,slots=True)
 class FDTD:
     geometry: Geometry
     materials: tuple
@@ -103,6 +120,7 @@ class FDTD:
     tensor_rtol: float=1e-10
     tensor_maxiter: int=200
     smoothing: SubpixelSmoothing | None=None
+    planes: tuple=()
 
     def __post_init__(self):
         if not isinstance(self.geometry,Geometry): raise InputTypeError('geometry must be Geometry')
@@ -185,6 +203,19 @@ class FDTD:
         if any(any(x<a[0] or x>a[-1] for x,a in zip(p,coords)) for p in observations):
             raise InputError('observation is outside the material grid')
         object.__setattr__(self,'observations',observations)
+        planes=tuple(self.planes)
+        for plane in planes:
+            if not isinstance(plane,PlaneMonitor):raise InputTypeError('planes require PlaneMonitor values')
+            if any(self.boundaries.faces[2*d:2*d+2]!=('periodic','periodic') for d in range(3) if d!=plane.axis):
+                raise InputError('automatic plane colocation requires transverse periodic faces')
+            axis_coords=self.geometry.grid.coordinates[plane.axis]
+            if plane.position<axis_coords[0] or plane.position>axis_coords[-1]:
+                raise InputError('plane position is outside the grid')
+            index=int(np.argmin(np.abs(axis_coords-plane.position)))
+            low=9 if self.boundaries.faces[2*plane.axis]=='pml' else 1
+            high=len(axis_coords)-10 if self.boundaries.faces[2*plane.axis+1]=='pml' else len(axis_coords)-2
+            if index<low or index>high:raise InputError('plane and its preceding neighbor must clear normal boundaries/PML')
+        object.__setattr__(self,'planes',planes)
         if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,39}',self.name): raise InputError('invalid calculation name')
 
     @property
@@ -207,11 +238,21 @@ class FDTD:
         except InputError:return None
         return self.smoothing.resolve(self.source.pulse.omega if isinstance(self.source,PlaneWave) else None)
 
+    def _plane_assets(self,assets):
+        if self.planes:
+            rows=['SALMONPY_NATIVE_PLANES_V1',str(len(self.planes))]
+            for plane in self.planes:
+                coords=self.geometry.grid.coordinates[plane.axis]
+                index=int(np.argmin(np.abs(coords-plane.position)))
+                rows.append(f'{plane.axis+1} {index}')
+            assets['salmonpy-planes.dat']='\n'.join(rows)+'\n'
+        return assets
+
     def input_assets(self):
         """Explicit native tensor records; no compilation or downloads."""
         reference=self.smoothing_reference
         if reference is not None:
-            return {'salmonpy-subpixel.dat':_profile_asset(self.materials,self.geometry,reference,self.tensor_rtol,self.tensor_maxiter)}
+            return self._plane_assets({'salmonpy-subpixel.dat':_profile_asset(self.materials,self.geometry,reference,self.tensor_rtol,self.tensor_maxiter)})
         assets={}
         for full in (False,True):
             entries=[(i,m) for i,m in enumerate(self.materials,1)
@@ -228,7 +269,7 @@ class FDTD:
                     rows.append(_vector(m.epsilon_infinity[i][i] for i in range(3)))
                     rows.extend(_vector(pole[i][i] for i in range(3)) for pole in m.strength)
             assets['salmonpy-ld-tensor.dat' if full else 'salmonpy-ld-diagonal.dat']='\n'.join(rows)+'\n'
-        return assets
+        return self._plane_assets(assets)
 
     def input_text(self):
         """Generate an inspectable namelist; tensor materials also need input_assets()."""
@@ -290,6 +331,33 @@ class FDTD:
 class FDTDResult:
     directory: Path
     observations: tuple
+    planes: tuple=()
+
+    def reflection_transmission(self,reference,*,front=0,back=1,window='none',drive_rtol=1e-8):
+        """Use matched native planes; subtract reference E/H before flux ratios."""
+        from .analysis import reflection_transmission
+        if not isinstance(reference,FDTDResult):raise InputTypeError('matched vacuum FDTDResult required')
+        try:incoming=self.planes[front];outgoing=self.planes[back];ref=reference.planes[front]
+        except IndexError as exc:raise InputError('complete front/back native plane data required') from exc
+        for plane in (outgoing,ref):
+            if (plane.axis!=incoming.axis or not np.array_equal(plane.time,incoming.time)
+                    or not np.array_equal(plane.area_weights,incoming.area_weights)
+                    or any(not np.array_equal(a,b) for a,b in zip(plane.coordinates,incoming.coordinates))):
+                raise InputError('plane geometry/sampling/clocks differ')
+        if ref.position!=incoming.position:raise InputError('reference front plane differs')
+        if outgoing.position==incoming.position:raise InputError('front and back planes must be distinct')
+        normal=[0.,0.,0.];normal[incoming.axis]=1. if outgoing.position>incoming.position else -1.
+        return reflection_transmission(incoming.time,ref.E,ref.H,incoming.E-ref.E,incoming.H-ref.H,
+            outgoing.E,outgoing.H,normal=normal,units='atomic_gaussian',window=window,drive_rtol=drive_rtol,
+            area_weights=incoming.area_weights)
+
+    def energy_balance(self,reference,absorbed,volumes,*,material_ids,field_energy_change,
+                       other_outgoing_energy=0.,front=0,back=1,window='none',drive_rtol=1e-8,rtol=.01,atol=0.):
+        """Connect collected/collocated planes to a budget; storage/work stay explicit."""
+        ports=self.reflection_transmission(reference,front=front,back=back,window=window,drive_rtol=drive_rtol)
+        return energy_balance(absorbed,volumes,ports,material_ids=material_ids,
+            transverse_area=ports.config['surface_area'],field_energy_change=field_energy_change,
+            other_outgoing_energy=other_outgoing_energy,units='atomic_gaussian',rtol=rtol,atol=atol)
 
 
 @dataclass(frozen=True,slots=True)
@@ -404,6 +472,11 @@ class SalmonExecutable:
         if hashlib.sha256(executable_bytes).hexdigest()!=self.sha256:
             raise InputError('executable SHA256 does not match the validated binary')
         assets=calculation.input_assets()
+        plane_supported=b'SALMONPY_NATIVE_PLANES_V1' in executable_bytes
+        if calculation.planes and not plane_supported:
+            import warnings
+            warnings.warn('Runtime lacks native plane collection; FDTD calculation continues, plane diagnostics unavailable. '
+                          'Explicitly obtain/build a matching runtime for plane diagnostics.',UserWarning,stacklevel=2)
         if 'salmonpy-ld-diagonal.dat' in assets and b'SALMONPY_FDTD_LD_DIAGONAL_V1' not in executable_bytes:
             raise InputError('runtime lacks diagonal tensor LD support; explicitly build or obtain a matching runtime')
         if 'salmonpy-ld-tensor.dat' in assets and b'SALMONPY_FDTD_LD_TENSOR_V1' not in executable_bytes:
@@ -456,7 +529,20 @@ class SalmonExecutable:
             expected=calculation.steps//calculation.observation_stride
             if any(len(t.values)!=expected for t in tables): raise RuntimeFailure('incomplete observation output')
             record['status']='complete'
-            return FDTDResult(directory,tables)
+            planes=()
+            if calculation.planes and not plane_supported:
+                record['plane_observations_status']='unavailable'
+                record['plane_observations_error']='runtime lacks native plane collection'
+            if calculation.planes and plane_supported:
+                try:
+                    planes=read_native_planes(directory,calculation,ranks=1 if mpi is None else mpi.ranks)
+                    record['plane_observations_status']='complete'
+                except Exception as exc:
+                    import warnings
+                    record['plane_observations_status']='unavailable'
+                    record['plane_observations_error']=str(exc)
+                    warnings.warn('FDTD completed; plane diagnostics unavailable: '+str(exc),UserWarning,stacklevel=2)
+            return FDTDResult(directory,tables,planes)
         except BaseException as exc:
             record['status']='failed' if isinstance(exc,Exception) else 'cancelled'
             record['error']=str(exc) or type(exc).__name__
@@ -538,3 +624,100 @@ def energy_balance(absorbed, volumes, ports, *, material_ids, transverse_area,
                     diagnostic_only=True,scope='finite-time net material work; not irreversible heat or a convergence certificate'))
     return EnergyBalance(ids,_readonly(w),*map(float,stats[:3]),float(stats[3]),float(delta),float(other),
                          float(stats[4]),float(stats[5]),bool(accepted.value),ports,config)
+
+
+@dataclass(frozen=True,slots=True)
+class PlaneData:
+    axis: int
+    position: float
+    time: np.ndarray
+    coordinates: tuple
+    E: np.ndarray
+    H: np.ndarray
+    area_weights: np.ndarray
+    config: object
+
+    def flux(self,normal=None):
+        from .analysis import surface_flux
+        if normal is None:
+            normal=[0.,0.,0.];normal[self.axis]=1.
+        return surface_flux(self.time,self.E,self.H,normal=normal,area_weights=self.area_weights,units='atomic_gaussian')
+
+
+def read_native_planes(directory,calculation,*,ranks=1):
+    """Read owner-local stream tiles and collocate periodic Yee planes in Fortran.
+
+    Batch fresh-run profile only. H is already at E time; no temporal averaging.
+    No solver launch, compilation or MPI call; incomplete observations are rejected.
+    """
+    import ctypes as c
+    from types import MappingProxyType
+    from .analysis import _energy_native
+    from .fields import _readonly
+    if not isinstance(calculation,FDTD):raise InputTypeError('FDTD configuration required')
+    ranks=_integer(ranks,'ranks');directory=Path(directory).expanduser().resolve()
+    times=np.arange(0,calculation.steps+1,calculation.observation_stride,dtype=np.int64)
+    result=[]
+    for number,monitor in enumerate(calculation.planes,1):
+        tangent=tuple(d for d in range(3) if d!=monitor.axis)
+        shape=tuple(calculation.geometry.grid.counts[d] for d in tangent)
+        raw=np.empty((2,len(times),*shape,6),dtype=np.float64)
+        covered=np.zeros((2,*shape),dtype=bool);seen=set();global_box=None
+        files=sorted(directory.glob(f'salmonpy_plane_{number:04d}_rank_*.bin'))
+        index=int(np.argmin(abs(calculation.geometry.grid.coordinates[monitor.axis]-monitor.position)))
+        for path in files:
+            with path.open('rb') as stream:
+                if stream.read(32).rstrip(b' \0')!=b'SALMONPY_NATIVE_PLANES_V1':raise InputError('invalid plane stream magic')
+                header=stream.read(84)
+                if len(header)!=84:raise InputError('truncated plane header')
+                endian='<' if int.from_bytes(header[:4],'little')==16909060 else '>'
+                h=np.frombuffer(header,dtype=endian+'i4').astype(np.int64)
+                dtbytes=stream.read(8)
+                if len(dtbytes)!=8:raise InputError('truncated plane timestep')
+                dt=float(np.frombuffer(dtbytes,dtype=endian+'f8')[0])
+                if (h[0]!=16909060 or h[1]!=1 or h[2]!=monitor.axis+1 or h[20]!=0
+                    or h[17]!=calculation.observation_stride or h[18]!=calculation.steps or dt!=calculation.dt):
+                    raise InputError('plane stream version/configuration/initial clock differs')
+                if global_box is None:global_box=tuple(h[5:11])
+                if tuple(h[5:11])!=global_box:raise InputError('native global plane bounds differ')
+                if tuple(h[8:11]-h[5:8]+1)!=calculation.geometry.grid.counts:
+                    raise InputError('native plane grid differs')
+                if h[3]!=h[5+monitor.axis]+index or h[4]!=h[3]-1:raise InputError('native plane location differs')
+                rank=int(h[19])
+                if rank in seen or rank<0 or rank>=ranks:raise InputError('invalid/duplicate native plane owner')
+                seen.add(rank)
+                lo=h[11:14];hi=h[14:17]
+                if np.any(lo<h[5:8]) or np.any(hi>h[8:11]) or np.any(hi<lo):raise InputError('invalid plane tile bounds')
+                spans=tuple(slice(int(lo[d]-h[5+d]),int(hi[d]-h[5+d]+1)) for d in tangent)
+                sizes=tuple(int(hi[d]-lo[d]+1) for d in tangent)
+                owns=[q for q,location in enumerate(h[3:5]) if lo[monitor.axis]<=location<=hi[monitor.axis]]
+                if not owns:raise InputError('plane stream has no owned plane')
+                for q in owns:
+                    if np.any(covered[(q,*spans)]):raise InputError('overlapping native plane tiles')
+                    covered[(q,*spans)]=True
+                size=6*sizes[0]*sizes[1]*8
+                for ti,step in enumerate(times):
+                    tag=stream.read(4)
+                    if len(tag)!=4 or int.from_bytes(tag,'little' if endian=='<' else 'big',signed=True)!=step:
+                        raise InputError('incomplete or inconsistent plane sample clock')
+                    for q in owns:
+                        data=stream.read(size)
+                        if len(data)!=size:raise InputError('truncated plane sample')
+                        tile=np.frombuffer(data,dtype=endian+'f8').reshape(sizes[1],sizes[0],6).transpose(1,0,2)
+                        raw[(q,ti,*spans,slice(None))]=tile
+                if stream.read(1):raise InputError('unexpected trailing plane data')
+        if not np.all(covered):raise InputError('native plane coverage is incomplete')
+        fields=[np.ascontiguousarray(raw[q,:,:,:,i:i+3]) for q,i in ((0,0),(0,3),(1,0),(1,3))]
+        E=np.empty_like(fields[0]);H=np.empty_like(E)
+        fn=_energy_native('sp_collocate_yee_plane',[c.c_int]*4+[c.c_void_p]*6)
+        if fn(len(times),*shape,monitor.axis+1,*(a.ctypes.data for a in fields),E.ctypes.data,H.ctypes.data):
+            raise InputError('native plane colocation rejected nonfinite fields or geometry')
+        coordinates=tuple(_readonly(calculation.geometry.grid.coordinates[d]) for d in tangent)
+        weights=np.full(shape,np.prod([calculation.geometry.grid.spacing[d] for d in tangent]),dtype=np.float64)
+        position=float(calculation.geometry.grid.coordinates[monitor.axis][index])
+        result.append(PlaneData(monitor.axis,position,_readonly(times*calculation.dt),coordinates,
+            _readonly(E),_readonly(H),_readonly(weights),MappingProxyType(dict(
+                units='atomic_gaussian',native_H_time='already centered at E time',
+                spatial_interpolation='native Yee: two E edges, four H faces; periodic transverse wrap',
+                raw_tiles=len(files),requested_position=monitor.position,source='native owner-local plane streams'))))
+    return tuple(result)

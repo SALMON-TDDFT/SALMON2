@@ -260,3 +260,5 @@ Preparation only: `python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-
 Electronic input preparation only: `python -m salmonpy.examples.prepare_electrons dft Si_rps.dat NEW_DIRECTORY` or `tddft rt.inp NEW_DIRECTORY --asset pseudo1_rps.dat Si_rps.dat`. No solver, GS discovery or submission. See PREPARATION.en.md.
 
 `fdtd_energy`: diagnose macro-point work, R/T and energy balance from stored collocated E/j and separated E/H ports; no solver launch.
+
+`fdtd_periodic_slab --native-planes`: native owner-local plane streams, automatic colocation and integrated flux; unmatched runtime warns without discarding the calculation.

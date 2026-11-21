@@ -78,6 +78,10 @@ class NativeEHField:
             if threading.current_thread() is not threading.main_thread():raise InputError('main thread required')
             if not isinstance(calculation,FDTD) or not isinstance(calculation.source,PlaneWave):
                 raise InputError('zero-initialized plane-wave FDTD required')
+            if calculation.planes and comm.rank==0:
+                import warnings
+                warnings.warn('Automatic PlaneMonitor streams currently require batch SalmonExecutable.run; '
+                              'embedded field calculation continues without plane streams.',UserWarning,stacklevel=2)
             parallel=FDTDMPI(tuple(grid))
             if parallel.ranks!=comm.size:raise InputError('field decomposition must match group size')
             text=parallel.input_text(calculation)

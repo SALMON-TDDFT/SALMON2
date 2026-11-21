@@ -60,7 +60,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.subpixel': ('SubpixelSmoothing','effect
                      'RuntimeFailure',
                      'SnapshotError',
                      'SCFReviewRequired'),
- 'salmonpy.fdtd': ('EnergyBalance', 'energy_balance', 'Boundaries',
+ 'salmonpy.fdtd': ('PlaneMonitor', 'PlaneData', 'read_native_planes', 'EnergyBalance', 'energy_balance', 'Boundaries',
                    'Dielectric',
                    'Impulse',
                    'PlaneWave',

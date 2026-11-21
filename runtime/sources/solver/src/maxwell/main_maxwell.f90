@@ -19,7 +19,7 @@ subroutine main_maxwell
   use communication,   only: comm_is_root
   use structures,      only: s_fdtd_system
   use lorentz_drude, only: s_ld_state
-  use fdtd_eh,         only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize
+  use fdtd_eh,         only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize,eh_planes_open,eh_planes_close
   use misc_routines,   only: get_wtime
   implicit none
   type(s_ld_state) :: ld
@@ -29,7 +29,9 @@ subroutine main_maxwell
   
   elapsed_time=get_wtime()
   call eh_init(fs,fe,ld)
+  call eh_planes_open(fs,fe)
   call eh_calc(fs,fe,ld)
+  call eh_planes_close(fe)
   call eh_finalize(fs,fe,ld)
   elapsed_time=get_wtime()-elapsed_time
   if(comm_is_root(nproc_id_global)) then

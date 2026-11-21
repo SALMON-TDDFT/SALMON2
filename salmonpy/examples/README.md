@@ -257,3 +257,5 @@ epsilon = dielectric_function(sigma)
 電子計算の準備だけ: `python -m salmonpy.examples.prepare_electrons dft Si_rps.dat NEW_DIRECTORY` または `tddft rt.inp NEW_DIRECTORY --asset pseudo1_rps.dat Si_rps.dat`。計算・GS探索・ジョブ投入はしません。PREPARATION.mdを参照してください。
 
 `fdtd_energy`: 保存済みマクロ点E/j・分離済みE/Hポートから吸収仕事、R/T、収支を診断（ソルバー起動なし）。
+
+`fdtd_periodic_slab --native-planes`: native所有タイルから横断面を取得・位置合わせして流束を表示。対応ランタイムが必要で、未対応なら計算結果を保持して警告します。

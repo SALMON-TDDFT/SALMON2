@@ -6,8 +6,9 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
-Molecular work remains paused. Memory budgets warn; SCF nonconvergence warns and
-retains results. GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
+Molecular work remains paused. Memory budgets warn; SCF nonconvergence retains
+results/residual diagnostics and pauses the downstream workflow for user review
+(the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
 ### Completed and verified
 
@@ -3156,7 +3157,7 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
 - [x] Native per-macro-point charge j dot total E work, separated E/H R/T and unwindowed fluences.
 - [x] FDTD budget with volumes/area/field storage/other outflow; warnings without stopping runnable solver.
 - [x] Uniform-port scope, reversible-storage accounting and no extra MPI communication documented in JP/EN/AI catalog.
-- [x] Nonuniform transverse-periodic plane area integration added via area_weights/surface_flux; native automatic plane collection remains separate.
+- [x] Nonuniform transverse-periodic plane area integration added via area_weights/surface_flux; fresh batch native plane collection/Fortran colocation connected; embedded/restarted streams remain separate.
 
 
 ### 2026-11-21 Real coupled energy-budget validation
@@ -3177,3 +3178,16 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
 - [x] Analytic phased diffraction (mean E=0 but finite flux), patch additivity and finite checks.
 - [x] Real native lossless periodic grating: area-budget residual0.0107%; field means miss10.1% of incident energy.
 - [x] JP/EN/AI guidance distinguishes full plane integration from automatic collection and order separation.
+
+
+### 2026-11-21 Automatic batch native plane acquisition
+
+- [x] Commit/push ac0354f7 for prior plane integration.
+- [x] Owner-local native plane+neighbor streams; no new collective, no numerical update changes.
+- [x] PlaneMonitor/PlaneData and Fortran3-axis spatial colocation; H clock preserved.
+- [x] FDTDResult reference R/T and energy budget; missing diagnostics preserve completed calculation.
+- [x] Real grating128 point files and EM checkpoints byte-identical to prior executable; serial/transverse MPI2 budgets agree.
+- [x] Normal split with planes on different ranks: nonzero colocated E/H bit-identical.
+- [x] Live source manifests/profiles and JP/EN/AI/sample synchronized.
+- [x] Source and installed sdist→wheel suites:678 tests, one optional skip; installed wheel reproduces serial/MPI budgets. Native diagnostic I/O failure preserves completed calculation.
+- [ ] Embedded and restart-stream plane acquisition/transactional output not implemented in this batch profile.

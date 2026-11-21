@@ -470,9 +470,8 @@ the budget. Extra lateral sources/nonperiodic channels must be counted separatel
 No added MPI calls: disjoint patch power/energy add on the owning group. Do not
 average rank-local R/T; evaluate ratios over the whole cross section. Automatic
 closed-surface placement, order-resolved decomposition and spatial interpolation
-are not provided. Nor is a new automatic native plane collector: supply collocated
-arrays from native plane outputs or your own observations. The existing FDTD
-point-observation entry still has its 200-point limit.
+are not provided. Batch FDTD can now collect planes through PlaneMonitor below. External collocated
+arrays remain supported; the old point-observation entry retains its200-point limit.
 
 Fortran performs area/time integration. The legacy uniform-port path is unchanged.
 The budget checks transverse_area against the recorded plane area to prevent
@@ -484,3 +483,63 @@ fields first lost transmitted energy equivalent to about10.1% of incidence.
 Final stored field energy was included from native field checkpoint data. This
 is local observation/accounting verification, not general3D material accuracy
 or multi-node scaling certification.
+
+
+### Native acquisition and automatic E/H colocation
+
+Specify `planes=(PlaneMonitor(axis, position), ...)` in batch FDTD. Axes are0/1/2,
+positions bohr. The nearest grid plane is selected and requested/actual positions
+are recorded. Transverse faces must be periodic; keep the plane and preceding
+neighbor clear of normal boundaries/PML. This stream is separate from the old
+200-point observation entry and does not expand a large plane into point probes.
+
+```python
+from dataclasses import replace
+from salmonpy.fdtd import PlaneMonitor
+from salmonpy.geometry import Geometry
+
+# calculation already has transverse periodic boundaries. Construct/prepare only
+# on a management node; run explicitly in the permitted compute environment.
+monitored = replace(calculation,
+    planes=(PlaneMonitor(0, x_front), PlaneMonitor(0, x_back)))
+reference = engine.run(replace(monitored,
+    geometry=Geometry(monitored.geometry.grid), materials=(), smoothing=None),
+    'new-vacuum-reference')
+result = engine.run(monitored, 'new-material-run')
+plane = result.planes[0]
+print(plane.time, plane.E.shape, plane.position)
+net = plane.flux()
+ports = result.reflection_transmission(reference)
+check = result.energy_balance(reference, point_work, point_volumes,
+    material_ids=material_ids, field_energy_change=delta_field_energy)
+```
+
+PlaneData E/H have shape(time,N1,N2,3), area_weights(N1,N2). Fortran averages
+2 neighboring E edges and4 H faces at a common position with periodic wrapping.
+Native saved H is already centered at E time: no second temporal average.
+Only ranks owning the plane/preceding plane append per-plane streams. Offline
+tile assembly and colocation add no MPI collectives. This first entry is fresh
+batch FDTD; embedded NativeEHField and partial-restart plane-stream stitching
+are not connected. Embedded calculations warn and continue without these streams;
+existing numerical checkpoint/restart contracts are unchanged.
+
+Times include0 and each observation stride. If steps is not divisible by stride,
+the last observation is the last stride boundary. Match material work and field
+storage to this interval. They cannot be inferred as zero from plane data and
+remain explicit inputs. Use matched reference grid/source/clocks/plane placement.
+Returned fields are immutable. `read_native_planes(directory, calculation,
+ranks=...)` rereads completed streams without a solver or MPI.
+
+A matching runtime contains SALMONPY_NATIVE_PLANES_V1. Old runtimes or failed/
+incomplete plane output warn and mark diagnostics unavailable while preserving
+a completed FDTD calculation and its point outputs. The budget never fabricates
+missing planes. Imports/preparation do not build; explicitly obtain/build a
+matching runtime if needed. Raw field output is approximately
+8*6*2*N1*N2*(1+steps//stride) bytes per plane, plus tags/tile headers.
+
+Actual grating tests preserved all128 prior point-output files and full EM
+checkpoint bytes with monitoring off/on. Two transverse MPI ranks gave matching
+automatically acquired planes/budgets (~0.0107% residual). A separate normal split
+placed the plane/preceding plane on different ranks and retained bit-identical
+nonzero colocated E/H. These are local implementation checks, not multi-node
+scaling or converged real-material optical accuracy.

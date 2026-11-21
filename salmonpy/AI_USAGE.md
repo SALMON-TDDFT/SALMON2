@@ -1092,4 +1092,11 @@ LDは観測Eから同じnativeカーネルでjを再構成し最終native電流�
 横方向周期セルの全面積分では、E/Hの時空間位置合わせ、面積重み、周期端点の重複、
 参照場の引き算を確認します。surface_flux.power/energyは総量、PortSpectrumのfluenceは
 面積平均でありenergy_balanceが面積を一度掛けます。MPI面分割では比を平均しません。
-200点までのpoint観測を無制限な自動面収集と説明せず、面データの取得方法は別途確認します。
+バッチFDTDの自動面取得はPlaneMonitorを明示し、旧point観測の200点制限とは区別します。
+
+PlaneMonitorを指定したバッチFDTDは所有タイルをnativeから取得し、FortranでYee E/Hを
+空間位置合わせしてresult.planesへ返します。時間中心化済みHを二重に平均しません。
+result.reflection_transmission(reference)／energy_balanceで診断へ接続し、物質仕事と場の始終差は
+明示的な観測値を使います。旧ランタイムや面診断失敗をFDTD計算失敗と混同しません。
+この入口はfresh batch用であり、NativeEHFieldや再開ストリームの自動統合を対応済みと案内しません。
+管理ノードではprepare_fdtdまで、runは利用者が計算環境で明示的に呼びます。

@@ -5,13 +5,14 @@ Requires the runtime's per-axis FDTD boundary implementation. No build/download.
 """
 import argparse
 from salmonpy.runtime import load_runtime
-from salmonpy.fdtd import FDTD, Boundaries, Dielectric, PlaneWave
+from salmonpy.fdtd import FDTD, Boundaries, Dielectric, PlaneWave, PlaneMonitor
 from salmonpy.geometry import Grid, Geometry, Shape
 from salmonpy.fields import AcosPulse
 from salmonpy.ld import LorentzDrude
 
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('runtime');p.add_argument('directory');p.add_argument('--ld',action='store_true')
+p.add_argument('--native-planes',action='store_true',help='collect/collocate complete transverse planes; matching native runtime needed for diagnostics')
 p.add_argument('--epsilon-infinity',type=float,default=1.0,help='instantaneous LD background, used with --ld')
 a=p.parse_args()
 material=(LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[25.],damping=[2.],epsilon_infinity=a.epsilon_infinity)
@@ -19,7 +20,15 @@ material=(LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[25.],dampin
 calculation=FDTD(Geometry(Grid((256,8,8),(.5,.5,.5)),(Shape('box',(20.,4.,4.)),)),
     (material,),.0015,4000,
     boundaries=Boundaries(('pml','pml','periodic','periodic','periodic','periodic')),
-    source=PlaneWave(AcosPulse(.001,10.,2.),0,-40.),observations=((30.,-.25,-.25),(30.,.25,.25)))
+    source=PlaneWave(AcosPulse(.001,10.,2.),0,-40.),observations=((30.,-.25,-.25),(30.,.25,.25)),
+    planes=(PlaneMonitor(0,-30.25),PlaneMonitor(0,30.25)) if a.native_planes else ())
 result=load_runtime(a.runtime,required=['fdtd']).run(calculation,a.directory,threads=1)
 print(result.directory)
 print('For vacuum-normalized complex Fresnel comparison, use tools/test_fdtd_periodic.py.')
+
+if a.native_planes:
+    if not result.planes:
+        print('Calculation completed; native plane diagnostics unavailable. See runtime/observation warning.')
+    for plane in result.planes:
+        print('Plane:',plane.axis,plane.position,'bohr; E/H shape:',plane.E.shape,
+              'net crossing energy:',plane.flux().energy[-1],'hartree')
