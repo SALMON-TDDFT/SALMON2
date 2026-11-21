@@ -773,4 +773,4 @@ response-service A history. Nonowned/private rows are placeholders, not replicat
 output. Use field-leader point archives for global observations. Old checkpoints
 with full rows remain readable. Native field A/E and physical state data are not
 replaced by placeholders. Native spatial J routing is described in COUPLED.en.md.
-Outer agreements remain a separate task; full solver communication is not claimed optimal.
+Adjacent outer admission is also coalesced as described in COUPLED.en.md; full solver communication is not claimed optimal.

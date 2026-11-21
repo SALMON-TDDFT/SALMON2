@@ -89,16 +89,22 @@ def main():
                 guarded_step(probes,targets,context=r.context)
                 records.append((0,'transaction-checkpoint-admission'))
             local_sbe=any(not hasattr(s,'native') and getattr(s,'checkpoint_protocol',None)!='salmonpy.direct-state/1' for s in r.states.values())
-            has_sbe=any(MPI.COMM_WORLD.allgather(local_sbe))
-            has_eh=any(MPI.COMM_WORLD.allgather(coupled.field is not None and hasattr(coupled.field,'lib')))
-            cases=['field-late']+(['sbe-late'] if has_sbe else [])+['electronic-late','electronic-deep']
-            if any(MPI.COMM_WORLD.allgather(any(getattr(s,'symmetry_enabled',False) for s in r.states.values()))):
-                cases.append('electronic-field')
+            flags=MPI.COMM_WORLD.allgather((local_sbe,
+                coupled.field is not None and hasattr(coupled.field,'lib'),
+                any(hasattr(s,'native') or getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1'
+                    for s in r.states.values()),
+                any(getattr(s,'symmetry_enabled',False) for s in r.states.values())))
+            has_sbe,has_eh,has_native,has_symmetry=(any(row[i] for row in flags) for i in range(4))
+            cases=['field-late']+(['sbe-late'] if has_sbe else [])
+            if has_native:cases+=['electronic-late','electronic-deep']
+            if has_symmetry:cases.append('electronic-field')
             if step==13 and has_eh:cases.append('field-deep')
             for case in cases:
                 before=freeze(coupled,f'{step}-{case}-before');replacements=[]
                 if case.startswith('field') and coupled.field is not None:
-                    s=coupled.field;fn=s.advance
+                    s=coupled.field
+                    name='advance_owned' if getattr(s,'current_rows',None) is not None else 'advance'
+                    fn=getattr(s,name)
                     def call(J,s=s,fn=fn,case=case):
                         if case=='field-deep':
                             s.A[:]=np.finfo(float).max
@@ -106,7 +112,7 @@ def main():
                         value=fn(J)
                         if r.context.solver_comm.rank==r.context.solver_comm.size-1:raise ValueError('late field failure')
                         return value
-                    replacements.append((s,'advance',fn));s.advance=call
+                    replacements.append((s,name,fn));setattr(s,name,call)
                 for p,s in r.states.items():
                     native=hasattr(s,'native') or getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1'
                     if case.startswith('electronic') and native:

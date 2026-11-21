@@ -3063,7 +3063,7 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
   admission/failure, MPI6 protected mixed step and old/new direct restore checked.
   No new GS or real-material TDDFT/HSE/multinode claim.
 - [x] Native field spatial J ownership implemented; see the spatial-current routing plan.
-- [ ] Remaining communication: outer error agreement scheduling; preserve numerical recovery and caller/custom interfaces.
+- [x] Adjacent outer field-status/response-admission votes coalesced; retain pre-field, pre-H and post-material decisions. See the coalesced outer admission plan.
 
 
 ## Spatial current routing (2026-11-21)
@@ -3074,3 +3074,33 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
 - [x] Local MPI4/6 owner and boundary tests, preceding-binary/legacy-path bitwise comparisons,
   owned/full-row direct resume and protected failure/retry; source/wheel668 tests
   (one optional skip). See 2026-11-21-spatial-current-routing.md and canonical record.
+
+
+## Coalesced outer coupling admission (2026-11-21)
+- [x] A coupling outer agreements4→3; packets without H7→4 and with H7→5.
+  These are hierarchical agreements, not individual MPI calls or speedup ratios.
+- [x] Explicit upstream-error argument; standalone signatures and custom public
+  response overrides retain their previous path. No persistent error flag.
+- [x] H-sampling barrier decision, recipient validation, native reductions and
+  protected-step transaction votes retained. Fault-injection tool follows owned-J
+  field entry and skips native-electronic probes if no native electron owner exists.
+- [x] Source/wheel668 tests (one optional skip), MPI4 native late/deep failure
+  preservation/retry and direct resume, MPI6 custom protected mixed states,
+  packet pre/post-H failures and rank-local custom response dispatch verified.
+  Evidence in the dedicated plan and canonical outer-admission record.
+
+
+## Status-bearing A/J transport (2026-11-21)
+- [x] Managed coupling exchanges input status with owner A/packets and gathers
+  material status with J; field returns carry status plus owned current.
+- [x] Reporter-only explanatory Bcast occurs only after every rank knows the
+  error origin; normal steps never use the owned failure-only communicator.
+  Caller input-communicator lifetime and MPI finalization remain independent.
+- [x] Separate hierarchical votes A3→1, packet no-H4→2, H5→3; leader collective
+  calls5→4,6→5,7→6. Keep post-J acknowledgement, pre-H and transaction votes.
+- [x] Final source/wheel668 tests (one optional skip), MPI4 protected numerical
+  failure/retry and direct resume, MPI6 custom states and MPI3 freed-parent/root
+  order validated. Normal reporter Bcast0; failed A/J Bcast1 from selected rank.
+  Seventeen A/E/J comparisons bitwise equal; evidence in the status transport plan.
+- [x] Reported lightweight CI failure repaired in test-only commit8d5d90f5;
+  run44852912505 passed. No manual platform/physics matrix dispatched.

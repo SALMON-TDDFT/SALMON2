@@ -385,7 +385,100 @@ class ResponseSession:
                 'logical_j_bytes_per_step': len(c.plan.point_ids)*3*8,
                 'ranks': [row for group in groups for row in group]}
 
-    def _step(self,A,*,field_packets=False):
+    def _transport_failure(self,origin,error):
+        """All groups know origin from data headers before entering this Bcast."""
+        c=self.context
+        parent=c._error_comm
+        message=parent.bcast(error if parent.rank==origin else None,root=origin)
+        raise InputError(message)
+
+    def _input_with_status(self,send,error,*,field_packets):
+        """Exchange owner inputs and all source statuses in the same operation."""
+        from mpi4py import MPI
+        c=self.context
+        errors=c.solver_comm.allgather(error) if c.solver_comm.size>1 else [error]
+        bad=next((i for i,e in enumerate(errors) if e),None)
+        origin=c.group.ranks[bad]+1 if bad is not None else 0
+        group_error=errors[bad] if bad is not None else None
+        received=None;status=0
+        if c.is_leader:
+            if field_packets:
+                outgoing=[(origin,send[i] if c.group.role=='field' and send is not None else None)
+                          for i in range(len(c.plan.groups))]
+                incoming=c.leaders.alltoall(outgoing)
+                status=min((item[0] for item in incoming if item[0]),default=0)
+                received=(status,incoming[c.field_group][1])
+            else:
+                counts=[1+(n if c.group.role=='field' else 0) for n in self._transport_counts]
+                recvcounts=[1+(3*len(c.group.point_ids) if i==c.field_group else 0)
+                            for i in range(len(c.plan.groups))]
+                packed=np.empty(sum(counts),dtype=np.float64)
+                inputs=np.asarray(send).ravel() if send is not None else None
+                start=offset=0
+                for i,count in enumerate(counts):
+                    packed[start]=origin
+                    if count>1:
+                        packed[start+1:start+count]=0 if inputs is None else inputs[offset:offset+count-1]
+                        offset+=count-1
+                    start+=count
+                incoming=np.empty(sum(recvcounts),dtype=np.float64)
+                c.leaders.Alltoallv([packed,counts,MPI.DOUBLE],[incoming,recvcounts,MPI.DOUBLE])
+                start=0;statuses=[];local=np.empty(3*len(c.group.point_ids))
+                for i,count in enumerate(recvcounts):
+                    statuses.append(int(incoming[start]))
+                    if i==c.field_group:local[:]=incoming[start+1:start+count]
+                    start+=count
+                status=min((v for v in statuses if v),default=0)
+                received=np.concatenate(([status],local))
+        if field_packets:
+            if c.solver_comm.size>1:received=c.solver_comm.bcast(received,root=0)
+            status,payload=received
+        else:
+            if not c.is_leader:received=np.empty(1+3*len(c.group.point_ids),dtype=np.float64)
+            if c.solver_comm.size>1:c.solver_comm.Bcast(received,root=0)
+            status=int(received[0]);payload=received[1:].reshape(-1,3)
+        if status:self._transport_failure(status-1,group_error)
+        return (payload or {}) if field_packets else payload
+
+    def _current_with_status(self,currents,error,origin):
+        """Return current and commit outcome together; broadcast details on failure."""
+        from mpi4py import MPI
+        c=self.context;result=None;status=0
+        if c.is_leader:
+            counts=[n+1 for n in self._transport_counts]
+            outgoing=np.concatenate(([origin+1 if error else 0],currents.ravel()))
+            packed=np.empty(sum(counts),dtype=np.float64) if c.group.role=='field' else None
+            c.leaders.Gatherv(outgoing,[packed,counts,MPI.DOUBLE] if packed is not None else None,root=c.field_group)
+            if packed is not None:
+                chunks=[];flags=[];start=0
+                for count in counts:
+                    flags.append(int(packed[start]));chunks.append(packed[start+1:start+count]);start+=count
+                status=min((v for v in flags if v),default=0)
+                if not status:result=np.ascontiguousarray(np.concatenate(chunks).reshape(-1,3)[self._return_rows])
+            # Remote material groups must know whether they may commit/continue.
+            status=c.leaders.bcast(status,root=c.field_group)
+        if c.group.role=='field':
+            rows_by_rank=getattr(self,'_field_current_rows_by_rank',None)
+            if rows_by_rank is None:rows_by_rank=[np.arange(len(c.plan.point_ids))]*c.solver_comm.size
+            counts=[1+3*len(rows) for rows in rows_by_rank]
+            local=np.empty(counts[c.solver_comm.rank],dtype=np.float64)
+            send=None
+            if c.is_leader:
+                send=np.concatenate([np.concatenate(([status],np.zeros(3*len(rows)) if status else result[rows].ravel()))
+                                     for rows in rows_by_rank])
+            if c.solver_comm.size>1:
+                c.solver_comm.Scatterv([send,counts,MPI.DOUBLE] if c.is_leader else None,local,root=0)
+            else:local[:]=send
+            status=int(local[0])
+            if not c.is_leader and not status:
+                result=np.zeros((len(c.plan.point_ids),3),dtype=np.float64)
+                result[rows_by_rank[c.solver_comm.rank]]=local[1:].reshape(-1,3)
+        elif c.solver_comm.size>1:
+            status=c.solver_comm.bcast(status,root=0)
+        if status:self._transport_failure(status-1,error)
+        return result
+
+    def _step(self,A,*,field_packets=False,upstream_error=None,transport_status=False):
         """Collective everywhere. Only field leader supplies (points,3) A.
 
         Returns ordered physical current on field ranks, None on material
@@ -395,9 +488,10 @@ class ResponseSession:
         but not any outer communicator.
         """
         from mpi4py import MPI
-        c=self.context;error=None
+        c=self.context;error=upstream_error
         send=None;field_values=None;local_values=None
         try:
+            if error is not None:raise InputError(error)
             if self.closed or self.failed or c.closed: raise InputError('session is not usable')
             if field_packets != (self._field_contracts is not None):
                 raise InputError('use step_fields with declared field contracts, otherwise step(A)')
@@ -415,14 +509,26 @@ class ResponseSession:
                 elif A is not None:
                     raise InputError('only field leader supplies A')
         except Exception as exc: error=f'{type(exc).__name__}: {exc}'
-        self._agree(error)
-        started = self._measurements.start()
-        if field_packets:
-            values=c.leaders.scatter(send,root=c.field_group) if c.is_leader else None
-            if c.group.point_ids:
-                if c.solver_comm.size>1:values=c.solver_comm.bcast(values,root=0)
+        if transport_status:
+            started=self._measurements.start()
+            received=self._input_with_status(send,error,field_packets=field_packets)
+            if field_packets:values=received
+            else:local_values=received
+        else:
+            self._agree(error)
+            started = self._measurements.start()
+            if field_packets:
+                values=c.leaders.scatter(send,root=c.field_group) if c.is_leader else None
+                if c.group.point_ids:
+                    if c.solver_comm.size>1:values=c.solver_comm.bcast(values,root=0)
+                else:values={}
             else:
-                values={}
+                if c.is_leader:
+                    c.leaders.Scatterv([send,self._transport_counts,MPI.DOUBLE] if c.group.role=='field' else None,
+                                       local_values,root=c.field_group)
+                if c.group.point_ids and c.solver_comm.size>1:
+                    c.solver_comm.Bcast(local_values,root=0)
+        if field_packets:
             from .field_input import FieldPacket, FieldValue
             error=None
             try:
@@ -432,17 +538,11 @@ class ResponseSession:
                         for p,packet in values.items()}
                 for p in c.group.point_ids:
                     self._field_contracts[p].validate(values[p],step_index=self.step_index+1)
-            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+            except Exception as exc:error=f'{type(exc).__name__}: {exc}'
             self._agree(error)
-        else:
-            if c.is_leader:
-                c.leaders.Scatterv([send,self._transport_counts,MPI.DOUBLE] if c.group.role=='field' else None,
-                                   local_values,root=c.field_group)
-            if c.group.point_ids and c.solver_comm.size>1:
-                c.solver_comm.Bcast(local_values,root=0)
         self._measurements.stop('A_distribution', started)
         started = self._measurements.start()
-        currents=np.zeros((len(c.group.point_ids),3));error=None
+        currents=np.zeros((len(c.group.point_ids),3));error=None;error_origin=None
         for i,point in enumerate(c.group.point_ids):
             b=self.bindings[point]
             try:
@@ -451,38 +551,50 @@ class ResponseSession:
                 if j.shape!=(3,) or not np.isfinite(j).all(): raise InputError('backend must return finite physical current density (3,)')
             except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             errors=c.solver_comm.allgather(error)
-            if any(errors): error=str(errors);break
+            if any(errors):
+                error_origin=c.group.ranks[next(i for i,e in enumerate(errors) if e)]
+                error=str(errors);break
             if b.backend.reduction=='sum': c.solver_comm.Allreduce(j,currents[i],op=MPI.SUM)
             elif c.is_leader: currents[i]=j
             if not np.isfinite(currents[i]).all(): error='nonfinite reduced current'
             errors=c.solver_comm.allgather(error)
-            if any(errors): error=str(errors);break
-        try: self._agree(error)
-        except ValueError:
-            self.failed=True
-            raise
-        self._measurements.stop('material', started)
-        started = self._measurements.start()
-        result=None
-        if c.is_leader:
-            counts=self._transport_counts
-            packed=np.empty(sum(counts),dtype=np.float64) if c.group.role=='field' else None
-            c.leaders.Gatherv(currents.ravel(),[packed,counts,MPI.DOUBLE] if packed is not None else None,root=c.field_group)
-            if packed is not None:
-                result=np.ascontiguousarray(packed.reshape(-1,3)[self._return_rows])
-        if c.group.role=='field':
-            rows_by_rank=getattr(self,'_field_current_rows_by_rank',None)
-            if rows_by_rank is None:
-                result=c.solver_comm.bcast(result,root=0)
-            else:
-                rows=rows_by_rank[c.solver_comm.rank]
-                local=np.empty((len(rows),3),dtype=np.float64)
-                counts=[3*len(r) for r in rows_by_rank]
-                send=np.concatenate([result[r].ravel() for r in rows_by_rank]) if c.is_leader else None
-                c.solver_comm.Scatterv([send,counts,MPI.DOUBLE] if c.is_leader else None,local,root=0)
-                if not c.is_leader:
-                    result=np.zeros((len(c.plan.point_ids),3),dtype=np.float64)
-                    result[rows]=local
+            if any(errors):
+                error_origin=c.group.ranks[next(i for i,e in enumerate(errors) if e)]
+                error=str(errors);break
+        if transport_status:
+            self._measurements.stop('material', started)
+            started=self._measurements.start()
+            try:result=self._current_with_status(currents,error,error_origin)
+            except ValueError:
+                self.failed=True
+                raise
+        else:
+            try: self._agree(error)
+            except ValueError:
+                self.failed=True
+                raise
+            self._measurements.stop('material', started)
+            started = self._measurements.start()
+            result=None
+            if c.is_leader:
+                counts=self._transport_counts
+                packed=np.empty(sum(counts),dtype=np.float64) if c.group.role=='field' else None
+                c.leaders.Gatherv(currents.ravel(),[packed,counts,MPI.DOUBLE] if packed is not None else None,root=c.field_group)
+                if packed is not None:
+                    result=np.ascontiguousarray(packed.reshape(-1,3)[self._return_rows])
+            if c.group.role=='field':
+                rows_by_rank=getattr(self,'_field_current_rows_by_rank',None)
+                if rows_by_rank is None:
+                    result=c.solver_comm.bcast(result,root=0)
+                else:
+                    rows=rows_by_rank[c.solver_comm.rank]
+                    local=np.empty((len(rows),3),dtype=np.float64)
+                    counts=[3*len(r) for r in rows_by_rank]
+                    send=np.concatenate([result[r].ravel() for r in rows_by_rank]) if c.is_leader else None
+                    c.solver_comm.Scatterv([send,counts,MPI.DOUBLE] if c.is_leader else None,local,root=0)
+                    if not c.is_leader:
+                        result=np.zeros((len(c.plan.point_ids),3),dtype=np.float64)
+                        result[rows]=local
 
         self._measurements.stop('j_collection', started)
         if not field_packets:
@@ -511,6 +623,21 @@ class ResponseSession:
                     unit=v.unit,position_unit=v.position_unit,sampling=v.sampling)
         return packed
 
+    def _can_merge_field_admission(self,*,field_packets=False):
+        """Initialization-only capability; public overrides require legacy dispatch."""
+        method=self.step_fields if field_packets else self.step
+        base=ResponseSession._merge_step_fields if field_packets else ResponseSession._merge_step
+        return (getattr(method,'__func__',None) is base
+                and getattr(self._step,'__func__',None) is ResponseSession._merge_impl)
+
+    def _step_from_field(self,payload,error,*,field_packets=False):
+        """Explicit upstream error; enabled only by unanimous setup negotiation.
+
+        The coupling fixes response dispatch at initialization, not per rank/step.
+        No upstream-error flag survives a call or needs checkpoint/rollback.
+        """
+        return self._step(payload,field_packets=field_packets,upstream_error=error,transport_status=True)
+
     def step(self,A):
         """Collective legacy A/c endpoint input, supplied only by field leader."""
         return self._step(A)
@@ -524,6 +651,11 @@ class ResponseSession:
         """
         return self._step(fields,field_packets=True)
 
+    # Stable callable identities detect subclass, instance and class-level
+    # overrides during setup without bypassing their public dispatch.
+    _merge_step = step
+    _merge_step_fields = step_fields
+    _merge_impl = _step
     advance = step  # Existing prescribed-A entry point.
 
     def close(self):

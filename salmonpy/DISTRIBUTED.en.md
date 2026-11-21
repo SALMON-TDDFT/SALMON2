@@ -189,7 +189,7 @@ response-service A history. Nonowned/private rows are placeholders, not replicat
 output. Use field-leader point archives for global observations. Old checkpoints
 with full rows remain readable. Native field A/E and physical state data are not
 replaced by placeholders. Native spatial J routing is described in COUPLED.en.md.
-Outer agreements remain a separate task; full solver communication is not claimed optimal.
+Adjacent outer admission is also coalesced as described in COUPLED.en.md; full solver communication is not claimed optimal.
 
 
 ## Spatially owned native FDTD current routing
@@ -218,3 +218,5 @@ owned rows. This does not bypass binary or MPI-layout compatibility checks.
 The field manifest records `current_routing` and `current_rows_by_field_rank`;
 explicit `communication_report()` rank records expose `received_current_rows`.
 These are logical point counts, not measured network bytes.
+
+See COUPLED.en.md for status-bearing A/J transport, failure-only explanatory Bcast and current communication counts.

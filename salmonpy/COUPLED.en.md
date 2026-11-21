@@ -654,3 +654,71 @@ owned rows. This does not bypass binary or MPI-layout compatibility checks.
 The field manifest records `current_routing` and `current_rows_by_field_rank`;
 explicit `communication_report()` rank records expose `received_current_rows`.
 These are logical point counts, not measured network bytes.
+
+
+## Coalesced outer step admission
+
+Ordinary CoupledStepper combines completed field status and ResponseSession input
+admission. That coalescing stage reduced successful-step outer agreements from 4 to 3.
+The current standard entry further reduces them with status-bearing transport below.
+At that stage PacketCoupledStepper decreased from 7 to 4 without H, or from 7 to 5 with H.
+One agreement here is a hierarchical group→leaders→group decision, not a single
+MPI call. Counts exclude setup, native validation/physical sums/halo exchange,
+per-point subgroup checks and protected-step capture/rollback votes. They do not
+state a wall-clock speedup.
+
+The pre-field clock/usability decision and post-material decision remain. With H,
+all groups agree on A/E sampling success before entering collective H sampling.
+Field, sampling and packet-construction failures are rejected everywhere before
+input distribution or material callbacks. Upstream errors travel as explicit
+call arguments, not persistent session/process flags.
+
+Standalone ResponseSession.step/step_fields signatures are unchanged. Custom
+public response-step overrides and response objects without the merge hook keep
+the previous separate agreement and dispatch order. Dispatch is negotiated once
+across all groups at initialization: any rank with a custom entry selects the
+legacy path everywhere. The coupling fixes response-entry dispatch when created.
+Custom material backend contracts are unchanged.
+
+Ordinary step is not newly transactional. Use the existing protected entry with
+explicit StepTargets for whole-state preservation/retry, checking
+original_preserved and cleanup_errors. Handled-exception tests do not establish
+recovery from process loss, broken MPI or unsupported native failures.
+
+
+## Status-bearing A/J transport
+
+The standard coupled entry carries zero for success, or a reporting-rank code
+for failure, in A/packet and J headers. Numeric A uses leader Alltoallv to
+exchange source statuses and destination-owned A rows together; packets use
+object alltoall. J and source status travel together through Gatherv. Field
+subgroups receive their spatially owned J and result status in one Scatterv.
+
+Only after every group knows failure from the headers do all participants enter
+one explanatory-message Bcast, rooted at the selected reporting rank. No such
+message Bcast occurs on normal steps. A failing rank never enters a Bcast while
+healthy ranks proceed elsewhere unaware of it. Multiple reports select the
+lowest reporting rank; that identifies a reporter, not necessarily the unique
+physical cause of the failure.
+
+ParallelContext duplicates a failure-only communicator once at creation and
+frees it at close. It does not directly depend on MPI_COMM_WORLD or the caller's
+input-communicator lifetime. Normal steps do not communicate on this domain;
+import does not initialize MPI or create communicators.
+
+Relative to the preceding implementation, separate hierarchical outer decisions
+decrease A3→1, packets without H4→2, with H5→3. Actual Python leader collectives
+also decrease5→4,6→5,7→6 respectively. Counts exclude native MPI and protected
+transaction operations. The short post-J outcome notification remains necessary
+for remote material groups to know whether to commit or restore; normal
+communication is not zero.
+
+Alltoallv status headers cost O(groups) per leader and O(groups²) in total. Fewer
+calls do not establish multi-node speedup. Timing of status processing moves
+into A_distribution/j_collection rather than a separate material decision.
+
+Standalone ResponseSession and custom public response entries retain their prior
+path. Unanimous setup selection, the pre-H vote, recipient-packet validation,
+physical sums and protected capture/rollback decisions remain. Protected retry
+guarantees and ordinary step's nontransactional semantics are unchanged. This
+is not recovery from broken MPI or process loss.

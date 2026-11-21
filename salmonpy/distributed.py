@@ -66,6 +66,7 @@ class ParallelContext:
         if any(e for e,p in entries): raise InputError('invalid parallel plan: '+str([e for e,p in entries if e]))
         if any(p!=plan for e,p in entries): raise InputError('parallel plans differ across ranks')
         self=cls();self.plan=plan
+        self._error_comm=world.Dup()  # Owned failure-only domain, independent of caller lifetime.
         self.group_id=next(i for i,g in enumerate(plan.groups) if world.rank in g.ranks)
         self.group=plan.groups[self.group_id]
         self.solver_comm=world.Split(self.group_id,self.group.ranks.index(world.rank))
@@ -85,7 +86,7 @@ class ParallelContext:
         if busy:
             raise RuntimeFailure('close response sessions and detach native contexts first')
         if self.is_leader: self.leaders.Free()
-        self.solver_comm.Free();self.closed=True
+        self.solver_comm.Free();self._error_comm.Free();self.closed=True
 
     def __enter__(self): return self
     def __exit__(self,*args): self.close()

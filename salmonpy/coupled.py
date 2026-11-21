@@ -26,6 +26,29 @@ def _agree(comm,error):
     if any(errors):raise InputError(str(errors))
 
 
+def _select_response_admission(response,*,field_packets=False):
+    """Choose one dispatch for the whole coupling, once before any step."""
+    context=response.context
+    if not callable(getattr(context.solver_comm,'allgather',None)):return False
+    eligible=False
+    try:
+        query=getattr(response,'_can_merge_field_admission',None)
+        eligible=callable(query) and bool(query(field_packets=field_packets))
+    except Exception:
+        pass  # An unsupported custom response keeps its existing separate vote.
+    local=all(context.solver_comm.allgather(eligible))
+    groups=context.leaders.allgather(local) if context.is_leader else None
+    selected=all(groups) if context.is_leader else None
+    return context.solver_comm.bcast(selected,root=0)
+
+
+def _response_from_field(response,payload,error,*,field_packets=False,merge=False):
+    """Use the group-unanimous dispatch selected during coupling setup."""
+    if merge:return response._step_from_field(payload,error,field_packets=field_packets)
+    response.agree(error)
+    return response.step_fields(payload) if field_packets else response.step(payload)
+
+
 def _require_field_record(record):
     """Admit the legacy field record or an explicitly declared fast field ABI."""
     if record.get('schema')=='salmonpy.embedded-tddft/1':return
@@ -427,6 +450,7 @@ class CoupledStepper:
         self.timing=self._check_timing(response,field)
         self.J=np.zeros((len(context.plan.point_ids),3))
         self._configure_current_routing()
+        self._merge_response_admission=_select_response_admission(response)
 
     def _configure_current_routing(self):
         field=self.field
@@ -536,11 +560,8 @@ class CoupledStepper:
                 else:
                     A=self.field.advance(self.J)
             except Exception as exc:error=str(exc)
-        try:r.agree(error)
-        except Exception:
-            r.failed=True
-            raise
-        try:J=r.step(A if context.group.role=='field' and context.is_leader else None)
+        try:J=_response_from_field(r,A if context.group.role=='field' and context.is_leader else None,error,
+                                       merge=self._merge_response_admission)
         except BaseException:
             r.failed=True
             raise
@@ -616,6 +637,7 @@ class PacketCoupledStepper:
         self.timing=cxt.solver_comm.bcast(record,root=0)
         self.J=np.zeros((len(cxt.plan.point_ids),3))
         CoupledStepper._configure_current_routing(self)
+        self._merge_response_admission=_select_response_admission(response,field_packets=True)
 
     def step(self):
         from .field_input import FieldPacket,FieldValue
@@ -639,15 +661,15 @@ class PacketCoupledStepper:
                         self.field.advance(self.J)
                     samples=self.field.sample_fields()
                 except Exception as exc:error=f'{type(exc).__name__}: {exc}'
-            r.agree(error)
-            # Do not enter the H collective if any field rank failed local sampling.
-            error=None
-            if self.field is not None and self.timing['needs_H']:
-                try:samples['H']=self.field.sample_magnetic_field()
-                except Exception as exc:error=f'{type(exc).__name__}: {exc}'
-            r.agree(error)
-            error=None
-            if self.field is not None and cxt.is_leader:
+            if self.timing['needs_H']:
+                # This vote is essential: H sampling is itself collective.
+                # No rank may enter it after another failed local A/E sampling.
+                r.agree(error)
+                error=None
+                if self.field is not None:
+                    try:samples['H']=self.field.sample_magnetic_field()
+                    except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+            if error is None and self.field is not None and cxt.is_leader:
                 try:
                     packets={}
                     for i,point in enumerate(self.field.point_ids):
@@ -658,8 +680,7 @@ class PacketCoupledStepper:
                                 position=sample.positions[i],unit=sample.unit)
                         packets[point]=FieldPacket(**components)
                 except Exception as exc:error=f'{type(exc).__name__}: {exc}'
-            r.agree(error)
-            current=r.step_fields(packets)
+            current=_response_from_field(r,packets,error,field_packets=True,merge=self._merge_response_admission)
         except BaseException:
             r.failed=True
             raise
