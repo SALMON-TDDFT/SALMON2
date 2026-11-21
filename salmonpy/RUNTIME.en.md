@@ -1,15 +1,18 @@
-# Full solver runtime
+# Prepare the calculation programs for DFT, TDDFT and FDTD
 
-LD/SBE wheels already include their compiled library. DFT, TDDFT, FDTD and band
-calculations use a **linked executable plus its runtime libraries**. An object
-file alone would still require a linker and dependencies on the user's machine.
-Importing SALMONpy never downloads or builds anything.
+A matching wheel is sufficient for LD and SBE. DFT, TDDFT, FDTD and band calculations
+also require the SALMON calculation program.
+
+First look for a prebuilt distribution matching your OS, CPU and required features.
+Explicitly build the bundled sources only if a suitable distribution is unavailable.
+To advance calculations one step at a time from Python, use the corresponding shared
+library instead of a separate executable. Importing SALMONpy never downloads or compiles software.
 
 ## Compute nodes without internet access
 
 Do not assume compute nodes can reach external services. Separate acquisition
 from execution: prepare files on an internet-connected workstation or a preparation
-host permitted by the facility, then transfer them. Login nodes may also be offline;
+computer permitted by the facility, then transfer them. Login nodes may also be offline;
 follow the facility's access policy.
 
 1. **Identify the target first:** record OS, CPU, Python version, required features,
@@ -33,7 +36,7 @@ follow the facility's access policy.
    already staged.
 
 This guidance is not an automatic offline bundle/dependency resolver. Custom
-backends must also be prepared to execute without network acquisition. SALMONpy
+calculation implementations must also be prepared to execute without network acquisition. SALMONpy
 import is offline; it does not sandbox network calls made by user callbacks.
 
 ## Prefer an existing or prebuilt runtime
@@ -68,9 +71,9 @@ Catalogs must come from a trusted publisher: their hashes are not signatures.
 ## Current branch artifacts
 
 The **Full runtime bundles** Actions workflow builds macOS arm64, macOS x86_64
-and Linux x86_64 profiles and uploads a bundle only after relocation and native
+and Linux x86_64 configurations and uploads a bundle only after relocation and solver
 TDDFT tests succeed. A configured runner is not evidence of a passing run. These
-profiles use a single MPI rank and PZ/TB-mBJ; they do not include Libxc. Windows
+configurations use a single MPI rank and PZ/TB-mBJ; they do not include Libxc. Windows
 full-runtime bundles are not yet provided (Windows LD/SBE wheels are separate).
 The locally tested macOS arm64 Libxc bundle is a separate artifact/profile.
 
@@ -86,7 +89,7 @@ python -m salmonpy.runtime install my-runtime --catalog downloaded/catalog.json 
 `RUNTIME_ZIP` means the actual ZIP filename inside that artifact. CI catalogs
 have no public asset URL; installation requires this local archive. No compiler
 or linker is needed. OS versions older than the recorded build baseline are
-rejected conservatively. Native calculations still need compatible inputs and
+rejected conservatively. solver calculations still need compatible inputs and
 pseudopotentials, which are not part of the executable bundle.
 
 ## Explicit fallback build
@@ -107,7 +110,7 @@ python -m salmonpy.runtime build NEW_BUILD --jobs 2 \
 These are GNU compiler options, not universal platform flags. Supply the actual
 GNU C compiler path on macOS; `/usr/bin/gcc` is normally Apple Clang. Install
 CMake >=3.22, GNU Fortran/C and LP64 OpenBLAS beforehand. The command never installs
-system dependencies. Windows native full-solver support is unvalidated; use a
+system dependencies. Windows solver full-solver support is unvalidated; use a
 supported Linux environment/WSL or a separately validated site build.
 `--jobs` controls build concurrency, not simulation threads or a memory limit.
 For Libxc supply `--cmake-arg=-DUSE_LIBXC=ON` and
@@ -118,7 +121,7 @@ so no SALMONpy checkout is needed. Source preparation, compilation and object
 checks are logged in `NEW_BUILD/build.log`; `build.json` records status, exact
 commands and the resulting executable SHA256. Failures preserve the log and
 source; retry in a new directory. Success means **built and object-audited**,
-not independently validated scientific accuracy. Run the relevant native
+not independently validated scientific accuracy. Run the relevant solver
 regression before production and use the recorded hash:
 
 ```python
@@ -135,7 +138,7 @@ MPI runtimes must match the cluster's MPI stack and remain explicit site builds.
 DFT/bands and process-isolated TDDFT retain their single-rank scope. FDTD can use its existing spatial MPI decomposition through FDTDMPI; see FDTD_MATERIALS.en.md. This acquisition
 layer does not alter the DFT/TDDFT update order, state isolation or A→J interface.
 
-Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). One point per solver group and one native lifetime per process; do not infer unrestricted reentrancy or restart support.
+Experimental MPI managed by the calling program TDDFT and FDTD updates of E and H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). One point per solver group and one solver initialization per process; do not infer unrestricted reentrancy or restart support.
 
 ## Validated NLCC force capability
 
@@ -157,17 +160,17 @@ convergence remains the caller's responsibility.
 
 The default runtime is unchanged. Explicitly apply `_runtime_source/tools/prepare_rt_step_config.py BASE NEW_DIRECTORY` to a matching externally prepared runtime; in a development checkout use `python tools/prepare_rt_step_config.py BASE NEW_DIRECTORY`. Only a new external directory is created. Inputs/fixed executables remain unchanged; failed preparations are retained with status and are not approved for execution.
 
-This first extraction gives each RT state its dt, Taylor order, propagation and field-integration settings. Validation uses synthetic PZ inputs; full native multi-material contexts are not implemented. Isolated calcVbox, ionic motion, single-scale Maxwell and other shared settings remain outside this milestone. FDTD coupling still requires a common dt.
+This first extraction gives each RT state its dt, Taylor order, propagation and field-integration settings. Validation uses synthetic PZ inputs; full solver multi-material contexts are not implemented. Isolated calcVbox, ionic motion, single-scale Maxwell and other shared settings remain outside this milestone. FDTD coupling still requires a common dt.
 
 The user's fast PR-intended implementation is the HSE baseline. This PZ regression is not an HSE speed/accuracy benchmark and the overlay is not automatically applicable to that PR branch. HSE ACE factors, prediction histories and mutable workspaces need separate ownership/validation. Explicit builds must resolve matching dependencies/compiler flags and retain source/all-application-object prohibition audits and CMake checks.
 
 ## Experimental fast-PR HSE RT state extraction
 
-A separate HSE profile pins the user's PR-intended revision `c9e8ce431f43eefd4a88998134adb4796f8ec837`. Run `python tools/prepare_hse_rt_state.py NEW_DIRECTORY` to prepare a new external source copy, or add `--reference-only` for the unchanged numerical reference. Both retain mandatory source/object audits in CMake configure/incremental builds. The PR checkout and default SALMONpy runtime are unchanged.
+A separate HSE configuration pins the user's PR-intended revision `c9e8ce431f43eefd4a88998134adb4796f8ec837`. Run `python tools/prepare_hse_rt_state.py NEW_DIRECTORY` to prepare a new external source copy, or add `--reference-only` for the unchanged numerical reference. Both retain mandatory source/object audits in CMake configure/incremental builds. The PR checkout and default SALMONpy runtime are unchanged.
 
 This stage groups ACE factors, accepted prediction histories, PT-CN history/dt, Taylor trials and action caches under `s_exx_rt_state`. Lifecycle operations take explicit state arguments and reject invalid dt/stages before mutation. Optional owned-allocation byte accounting includes allocated history-array descriptors/fixed fields and nested buffers; it is not RSS.
 
-The legacy HSE adapter still uses one default state. Geometry/kernel/Wannier resources, public legacy flags and input settings remain shared, so this does not provide full native multi-material contexts or concurrent calls. Fast exchange paths are retained; synthetic numerical regression does not establish real-material accuracy or a speed improvement. FDTD coupling still requires a common dt.
+The legacy HSE adapter still uses one default state. Geometry/kernel/Wannier resources, public legacy flags and input settings remain shared, so this does not provide full solver multi-material contexts or concurrent calls. Fast exchange paths are retained; synthetic numerical regression does not establish real-material accuracy or a speed improvement. FDTD coupling still requires a common dt.
 
 ## Experimental explicit HSE RT routing
 
@@ -175,18 +178,18 @@ Add `--explicit-routing` to the preceding preparation command to copy the comple
 
 Twenty-four exchange/history procedures forward a caller-supplied RT state through their internal calls. Resolution uses local references, without switching a process-wide active state or copying all arrays. Public legacy flags/energy are state-owned; old names are aliases to the default owner only. Reassociating those aliases is unsupported.
 
-Without a system binding, the state-only routing scope remains common exchange configuration, serial CPU scalar dense ACE action and lifecycle. Nondefault refresh, direct/full, packed/distributed and spin routes are rejected before shared resources are reached. With optional `rt_status`, `exx_refresh`/`exx_add_action` return nonzero for this capability mismatch without changing accepted state/output. Without it native errors may terminate the process. This is not general failure atomicity or material C ABI conformance.
+Without a system binding, the state-only routing scope remains common exchange configuration, serial CPU scalar dense ACE action and lifecycle. Nondefault refresh, direct/full, packed/distributed and spin routes are rejected before shared resources are reached. With optional `rt_status`, `exx_refresh`/`exx_add_action` return nonzero for this capability mismatch without changing accepted state/output. Without it solver errors may terminate the process. This is not general failure atomicity or material C ABI conformance.
 
 The integrated development route binds an explicit owner using
-`exx_bind_system(system, owner, status)`. The native Hamiltonian, XC/total energy,
+`exx_bind_system(system, owner, status)`. The solver Hamiltonian, XC/total energy,
 Taylor lifecycle, PT-CN freeze/history and restart metadata resolve that owner.
-Each owner keeps its own optimized fast-PR kernel, ACE, trial buffers and histories;
-there is no process-wide active-owner switch or generic-kernel substitution.
+Each owner keeps its own optimized fast-PR calculation routine, ACE, trial buffers and histories;
+there is no process-wide active-owner switch or generic-calculation routine substitution.
 `SALMONPY_HSE_CONTEXT=1` opts the full `main_tddft` driver into this route for
 explicit regression runs. Existing binaries and the Python TDDFT API are unchanged.
 
 Scope: serial CPU, periodic scalar/non-spin-polarized HSE, full real-space grid,
-full-support exchange and common immutable process settings. The native refresh
+full-support exchange and common immutable process settings. The solver refresh
 and action reject spatial/orbital/k MPI, Wannier, symmetry and spin paths for
 bound owners. States can own different cell spacings with the same grid/k counts,
 but changing global XC, mesh, propagator or factor settings between calls is
@@ -198,7 +201,7 @@ serialized. After all calls, use `exx_unbind_system(system)` then
 `rt_state_clear(owner)`; clearing destroys the owned FFT plans. A second binding
 to an already enabled owner is rejected; clear before reopening. These are
 internal Fortran development interfaces, not a stable C/Python multi-instance API.
-Native numerical/allocation failures may still stop the process. `rt_state_bytes`
+solver numerical/allocation failures may still stop the process. `rt_state_bytes`
 returns status 2 and bytes -1 for resource-enabled owners because opaque FFT-plan
 allocation sizes are unavailable; do not interpret this as zero memory usage.
 
@@ -211,26 +214,26 @@ The first probe compares interleaved ACE and direct actions for different cells
 with separate-process references and checks close/reopen isolation. The second
 runs the actual TDDFT driver through 32 synthetic k-mesh/dt/propagator/factor
 cases and compares current, energy and prediction/solver traces. Together they
-check native HSE ownership plus full-driver numerical regression; they do not
+check Fortran HSE calculation ownership plus full-driver numerical regression; they do not
 prove interleaving of complete independent TDDFT solvers or physical convergence.
-The standalone `test_hse_rt_state.py` applies only to the parent RT-only profile;
-use the full-build probes above for the integrated profile.
+The standalone `test_hse_rt_state.py` applies only to the parent RT-only configuration;
+use the full-build probes above for the integrated configuration.
 
 ## Experimental independent HSE resource primitive
 
 `salmonpy/native_adapters/hse_resource_context.f90` is SALMONpy-owned source,
 shipped in this repository and wheel. It links to the preceding pinned fast-PR
-kernel modules; the full solver sources are also bundled, and compilation remains explicit.
+calculation routine modules; the full solver sources are also bundled, and compilation remains explicit.
 Completed changes are integrated in runtime/sources/solver.
 
-`hse_context` owns its FFT kernel and accepted RT/ACE data. `hse_open` fixes the
+`hse_context` owns its FFT calculation routine and accepted RT/ACE data. `hse_open` fixes the
 orthogonal rectangular grid, uniform full k mesh, spacings, screening and hybrid
 fraction; `hse_refresh` accepts an occupied orthonormal complex frame, and
 `hse_apply` evaluates fraction-scaled ACE action. Arrays use (grid, orbital, k)
 order. Source occupations are one per spin, with no spin multiplier; this is an
 exchange primitive, not the physical charge-current interface. Source overlaps
 must equal the identity within 1e-8 with grid volume weighting. Layout is fixed
-strided CPU FFT. It uses the generic kernel action, not the optimized full
+strided CPU FFT. It uses the generic calculation routine action, not the optimized full
 adapter dispatch; no performance or full-TDDFT equivalence claim is made.
 
 Call `hse_close` explicitly, including after failed construction; repeated close
@@ -239,7 +242,7 @@ concurrently. They own opaque FFT plans, unlike copyable RT-only snapshots.
 Status 0 means success, 1 invalid input/lifecycle, 2 caught adapter allocation
 failure, and 3 a kernel/ACE/numerical failure. Reported refresh failures preserve
 accepted ACE/source data, and reported apply failures preserve the output.
-Internal FFT work buffers may change. Existing kernel allocation/FFT failures
+Internal FFT work buffers may change. Existing calculation routine allocation/FFT failures
 can still terminate a process; this is not a general failure-atomic public ABI.
 
 ```sh
@@ -267,28 +270,28 @@ Reference-only preparation is explicitly a developer comparison operation.
 
 `source_tree_sha256` identifies the bundled tree inventory; `replacements_sha256`
 identifies completed stage files. Historical `patch_sha256` values remain solely
-for provenance and existing binary receipts, not as evidence of new source
+for provenance and existing binary validation records, not as evidence of new source
 content. NLCC loading additionally rejects unknown source-tree identities when
 present. Future numerical source changes require new scientific validation.
 Update sources, inventories and their hashes in the same reviewed commit; verify
-shared native kernels and rebuild/test affected profiles before distribution.
-The optimized native HSE owner is connected as described above; the standalone generic resource primitive remains a separate diagnostic component.
+shared compiled calculation routines and rebuild/test affected configurations before distribution.
+The optimized Fortran HSE calculation owner is connected as described above; the standalone generic resource primitive remains a separate diagnostic component.
 
 
-### Shared kernels and field runtime in current fast-PR builds
+### Shared calculation routines and field runtime in current fast-PR builds
 
 New explicit-routing fast-PR builds share SBE, FDTD and LD source with the
-ordinary profile. Native/solver kernels are byte-checked during preparation.
+ordinary configuration. Shared Fortran calculation routines are byte-checked during preparation.
 The same tree builds with HSE ON/OFF; OFF requires no HSE FFTW linkage.
 
 Use NEW_BUILD/build.json for NativeEHField and HSE material groups when the
 record declares field_abi protocol1 / salmonpy.eh-centered-current/1. Use the
 separate NEW_BUILD/executable-build.json with SalmonExecutable.from_mpi_build
 for batch MPI FDTD. Both records bind different binaries by their own SHA256.
-Existing embedded field records remain supported; only new capable builds carry
+Existing in-process field records remain supported; only new capable builds carry
 the new declaration. Import never builds or downloads anything.
 
-Field and material groups remain separate processes with host-owned MPI.
+Field and material groups remain separate processes with calling program-owned MPI.
 Ordinary GS/TDDFT source migration is complete in the maintained solver tree.
 Concurrent same-process field/electronic ownership remains outside this contract;
 existing binaries retain their original capabilities.
@@ -297,14 +300,14 @@ existing binaries retain their original capabilities.
 
 `salmonpy/native_adapters/tddft_context.f90` provides internal Fortran development
 entries `rt_open`, `rt_step`, and `rt_close`. Each context owns the arguments of
-the actual native initialization/time-step routines: orbitals, density, Hartree
+the actual solver initialization/time-step routines: orbitals, density, Hartree
 and XC/local potentials, propagation history, pseudopotential working arrays,
 XC handle, HSE owner and output handles. States are initialized independently
 from the same restart; initialized contexts are never copied. `rt_step` receives
-endpoint A/c and returns charge current density j (the negative of native matter
+endpoint A/c and returns charge current density j (the negative of solver matter
 current) and total energy in atomic units. Every-step energy sampling is required.
 
-The process must first initialize its native configuration and serial runtime;
+The process must first initialize its solver configuration and serial runtime;
 see `tests/native/test_tddft_contexts.f90`. This is not a stable Python/C ABI.
 Scope is periodic unpolarized fast HSE, serial CPU/FFTE, fixed ions, transverse
 driving, zero initial A, and common immutable settings except the owned dt. Only the tested
@@ -324,7 +327,7 @@ coefficients, PT-CN, field evaluation and output times use the owned timestep.
 Changing dt during a state lifetime, adaptive stepping and FDTD subcycling are
 not supported. Other guarded configuration must remain common.
 Do not copy contexts or call them concurrently; use `rt_close` explicitly.
-Invalid A or guarded-setting changes are rejected before advancement, but native
+Invalid A or guarded-setting changes are rejected before advancement, but solver
 allocation/numerical errors may still stop the process. Memory/RSS is not capped.
 
 ```sh
@@ -335,8 +338,8 @@ The test advances two distinct A waveforms through the real full TDDFT step,
 compares with separate-process references, reverses call order, and closes/reopens
 one state while the other continues. It compares current/energy, orbitals,
 densities, potentials and HSE histories, and checks returned current sign and
-energy against the unchanged native driver using its supported Acos2 pulse.
-The native reference rejects arbitrary sampled-field input; it is not patched to
+energy against the unchanged solver driver using its supported Acos2 pulse.
+The solver reference rejects arbitrary sampled-field input; it is not patched to
 bypass that restriction. Binary traces are synthetic test diagnostics, not
 restart/checkpoint files. Local implementation regression does not certify
 physical convergence, mixed configurations, MPI or a new Python TDDFT interface.
@@ -349,7 +352,7 @@ the old global dt and also check reverse order and close/reopen. See
 
 ## Owned XC workspaces and stencil tables (development)
 
-The explicit fast-HSE profile stores XC grid buffers and PZ work arrays in each
+The explicit fast-HSE configuration stores XC grid buffers and PZ work arrays in each
 `s_dft_system%xc_work`. `calc_xc(..., workspace=...)` can reuse an explicit PZ
 workspace; omission creates call-local storage. Shape/spin changes resize only
 that owner. Functional/Libxc handles are not copied or made mutable for scratch.
@@ -362,7 +365,7 @@ PZ evaluation against the original built-in routines, two shapes, spin/shape
 resize, table contents and continued use after the other owner is released.
 This is a lower-level workspace test, not heterogeneous full TDDFT. The full
 context regression still requires common grid/k/XC: input and other global
-initialization settings remain. AVX/SVE tuned kernels,
+initialization settings remain. AVX/SVE tuned calculation routines,
 MPI, GPU and concurrent calls are not validated by the local Apple Silicon test.
 See `docs/tddft-workspaces-validation-2026-11-15.md`.
 
@@ -370,12 +373,12 @@ See `docs/tddft-workspaces-validation-2026-11-15.md`.
 ## Owned OpenMP selection (development)
 
 Stencil, current and force OpenMP selection flags are captured in `s_stencil`.
-Numerical kernels do not read process-global selection flags. The internal
+Numerical calculation routines do not read process-global selection flags. The internal
 `rt_open(..., openmp_mode=...)` accepts `auto`, `orbital` or `rgrid`, fixed for
-that state and applied to the three kernels. Omission preserves the three
+that state and applied to the three calculation routines. Omission preserves the three
 independent input settings and original auto threshold. Invalid values are
 rejected before initialization. This selects loop decomposition, not the process
-thread count; concurrent host calls remain unsupported.
+thread count; concurrent calling program calls remain unsupported.
 
 Add `--different-openmp` to the full-context test for orbital A and real-space B.
 Each is compared with its own isolated reference, including reverse order and
@@ -388,7 +391,7 @@ See `docs/tddft-openmp-validation-2026-11-15.md`.
 ## Explicit construction configuration (development)
 
 `structures:s_rt_run_config` contains `delta_t`, `max_steps`, `stencil_mode`,
-`current_mode` and `force_mode`. After native process/input initialization,
+`current_mode` and `force_mode`. After solver process/input initialization,
 `rt_input_config(options)` captures the existing input into a value object.
 Set its fields and pass `rt_open(state, name, status, config=options)` to create
 an independent state. This copies values; later changes to options do not alter
@@ -406,14 +409,14 @@ independent dt and OpenMP options, separate references, reverse/close/reopen,
 source-options capacity mutation, and global-nt poisoning. The other state's
 calculation continues after capacity exhaustion. Grid/k/XC and remaining input
 settings still require common immutable values. No general input-object API or
-public Python backend is introduced. See `docs/tddft-config-validation-2026-11-15.md`.
+public Python calculation implementation is introduced. See `docs/tddft-config-validation-2026-11-15.md`.
 
 
 ## Explicit grid bounds initialization (development)
 
 `structures:s_rgrid_config` holds periodicity (0 or 3), requested point counts,
 spacing and consistency-check lengths. `grid_config_from_input(lengths, config)`
-captures native input; for Maxwell it preserves the existing al_em/dl_em rule.
+captures SALMON input; for Maxwell it preserves the existing al_em/dl_em rule.
 `initialization_sub:init_grid_whole_config(lengths, spacing, config, grid, status)`
 then reads only its explicit geometry/configuration arguments. The old
 `init_grid_whole` remains a compatibility wrapper using that route.
@@ -446,7 +449,7 @@ nonpositive or zero-volume geometry returns nonzero without changing the result;
 a scaled determinant detects singular cells without forming huge volume products.
 This does not certify conditioning of nearly singular cells.
 
-Native DFT/RT initialization calls this resolver; its compatibility layer still
+solver DFT/RT initialization calls this resolver; its compatibility layer still
 normalizes global al for downstream consumers. This is a local cell resolver,
 not completion of global cell/k/pseudo/XC removal or heterogeneous TDDFT support.
 `tools/test_cell_config.py HSE_BUILD_RECORD NEW_OUTPUT` checks precedence,
@@ -456,13 +459,13 @@ tilted geometry, independence and failed-call retention. See
 
 ### Owned k-point, pseudopotential and XC inputs
 
-The fast-HSE development profile separates internal Fortran inputs into value types:
+The fast-HSE development configuration separates internal Fortran inputs into value types:
 
 - `s_kpoint_config` → `lattice:init_kvector_config(system, unfold, config)`: deep-copies mesh, shift, k-file, unfolding and symmetry inputs. The effective mesh is `system%kmesh`; HSE consumes that mesh and owned symmetry operations.
 - `s_pp_input_config` → `salmon_pp:read_pslfile(system, pp, config)`: copies species, files, local channels and masking settings into `pp%input_config`. Detected formats and parser scratch flags also belong to `pp`.
 - `s_xc_config` → `salmon_xc:init_xc_config(functional, config, status)`: retains functional identity, spin, coefficients, HSE screening and rVV10 settings. Never copy initialized Libxc handles; call `finalize_xc` before reinitializing. `calc_xc(..., pre_scf_active=...)` takes an explicit evaluation phase, defaulting to production.
 
-Legacy entries remain input-capture adapters. Explicit paths never temporarily swap shared input. These are internal initialization/evaluation components, not new public Python or C interfaces. Specialized SOC/+U PP setup, SCF phase/algorithm controls, communicators and file units still have shared dependencies. Full native TDDFT therefore retains its common grid/k/XC guard. These internal interfaces assume validated input and do not guarantee atomic failure for all native errors or I/O failures.
+Legacy entries remain input-capture adapters. Explicit paths never temporarily swap shared input. These are internal initialization/evaluation components, not new public Python or C interfaces. Specialized SOC/+U PP setup, SCF phase/algorithm controls, communicators and file units still have shared dependencies. Full TDDFT called directly from Python therefore retains its common grid/k/XC guard. These internal interfaces assume validated input and do not guarantee atomic failure for all solver errors or I/O failures.
 
 Run `tools/test_kpoint_config.py`, `tools/test_pp_input_config.py` and `tools/test_xc_input_config.py` with `HSE_BUILD_RECORD NEW_OUTPUT`. See `docs/shared-input-validation-2026-11-15.md` for measured scope and limitations.
 
@@ -497,7 +500,7 @@ Internal `exx_set_scf_flags(system, ...)`, `exx_adaptive_is_ready(system)`, `exx
 
 ### GS-owned HSE resources
 
-The GS entry now creates a local HSE resource owner and binds it after system initialization when the existing native-owner predicate accepts the configuration. The initial scope is ordinary `theory='dft'`, no geometry optimization, periodic unpolarized non-spinor HSE06, full-support CPU exchange, no Wannier/symmetry reduction, negative temperature setting (integer-occupation route), and one rank in each electronic decomposition. DC, distributed/thermal/localized exchange and other configurations retain the legacy owner. This does not broaden solver physics support.
+The GS entry now creates a local HSE resource owner and binds it after system initialization when the existing solver-owner predicate accepts the configuration. The initial scope is ordinary `theory='dft'`, no geometry optimization, periodic unpolarized non-spinor HSE06, full-support CPU exchange, no Wannier/symmetry reduction, negative temperature setting (integer-occupation route), and one rank in each electronic decomposition. DC, distributed/thermal/localized exchange and other configurations retain the legacy owner. This does not broaden solver physics support.
 
 A selected owner is reported as `EXX_GS_OWNER explicit`; it survives through result/checkpoint output, then is unbound and cleared. `tools/test_pre_scf_runtime.py ... --require-gs-owner` additionally requires that branch in the current build. Full GS state and configuration are not yet independently encapsulated; no concurrent GS API is provided.
 
@@ -507,7 +510,7 @@ The remaining same-input GS lifecycle check is provided by `tools/test_gs_lifecy
 
 `salmonpy_gs_context` provides `s_gs_context`, `gs_run(ctx, status)` and `gs_close(ctx)`. The context retains the former GS work objects: orbitals, densities/potentials, occupations/forces, mixing and pseudopotential data, XC handles and the eligible HSE owner. **Declare actual contexts with `TARGET`, keep their address stable, and never copy a live context.** Close explicitly before discarding one. The external `main_dft` remains a run/close wrapper.
 
-`gs_run` rejects an already live context with status 1 before mutation; successful completion returns 0. `gs_close` is idempotent. Native errors can still terminate the process. Input, parallel and timer globals remain shared; this is not a stable public ABI, an explicit-input GS API, or concurrency support. Only the documented same-input scalar-HSE case is validated for multiple retained contexts. The lifecycle probe compares retained A before/after B's run and close, including electronic arrays, occupations/forces, mixing histories and selected HSE caches; it is not an exhaustive memory comparison.
+`gs_run` rejects an already live context with status 1 before mutation; successful completion returns 0. `gs_close` is idempotent. solver errors can still terminate the process. Input, parallel and timer globals remain shared; this is not a stable public ABI, an explicit-input GS API, or concurrency support. Only the documented same-input scalar-HSE case is validated for multiple retained contexts. The lifecycle probe compares retained A before/after B's run and close, including electronic arrays, occupations/forces, mixing histories and selected HSE caches; it is not an exhaustive memory comparison.
 
 ### Explicit GS SCF controls
 
@@ -591,7 +594,7 @@ Test: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT --dip`. Scope: `d
 
 `native_adapters/tddft_context.f90` provides `rt_checkpoint(ctx,path,restore,status)`: false writes numerical state, true loads it immediately after `rt_open` from the same original GS/input in a fresh process. Continue at `rt_accepted_step(ctx)+1`; no elapsed time evolution is repeated. Rebuild static exchange/FFT resources in the new process; never serialize raw FFT handles.
 
-The payload covers both orbital buffers, density/local/Hartree potentials and histories, RT history, fields/current/energy reference/accepted step, ACE, learned-factor/PT-CN histories and exchange caches. The caller must authenticate original inputs/GS, runtime/adapter and archive hashes before loading. This same-binary native format is not a generic portable archive. Settings mismatch is rejected; a late restore failure invalidates further stepping.
+The payload covers both orbital buffers, density/local/Hartree potentials and histories, RT history, fields/current/energy reference/accepted step, ACE, learned-factor/PT-CN histories and exchange caches. The caller must authenticate original inputs/GS, runtime/adapter and archive hashes before loading. This same-binary solver format is not a generic portable archive. Settings mismatch is rejected; a late restore failure invalidates further stepping.
 
 ```sh
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python tools/test_hse_direct_checkpoint.py FAST_HSE_BUILD_RECORD SYNTHETIC_FIXTURES NEW_OUTPUT
@@ -599,30 +602,30 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python tools/test_hse_direct_checkpoint
 
 The tool explicitly compiles adapters against audited fast-PR objects and compares separate continuous/save/resume processes. Two/three k points, Taylor ACE/learned ACE/full-action within the fast-PR engine, and learned PT-CN, split6/7, match currents,total energy and internal traces exactly after6/5 remaining steps. Validated at OpenMP1/2. Conventional HSE and comparison baselines are not execution engines.
 
-Scope: internal serial CPU Fortran entry, periodic scalar fixed occupation/ions, full support. This does not provide a stable native ABI, GPU, symmetry, orbital/grid-distributed ACE or reduced-q support. Explicit host-MPI k-only HSE and FDTD coupling use the separate entry below. Synthetic numerical regression is separate from physical convergence. Historical native text-file positions are not resumed.
+Scope: internal serial CPU Fortran entry, periodic scalar fixed occupation/ions, full support. This does not provide a stable C/Fortran calling interface, GPU, symmetry, orbital/grid-distributed ACE or reduced-q support. Explicit MPI managed by the calling program k-only HSE and FDTD coupling use the separate entry below. Synthetic numerical regression is separate from physical convergence. Historical solver text-file positions are not resumed.
 
 Save at an accepted step with initialized exchange resources. Step-zero saving immediately after initialization is not established.
 
 For outer-MPI/FDTD fast-HSE coupling, explicitly build the dedicated worker and use FastHSEResponseBackend. In this worker mode each outer material rank calls its own serial process. See COUPLED.en.md for build/coupling/direct-restart instructions. This does not add inner HSE MPI.
 
-For internal k-only MPI use `tools/build_fast_hse_mpi.py` and `salmonpy.fast_hse_mpi.NativeFastHSEBackend`. Supported material groups have one or two ranks, no orbital/rgrid split, and one native lifetime per process on the main thread. The host owns MPI; the backend temporarily changes cwd. Same-topology rank-local direct restart preserves numerical HSE histories and rebuilds static FFT resources. See COUPLED.en.md for the four-rank FDTD/SBE/HSE example and failure limits.
+For internal k-only MPI use `tools/build_fast_hse_mpi.py` and `salmonpy.fast_hse_mpi.NativeFastHSEBackend`. Supported material groups have one or two ranks, no orbital/rgrid split, and one solver initialization per process on the main thread. The calling program owns MPI; the calculation implementation temporarily changes cwd. Same-topology rank-local direct restart preserves numerical HSE histories and rebuilds static FFT resources. See COUPLED.en.md for the four-rank FDTD/SBE/HSE example and failure limits.
 
 The fast source now shares ordinary initialization input storage and RT output
 management too. The duplicated adapter output source is removed. Existing MPI
 and serial builders reuse the compiled solver helper, or compile the same shared
 source for ABI-compatible older prepared builds. HSE-specific settings retain their own complete
-snapshot; ordinary retained GS/embedded TDDFT migration is still unfinished.
+snapshot; ordinary retained GS/in-process TDDFT migration is still unfinished.
 
 Fast HSE model registration now uses the same model-owned parser workspace
-contract as the standard profile: scratch connections, namelist diagnostics,
+contract as the standard configuration: scratch connections, namelist diagnostics,
 coordinate-source flags and common input/default snapshots belong to each read.
 The full fast-HSE defaults, conversion rules and checks are retained; registered
 models still capture all HSE-specific settings in hse_model_inputs. The common
 parser values record alone is not a complete HSE model snapshot. Legacy batch
 reads keep their named temporary files for MD compatibility. This is parser
-migration, not completion of retained GS/ordinary embedded TDDFT integration.
+migration, not completion of retained GS/ordinary TDDFT called in the Python process integration.
 
-The fast native GS context now has an internal import-only path:
+The fast solver GS context now has an internal import-only path:
 `gs_run(..., import_only=.true.)` reads an existing compatible GS wavefunction
 restart through the original initialization, without SCF, PBE warmup or GS
 checkpoint output. States retain independent XC/HSE/MPI resources; closing one
@@ -630,23 +633,23 @@ must preserve the others. `gs_export_seed` returns detached orbitals, occupation
 common input values and ownership/grid metadata using the shared gs_seed module.
 This seed is not a complete HSE model or portable checkpoint. Python
 NativeGSBackend.load now accepts a fast build explicitly declaring gs_abi/1.
-That profile returns density/occupations/orbitals and material IDs; energies,
+That configuration returns density/occupations/orbitals and material IDs; energies,
 residuals, tolerance and convergence remain None. Standard-runtime SCF behavior
 is unchanged. Fast session.run, eigenvalues/forces and archive export remain unconnected.
 New builds additionally declare gs_abi.memory_rt=1 after probing the compiled
 memory GS protocol: retained GS→fast-PR HSE model creation is supported without
-GS restart files/SCF/replay (NATIVE_GS.en.md). Ordinary XC is supported by the HSE-disabled fast profile described below. The imported
+GS restart files/SCF/replay (NATIVE_GS.en.md). Ordinary XC is supported by the HSE-disabled fast configuration described below. The imported
 state does not certify convergence, energy or forces. MD/DC/optimization import
 and real-material convergence validation are outside this measured path.
 
-The fast source also builds an ordinary-XC host library via build_embedded_tddft.py with USE_HSE=OFF. It declares source_profile=fast-pr, ordinary_rt_abi=1 and import-only gs_abi/1. Shared embedded RT/worker/parallel-bridge sources preserve normal APIs; fast numerical states already own stencil/XC scratch. PZ/TB-mBJ/Libxc-PZ/PBE memory GS handoff, independent states and direct RT restart are supported as described in NATIVE_GS.en.md. Computed GS and export migration remain pending.
+The fast source also builds an ordinary-XC calling program library via build_embedded_tddft.py with USE_HSE=OFF. It declares source_profile=fast-pr, ordinary_rt_abi=1 and import-only gs_abi/1. Shared in-process RT/worker/parallel-bridge sources preserve normal APIs; fast numerical states already own stencil/XC scratch. PZ/TB-mBJ/Libxc-PZ/PBE memory GS handoff, independent states and direct RT restart are supported as described in NATIVE_GS.en.md. Computed GS and export migration remain pending.
 
 ## Unified source and default builds (2026-11-19)
 
 One maintained tree, `runtime/sources/solver`, serves ordinary XC and fast PR HSE.
 Default preparation uses this tree and default builds disable HSE; explicit HSE
 builds use the same inventory. Historical archives are developer-only and are not
-shipped in wheel/sdist. No numerical kernel was changed by this layout migration.
+shipped in wheel/sdist. No numerical calculation routine was changed by this layout migration.
 Fast-specific initialization settings are captured per model.
 
 Fast-PR HSE additionally needs FFTW3 with `fftw3.f03`; this is not a new dependency
@@ -657,7 +660,7 @@ beforehand and confirm `HSE: using installed FFTW` in the configure log. Import
 never performs this build/download. Ordinary USE_HSE=OFF does not need HSE FFTW.
 
 
-## Explicit single-job validation receipts
+## Explicit single-job validation records
 
 A managed runtime may be fully validated once per job and then reused explicitly:
 
@@ -674,14 +677,14 @@ print(engine.runtime_validation_report)  # Never contains the secret token.
 ```
 
 Neither call starts SALMON, MPI, a download or a build. Run the preparation once
-within the job, not once per point. The receipt is a NEW file outside the runtime;
-existing receipts are never overwritten. Do not write outputs inside a managed
+within the job, not once per point. The validation record is a NEW file outside the runtime;
+existing validation records are never overwritten. Do not write outputs inside a managed
 runtime. Keep its files immutable during the job. Omit validation= to retain full
 verification on every load; no global/environment cache is activated.
 
 The job leader generates a fresh secret for this allocation and distributes the
 RuntimeValidation context to workers through the caller-owned communication
-channel (for example comm.bcast). The receipt binds the resolved runtime path,
+channel (for example comm.bcast). The validation record binds the resolved runtime path,
 manifest, file/directory metadata and job ID using HMAC-SHA256. It does NOT store
 the secret; repr(validation) also hides it. Do not serialize the context into
 material/input/checkpoint JSON, print its fields or put the token on a command
@@ -703,7 +706,7 @@ correspondingly limited; this does not eliminate mandatory executable I/O.
 Changed/unavailable proof, wrong job/token, moved bundle or changed metadata
 warns and falls back to ordinary COMPLETE verification. An unchanged valid
 calculation can continue; a corrupt actual bundle still fails its normal checks.
-No automatic receipt rewrite. Required features and binary-bound NLCC force
+No automatic validation record rewrite. Required features and binary-bound NLCC force
 validation keep their original checks. Creation still verifies every bundle byte.
 The fast metadata path is currently POSIX-only; other systems keep full validation
 with a warning. Shared-filesystem metadata consistency and cross-node identities
@@ -712,9 +715,9 @@ must be validated at the site. Local Mac evidence is not a multi-node guarantee.
 For process-isolated TDDFT, pass runtime_validation=validation explicitly to BOTH
 TDDFTMaterialProvider(...) and TDDFTResponseBackend(...). The job context is not
 part of physical material identity or electronic state. Configured catalog
-providers which do not expose this option still use full verification. Embedded
-build.json / native library loaders are not accelerated by this bundle receipt.
-Custom backends need not participate and are never rejected for lacking a receipt.
+providers which do not expose this option still use full verification. in-process
+build.json / Fortran/C library loaders are not accelerated by this bundle validation record.
+user-written calculation implementations need not participate and are never rejected for lacking a validation record.
 
 ```sh
 # Preview only: no MPI initialization, file creation or calculation
@@ -728,7 +731,7 @@ nest a launcher. Rank0 performs the complete verification and broadcasts only
 inside the job. Every rank loads through the explicit context; the report records
 bytes hashed, snapshot stat checks, tree walks, elapsed time and caller MPI health,
 without the token. A successful report never starts a physical calculation.
-No receipt is required for pre-submission validation or user-defined modules.
+No validation record is required for pre-submission validation or user-defined modules.
 
 Local synthetic benchmark (18 files, approximately58MiB including a2MiB DATA-ONLY
 nonexecuted stand-in): reuse hashes2MiB of executable payload plus the small
@@ -740,17 +743,17 @@ execute. No FEFS/multi-node scaling, GPU or physical-observable claim is made.
 ## Minimize outer collectives
 
 Application-wide communication is limited to necessary setup, consistent failure
-agreement and explicitly requested final aggregation. Runtime receipt reuse is
+agreement and explicitly requested final aggregation. Runtime validation record reuse is
 rank-local. The validation-only mpi_runtime_receipt example uses one setup bcast
 and one final gather to rank0, without allgather, health allreduce or Barrier.
 The final gather itself shows caller MPI remains usable; reports are not copied
 to every rank. The script terminates after reporting and never starts a solver.
 
 NativeEHField.advance coalesces its Python wrapper's subgroup checks from six
-collectives to two: (local input error, current values), then (native status,
+collectives to two: (local input error, current values), then (solver status,
 finite E, finite candidate A, integration error). Every member sees the same
-records and decides identically. No reduction of native physical communication
-is claimed. Signed-zero equality, before-entry rejection, recoverable native
+records and decides identically. No reduction of solver physical communication
+is claimed. Signed-zero equality, before-entry rejection, recoverable solver
 rollback and commit-after-agreement are preserved. No numerical update changes.
 
 Keep model-internal physical sums/halos and required failure decisions.
@@ -759,7 +762,7 @@ broadcasts those rows only within that material group. Field groups receive no
 response-service input payload; singleton groups need no subgroup broadcast.
 Field packets are similarly scattered as per-owner dictionaries, preserving
 values, units, positions and clocks. J already gathers local owner contributions;
-the callback/native update order is unchanged. Native spatial return routing is described in COUPLED.en.md.
+the callback and solver update order is unchanged. solver spatial return routing is described in COUPLED.en.md.
 
 Root need not be first in plan order; point IDs and owning groups may interleave
 and own different counts. Cached routing indexes restore global J order without
@@ -771,6 +774,12 @@ For checkpoint compatibility response._A retains a global-indexed shape: only
 owned rows are current on material ranks, and only the field leader retains full
 response-service A history. Nonowned/private rows are placeholders, not replicated
 output. Use field-leader point archives for global observations. Old checkpoints
-with full rows remain readable. Native field A/E and physical state data are not
-replaced by placeholders. Native spatial J routing is described in COUPLED.en.md.
-Adjacent outer admission is also coalesced as described in COUPLED.en.md; full solver communication is not claimed optimal.
+with full rows remain readable. solver field A/E and physical state data are not
+replaced by placeholders. solver spatial J routing is described in COUPLED.en.md.
+Adjacent outer input checking is also coalesced as described in COUPLED.en.md; full solver communication is not claimed optimal.
+
+## Linking details for developers
+
+Object files alone still require a linker and dependencies on the user's computer.
+For ordinary users, provide a ready-to-run executable or distribution package with
+its required shared libraries checked.

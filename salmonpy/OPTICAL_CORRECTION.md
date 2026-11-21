@@ -1,6 +1,6 @@
 # 長波長の光学応答補正
 
-`salmonpy.analysis.long_wavelength_correction` は [Otobeほか、PRB 85, 045134、付録A4](https://doi.org/10.1103/PhysRevB.85.045134) に基づく絶縁体の低周波処理です。フィット、伝導率変換、補正は観測用Fortranカーネル内で完結します。TDDFT時間発展・測定電流・Maxwellへのフィードバックは変わりません。
+`salmonpy.analysis.long_wavelength_correction` は [Otobeほか、PRB 85, 045134、付録A4](https://doi.org/10.1103/PhysRevB.85.045134) に基づく絶縁体の低周波処理です。フィット、伝導率変換、補正は観測用Fortran計算ルーチン内で完結します。TDDFT時間発展・測定電流・Maxwellへのフィードバックは変わりません。
 
 ```python
 from salmonpy.analysis import long_wavelength_correction

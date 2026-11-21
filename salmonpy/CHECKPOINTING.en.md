@@ -1,9 +1,9 @@
 # Checkpoint capability and compatibility
 
-[日本語](CHECKPOINTING.md) · Topic: `checkpoint_compatibility` · Paired revision: `2026-11-17.1`
+[日本語](CHECKPOINTING.md)
 
-`salmonpy.checkpointing` provides common admission and execution for built-in and user
-backends. `execute_checkpoint` calls explicitly bound SAVE/LOAD functions after admission. It returns detached JSON
+`salmonpy.checkpointing` provides common input checking and execution for built-in and user
+calculation implementations. `execute_checkpoint` calls explicitly bound SAVE/LOAD functions after input checking. It returns detached JSON
 metadata after checking all participating ranks. Serial hosts pass `comm=None`;
 MPI hosts supply their existing communicator. No solver context or inheritance
 is required. Import and checking perform no MPI initialization, file access,
@@ -27,17 +27,17 @@ The object is immutable. `format` identifies a versioned payload format;
 integer tuple whose product equals the actual group size. Its axis order is part
 of the contract: `(2,1)` differs from `(1,2)`. Pin implementation, fixed model/input
 and runtime identity with `identity`. An empty identity is omitted from metadata
-for compatibility with existing native-direct/2 archives. Checks compare the
+for compatibility with existing solver-direct/2 archives. Checks compare the
 explicit declarations; model identity and file integrity remain caller-owned.
 
-## Execute backend-owned persistence
+## Execute calculation implementation-owned persistence
 
 Bind zero-argument callbacks with `CheckpointTarget`, then call `execute_checkpoint`
-with operation=save or restore. Paths and payload formats belong to the backend;
+with operation=save or restore. Paths and payload formats belong to the calculation implementation;
 use closures or `functools.partial` to supply arguments. A complete file-based
 example runs with `python -m salmonpy.examples.custom_checkpoint NEW_OUTPUT`.
 
-The same entry can also transport an in-memory backend token:
+The same entry can also transport an in-memory calculation implementation token:
 
 ```python
 from salmonpy.checkpointing import CheckpointCapability, CheckpointTarget, execute_checkpoint
@@ -57,8 +57,8 @@ assert candidate == state and candidate is not state
 ```
 
 The result contains `compatibility` JSON, a process-local `field` callback result
-and a `states` mapping keyed by string point IDs. Opaque tokens, arrays and receipts
-remain local; they are not copied or sent through MPI. The backend controls their
+and a `states` mapping keyed by string point IDs. Opaque tokens, arrays and validation records
+remain local; they are not copied or sent through MPI. The calculation implementation controls their
 ownership. Callback return values, including None, are accepted; callbacks must
 raise exceptions to report failure. A return value of False is not an error signal.
 
@@ -66,14 +66,14 @@ Capability and callback availability are checked collectively before the first
 callback. Groups execute their own point order in synchronized slots, so groups
 with different point counts are supported. An ordinary callback exception becomes
 RuntimeFailure on every rank; later slots stop. Completed state changes remain.
-A collective backend must complete its own MPI protocol before raising; the common
-entry cannot unblock ranks stranded inside a backend collective or recover a
+A collective calculation implementation must complete its own MPI protocol before raising; the common
+entry cannot unblock ranks stranded inside a calculation implementation collective or recover a
 Fortran STOP/process crash. Hosts decide whether to discard affected candidates
-or abort their native job. MPI initialization, splitting and finalization stay
-with the host. Metadata/hash authentication and completion publication also remain
-host/backend policies; the native sample preserves its existing inventory/marker.
+or abort their solver job. MPI initialization, splitting and finalization stay
+with the calling program. Metadata/hash authentication and completion publication also remain
+calling program/calculation implementation policies; the solver sample preserves its existing inventory/marker.
 
-## Serial user backend
+## Serial user calculation implementation
 
 The packaged example contains a complete user model, JSON persistence, payload
 SHA256 verification, independent states and comparison with continuous execution:
@@ -86,7 +86,7 @@ It saves at17 and advances only15 more steps through32; current is exactly equal
 to continuous execution. Changing the model is rejected before its loader runs.
 The recurrence is synthetic interface data, not a physical material prediction.
 
-This is the admission part of that workflow:
+This is the input checking part of that workflow:
 
 ```python
 from salmonpy.checkpointing import check_checkpoint_compatibility
@@ -107,8 +107,8 @@ check_checkpoint_compatibility(
 
 `available_files` is a names-only inventory. The API checks safe relative POSIX
 paths and required-file presence; it does not read files or verify their hashes.
-The host must authenticate payloads and check that the restore candidate is fresh
-before binding its own loader to the execution entry. The sample above illustrates metadata admission;
+The calling program must authenticate payloads and check that the separate state prepared for restoration is fresh
+before binding its own loader to the execution entry. The sample above illustrates metadata input checking;
 the runnable example supplies the actual I/O and checksum checks.
 
 ## MPI hosts and failure agreement
@@ -197,8 +197,8 @@ rank, including `discard_restore(None)` when staging threw or returned an unsafe
 alias. It must handle partial staging resources and complete its subgroup protocol
 before raising. A stage factory can instead clean its own failed allocations before
 raising. Cleanup errors are reported in `error.cleanup_errors`, separately from
-preservation of the live states. Candidate cleanup never authorizes changing live
-objects. Under the backend isolation contract, no original is passed to discard.
+preservation of the live states. discarding the prepared restore state never authorizes changing live
+objects. Under the calculation implementation isolation contract, no original is passed to discard.
 
 `execute_checkpoint(..., operation='restore', atomic=True, live=live)` is the same
 protected path. Existing execute_checkpoint defaults to non-atomic execution for
@@ -206,13 +206,13 @@ compatibility; direct-only targets are rejected by the protected path with zero
 LOAD calls, without fallback. LD/SBE states can be staged via new_state plus
 snapshot restore; custom JSON factories are shown in the runnable example.
 
-### Native numerical candidates (experimental)
+### solver numerical candidates (experimental)
 
-Explicitly rebuilt native FDTD, standard TDDFT and fast-PR HSE expose
+Explicitly rebuilt FDTD called directly from Python, standard TDDFT and fast-PR HSE expose
 checkpoint_protocol=1: modes0 save,1 legacy immediate restore,2 stage a detached
-numerical candidate,3 publish prepared memory,4 discard. One candidate per native
+numerical candidate,3 publish prepared memory,4 discard. One candidate per solver
 lifetime is allowed. Pause evolution, finish mode2 and agree success across every
-host group before mode3. On handled failure every group discards with mode4 and
+calling program group before mode3. On handled failure every group discards with mode4 and
 can continue its original. HSE retains validated exchange/history data in memory;
 mode3 never reopens the checkpoint. Reject older libraries via the protocol query.
 
@@ -220,34 +220,34 @@ The internal `salmonpy._native_checkpoint.NativeRestoreCandidate` helper and
 `tools/test_native_restore_candidates_mpi.py` demonstrate the common entry:
 bind stage/discard callbacks, use the common API for collective preparation,
 then call publish in each group and install preprepared Python A/current/clocks.
-The generic holder switch alone does not finish native publication. This is an
+The generic holder switch alone does not finish solver publication. This is an
 internal experimental contract, not a stable public C ABI.
 
 Only mutable numerical candidates are detached. Initialized MPI/Libxc/FFT resources
-remain in the existing context; this does not enable concurrent native lifetimes
+remain in the existing context; this does not enable concurrent solver lifetimes
 or continued use of an old alias after publication. Publication uses prepared
 memory but includes allocating assignments: allocation failure/process death is
 outside the recoverable contract. The ordinary mpi_mixed_native integration is described below.
-Exact-layout/input/hash admission is still required.
+Exact-layout/input/hash input checking is still required.
 
 This contract covers handled exceptions with healthy participating MPI ranks and
 correct isolated factories. It does not recover process crashes, communicator loss,
-Fortran STOP or a backend which mutates/shares its original state during staging.
+Fortran STOP or a calculation implementation which mutates/shares its original state during staging.
 
-## Existing mixed native calculations
+## Existing mixed solver calculations
 
-The native mixed sample uses both common admission and execution, retaining solver-specific
-fresh-state and native-ABI checks. Existing native-direct/2 compatibility metadata
-is unchanged; pinned native payloads and numerical update order are unchanged.
+The solver mixed sample uses both common input checking and execution, retaining solver-specific
+fresh-state and solver-ABI checks. Existing solver-direct/2 compatibility metadata
+is unchanged; pinned solver payloads and numerical update order are unchanged.
 Custom direct-state/1 sample adapters may expose `checkpoint_capability` as an
 object/mapping. The previous checkpoint_format/checkpoint_modes/
 checkpoint_decomposition attributes remain accepted. The sample's callback/clock/
 A/current requirements are described in [COUPLED.en.md](COUPLED.en.md).
 
-Current admission requires the same topology and declared format/identity. Payload
+Current input checking requires the same topology and declared format/identity. Payload
 conversion, changed-topology redistribution, generic archive I/O and atomic rollback
-remain backend/host responsibilities. The execution entry runs supplied functions without certifying the backend's
-persistence implementation or atomic rollback. Historical native-direct/1 archives
+remain calculation implementation/calling program responsibilities. The execution entry runs supplied functions without certifying the calculation implementation's
+persistence implementation or atomic rollback. Historical solver-direct/1 archives
 without compatibility metadata require their original matching reader.
 
 ## Protected restore in the ordinary mixed sample
@@ -265,11 +265,11 @@ accepts advanced paused sessions. A staging failure raises AtomicRestoreError on
 all ranks and preserves original field/LD/electronic states, clocks, references
 and failed flags. Make the same collective decision everywhere: continue the old
 trajectory or remove the failure cause and retry the same checkpoint. Input/history
-admission errors are rejected before LOAD as well.
+input checking errors are rejected before LOAD as well.
 
 After success retrieve current states through session.states; old SBE handles are
 retired. Release errors are separate coupled.checkpoint_cleanup_errors diagnostics,
-not a failed restoration. Native resources still have one lifetime; allocation
+not a failed restoration. solver resources still have one lifetime; allocation
 failure during publication, process death and failed MPI remain outside recovery.
 
 Older ABIs, process-isolated HSE workers and custom direct-only LOAD targets are
@@ -284,9 +284,9 @@ evolution and exact retry results for SBE plus internal-MPI TDDFT/fast-PR HSE.
 Source-tree tests can explicitly select a built LD/SBE library with `--kernel LIB`;
 installed-wheel users do not need that override.
 
-Live rewind does not truncate native output files already written. Manage the
+Live rewind does not truncate solver output files already written. Manage the
 trajectory with the saved frames plus subsequent step returns, or resume in a
-fresh MPI job/output directory to keep native output streams separate.
+fresh MPI job/output directory to keep solver output streams separate.
 
 Memory advice includes concurrent candidate storage; see [MEMORY.en.md](MEMORY.en.md). Exceeding the ordinary sample budget only warns and does not refuse protected restore.
 
@@ -300,33 +300,33 @@ Use `--legacy-checkpoint-identity` explicitly only for old unidentified checkpoi
 
 ## In-memory snapshots with point identity
 
-`PointState.snapshot()` wraps the backend-owned snapshot with immutable `salmonpy.point-snapshot/1` identity. `state.restore(saved)` checks run, point, material-definition and initial-state identity plus package version before calling the backend. Cross-point/run and raw backend tokens are rejected. Even with explicit matching run/point IDs, the backend must still validate its model, time step and other settings.
+`PointState.snapshot()` wraps the calculation implementation-owned snapshot with immutable `salmonpy.point-snapshot/1` identity. `state.restore(saved)` checks run, point, material-definition and initial-state identity plus package version before calling the calculation implementation. Cross-point/run and raw calculation implementation tokens are rejected. Even with explicit matching run/point IDs, the calculation implementation must still validate its model, time step and other settings.
 
-This is process-local rewind, not branching, cloning, disk persistence or an MPI-wide transaction. Unsupported custom backends raise `SnapshotError`. Backend restore-failure guarantees remain the backend's responsibility; identity rejection invokes no backend restore callback. Raw-state snapshot APIs are unchanged.
+This is process-local rewind, not branching, cloning, disk persistence or an MPI-wide transaction. Unsupported user-written calculation implementations raise `SnapshotError`. calculation implementation restore-failure guarantees remain the calculation implementation's responsibility; identity rejection invokes no calculation implementation restore callback. Raw-state snapshot APIs are unchanged.
 
 `python -m salmonpy.examples.point_ld /new/output/directory` also verifies cross-point rejection and exact current continuation after same-point restore.
 
-## Native TDDFT rejection before update (limited scope)
+## TDDFT called directly from Python rejection before update (limited scope)
 
-Newly prepared and built standard embedded TDDFT exposes `sp_tddft_error_protocol() == 1`. Validation is collective on the attached material communicator:10 invalid/nonfinite input, stale A or missing input file;11 rank disagreement;12 unavailable lifecycle or repeated initialization;13 exhausted step capacity;14 pending restore candidate. These codes return unanimously before numerical mutation. Initial admission codes10/11 do not consume the lifetime; Python initialization can be retried with corrected input. Failed work directories remain for diagnosis.
+Newly prepared and built standard TDDFT called in the Python process exposes `sp_tddft_error_protocol() == 1`. Validation is collective on the attached material communicator:10 invalid/nonfinite input, stale A or missing input file;11 rank disagreement;12 unavailable lifecycle or repeated initialization;13 exhausted step capacity;14 pending separate state prepared for restoration. These codes return unanimously before numerical mutation. Initial input checking codes10/11 do not consume the lifetime; Python initialization can be retried with corrected input. Failed work directories remain for diagnosis.
 
-Python maps only protocol-declared unanimous rejection to `InputError`. Old libraries, unknown codes or nonfinite results retain `RuntimeFailure`, with no inferred state guarantee. Every solver-group member must enter the same call. Invalid pointers, MPI/process failure, allocation errors, deep solver STOP and failures after numerical updates are outside this admission-only contract; see the limited deep-recovery contract below. Actual initialization still consumes the one-process lifetime. Fast HSE and native FDTD error contracts are unchanged.
+Python maps only protocol-declared unanimous rejection to `InputError`. Old libraries, unknown codes or nonfinite results retain `RuntimeFailure`, with no inferred state guarantee. Every solver-group member must enter the same call. Invalid pointers, MPI/process failure, allocation errors, deep solver STOP and failures after numerical updates are outside this input checking-only contract; see the limited deep-recovery contract below. Actual initialization still consumes the one-process lifetime. Fast HSE and FDTD called directly from Python error contracts are unchanged.
 
 This guarantee concerns an individual TDDFT state's pre-update rejection. A coupled session may already have advanced another component; it remains failed under the existing driver policy. This does not implement general coupled-step rollback.
 
 ## Direct rollback after deep TDDFT numerical errors
 
-New standard native TDDFT exposes `sp_tddft_recovery_protocol() == 1` and retains a per-step numerical payload in memory. Collective checks cover propagated wavefunctions(20), density(21), Hartree field(22), XC potential/energy(23), current/total energy(24), and a protected propagator error(25). Every material-group rank agrees before returning. Errors restore accepted orbitals, densities, fields, propagation history, XC state, counters and original overlap flags without propagation replay. Failed attempts add no ordinary RT output records.
+New standard TDDFT called directly from Python exposes `sp_tddft_recovery_protocol() == 1` and retains a per-step numerical payload in memory. Collective checks cover propagated wavefunctions(20), density(21), Hartree field(22), XC potential/energy(23), current/total energy(24), and a protected propagator error(25). Every material-group rank agrees before returning. Errors restore accepted orbitals, densities, fields, propagation history, XC state, counters and original overlap flags without propagation replay. Failed attempts add no ordinary RT output records.
 
 A state returned by Python `NativeTDDFTBackend` raises `NumericalError` from `advance(A_old,A_new)` only for protocol-declared unanimous recovery. Its `A` and `steps` remain accepted; correct the cause and retry from that time. No automatic pulse weakening or dt changes are applied. Old libraries and unknown errors retain conservative `RuntimeFailure` handling without inferred recovery.
 
-Supported: periodic, unpolarized, fixed-ion middlepoint PZ, automatic/fixed TB-mBJ, Libxc-PZ/PBE. SOC,+U,jellium, ionic motion/force output, Gram–Schmidt, projection/unfold and microscopic Maxwell coupling are outside the protected profile and return15 before updating. Ordinary batch calculations retain their existing route; external checkpoint encoding is unchanged. Per-step copies/checks add memory and runtime overhead: leave resource headroom. Budgets remain warning-only.
+Supported: periodic, unpolarized, fixed-ion middlepoint PZ, automatic/fixed TB-mBJ, Libxc-PZ/PBE. SOC,+U,jellium, ionic motion/force output, Gram–Schmidt, projection/unfold and microscopic Maxwell coupling are outside the protected configuration and return15 before updating. Ordinary batch calculations retain their existing route; external checkpoint encoding is unchanged. Per-step copies/checks add memory and runtime overhead: leave resource headroom. Budgets remain warning-only.
 
 This is a TDDFT-group guarantee, not automatic rollback of an entire mixed FDTD step whose other components may have advanced. MPI/process death, allocation failures, uncontrolled third-party STOP, deep initialization STOP and output-device failures are excluded. One-rank fault injection exists only in a separately compiled `SALMONPY_RECOVERY_TESTING` build; production builds export no injection entry.
 
 ## Deep numerical recovery for fast-PR HSE
 
-New libraries for `NativeFastHSEBackend` declare `sp_fast_hse_recovery_protocol() == 1`. The guarded profile is periodic, unpolarized, fixed-ion fast-PR HSE06 with Taylor4 / learned PT-CN and internal k-only MPI1/2. Conventional HSE is not a fallback.
+New libraries for `NativeFastHSEBackend` declare `sp_fast_hse_recovery_protocol() == 1`. The guarded configuration is periodic, unpolarized, fixed-ion fast-PR HSE06 with Taylor4 / learned PT-CN and internal k-only MPI1/2. Conventional HSE is not a fallback.
 
 Each step backs up electronic arrays and ACE, factor/PT-CN histories, exchange caches and counters. FFT plans, MPI communicators and other owning resources are not copied. Collective checks cover finite orbitals, density, Hartree, XC and endpoints, plus handled ACE operator errors, PT-CN convergence/Gram/retraction checks and history updates. Handled failures directly restore accepted numerical state without replaying propagation or exchange history. A, clocks, current and energy remain unchanged; failed attempts append no ordinary RT records. Diagnostic logs may remain.
 
@@ -336,23 +336,23 @@ The guarantee covers the HSE material group, not automatic rollback of an entire
 
 Run `tools/test_fast_hse_deep_recovery_mpi.py BUILD GS NEW_OUTPUT --steps 32 --fault-step 13` with two ranks, OMP/BLAS1 and an external timeout. `--split` uses two independent two-rank groups. `--overflow-A 1e100` stresses real PT-CN numerical divergence; it is not a scientific input. `--faults` requires a separate explicit `SALMONPY_RECOVERY_TESTING` build; production exports no injection entry point. See `docs/fast-hse-deep-recovery-validation-2026-11-17.md`. These small synthetic cases verify implementation, not converged physical accuracy.
 
-## Native FDTD numerical recovery
+## FDTD called directly from Python numerical recovery
 
-New standard host-MPI libraries declare `sp_eh_recovery_protocol() == 1`. `NativeEHField.advance` selects a checked entry and backs up field/PML, every field-local LD, deposited current and clock in memory. Collective gates check E after update (20), LD after update (21), H after update (22), and sampled fields/integrated A/ordinary observation arithmetic (23). Handled failures restore accepted state directly without propagation replay. A declared known recovery raises `NumericalError`, preserving Python A/E/clock/failed so the caller can correct input and retry. Failed attempts append no ordinary observation records; diagnostic/progress stdout may remain.
+New standard MPI managed by the calling program libraries declare `sp_eh_recovery_protocol() == 1`. `NativeEHField.advance` selects a checked entry and backs up field/PML, every field-local LD, deposited current and clock in memory. Collective gates check E after update (20), LD after update (21), H after update (22), and sampled fields/integrated A/ordinary observation arithmetic (23). Handled failures restore accepted state directly without propagation replay. A declared known recovery raises `NumericalError`, preserving Python A/E/clock/failed so the caller can correct input and retry. Failed attempts append no ordinary observation records; diagnostic/progress stdout may remain.
 
-The guarded profile is the existing native E/H plane-wave path with local LD. Dedicated linear response, ASE/ART and frequency-resolved observation are rejected before updating. Batch FDTD retains its old path. Old binaries without the checked entry and unknown failures remain conservative. Initialization, allocation, MPI/process termination, external STOP and output-device failure remain excluded. This protects the field group alone; it does not automatically roll back or retry a whole `CoupledStepper` / `ResponseSession` step. Budget for backup/check overhead; memory limits remain advisory.
+The guarded configuration is the existing FDTD updates of E and H plane-wave path with local LD. Dedicated linear response, ASE/ART and frequency-resolved observation are rejected before updating. Batch FDTD retains its old path. Old binaries without the checked entry and unknown failures remain conservative. Initialization, allocation, MPI/process termination, external STOP and output-device failure remain excluded. This protects the field group alone; it does not automatically roll back or retry a whole `CoupledStepper` / `ResponseSession` step. Budget for backup/check overhead; memory limits remain advisory.
 
 Run `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` with one/two ranks, OMP/BLAS1 and an external timeout. `--split` uses two independent two-rank groups. `--faults` requires a separate explicit `SALMONPY_RECOVERY_TESTING` build; production exports no injection entry. Overflow stress values are not scientific inputs.
 
-See [NATIVE_STEPPING.en.md](NATIVE_STEPPING.en.md) for native numerical/ordinary-output rollback after a step failure. Checkpoint LOAD is not a substitute for the step backup; concurrent use is rejected. Rebuild step targets when publication replaces owners.
+See [NATIVE_STEPPING.en.md](NATIVE_STEPPING.en.md) for solver numerical/ordinary-output rollback after a step failure. Checkpoint LOAD is not a substitute for the step backup; concurrent use is rejected. Rebuild step targets when publication replaces owners.
 
-## Native SCF memory snapshots through the common API
+## solver SCF memory snapshots through the common API
 
 A live computed NativeGSState exposes `checkpoint_capability` and
 `checkpoint_target(snapshot=None)`. These are collective on its internal group;
 binding queries the runtime protocol and live SCF metadata, but performs no save or numerical iteration.
 The format is `salmonpy.native-scf-memory/1`. Identity binds the material/model,
-runtime and live native owner token; even identical-model sibling owners differ.
+runtime and live calculation object token; even identical-model sibling owners differ.
 Decomposition is the actual `(k, orbital, x, y, z)` tuple.
 
 ```python
@@ -382,7 +382,7 @@ numerical callbacks. Do not substitute destructive restore for candidate staging
 `python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT` uses this entry;
 add `--xc hse06` with the matching fast-PR HSE build.
 
-### Protected SCF staging and explicit native publication
+### Protected SCF staging and explicit solver publication
 
 A matching runtime with `sp_gs_scf_candidate_protocol()==1` adds independent
 **numerical** candidates to `state.checkpoint_target(payload)`. These are not
@@ -399,21 +399,21 @@ holder = CheckpointState(states={"film": state})
 prepared = restore_checkpoint(
     comm, plan, live=holder, saved=saved_run["compatibility"],
     states={"film": state.checkpoint_target(payload)})
-# All participants are now ready. Until this point native originals are unchanged.
+# All participants are now ready. Until this point solver originals are unchanged.
 for candidate in prepared["states"].values():
     candidate.publish()  # collective within its own native group; returns state
 state.continue_scf(steps=5)
 ```
 
 The holder contains readiness candidates, not independently runnable states.
-Publish every native candidate in the same group order before resuming work.
+Publish every solver candidate in the same group order before resuming work.
 A handled staging failure invokes discard callbacks (also for partly staged
 slots), clears reservations and leaves original numerical data intact, so the
 original trajectory can continue and restoration can be retried with new targets.
 Before the ready vote, call candidate.discard() to abandon a manually staged
 candidate; do not continue a partially published bundle after publication errors.
-Native publication uses numerical assignments and may allocate. Fatal allocation,
-process/communication failures, and arbitrary errors during native publication
+solver publication uses numerical assignments and may allocate. Fatal allocation,
+process/communication failures, and arbitrary errors during solver publication
 are outside this handled staging-error guarantee. This is not general rollback.
 No files or numerical propagation are used by publish/discard. Snapshots must
 remain open through staging/publication, and are closed explicitly afterwards.
@@ -422,13 +422,13 @@ Use `python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT --protected`;
 add `--xc hse06` for a matching full-k fast-PR HSE build. Old runtimes keep direct
 mode; there is no destructive fallback when protected staging is unavailable.
 
-Native SCF same-build/input/decomposition disk checkpoints bind through
+solver SCF same-build/input/decomposition disk checkpoints bind through
 `state.checkpoint_target(directory=...)`. scf_disk_capability is metadata-only;
 staging authenticates SHA256 and inputs. Publish every returned candidate after
 the ready vote, and recreate targets before retrying a failed restore.
 See [NATIVE_GS.en.md](NATIVE_GS.en.md) for a two-state example and scope.
 
-Prepared native SCF candidates support close/context-manager discard. GS-owner
+Prepared solver SCF candidates support close/context-manager discard. GS-owner
 close discards its Python-owned candidate; snapshot close discards a candidate
-derived from that snapshot. Direct C-host reservations are not automatically
+derived from that snapshot. Direct C-calling program reservations are not automatically
 discarded. Matching MPI call order is still required.

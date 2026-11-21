@@ -20,17 +20,17 @@ with material.new_state(dt=0.1, initial_field=E[0]) as state:
 
 Sample zero in `respond` is the initial P=J=0 at time zero. `step` accepts E at the next endpoint and uses stored previous E with a fixed dt and trapezoidal update. P/J are summed over poles, not FDTD auxiliary Q. Histories are independent. Check time-step convergence.
 
-The continuous equations are `dP/dt=J` and `dJ/dt=f*wp**2*E/(4*pi)-gamma*J-w0**2*P`. `permittivity(omega)` uses exp(-i omega t) and returns `epsilon_infinity+sum(f*wp**2/(w0**2-omega**2-i*gamma*omega))`. Real-axis poles are rejected. Set instantaneous background permittivity with epsilon_infinity (default one); anisotropy, active media and automatic unit conversion are not included. Constrained fitting is a separate explicit entry described below.
+The continuous equations are `dP/dt=J` and `dJ/dt=f*wp**2*E/(4*pi)-gamma*J-w0**2*P`. `permittivity(omega)` uses exp(-i omega t) and returns `epsilon_infinity+sum(f*wp**2/(w0**2-omega**2-i*gamma*omega))`. Real-axis poles are rejected. Set instantaneous background permittivity with epsilon_infinity (default one); this scalar model is isotropic and passive, and does not convert units automatically. Use `TensorLorentzDrude` for direction-dependent response. Constrained fitting is a separate explicit entry described below.
 
 ## Ownership and memory
 
 Coefficients are computed once per state and retained natively with its per-pole history. Normal steps pass only three E components and receive three P/J components each. `current`/`polarization` return copies of accepted totals. Full pole histories cross the boundary only for snapshots/restoration. Nonfinite arithmetic rejects the entire call without changing accepted time/history, including batch calls.
 
-Use a context manager or `close()` for direct states. `respond` and MPI response sessions close states automatically; GC also releases abandoned handles. Closed states reject stepping and snapshots/restoration; last time/totals remain readable. Do not operate on one state concurrently. Native registry calls are serialized.
+Use a context manager or `close()` for direct states. `respond` and MPI response sessions close states automatically; GC also releases abandoned handles. Closed states reject stepping and snapshots/restoration; last time/totals remain readable. Do not operate on one state concurrently. solver registry calls are serialized.
 
-There is no arbitrary memory or state-count limit. Dimensions and allocation failures are checked. Major native arrays occupy approximately `192*n_poles+48` bytes per state, excluding metadata, Python storage and input/output arrays. Many idle states retain memory, so close them when finished. Coefficients belong to states because dt can differ between states.
+There is no arbitrary memory or state-count limit. Dimensions and allocation failures are checked. Major solver arrays occupy approximately `192*n_poles+48` bytes per state, excluding metadata, Python storage and input/output arrays. Many idle states retain memory, so close them when finished. Coefficients belong to states because dt can differ between states.
 
-Material objects remain data-only and pickleable after use. For evolving states use [snapshot/restore](SNAPSHOTS.en.md) with the same model and settings rather than pickle. This does not add an LD plugin to the public C material vtable. Native builds remain explicit, never on import.
+Material objects remain data-only and pickleable after use. For evolving states use [snapshot/restore](SNAPSHOTS.en.md) with the same model and settings rather than pickle. This does not add an LD plugin to the public C material vtable. solver builds remain explicit, never on import.
 
 ## Instantaneous background epsilon_infinity
 
@@ -51,7 +51,7 @@ Supply simultaneous, spatially aligned (...,3) arrays. These observables and
 continuous permittivity are computed in Fortran. The background is not a
 fictitious pole and belongs to the immutable model/checkpoint identity.
 
-Native FDTD uses existing epsilon_em and includes the background in both
+FDTD called directly from Python uses existing epsilon_em and includes the background in both
 semi-implicit E-update coefficients. Pole update arithmetic/order is unchanged.
 The conservative CFL includes vacuum/PML; backgrounds below one tighten it,
 whereas a slower material does not relax the vacuum limit.
@@ -60,14 +60,14 @@ For non-unit backgrounds, Impulse remains the legacy dispersive-pole current
 kick: propagation and raw pole/observation data continue. Legacy normalized
 optical spectra assuming background one are omitted with a warning. Use
 PlaneWave with an explicit reference/normalization for optical response.
-The A-endpoint LD adapter also returns pole current only; the host field must
+The A-endpoint LD adapter also returns pole current only; the calling program field must
 include the background separately, and this case warns. Do not feed only pole
 current into dielectric_function and interpret the result as full epsilon:
 that observable assumes total charge current. material.permittivity returns
 the full continuous LD-model permittivity directly.
 
 Local synthetic checks cover MPI1/2 slab/Fresnel agreement at background2.25,
-the zero-dispersion dielectric limit, and direct native checkpoint continuation
+the zero-dispersion dielectric limit, and direct saved solver state continuation
 with two distinct backgrounds. They do not certify real-material accuracy.
 
 ## Constrained fitting and provenance
@@ -84,7 +84,7 @@ print(report.as_dict())
 
 Supply increasing nonnegative angular frequencies (strictly positive for Drude fits) and complex epsilon, or nk=(N,2)
 columns with n,k. The n/k conversion assumes a nonmagnetic medium (mu=1); supply epsilon explicitly for magnetic media. The absorption convention is n+i*k with exp(-i omega t);
-conversion to epsilon is native. Units must be atomic_gaussian, without implicit
+conversion to epsilon is solver. Units must be atomic_gaussian, without implicit
 conversion. A dielectric_function result may be supplied directly as the first
 argument; masked bins are excluded and the optical configuration is retained.
 Select a polarization/component explicitly; no tensor averaging or data download
@@ -94,7 +94,7 @@ poles counts the Drude pole. drude=True fixes its first resonance to zero.
 epsilon_infinity=True fits a positive background, False fixes one, and a positive
 real fixes that value. initial accepts an LDModelConfig or LorentzDrude seed.
 Returned coefficients use plasma_frequency=1, with oscillator weights in strength.
-Native projected LM keeps strengths/resonances/damping nonnegative and the fitted
+solver projected LM keeps strengths/resonances/damping nonnegative and the fitted
 background at least1e-9. The objective is sum|delta epsilon/max(1,abs(epsilon))|^2.
 relative_rms_error is the unweighted complex residual norm divided by the data
 norm; rtol (default5%) classifies that quantity, not universal physical accuracy.
@@ -107,7 +107,7 @@ candidate. accepted and optimizer_converged are separate. No existing simulation
 is stopped and no additional solver job is launched.
 
 FitReport records band, both residuals, model/iteration settings, initial model,
-software version, kernel elapsed time, citation, reference-file SHA256 and separate
+software version, calculation routine elapsed time, citation, reference-file SHA256 and separate
 normalized-array SHA256. source_file is a caller-supplied reference, not a claim
 that this API parsed it. as_dict() returns independent JSON-ready data.
 recommended_dt=0.1/fastest active pole/plasma/damping scale is an accuracy heuristic,
@@ -143,7 +143,7 @@ does not guarantee a global optimum or acceptable physical accuracy.
 component, epsilon_ij=epsilon*delta_ij. `LorentzDrude.from_config(tensor)`, FDTD materials
 and LDMaterialProvider accept it. This applies across modes, not only3D E/H.
 `permittivity_tensor(omega)` returns immutable complex(...,3,3) arrays; scalar APIs remain.
-FDTD.tensor_materials and its run record expose the representation. Native FDTD now supports isotropic, diagonal and reciprocal off-diagonal tensors; standalone/MPI tensor material response is now implemented below.
+FDTD.tensor_materials and its run record expose the representation. FDTD called directly from Python now supports isotropic, diagonal and reciprocal off-diagonal tensors; standalone/MPI tensor material response is now implemented below.
 See OPTICAL_DATA.en.md for oxide data, source assumptions and limits.
 
 ## Reciprocal diagonal/off-diagonal LD response
@@ -177,8 +177,8 @@ nonfinite steps retain accepted state. Concurrent use of one state is not suppor
 A-endpoint adapters return dispersive-pole current only; hosts own the instantaneous
 background tensor. This is reciprocal passive response, not antisymmetric magneto-optics.
 Automatic axis rotation remains unimplemented. Tensor fitting is described below.
-Standalone/MPI material response and native E/H FDTD support reciprocal off-diagonal tensors without dropping components.
-The native E/H implementation uses paired Yee edge/node means and their transpose; geometry is not restricted to a 3D-only material API.
+Standalone/MPI material response and FDTD called directly from Python support reciprocal off-diagonal tensors without dropping components.
+The FDTD updates of E and H implementation uses paired Yee edge/node means and their transpose; geometry is not restricted to a 3D-only material API.
 Run `python -m salmonpy.examples.ld_response --anisotropic` for a synthetic example.
 
 
@@ -201,7 +201,7 @@ are distinct report fields. An inaccurate candidate is returned with a warning.
 A zero initial pole factor can be stationary: provide nonzero initial strengths.
 
 The new extraction/fit path has synthetic numerical verification, not a newly
-converged real-material TDDFT validation. Reciprocal off-diagonal native E/H FDTD is connected as described in FDTD_MATERIALS.en.md. A fitted candidate still needs accuracy, bandwidth, stability and grid checks.
+converged real-material TDDFT validation. Reciprocal off-diagonal FDTD called directly from Python is connected as described in FDTD_MATERIALS.en.md. A fitted candidate still needs accuracy, bandwidth, stability and grid checks.
 
 ```python
 from salmonpy.analysis import dielectric_tensor

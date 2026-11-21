@@ -1,6 +1,8 @@
 # Saving and restoring states
 
-[日本語](SNAPSHOTS.md) · Topic: `snapshots` · Paired revision: `2026-11-14.3`
+[日本語](SNAPSHOTS.md)
+
+Keep a copy of a calculation state in the current Python session so you can return to it or try different conditions from the same starting point. For saving to disk and restarting another job, see the [checkpoint guide](CHECKPOINTING.en.md).
 
 `state.snapshot()` returns an immutable `StateSnapshot` token.
 `state.restore(token)` replaces the accepted state and returns `None`.
@@ -15,7 +17,7 @@ private temporary files. Neither API builds a solver or invokes MPI.
 |---|---|
 | `TDDFTState` (process isolated) | Initial A/current, accepted A/current history and counter |
 | `LDState` | Per-pole P/J, previous E and step counter |
-| `SBEState` | Density matrix, previous A/c, cached native matter current and counter |
+| `SBEState` | Density matrix, previous A/c, cached solver matter current and counter |
 | `Transverse` state | A and step counter |
 | `Longitudinal` state | A, two induced-A levels and counter |
 | `ThinFilm` state | A, reflected A and counter |
@@ -62,7 +64,7 @@ b.step([-0.1, 0., 0.])      # does not change a or saved
 ```
 
 Run `python -m salmonpy.examples.snapshot_restore` for LD, SBE and all four
-fields. It needs installed LD/SBE kernels but no full SALMON runtime. The sample
+fields. It needs installed LD/SBE calculation routines but no full SALMON runtime. The sample
 checks exact replay locally; it does not claim cross-platform bitwise identity
 or physical convergence. Ordinary scientific regression tolerances remain valid.
 
@@ -71,7 +73,7 @@ or physical convergence. Ordinary scientific regression tolerances remain valid.
 Use `saved = state.snapshot()` and `state.restore(saved)` on a state returned by
 `TDDFTInitialState.new_state`. The same initial model object, fixed dt, initial A,
 capacity, executable checksum and thread count are required. Closed states reject
-both operations. Existing states retain a lease on one shared baseline after
+both operations. Existing states retain a reference to one shared baseline after
 the model loader closes; each worker owns an independent writable copy. N live
 states retain N+1 managed bundles, excluding caller input and saved outputs.
 Restore temporarily adds one worker copy, sharing the same baseline. Closing
@@ -147,14 +149,14 @@ serialize/edit tokens or pass output archives to `restore`. Snapshot public
 metadata (`kind`, `schema`, `version`, `step_index`, `time`) is diagnostic only;
 private fields are not an editable checkpoint schema.
 
-Embedded TDDFT, native E/H FDTD and MPI sessions do not gain this API. A host manually coupling supported material/field states must save and
+TDDFT called in the Python process, FDTD called directly from Python and MPI sessions do not gain this API. A calling program manually coupling supported material/field states must save and
 restore **both at the same accepted coupling boundary**. There is no automatic
 transaction across components; a single state's atomic restore does not provide
 MPI/global rollback. `couple()` still creates and closes its own states.
-Changing dt, adding adaptive stepping/subcycles or making native TDDFT reentrant
+Changing dt, adding adaptive stepping/subcycles or making TDDFT called directly from Python reentrant
 requires separate work. Transverse prescribed-A use remains the basic workflow.
 
-SBE now keeps native model/density handles; snapshot export and atomic restore
+SBE now keeps solver model/density handles; snapshot export and atomic restore
 retain the same contract. See [SBE ownership](SBE.en.md) for close/GC and memory tradeoffs.
 
-LD retains native pole histories and transfers them only for snapshots/restoration. See [LD.en.md](LD.en.md) for ownership and memory.
+LD retains solver pole histories and transfers them only for snapshots/restoration. See [LD.en.md](LD.en.md) for ownership and memory.

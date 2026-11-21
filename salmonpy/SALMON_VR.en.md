@@ -19,7 +19,7 @@ result = export_cubes(
 
 Use atomic-unit inputs, density changes relative to the initial state, and Ac=A/c.
 No unit conversion, density subtraction or E-to-A integration is performed.
-Provide strictly increasing native step IDs in 0..999999. `dt_au` is the native
+Provide strictly increasing solver step IDs in 0..999999. `dt_au` is the solver
 time step, not the interval between saved frames. Files are paired by list order;
 no physical meaning or time is inferred from names. Grid, origin and fixed atoms
 must agree. The viewer linearly interpolates gaps; the exporter does not.
@@ -41,7 +41,7 @@ OS security decisions remain with the user; no quarantine or security changes
 are performed. The manual specifies Apple Silicon and macOS 14.5+. Export works
 on other Python platforms; Windows app launch is not implemented or verified.
 
-For an OutputArchive, choose indexed CUBE paths and supply their native steps.
+For an OutputArchive, choose indexed CUBE paths and supply their solver steps.
 A run without saved density distributions cannot provide a density animation.
 Budget memory and disk for CUBE data and the copied app; the viewer loads all
 frames. CLI sample: `python -m salmonpy.examples.salmon_vr_export --help`.

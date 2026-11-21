@@ -2,7 +2,7 @@
 
 `tddft_from_catalog` selects a local SALMONpy-generated `salmonpy.gs/1` ground
 state for an explicitly configured DFT material. It does not run SCF, download,
-compile, or start a native worker. `new_state(dt=...)` starts an independent worker.
+compile, or start a solver worker. `new_state(dt=...)` starts an independent worker.
 Install optional ASE/f90nml and prepare a verified local DFT/TDDFT runtime first.
 
 Add this entry alongside `materials` in a `salmonpy.materials/1` recipe:
@@ -27,8 +27,8 @@ license and provenance files too. `prepare_inputs` can collect these with an
 explicit destination-to-source file mapping; verify the bundle after transfer
 with `verify_inputs`, using its separately recorded manifest digest. See
 [offline preparation](PREPARATION.en.md). Compute-node execution needs no network.
-Native restart portability is not promised: this selector requires the exact
-executable SHA256 used for GS creation and an otherwise compatible runtime host.
+solver restart portability is not promised: this selector requires the exact
+executable SHA256 used for GS creation and an otherwise compatible runtime calling program.
 
 ```python
 from salmonpy.builtin_materials import builtin_material_registry
@@ -45,7 +45,7 @@ with tddft_from_catalog(catalog, 'Si-ground', base_directory=bundle,
     metadata = model.record()
 ```
 
-The loader checks the pinned manifest, native file hashes, SCF completion,
+The loader checks the pinned manifest, solver file hashes, SCF completion,
 ordered geometry, cell, electrons, states, grid, k mesh, XC, pseudopotential bytes,
 actual scientific GS input and copied snapshot. Reordered or transformed cells
 are not silently converted. Malformed metadata and mismatches are rejected.

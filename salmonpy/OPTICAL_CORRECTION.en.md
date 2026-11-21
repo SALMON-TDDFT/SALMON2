@@ -1,6 +1,6 @@
 # Long-wavelength optical correction
 
-`salmonpy.analysis.long_wavelength_correction` implements the insulating low-frequency treatment of [Otobe et al., PRB 85, 045134, Appendix A4](https://doi.org/10.1103/PhysRevB.85.045134). Numerical fitting, conductivity conversion and correction run in the Fortran observation kernel. TDDFT propagation, measured currents and Maxwell feedback are unchanged.
+`salmonpy.analysis.long_wavelength_correction` implements the insulating low-frequency treatment of [Otobe et al., PRB 85, 045134, Appendix A4](https://doi.org/10.1103/PhysRevB.85.045134). Numerical fitting, conductivity conversion and correction run in the Fortran observation calculation routine. TDDFT propagation, measured currents and Maxwell feedback are unchanged.
 
 ```python
 from salmonpy.analysis import long_wavelength_correction

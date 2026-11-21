@@ -1,6 +1,6 @@
 # Custom FDTD materials and interfaces
 
-[日本語](FDTD_MATERIALS.md) · Topic: `fdtd_materials` · Paired revision: `2026-11-21.1`
+[日本語](FDTD_MATERIALS.md)
 
 Run `python -m salmonpy.examples.fdtd_layers MANAGED_RUNTIME NEW_DIRECTORY`
 with a verified runtime v2. This one-process, one-thread example contains two
@@ -32,7 +32,7 @@ unlike dispersive models:
 - A magnetic-field site takes the first nonvacuum cell in fixed spatial order.
   For Hx this is `(i,j,k)`, `(i,j+1,k)`, `(i,j,k+1)`, `(i,j+1,k+1)`; Hy and Hz
   use the corresponding transverse planes. A fully vacuum stencil stays vacuum.
-- Native MPI initialization exchanges faces, edges and corners of the material
+- solver MPI initialization exchanges faces, edges and corners of the material
   grid. The existing E/H and LD time-update order remains unchanged.
 
 This rule preserves the tested single-material/vacuum calculations. Results at
@@ -49,8 +49,8 @@ parameters or timestep.
 This public batch interface supports LD and constant dielectric materials. It does
 not yet accept arbitrary current callbacks, anisotropic tensors, tabulated optical
 response, periodic boundaries, oblique incidence or TDDFT/SBE materials in E/H
-FDTD. The Python batch launcher can also start the existing native MPI FDTD with
-`FDTDMPI`; see below. TDDFT/SBE A-to-J interfaces and the native A-form multiscale path remain
+FDTD. The Python batch launcher can also start the existing solver MPI FDTD with
+`FDTDMPI`; see below. TDDFT/SBE A-to-J interfaces and the solver A-form multiscale path remain
 separate capabilities.
 
 
@@ -60,7 +60,7 @@ FDTD was already MPI-parallel in SALMON. This API selects its existing spatial
 partition; it does not add a new Maxwell parallel algorithm. Each FDTD rank owns
 its local field grid and LD P/J/Q histories, selecting coefficients by material
 ID. Several LD materials and many LD cells can reside on one rank. No dedicated
-MPI group is allocated per LD cell. Native implicit E/LD/H update order is kept;
+MPI group is allocated per LD cell. solver implicit E/LD/H update order is kept;
 the separate endpoint-A LD response-service adapter is not used here.
 
 ```python
@@ -72,11 +72,11 @@ result = solver.run(calculation, "NEW_OUTPUT", mpi=FDTDMPI((2, 2, 1)), threads=1
 Run this from a fresh serial Python controller, not under mpiexec or initialized
 mpi4py. FDTDMPI's three integers define the spatial process grid; their product is
 the MPI rank count. `launcher=("mpiexec",)` can be replaced with an argument tuple
-for the host launcher; there is no shell interpolation. Each rank needs at least
+for the calling program launcher; there is no shell interpolation. Each rank needs at least
 two cells per direction. MPI launching currently targets macOS/Linux.
 
 Build explicitly using `python -m salmonpy.runtime build` with USE_MPI=ON and the
-host MPI C/Fortran compilers. See RUNTIME.en.md; choose the build job count from
+MPI managed by the calling program C/Fortran compilers. See RUNTIME.en.md; choose the build job count from
 your memory/CPU budget. The successful build record binds MPI capability to the
 binary hash. An older record without that capability requires a fresh build;
 editing CMakeCache does not confer MPI capability. Portable serial runtime bundles
@@ -98,7 +98,7 @@ This example uses three synthetic LD materials with 1, 2 and 3 poles. It prints
 material-cell counts and leaves memory explicitly unmeasured. Production sizes
 need resource planning and numerical convergence tests.
 
-For electronic feedback into E/H, use the separate [native coupling entry](COUPLED.en.md). Do not put TDDFT objects in the batch API material list.
+For electronic feedback into E/H, use the separate [solver coupling entry](COUPLED.en.md). Do not put TDDFT objects in the batch API material list.
 
 ## Transverse-periodic slabs
 
@@ -116,7 +116,7 @@ Fitted LD valid_frequency_range is retained. Out-of-band source carriers and bro
 component, epsilon_ij=epsilon*delta_ij. `LorentzDrude.from_config(tensor)`, FDTD materials
 and LDMaterialProvider accept it. This applies across modes, not only3D E/H.
 `permittivity_tensor(omega)` returns immutable complex(...,3,3) arrays; scalar APIs remain.
-FDTD.tensor_materials and its run record expose the representation. Native FDTD now supports isotropic, diagonal and reciprocal off-diagonal tensors; standalone/MPI tensor material response is now implemented below.
+FDTD.tensor_materials and its run record expose the representation. FDTD called directly from Python now supports isotropic, diagonal and reciprocal off-diagonal tensors; standalone/MPI tensor material response is now implemented below.
 See OPTICAL_DATA.en.md for oxide data, source assumptions and limits.
 
 ## Diagonal tensor FDTD and waveplates
@@ -155,13 +155,13 @@ omitting the legacy scalar optical normalization.
 
 The reported phasor is a trapezoidal Fourier integral with units E(au)*time(au), not the pulse peak amplitude. Polarization uses its normalized ratios.
 
-## Reciprocal off-diagonal native E/H FDTD
+## Reciprocal off-diagonal FDTD called directly from Python
 
 Pass TensorLorentzDrude with lab-frame symmetric SPD epsilon_infinity and PSD
 pole strengths. Each pole keeps a scalar resonance/damping shared by its matrix
-components. This is not antisymmetric magneto-optics. It applies to the native E/H
-backend with 1D-like, 2D-like or 3D geometry; it does not add an anisotropic background
-to the separate maxwell.py A-only field components. Native nonzero Bloch phase is
+components. This is not antisymmetric magneto-optics. It applies to the FDTD updates of E and H
+calculation implementation with 1D-like, 2D-like or 3D geometry; it does not add an anisotropic background
+to the separate maxwell.py A-only field components. solver nonzero Bloch phase is
 not implemented for the new tensor operator (Python FDTD does not expose it).
 
 Full tensors use media_type='ld-tensor' and salmonpy-ld-tensor.dat, staged by both
@@ -175,7 +175,7 @@ work is Fortran. Diagonal/isotropic input retains the existing arithmetic path.
 FDTD(..., tensor_rtol=1e-10, tensor_maxiter=200) controls this solve. A finite solve
 that exhausts its budget warns and continues; inspect its residual and refine as
 needed. Nonfinite arithmetic or nonpositive curvature rejects the trial, with
-native host state rollback permitting retry. PEC fixed edges stay excluded.
+solver calling program state rollback permitting retry. PEC fixed edges stay excluded.
 The full-tensor direct checkpoint binds the immutable tensor model and solver
 settings; mismatches are rejected before committing. Old scalar/diagonal checkpoint
 streams retain their format. This is not repartitionable field checkpointing.
@@ -196,7 +196,7 @@ Local regression (not required CI):
 ```sh
 mpiexec -n 2 python tools/test_eh_deep_recovery_mpi.py BUILD_JSON NEW_OUTPUT --baseline --resume-midpoint --tensor
 ```
-This reuses the common native recovery suite; it needs a source checkout and allocated resources.
+This reuses the common solver recovery suite; it needs a source checkout and allocated resources.
 
 
 ## LD-only reference-frequency subpixel smoothing
@@ -211,11 +211,11 @@ smoothed = replace(calculation, smoothing=SubpixelSmoothing())
 # Impulse has no carrier: specify SubpixelSmoothing(reference_omega=...).
 ```
 
-This option is for native E/H FDTD (1D-like, 2D-like and 3D geometries) with
+This option is for FDTD called directly from Python (1D-like, 2D-like and 3D geometries) with
 explicit LD materials. It never smooths SBE/TDDFT or user A-to-j constitutive
 states. Interfaces must touch an LD phase; a constant dielectric may be its
 other side. Without LD, or with unsupported magnetic/conductive background,
-warn and retain the ordinary coefficients. Native response-point neighborhoods
+warn and retain the ordinary coefficients. solver response-point neighborhoods
 are excluded from interface preparation. This does not smooth atomistic density
 or change electronic current, its normalization or the Maxwell coupling protocol.
 
@@ -236,10 +236,10 @@ with warnings. LD interfaces with other LD materials are allowed independently
 of their IDs. Source geometry overlap still follows last-shape precedence.
 Vacuum PML/PEC treatment is retained; keep material away from PML.
 
-The profile is salmonpy-subpixel.dat (version2), staged automatically by run()
+The configuration is salmonpy-subpixel.dat (version2), staged automatically by run()
 and NativeEHField, bound to runtime/model/checkpoint identity. Export input_assets()
-with input_text() when preparing a batch job. A matching audited native runtime
-is required. Missing/corrupt profiles are errors, not silent fallback. Summary
+with input_text() when preparing a batch job. A matching audited solver runtime
+is required. Missing/corrupt configurations are errors, not silent fallback. Summary
 salmonpy-subpixel-summary.json reports reference, global oscillator slots,
 excluded response points, mixed/fallback sample counts, matching error and a
 conservative background time-step bound. Exceeding this bound warns and continues;
@@ -248,7 +248,7 @@ warn and keep calculating.
 
 Allocation scales with all active material pole slots times local grid volume,
 including cell-owned tensors; poles are not currently merged by equal rates.
-Inspect the native allocation estimate before using many distinct LD models.
+Inspect the solver allocation estimate before using many distinct LD models.
 Direct checkpoints include these coefficients and reject incompatible models;
 MPI field repartitioning is not added by this option.
 

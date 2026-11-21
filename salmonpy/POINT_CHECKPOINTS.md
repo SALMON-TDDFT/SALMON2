@@ -21,11 +21,11 @@ with PointRun({'p': rebuilt_configured_initial}, run_id='experiment-1') as run:
 
 外側のローダーはrun_id、point_id、material_id/definition_digest、任意initial_state_id/digestの
 完全一致を要求します。別の点・runはbackendの復元前に拒否します。同じrun IDを使うのはそのrunの
-再開を意味し、分岐ではありません。モデルオブジェクトは新しく作れますが、native側の内容・runtime・
+再開を意味し、分岐ではありません。モデルオブジェクトは新しく作れますが、計算処理側の内容・runtime・
 dt・容量・threadsの互換性検査は維持します。モデル生成や任意restart変換は行いません。
 
 外側で内部manifestのhashを照合し、既存ローダーが配列を検証して、受理済みA/電流履歴を再計算します。
-復元失敗時は既存TDDFTの原子的復元契約に従います。履歴に比例して時間がかかり、復元候補workerと
+復元失敗時は既存TDDFTの原子的復元仕様に従います。履歴に比例して時間がかかり、復元用の別状態workerと
 対象workerが共存する場合があるため、両方のメモリを確保してください。ID不一致では再計算を始めません。
 保存先は上書きせず、失敗時は今回新しく作ったディレクトリだけを削除します。
 

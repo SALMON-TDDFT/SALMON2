@@ -1,6 +1,6 @@
 # Author one material model for serial and MPI use
 
-[日本語](MATERIALS.md) · Topic: `materials` · Paired revision: `2026-11-14.2`
+[日本語](MATERIALS.md)
 
 Implement one serial material contract. Use `crystal.respond` for a waveform,
 and `materials.bind_material` to connect it to the existing MPI response service.
@@ -29,7 +29,7 @@ If the internal observable is SALMON matter current J, explicitly declare
 j=−J exactly once. The software cannot infer physical units/signs from numbers.
 
 Check calculations before committing state so a failing step leaves accepted
-history intact. A model calling MPI internally must use the collective backend
+history intact. A model calling MPI internally must use the collective calculation implementation
 contract below. Models/states are not safe for concurrent calls from threads.
 
 ## Use the same model serially
@@ -95,14 +95,14 @@ An MPI step failure invalidates the session collectively; other points may alrea
 have advanced, so no global rollback is promised. Collectively close the session
 before its context.
 
-## Internally parallel and native models
+## Internally parallel and solver models
 
-A genuinely parallel model continues to implement the existing provider/backend
+A genuinely parallel model continues to implement the existing provider/calculation implementation
 collective contract using solver_comm. This serial adapter rejects multirank
 material groups and does not duplicate work while claiming internal parallelism.
 See [DISTRIBUTED.en.md](DISTRIBUTED.en.md).
 
-Native TDDFT retains TDDFTMaterialProvider/TDDFTResponseBackend with managed-runtime
+TDDFT called directly from Python retains TDDFTMaterialProvider/TDDFTResponseBackend with managed-runtime
 validation. LD remains E-driven and uses LDMaterialProvider/LDResponseBackend.
 This entry does not implement whole-MPI rollback, collective checkpoint restore
-or an MPI-wide C ABI. For serial native material plugins, see [C_ABI.en.md](C_ABI.en.md).
+or an MPI-wide C ABI. For serial solver material plugins, see [C_ABI.en.md](C_ABI.en.md).

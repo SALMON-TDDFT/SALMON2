@@ -833,8 +833,8 @@ contains
     
     !*** check and partially input restart date ***************************************************************!
     if(yn_restart=='y') then
+      restart_io=0
       !check restart date
-      if(directory_exists(directory_read_data)) then
         if(comm_is_root(nproc_id_global)) then
           write(*,*)
           write(*,*) "**************************"
@@ -846,14 +846,19 @@ contains
           write(*,'(A)') " Otherwise, unexpected errors would appear."
           write(*,*) "**************************"
         end if
-      else
-        call stop_em('Invalid directory_read_data:',c2=trim(adjustl(directory_read_data)),c3='is not found.')
-      end if
-      
       !input nproc_size_global, nt_em, and obs_samp_em used in the previous calculation
-      call input_r_txt_em(fe%ifn,1,1,'nproc_size_global',i0d=nsg_p  )
-      call input_r_txt_em(fe%ifn,1,1,'nt_em'            ,i0d=nt_em_p)
-      call input_r_txt_em(fe%ifn,1,1,'obs_samp_em'      ,i0d=iobs_samp_em_p)
+      call input_r_txt_em(fe%ifn,1,1,'nproc_size_global',i0d=nsg_p  , &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
+      call input_r_txt_em(fe%ifn,1,1,'nt_em'            ,i0d=nt_em_p, &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
+      call input_r_txt_em(fe%ifn,1,1,'obs_samp_em'      ,i0d=iobs_samp_em_p, &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       if(nt_em/=nt_em_p) then
         call stop_em('When yn_restart="y",',c2='nt_em must be same with that used in the previous calculation.')
       end if
@@ -867,13 +872,25 @@ contains
       do ii=0,(nsg_p-1)
         write(tmp_name1,*) ii
         tmp_name2 = 'mg_is_'//trim(adjustl(tmp_name1))
-        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=is_p(:,ii))
+        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=is_p(:,ii), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         tmp_name2 = 'mg_ie_'//trim(adjustl(tmp_name1));
-        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=ie_p(:,ii))
+        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=ie_p(:,ii), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         tmp_name2 = 'mg_is_array_'//trim(adjustl(tmp_name1))
-        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=is_a_p(:,ii))
+        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=is_a_p(:,ii), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         tmp_name2 = 'mg_ie_array_'//trim(adjustl(tmp_name1))
-        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=ie_a_p(:,ii))
+        call input_r_txt_em(fe%ifn,1,3,trim(adjustl(tmp_name2)),i1d=ie_a_p(:,ii), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
       end do
       
       !set flag
@@ -931,27 +948,6 @@ contains
         error stop 'Required EM restart directory creation failed'
       endif
 
-      !output nproc_size_global, nt_em, and obs_samp_em
-      call output_r_txt_em(fe%ifn,1,1,'single','nproc_size_global',i0d=nproc_size_global, &
-            io_status=restart_io)
-      call output_r_txt_em(fe%ifn,1,1,'single','nt_em',            i0d=nt_em            , &
-            io_status=restart_io)
-      call output_r_txt_em(fe%ifn,1,1,'single','obs_samp_em',      i0d=obs_samp_em      , &
-            io_status=restart_io)
-      
-      !output array size
-      call output_r_txt_em(fe%ifn,1,3,'all','mg_is'      ,i1d=fs%mg%is      , &
-            io_status=restart_io)
-      call output_r_txt_em(fe%ifn,1,3,'all','mg_ie'      ,i1d=fs%mg%ie      , &
-            io_status=restart_io)
-      call output_r_txt_em(fe%ifn,1,3,'all','mg_is_array',i1d=fs%mg%is_array, &
-            io_status=restart_io)
-      call output_r_txt_em(fe%ifn,1,3,'all','mg_ie_array',i1d=fs%mg%ie_array, &
-            io_status=restart_io)
-      restart_bad=0
-      if(restart_io/=0)restart_bad=1
-      call comm_summation(restart_bad,restart_total,nproc_group_global)
-      if(restart_total/=0)error stop 'Required EM restart metadata save failed; incomplete checkpoint'
     end if
     
     !*** make or input shape data *****************************************************************************!
@@ -2541,9 +2537,18 @@ contains
       elapsed_time = get_wtime()
       
       !input iter_now(substituted to iter_sta with +1), e_max and h_max
-      call input_r_txt_em(fe%ifn,1,1,'iter_now',i0d=fe%iter_sta); fe%iter_sta = fe%iter_sta + 1;
-      call input_r_txt_em(fe%ifn,1,1,'e_max',   r0d=fe%e_max   );
-      call input_r_txt_em(fe%ifn,1,1,'h_max',   r0d=fe%h_max   );
+      call input_r_txt_em(fe%ifn,1,1,'iter_now',i0d=fe%iter_sta, &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+      fe%iter_sta = fe%iter_sta + 1;
+      call input_r_txt_em(fe%ifn,1,1,'e_max',   r0d=fe%e_max   , &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
+      call input_r_txt_em(fe%ifn,1,1,'h_max',   r0d=fe%h_max   , &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       
       !input binary data
       is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
@@ -2552,29 +2557,65 @@ contains
       is5(4) = 1          ; ie5(4) = 1          ;
       is5(5) = 1          ; ie5(5) = 1          ;
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ex_y',&
-                          r3d=fe%ex_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%ex_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ex_z',&
-                          r3d=fe%ex_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%ex_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ey_z',&
-                          r3d=fe%ey_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%ey_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ey_x',&
-                          r3d=fe%ey_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%ey_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ez_x',&
-                          r3d=fe%ez_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%ez_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ez_y',&
-                          r3d=fe%ez_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%ez_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hx_y',&
-                          r3d=fe%hx_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%hx_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hx_z',&
-                          r3d=fe%hx_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%hx_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hy_z',&
-                          r3d=fe%hy_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%hy_z(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hy_x',&
-                          r3d=fe%hy_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%hy_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hz_x',&
-                          r3d=fe%hz_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%hz_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hz_y',&
-                          r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                          r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+      if(restart_io/=0)error stop 'Required EM restart read failed'
+
       call eh_sendrecv(fs,fe,'e'); call eh_sendrecv(fs,fe,'h');
       if(ld%enabled) then
         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)       ;
@@ -2583,24 +2624,51 @@ contains
         is5(4) = 1          ; ie5(4) = ld%max_pole_num_ld;
         is5(5) = 1          ; ie5(5) = 1                 ;
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjx_ld',&
-                            r4d=ld%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d=ld%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjy_ld',&
-                            r4d=ld%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d=ld%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjz_ld',&
-                            r4d=ld%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d=ld%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','px_ld' ,&
-                            r4d= ld%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d= ld%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','py_ld' ,&
-                            r4d= ld%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d= ld%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','pz_ld' ,&
-                            r4d= ld%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d= ld%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         is5(4) = 1; ie5(4) = 1;
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjx_fdtd_ld',&
-                            r3d=ld%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                            r3d=ld%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjy_fdtd_ld',&
-                            r3d=ld%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                            r3d=ld%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjz_fdtd_ld',&
-                            r3d=ld%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                            r3d=ld%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)), &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
       end if
       if(fe%flag_lr) then
         is5(1) = 1; ie5(1) = nt_em;
@@ -2608,13 +2676,25 @@ contains
         is5(3) = 1; ie5(3) = 1;
         is5(4) = 1; ie5(4) = 1;
         is5(5) = 1; ie5(5) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','time_lr',r1d=fe%time_lr)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','time_lr',r1d=fe%time_lr, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         is5(2) = 1; ie5(2) = 3;
         if(yn_periodic=='n') then
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','dip_lr' ,r2d=fe%dip_lr )
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','dip_lr' ,r2d=fe%dip_lr , &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
         elseif(yn_periodic=='y') then
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','curr_lr',r2d=fe%curr_lr)
-          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','e_lr'   ,r2d=fe%e_lr   )
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','curr_lr',r2d=fe%curr_lr, &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
+          call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','e_lr'   ,r2d=fe%e_lr   , &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
         end if
       end if
       if(fe%flag_obs) then
@@ -2627,69 +2707,150 @@ contains
         do ii=1,obs_num_em
           write(save_name,*) ii
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ex_xy_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_ex_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1))
+                              c5d=fe%obs_ex_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ey_xy_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_ey_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1))
+                              c5d=fe%obs_ey_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ez_xy_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_ez_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1))
+                              c5d=fe%obs_ez_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hx_xy_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_hx_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1))
+                              c5d=fe%obs_hx_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hy_xy_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_hy_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1))
+                              c5d=fe%obs_hy_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hz_xy_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_hz_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1))
+                              c5d=fe%obs_hz_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jx_xy_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_jx_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1))
+                              c5d=fe%obs_jx_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jy_xy_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_jy_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1))
+                              c5d=fe%obs_jy_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jz_xy_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_jz_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1))
+                              c5d=fe%obs_jz_xy_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,1), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
         end do
         is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
         is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
         do ii=1,obs_num_em
           write(save_name,*) ii
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ex_yz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_ex_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2))
+                              c5d=fe%obs_ex_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ey_yz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_ey_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2))
+                              c5d=fe%obs_ey_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ez_yz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_ez_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2))
+                              c5d=fe%obs_ez_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hx_yz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_hx_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2))
+                              c5d=fe%obs_hx_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hy_yz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_hy_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2))
+                              c5d=fe%obs_hy_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hz_yz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_hz_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2))
+                              c5d=fe%obs_hz_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jx_yz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_jx_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2))
+                              c5d=fe%obs_jx_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jy_yz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_jy_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2))
+                              c5d=fe%obs_jy_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jz_yz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_jz_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2))
+                              c5d=fe%obs_jz_yz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,2), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
         end do
         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
         is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
         do ii=1,obs_num_em
           write(save_name,*) ii
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ex_xz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_ex_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
+                              c5d=fe%obs_ex_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ey_xz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_ey_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
+                              c5d=fe%obs_ey_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_ez_xz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_ez_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
+                              c5d=fe%obs_ez_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hx_xz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_hx_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
+                              c5d=fe%obs_hx_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hy_xz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_hy_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
+                              c5d=fe%obs_hy_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_hz_xz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_hz_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
+                              c5d=fe%obs_hz_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jx_xz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_jx_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
+                              c5d=fe%obs_jx_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jy_xz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_jy_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
+                              c5d=fe%obs_jy_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','obs_jz_xz_ene_iobs'//trim(adjustl(save_name)),&
-                              c5d=fe%obs_jz_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3))
+                              c5d=fe%obs_jz_xz_ene(:,:,ii,:,:),ipe=fe%iobs_pl_pe(ii,3), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
         end do
       end if
       end if
@@ -2705,23 +2866,59 @@ contains
         is5(3) = 1; ie5(3) = 2;
         is5(4) = 1; ie5(4) = 1;
         is5(5) = 1; ie5(5) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ex_inc_pa_ene',c3d=fe%ase_ex_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ey_inc_pa_ene',c3d=fe%ase_ey_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ez_inc_pa_ene',c3d=fe%ase_ez_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hx_inc_pa_ene',c3d=fe%ase_hx_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hy_inc_pa_ene',c3d=fe%ase_hy_inc_pa_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hz_inc_pa_ene',c3d=fe%ase_hz_inc_pa_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ex_inc_pa_ene',c3d=fe%ase_ex_inc_pa_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ey_inc_pa_ene',c3d=fe%ase_ey_inc_pa_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ez_inc_pa_ene',c3d=fe%ase_ez_inc_pa_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hx_inc_pa_ene',c3d=fe%ase_hx_inc_pa_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hy_inc_pa_ene',c3d=fe%ase_hy_inc_pa_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hz_inc_pa_ene',c3d=fe%ase_hz_inc_pa_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         is5(1) = 1; ie5(1) = ase_num_em;
         is5(2) = 1; ie5(2) = 2;
         is5(3) = 1; ie5(3) = 2;
         is5(4) = 1; ie5(4) = 1;
         is5(5) = 1; ie5(5) = 1;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_ex_inc_bt_ene',c3d=fe%ase_ex_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_ey_inc_bt_ene',c3d=fe%ase_ey_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_ez_inc_bt_ene',c3d=fe%ase_ez_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_hx_inc_bt_ene',c3d=fe%ase_hx_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_hy_inc_bt_ene',c3d=fe%ase_hy_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_hz_inc_bt_ene',c3d=fe%ase_hz_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_ex_inc_bt_ene',c3d=fe%ase_ex_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_ey_inc_bt_ene',c3d=fe%ase_ey_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_ez_inc_bt_ene',c3d=fe%ase_ez_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_hx_inc_bt_ene',c3d=fe%ase_hx_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_hy_inc_bt_ene',c3d=fe%ase_hy_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','ase_hz_inc_bt_ene',c3d=fe%ase_hz_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
         is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2);
         is5(3) = 1;           ie5(3) = ase_num_em;
@@ -2730,39 +2927,75 @@ contains
         do ii = 1,2
           write(save_name,*) ii
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ex_xy_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_ex_xy_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(3,ii))
+                              c5d=fe%ase_ex_xy_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(3,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ey_xy_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_ey_xy_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(3,ii))
+                              c5d=fe%ase_ey_xy_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(3,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hx_xy_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_hx_xy_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(3,ii))
+                              c5d=fe%ase_hx_xy_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(3,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hy_xy_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_hy_xy_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(3,ii))
+                              c5d=fe%ase_hy_xy_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(3,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
         end do
         is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
         is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
         do ii = 1,2
           write(save_name,*) ii
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ey_yz_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_ey_yz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(1,ii))
+                              c5d=fe%ase_ey_yz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(1,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ez_yz_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_ez_yz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(1,ii))
+                              c5d=fe%ase_ez_yz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(1,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hy_yz_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_hy_yz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(1,ii))
+                              c5d=fe%ase_hy_yz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(1,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hz_yz_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_hz_yz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(1,ii))
+                              c5d=fe%ase_hz_yz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(1,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
         end do
         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
         is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
         do ii = 1,2
           write(save_name,*) ii
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ex_xz_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_ex_xz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(2,ii))
+                              c5d=fe%ase_ex_xz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(2,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_ez_xz_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_ez_xz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(2,ii))
+                              c5d=fe%ase_ez_xz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(2,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hx_xz_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_hx_xz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(2,ii))
+                              c5d=fe%ase_hx_xz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(2,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
           call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','ase_hz_xz_sca_ene_ibt'//trim(adjustl(save_name)),&
-                              c5d=fe%ase_hz_xz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(2,ii))
+                              c5d=fe%ase_hz_xz_sca_ene(:,:,:,ii,:),ipe=fe%ipe_on_box_surf(2,ii), &
+            io_status=restart_io)
+          if(restart_io/=0)error stop 'Required EM restart read failed'
+
         end do
       end if
       if(fe%flag_art) then
@@ -2771,12 +3004,30 @@ contains
         is5(3) = 1; ie5(3) = 2         ;
         is5(4) = 1; ie5(4) = 1         ;
         is5(5) = 1; ie5(5) = 1         ;
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_ex_inc_bt_ene',c3d=fe%art_ex_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_ey_inc_bt_ene',c3d=fe%art_ey_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_ez_inc_bt_ene',c3d=fe%art_ez_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_hx_inc_bt_ene',c3d=fe%art_hx_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_hy_inc_bt_ene',c3d=fe%art_hy_inc_bt_ene)
-        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_hz_inc_bt_ene',c3d=fe%art_hz_inc_bt_ene)
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_ex_inc_bt_ene',c3d=fe%art_ex_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_ey_inc_bt_ene',c3d=fe%art_ey_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_ez_inc_bt_ene',c3d=fe%art_ez_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_hx_inc_bt_ene',c3d=fe%art_hx_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_hy_inc_bt_ene',c3d=fe%art_hy_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
+        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'single','art_hz_inc_bt_ene',c3d=fe%art_hz_inc_bt_ene, &
+            io_status=restart_io)
+        if(restart_io/=0)error stop 'Required EM restart read failed'
+
         if    (ek_dir1(1)==1.0d0) then
           is5(1) = fs%mg%is(2); ie5(1) = fs%mg%ie(2);
           is5(2) = fs%mg%is(3); ie5(2) = fs%mg%ie(3);
@@ -2786,13 +3037,25 @@ contains
           do ii = 1,2
             write(save_name,*) ii
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ey_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_ey_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_ey_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ez_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_ez_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_ez_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hy_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_hy_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_hy_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hz_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_hz_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_hz_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
           end do
         elseif(ek_dir1(2)==1.0d0) then
           is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
@@ -2803,13 +3066,25 @@ contains
           do ii = 1,2
             write(save_name,*) ii
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ex_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_ex_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_ex_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ez_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_ez_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_ez_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hx_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_hx_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_hx_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hz_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_hz_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_hz_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
           end do
         elseif(ek_dir1(3)==1.0d0) then
           is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1);
@@ -2820,13 +3095,25 @@ contains
           do ii = 1,2
             write(save_name,*) ii
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ex_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_ex_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_ex_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_ey_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_ey_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_ey_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hx_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_hx_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_hx_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
             call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','art_hy_tot_bt_ene_ibt'//&
-                                trim(adjustl(save_name)),c5d=fe%art_hy_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii))
+                                trim(adjustl(save_name)),c5d=fe%art_hy_tot_bt_ene(:,:,:,ii,:),ipe=fe%ipe_on_plane(ii), &
+            io_status=restart_io)
+            if(restart_io/=0)error stop 'Required EM restart read failed'
+
           end do
         end if            
       end if
@@ -2864,6 +3151,33 @@ contains
     end if
     
     !*** write start ******************************************************************************************!
+    ! Publish the new layout only after every required old payload was read.
+    ! Input/output restart directories may be the same during repartition.
+    if(fe%flag_o_restart)then
+      restart_io=0
+      !output nproc_size_global, nt_em, and obs_samp_em
+      call output_r_txt_em(fe%ifn,1,1,'single','nproc_size_global',i0d=nproc_size_global, &
+            io_status=restart_io)
+      call output_r_txt_em(fe%ifn,1,1,'single','nt_em',            i0d=nt_em            , &
+            io_status=restart_io)
+      call output_r_txt_em(fe%ifn,1,1,'single','obs_samp_em',      i0d=obs_samp_em      , &
+            io_status=restart_io)
+
+      !output array size
+      call output_r_txt_em(fe%ifn,1,3,'all','mg_is'      ,i1d=fs%mg%is      , &
+            io_status=restart_io)
+      call output_r_txt_em(fe%ifn,1,3,'all','mg_ie'      ,i1d=fs%mg%ie      , &
+            io_status=restart_io)
+      call output_r_txt_em(fe%ifn,1,3,'all','mg_is_array',i1d=fs%mg%is_array, &
+            io_status=restart_io)
+      call output_r_txt_em(fe%ifn,1,3,'all','mg_ie_array',i1d=fs%mg%ie_array, &
+            io_status=restart_io)
+      restart_bad=0
+      if(restart_io/=0)restart_bad=1
+      call comm_summation(restart_bad,restart_total,nproc_group_global)
+      if(restart_total/=0)error stop 'Required EM restart metadata save failed; incomplete checkpoint'
+    endif
+
     if(comm_is_root(nproc_id_global)) then
       write(*,*)
       write(*,*) "**************************"

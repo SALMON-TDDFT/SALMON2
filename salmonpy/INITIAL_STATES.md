@@ -1,9 +1,9 @@
 # 保存済み基底状態をIDで選択
 
 `tddft_from_catalog`は、明示設定したDFT物質に対してSALMONpyで生成したローカルの
-`salmonpy.gs/1`基底状態を選びます。SCF・ダウンロード・コンパイル・native workerの起動は
+`salmonpy.gs/1`基底状態を選びます。SCF・ダウンロード・コンパイル・計算処理 workerの起動は
 行いません。`new_state(dt=...)`で独立workerを開始します。任意依存のASE/f90nmlと、
-検証済みのローカルDFT/TDDFTランタイムを先に用意してください。
+検証済みのローカルDFT/TDDFT計算プログラムを先に用意してください。
 
 `salmonpy.materials/1`の`materials`と並べて次を記述します。
 
@@ -25,8 +25,8 @@ pathは明示した基準ディレクトリ内の相対パスです。物質ID�
 構造・擬ポテンシャル・ライセンス・出典も保持します。`prepare_inputs`に転送先名→元ファイルの
 一覧を明示して収集し、転送後は別途記録したmanifestのhashで`verify_inputs`を実行します。
 [オフライン準備](PREPARATION.md)を参照。計算ノードで通信する必要はありません。
-native restartの機種間互換性は保証しません。この入口はGS作成時と同じ実行ファイルのSHA256を
-要求し、実行先自体もランタイムに対応する必要があります。
+計算処理 restartの機種間互換性は保証しません。この入口はGS作成時と同じ実行ファイルのSHA256を
+要求し、実行先自体も計算プログラムに対応する必要があります。
 
 ```python
 from salmonpy.builtin_materials import builtin_material_registry
@@ -43,7 +43,7 @@ with tddft_from_catalog(catalog, 'Si-ground', base_directory=bundle,
     metadata = model.record()
 ```
 
-manifestのhash、nativeファイル、SCF完了、原子の順序を含む構造、セル、電子数、状態数、
+manifestのhash、計算処理ファイル、SCF完了、原子の順序を含む構造、セル、電子数、状態数、
 格子、k点、XC、PP実体、実際のGS科学入力、コピー後のsnapshotを検査します。
 原子順やセルを暗黙に変換せず、不整合や不正なmetadataを拒否します。
 hashはバイト列を固定するもので、物理的収束や出所の信頼性を単独で保証しません。

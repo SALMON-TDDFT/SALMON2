@@ -1,11 +1,11 @@
 # Per-material configuration catalog
 
-[日本語](CONFIG.md) · Topic: `material_config` · Paired revision: `2026-11-15.1`
+[日本語](CONFIG.md)
 
 `salmonpy.config` is a configuration-only preview. It accepts Python dictionaries
 or UTF-8 JSON with schema `salmonpy.materials/1`, not the planned full simulation
 schema. It does not create a solver, read a structure/GS, download data, initialize
-MPI, or certify capabilities. No built-in backend is registered automatically.
+MPI, or certify capabilities. No built-in calculation implementation is registered automatically.
 Run `python -m salmonpy.examples.material_config` for a solver-free example.
 
 ## Entry points
@@ -50,7 +50,7 @@ are not filesystem paths.
 ## Custom resolver
 
 The callable has signature `resolve_parameters(model, parameters, *, base_directory)`
-and returns a plain JSON object. The host explicitly trusts this Python code;
+and returns a plain JSON object. The calling program explicitly trusts this Python code;
 it is not sandboxed. The callback must validate unknown parameters, units,
 ranges and combinations, normalize units/defaults, preserve provenance, and return
 resolved values. Do not launch solvers, allocate states or modify global settings
@@ -67,9 +67,9 @@ see the built-in adapter guide below for LD/SBE configuration-to-model binding.
 
 ## Definition hashes
 
-SHA256 covers backend name/version, model and resolved parameters, excluding
+SHA256 covers calculation implementation name/version, model and resolved parameters, excluding
 material ID and label. Canonical encoding v1 uses sorted keys, compact JSON,
-UTF-8 and finite numbers (`1` and `1.0` remain distinct). Backend versions must
+UTF-8 and finite numbers (`1` and `1.0` remain distinct). calculation implementation versions must
 change when resolution semantics change. File contents and callback code are
 not automatically hashed. Resolvers must include data hashes for content-aware
 identity and portable references instead of absolute machine paths. These are
@@ -86,17 +86,17 @@ explicit adapter. Structure data do not determine XC, pseudopotentials, charge,
 magnetism or convergence parameters automatically.
 
 An explicitly registered resolver can use grid_from_spacing for per-material maximum electronic spacing with an explicit unit. For supported orthogonal periodic cells, start from N_i = ceil(L_i/h_i),
-then increase N_i to meet the selected backend's minimum/alignment constraints.
+then increase N_i to meet the selected calculation implementation's minimum/alignment constraints.
 Report requested spacing, adopted counts and actual L_i/N_i. Do not silently
 alter a finalized grid when MPI resources change. Counts remain an expert option;
 counts and spacing together are rejected by the ASE DFT/TDDFT entries to avoid two sources of truth.
-Nonorthogonal/isolated cells require backend-specific geometry validation. FDTD
+Nonorthogonal/isolated cells require specific to each calculation implementation geometry validation. FDTD
 spacing is separate. This rounding is not a convergence guarantee. Direct DFT still requires counts; ASE DFT/TDDFT entries also accept the explicit width/unit alternative described below.
 
 ## Offline structure references
 
 Do not require database queries/downloads from compute nodes. Stage structure/
-supercell files and all referenced data on an allowed connected host, recording
+supercell files and all referenced data on an allowed connected calling program, recording
 source, version and SHA256 before transfer. Use local references in calculation
 inputs; verify hashes and relative paths afterward. Separate discovery through
 MateriApps or other services from job execution; missing files must not trigger

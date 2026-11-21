@@ -4,16 +4,16 @@
 このモジュールのimportにはASEが必要ですが、SALMONpyの通常のimportやLDなどには不要です。
 対応する物理量は `energy`（eV）と `forces`（eV/Å）。応力・free_energyは公開しません。
 対応範囲は3次元周期・中性・固定イオンSCF・非スピン分極、PZ／Libxc-PZ／Libxc-PBEとスカラーKY／NC-UPF擬ポテンシャルです。
-Libxcには対応したランタイムが必要です。擬ポテンシャルの生成汎関数・元素との整合を確認してください。TB-mBJの力は対象外です。
+Libxcには対応した計算プログラムが必要です。擬ポテンシャルの生成汎関数・元素との整合を確認してください。TB-mBJの力は対象外です。
 
 ## NLCC付きUPFの力
 
-**既存・未検証ランタイムのLibxc-PBE＋NLCC付きUPFの力は拒否します。**
+**既存・未検証計算プログラムのLibxc-PBE＋NLCC付きUPFの力は拒否します。**
 通常の`SalmonExecutable(path, sha256)`だけではNLCC力は有効になりません。
 検証記録のない環境で構造最適化を行う場合は、対応するPZ＋KYを使い、
 格子・k点・SCF精度を確認してください。
 
-実装検証を終えたランタイムは、次の入口で読み込みます。
+実装検証を終えた計算プログラムは、次の入口で読み込みます。
 
 ```python
 from salmonpy.runtime import load_runtime, load_validated_build
@@ -39,7 +39,7 @@ print(engine.nlcc_force_xc)  # ('pz', 'libxc_pz', 'libxc_pbe')
 `PP_NLCC`要素を検出すると、力要求は計算開始前に`PropertyNotImplementedError`となります。
 エネルギーのみ利用でき、力はキャッシュしません。エネルギー取得可能と物理的な検証済みを
 混同しないでください。低水準の`GroundStateResult.forces_hartree_per_bohr`も、
-ランタイムの妥当性を自動認定する入口ではありません。
+計算プログラムの妥当性を自動認定する入口ではありません。
 
 ```python
 from ase.build import bulk
@@ -63,7 +63,7 @@ forces = atoms.get_forces()
 gs = atoms.calc.last_ground_state
 ```
 
-`electrons` は省略可能です。各構造の擬ポテンシャル価電子数の合計から決定し、明示値が異なればネイティブ計算前に拒否します。`states`・`grid`・`kmesh` は明示指定です。
+`electrons` は省略可能です。各構造の擬ポテンシャル価電子数の合計から決定し、明示値が異なれば計算処理計算前に拒否します。`states`・`grid`・`kmesh` は明示指定です。
 
 上の格子はSiの例であり、任意の系や目標精度への推奨値ではありません。
 実行ファイルにはGS収束報告と `gs_forces.dat` の `SALMONPY_FORCES_V1` 報告を含めます。

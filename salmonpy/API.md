@@ -1,9 +1,10 @@
 # 公開Python APIと互換性
 
-[English](API.en.md) · Topic: `public_api` · Paired revision: `2026-11-14.3`
+[English](API.en.md)
 
-版は **0.1.0a5** です。`salmonpy.__version__` と配布メタデータに同じ版を示します。
-プレビュー版であり、安定した1.0 APIを宣言するものではありません。物質C ABIのプレビュー1は[C_ABI.md](C_ABI.md)を参照してください。
+利用できる関数・クラスと、エラーや保存データの扱いを説明します。目的から使い方を選ぶ場合は、先に[はじめに](README.md)または[サンプル集](examples/README.md)を参照してください。
+
+導入した版は `salmonpy.__version__` で確認できます。公開前の開発版のため、APIは変更されることがあります。計算プログラムと同梱マニュアルを組にして使ってください。C/Fortranから呼ぶ場合は[C_ABI.md](C_ABI.md)を参照します。
 
 ## 公開範囲
 
@@ -19,30 +20,28 @@
 | `fields`, `geometry`, `analysis`, `outputs` | パルス・構造・解析・出力 |
 | `dft`, `bands`, `tddft`, `fdtd`, `runtime` | 外部ソルバーの明示的実行・準備 |
 | `ase`, `ase_calculator`, `salmon_vr` | 任意の連携機能 |
-| `distributed`, `material_response`, `embedded_tddft`, `coupled` | 既存の寿命制限がある実験的MPI・埋め込みAPI |
-| `errors`, `snapshots`, `api` | 例外・不変の状態トークン・公開一覧 |
+| `distributed`, `material_response`, `embedded_tddft`, `coupled` | Pythonと同じプロセスで計算し、MPIで分担するAPI（実験的） |
+| `errors`, `snapshots`, `api` | 例外・変更できない保存状態オブジェクト・公開一覧 |
 
 トップレベルの `__all__` は版、`LorentzDrude`、例外型に限定します。
-任意依存を一括importしません。import時のコンパイル・取得・ネイティブ読込み・MPI初期化はありません。
+任意依存を一括importしません。import時のコンパイル・取得・Fortran/C共有ライブラリの読み込み・MPI初期化はありません。
 snapshot／restoreは標準出力へ書きません。必須Python依存は引き続きNumPyです。
-LD/SBEカーネルや外部ランタイムの明示的準備、任意依存の要件は従来どおりです。
+LD/SBE計算ルーチンや外部計算プログラムの明示的準備、任意依存の要件は従来どおりです。
 
 ## 互換方針
 
 配布するAPI・挙動の変更には新しいパッケージ版を付けます。同じリリース内で単位・電流符号・
 時刻配置・配列名を黙って変更しません。プレビュー版間では明記した破壊的変更を行うことがあります。
-ホスト側は検証した版を固定し、移行説明を確認してください。将来の安定版では廃止予告期間を
+呼び出し元プログラム側は検証した版を固定し、移行説明を確認してください。将来の安定版では廃止予告期間を
 設けますが、現在の実験的MPI API全体に安定性を保証するものではありません。
 公開一覧への掲載と、機能の成熟度は別です。
 
-アーカイブ・時刻・ランタイム・snapshotのスキーマ版は独立です。パッケージ版だけから
+アーカイブ・時刻・計算プログラム・snapshotのスキーマ版は独立です。パッケージ版だけから
 保存形式の互換性を推測しません。メモリ上のsnapshotは同じパッケージ版・同じ元モデルを要求します。
 
-a5への移行で更新式・電流規約は変更しません。結晶は **A/c → 電荷電流密度j**、
-内部の電子物質電流は J = -j です。過去のa4開発中に規約が変更されたため、古いデータは
-記録されたメタデータで解釈し、一律に符号反転しません。基本はtransverseで、Longitudinalは明示的選択です。
+結晶は **A/c → 電荷電流密度j** を受け渡します。内部の電子物質電流は J = -j です。基本はtransverseで、Longitudinalは明示的に選択します。既存の計算データは記録された単位・符号で解釈してください。
 
-## 例外の契約
+## 例外の仕様
 
 | 型（`salmonpy.errors`） | 意味 | 従来の捕捉型 |
 |---|---|---|
@@ -51,15 +50,15 @@ a5への移行で更新式・電流規約は変更しません。結晶は **A/c
 | `InputTypeError` | 型の不正。`InputError`の子でもある | `TypeError` |
 | `SnapshotError` | 不正・不適合な復元。状態は保持 | `ValueError` |
 | `NumericalError` | 検出した非有限値などの数値異常 | `FloatingPointError` |
-| `RuntimeFailure` | ランタイムの欠如・失敗・結果の未確認 | `RuntimeError` |
+| `RuntimeFailure` | 計算プログラムの欠如・失敗・結果の未確認 | `RuntimeError` |
 
 既存の `RuntimeUnavailable` と `OutputSaveError` は名前を維持し、`RuntimeFailure`を継承します。
 従来の組込み例外型での捕捉も利用できます。OS・ファイルの例外（`FileExistsError`を含む）、
 プロセスの時間切れ、NumPy変換、任意依存の不足、利用者コールバックの例外は元の型を保つ場合があります。
-外部例外を一律に包みません。収束報告がないことはランタイムの失敗であり、数値発散の証明ではありません。
+外部例外を一律に包みません。収束報告がないことは計算プログラムの失敗であり、数値発散の証明ではありません。
 
 例外の型だけから計算全体の巻き戻しを推測しません。内蔵LD・SBE・Pythonの場のstep／restoreは
-失敗時に受理済み状態を保持します。MPI応答・結合の失敗はセッションを無効化し得ます。
+失敗時に最後に成功した計算状態を保持します。MPI応答・結合の失敗はセッションを無効化し得ます。
 FortranのSTOP／abortを回復可能なPython例外にする変更ではありません。
 
 プロセス分離`TDDFTState`は`save_checkpoint(directory)`と
@@ -67,23 +66,23 @@ FortranのSTOP／abortを回復可能なPython例外にする変更ではあり�
 同じ内容の初期モデルを明示的に用意し、Zarr履歴から別プロセスで再開できます。
 初期GS本体は保存しません。詳細は[状態保存](SNAPSHOTS.md)を参照してください。
 
-直列モデルの共通契約、適合チェッカー、MPI点分散への接続は[MATERIALS.md](MATERIALS.md)を参照してください。
+直列モデルの共通仕様、適合チェッカー、MPI点分散への接続は[MATERIALS.md](MATERIALS.md)を参照してください。
 
 `fast_hse` の `FastHSEMaterialProvider`／`FastHSEResponseBackend` は明示ビルドした高速PR版serialワーカーを外側MPIの物質応答へ接続するプレビュー入口です。COUPLED.mdを参照してください。HSE内部MPIを初期化しません。
 
-`fast_hse_mpi.NativeFastHSEBackend` は高速PR版HSEの実験的なホストMPI入口です。k点のみ1／2ランクの物質群と、同じ分割での直接保存／復元に対応します。旧create_stateはメインスレッド・1プロセス1回のnative寿命です。open_modelはNativeFastHSEModelを返し、同一の全k点モデルの状態を共有接続で独立に扱います。SHARED_HSE.mdとCOUPLED.mdを参照してください。
+`fast_hse_mpi.NativeFastHSEBackend` は高速PR版HSEの実験的な呼び出し元プログラムが管理するMPI入口です。k点のみ1／2ランクの物質群と、同じ分割での直接保存／復元に対応します。旧create_stateはメインスレッド・1プロセスにつき初期化1回です。open_modelはNativeFastHSEModelを返し、同一の全k点モデルの状態を共有接続で独立に扱います。SHARED_HSE.mdとCOUPLED.mdを参照してください。
 
-`checkpointing.CheckpointCapability` と `check_checkpoint_compatibility` は、自作バックエンドにも使える保存／復元前の共通宣言・検査です。[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。
+`checkpointing.CheckpointCapability` と `check_checkpoint_compatibility` は、自作の計算コードにも使える保存／復元前の共通宣言・検査です。[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。
 
-`checkpointing.CheckpointTarget` と `execute_checkpoint` は検査後にバックエンド独自の保存／復元関数を呼び、不透明な戻り値をプロセス内で返します。
+`checkpointing.CheckpointTarget` と `execute_checkpoint` は検査後に計算処理独自の保存／復元関数を呼び、不透明な戻り値をプロセス内で返します。
 
-`CheckpointState`／`restore_checkpoint` は、独立候補を全ランクで準備した後にまとめて公開する保護付き復元です。`AtomicRestoreError`で元のホルダー維持と候補の破棄エラーを区別します。
+`CheckpointState`／`restore_checkpoint` は、独立候補を全ランクで準備した後にまとめて公開する失敗時に元の状態を保つ復元です。`AtomicRestoreError`で元のホルダー維持と候補の破棄エラーを区別します。
 
 メモリ助言の公開入口はsalmonpy.memoryのMemoryEstimate／MemoryReport／memory_advice／process_memoryです。予算超過は警告のみで、実行可否や上限の保証ではありません。詳細は[MEMORY.md](MEMORY.md)。
 
-`stepping.StepTarget`・`guarded_step`・`StepRecoveryError` は明示した完全退避契約によるステップ保護のプレビュー入口です。STEPPING日英ガイドを参照してください。
+`stepping.StepTarget`・`guarded_step`・`StepRecoveryError` は明示した完全退避仕様によるステップ保護のプレビュー入口です。STEPPING日英ガイドを参照してください。
 
-`native_steps.native_step_targets` は、監査済みnative状態と通常出力を共通の保護付きステップへつなぐプレビューAPIです。NATIVE_STEPPING日英ガイドを参照してください。
+`native_steps.native_step_targets` は、監査済みFortran/Cで保持する計算状態と通常出力を共通の失敗時に元の状態を保つ時間更新へつなぐプレビューAPIです。NATIVE_STEPPING日英ガイドを参照してください。
 
 ### ソルバー初期化時の原子入力
 
@@ -120,12 +119,12 @@ k点判定を内部の `s_orbital_initial_config` に取り込みます。`resol
 
 RTの `temperature < -1e-12` 分岐など、正常入力の既存GS／RT選択規則は維持します。
 不明なモード・非有限温度・使えない構成は、結果オブジェクトを変えずに拒否します。
-これは初期配列構成の選択であり、占有容量・物理的妥当性・SCF入力全体の所有や、native初期化からの
+これは初期配列構成の選択であり、占有容量・物理的妥当性・SCF入力全体の所有や、計算状態の初期化からの
 異常復帰を保証するものではありません。新しいPython／C公開入口もなく、k点・対称性・
 コミュニケータなどの共有依存は引き続き残ります。
 
 HSEは高速PR版のみです。`NativeFastHSEBackend(build_record, work_root, allow_symmetry=True)` で
-対称性を明示的に許可できます。内部kランク1／2・周期・非スピン分極・CPU・full-qのTaylor／PT-CNに対応し、共有の対称化設定は不変、1プロセス1寿命です。既定値Falseと既存C入口は
+対称性を明示的に許可できます。内部kランク1／2・周期・非スピン分極・CPU・full-qのTaylor／PT-CNに対応し、共有の対称化設定は不変、1プロセスにつき初期化1回です。既定値Falseと既存C入口は
 対称性を拒否します。内部2ランクはsp_fast_hse_symmetry_kmpi_protocol()==1が必要。Taylor strict／learned・PT-CNにはsp_fast_hse_symmetry_history_protocol()==1が必要です。学習PT-CNは既存方式どおりinterval=1・predictor_corrector=nを指定します。
 
 新C入口 `sp_fast_hse_init_symmetry` は既存initと同じ引数で、
@@ -137,9 +136,9 @@ HSEは高速PR版のみです。`NativeFastHSEBackend(build_record, work_root, a
 [対称性ガイド](FAST_HSE_SYMMETRY.md)には、混在サンプル、対応範囲と極小勾配XCの安定評価と回帰検証を
 記載しています。接続・保存復元のテストを物理収束の証明と解釈しないでください。
 
-縮約k点の内部2ランクと同一分割での直接再開に対応します。追加のnative k-MPI capabilityが必要です。分割変更による再開は未対応。詳しくは対称性ガイドを参照してください。
+縮約k点の内部2ランクと同一分割での直接再開に対応します。追加の計算処理 k-MPI capabilityが必要です。分割変更による再開は未対応。詳しくは対称性ガイドを参照してください。
 
-NativeFastHSEBackendはnative寿命前に周期セル・格子・原子入力を読み取り検査し、群内でInputErrorを合意します。入力を直してproviderを作り直せます。再開バイナリの互換性や全native初期化の安全性は別契約です。詳しくは対称性ガイドを参照してください。
+NativeFastHSEBackendは計算状態の初期化前に周期セル・格子・原子入力を読み取り検査し、群内でInputErrorを合意します。入力を直してproviderを作り直せます。再開バイナリの互換性や全計算状態の初期化の安全性は別仕様です。詳しくは対称性ガイドを参照してください。
 
 SCFの閾値未達は `RuntimeWarning` として通知し、有限で読み出せる結果を後続へ渡します。
 `GroundStateResult.converged` と保存JSONの `converged` が収束状態を表します。
@@ -158,7 +157,7 @@ SCFの閾値未達は `RuntimeWarning` として通知し、有限で読み出�
 計算を開始せずJSON化可能な入力受付レポートを返します。信頼する検証関数の登録は任意で、
 省略時はファイル整合性だけが対象です。ジョブの終了コードとランク別記録はPREPARATION.mdを参照してください。
 
-## native実行経路の契約情報
+## 計算処理実行経路の仕様情報
 
 ```python
 from salmonpy.api import native_contract
@@ -173,12 +172,12 @@ assert contract['runtime_verified'] is False
 標準TDDFTのlegacy C入口は物質電流J=-jを返し、Python側は電荷電流jへ変換します。
 高速HSEと標準handleのC入口は電荷電流jです。照会がローカルかcollectiveかは個別ヘッダーに従い、診断を一律collective扱いしません。
 
-これは宣言された仕様の情報で、実ランタイムの能力確認や安定C ABIの宣言ではありません。`runtime_verified`は常にfalseです。
-実際のランタイム・保存再開の対応可否は別途照会します。未知の自作コンポーネントや経路名には`known=False`・`status='unverified'`を返し、
-自作バックエンドを拒否しません。その契約はバックエンド自身が定めます。結果は独立した辞書で、呼出し側で注記しても後の照会に混入しません。
-既存の計算呼出し、数値状態、legacy経路の省略時処理、計算可能な条件は変えません。C／Fortranホストの安定ABI適合検証は別の残課題です。
+これは宣言された仕様の情報で、実計算プログラムの能力確認や安定C ABIの宣言ではありません。`runtime_verified`は常にfalseです。
+実際の計算プログラム・保存再開の対応可否は別途照会します。未知の自作コンポーネントや経路名には`known=False`・`status='unverified'`を返し、
+自作の計算コードを拒否しません。その仕様は計算処理自身が定めます。結果は独立した辞書で、呼出し側で注記しても後の照会に混入しません。
+既存の計算呼出し、数値状態、legacy経路の省略時処理、計算可能な条件は変えません。C／Fortran呼び出し元プログラムの安定ABI適合検証は別の残課題です。
 
-### 明示指定した実ランタイムの版照会
+### 明示指定した実計算プログラムの版照会
 
 ```python
 from salmonpy.doctor import probe_native_protocols
@@ -187,13 +186,13 @@ report = probe_native_protocols('audited-build.json', component='tddft', route='
 ```
 
 CLIは`python -m salmonpy.doctor --native-build audited-build.json --component tddft --route shared --json`です。
-`native_contract`や独立静的チェッカーとは異なり、明示指定されたnativeライブラリを、記録のSHA256と照合して別プロセスで読み込みます。
+`native_contract`や独立静的チェッカーとは異なり、明示指定された計算処理ライブラリを、記録のSHA256と照合して別プロセスで読み込みます。
 子側でも読込前にhashを再確認します。hashは同一性であり、信頼性やビルド監査の証明ではありません。
 読込時に初期化コードが動く可能性があるため、信頼する監査済みライブラリだけを対象にしてください。
 既知の引数なし版照会関数だけを呼び、ソルバー状態の作成、MPI初期化・接続、ビルド、インストール、計算は要求しません。
 未知の自作経路は記録ファイルも開かず、コードを読み込みません。
 
-`protocol_match`は選択した版照会だけの一致です。関数の欠如や新しい版は記録するだけで、自動的なバックエンド拒否や別機能への置換はしません。
+`protocol_match`は選択した版照会だけの一致です。関数の欠如や新しい版は記録するだけで、自動的な計算処理拒否や別機能への置換はしません。
 `runtime_ready`は未確認のままで、操作関数のシグネチャ、物理的対応範囲、保存形式・MPI分割の互換性の保証ではありません。
 子プロセスの異常は呼出し元を落とさず記録し、`library_loaded=None`は子側が読込完了の有無を報告できなかった意味です。
 渡されたコードを読み込まない`check_job`とは別の、任意の明示的診断として扱います。
@@ -201,19 +200,19 @@ CLIは`python -m salmonpy.doctor --native-build audited-build.json --component t
 CとISO_C_BINDING Fortranの版照会例は`tests/native/test_native_protocol.c`と、
 `tests/native/test_io_ownership.f90`の`SALMONPY_ABI_PROTOCOL_PROBE`モードです。
 開発用の実行入口は`tools/test_io_ownership.py BUILD_RECORD NEW_OUTPUT --abi-contract`で、
-高速HSEの場合は`--fast-hse`を追加します。ランタイムhashと全リンク対象のアプリケーションオブジェクトを監査し、
+高速HSEの場合は`--fast-hse`を追加します。計算プログラムhashと全リンク対象のアプリケーションオブジェクトを監査し、
 返却値の一致とMPIが未初期化のままであることを確認します。これは版照会の相互呼出し検証で、モデル・状態・step全体のABI適合確認ではありません。
-native ABIは引き続き実験段階です。
+C/Fortranの呼び出し規約は引き続き実験段階です。
 
-### 状態の作成・更新・終了を確認するホスト試験
+### 状態の作成・更新・終了を確認する呼び出し元プログラム試験
 
 `tools/test_io_ownership.py BUILD_RECORD NEW_BUILD_DIR --abi-state --fixture EXISTING_PZ_FIXTURE --state-output NEW_RESULTS_DIR --ranks 2` は、監査済みの通常TDDFTライブラリをCとISO_C_BINDING Fortranから呼びます。高速PR版HSEのビルド記録と既存の全k点HSE入力には`--fast-hse`を付けて同じ検査を実行できます。HSE試験では各実行のk点並列数だけを設定し、渡されたGSは変更しません。縮約k点入力にはさらに`--state-symmetry`を付けます。渡された`sym.dat`を参照し、対称性対応のHSE初期化を使い、この入力の保持対称操作に合うz方向を駆動します。代表k点が実際に出力されたことも確認します。この試験入力の方向指定であり、全k点でのx・y・z駆動を制限しません。MPIの初期化・終了は呼び出し側が所有します。2状態と個別実行の一致、直前Aが不一致のときの状態保持、スロット再利用後の古いハンドルの拒否、新しい状態の独立した初期化を確認します。既存GSはその場で読み、変更されていないことを確認します。GSのコピーや電子状態チェックポイントの保存はしません。結果の保存先は明示してください。
 
-ディレクトリスコープの共通宣言は、両ハンドルヘッダーから取り込む`native_context.h`にあります。macOSではMPIホストのリンクにも既存の`tools/build_embedded_tddft.py::mpi_link_command`を使ってください。OpenMPIのFortran COMMON特殊値が実行ファイル内に別配置されると、共有ライブラリとの間でMPI_IN_PLACE処理の判定が変わる場合があります。試験ランナーはこの共通処理を使い、リンク引数と実行ファイルのハッシュを記録します。版の問い合わせだけではこの問題は検出できません。
+ディレクトリスコープの共通宣言は、両ハンドルヘッダーから取り込む`native_context.h`にあります。macOSではMPI呼び出し元プログラムのリンクにも既存の`tools/build_embedded_tddft.py::mpi_link_command`を使ってください。OpenMPIのFortran COMMON特殊値が実行ファイル内に別配置されると、共有ライブラリとの間でMPI_IN_PLACE処理の判定が変わる場合があります。試験ランナーはこの共通処理を使い、リンク引数と実行ファイルのハッシュを記録します。版の問い合わせだけではこの問題は検出できません。
 
-確認範囲は通常PZと高速PR版HSEの全k点／縮約k点入力、C／Fortranホスト、MPI 1／2ランク、複数状態と個別実行の電流一致です。HSE固有の引数と拒否コード（直前Aの不一致はHSEで1、通常TDDFTで10）を共通試験内で扱い、公開ABIや数値ソルバーは変更しません。縮約入力は対称性対応PT-CNと学習型交換を使い、全8点を4代表点で扱います。他XC・形状・他環境の検証は別途必要で、公開native ABIは引き続き実験的です。この小規模入力は接続と状態所有を検査するもので、実材料の収束を保証しません。
+確認範囲は通常PZと高速PR版HSEの全k点／縮約k点入力、C／Fortran呼び出し元プログラム、MPI 1／2ランク、複数状態と個別実行の電流一致です。HSE固有の引数と拒否コード（直前Aの不一致はHSEで1、通常TDDFTで10）を共通試験内で扱い、公開ABIや数値ソルバーは変更しません。縮約入力は対称性対応PT-CNと学習型交換を使い、全8点を4代表点で扱います。他XC・形状・他環境の検証は別途必要で、公開C/Fortranの呼び出し規約は引き続き実験的です。この小規模入力は接続と状態所有を検査するもので、実材料の収束を保証しません。
 
-### ホスト試験のPZ入力を準備する
+### 呼び出し元プログラム試験のPZ入力を準備する
 
 `--abi-state`の標準PZ入力は`rt.inp`、`data_for_restart/`、`pseudo1_rps.dat`を必要とします。`theory='tddft_pulse'`、周期・固定イオン・非スピン分極、`middlepoint`、`trans_longi='tr'`を使い、試験用RT入力から`&parallel`を除いてください。同じランナーが1／2ランクを試すため、固定した並列条件を埋め込まないひな形を提供します。GSのセル・原子・格子・k点・電子数・擬ポテンシャル・XCは入力と一致させてください。
 
@@ -226,7 +225,7 @@ SALMONpy導入済みのPython環境で実行します。`GS_INPUT`には元のGS
 
 `BUILD_JSON`にはビルド記録のファイル、または`build.json`を含むディレクトリを指定できます。`--parser-host`はGSを使わず、`status`単独／`native_host=.false.`で通常検査を維持し、明示trueだけが場用検査へ切り替えることをMPIで検査します。
 
-ランタイムバンドルからは`SalmonExecutable.from_runtime(directory)`を使えます。これは`runtime.load_runtime`へ委譲し、全ファイルと能力記録を検証します。バイナリ単体とハッシュを手作業で組み合わせる必要はありません。
+計算プログラムバンドルからは`SalmonExecutable.from_runtime(directory)`を使えます。これは`runtime.load_runtime`へ委譲し、全ファイルと能力記録を検証します。バイナリ単体とハッシュを手作業で組み合わせる必要はありません。
 
 ## 誘電関数・光学伝導率（単一偏光）
 
@@ -249,7 +248,7 @@ epsilon = dielectric_function(sigma)
 合成データのサンプル: `python -m salmonpy.examples.optical_response`。実材料の収束済み光学定数の例ではありません。
 
 
-追加入口: salmonpy.preparation.prepare_fdtd(calculation, directory, mpi=None)は新規のnative FDTD入力群を保存し、Pathを返すだけです。FDTDMPI.rank_argumentsとcommand(executable)はargvの構成・プレビュー用です。実行は自動で始まりません。詳細はPREPARATION.mdを参照してください。
+追加入口: salmonpy.preparation.prepare_fdtd(calculation, directory, mpi=None)は新規のPythonから直接呼ぶFDTD入力群を保存し、Pathを返すだけです。FDTDMPI.rank_argumentsとcommand(executable)はargvの構成・プレビュー用です。実行は自動で始まりません。詳細はPREPARATION.mdを参照してください。
 
 入力準備専用: prepare_dft(model, directory, scf=None, save_restart=True)とprepare_tddft(input_file, directory, files=None)はPathだけを返し、SCF／TDDFT worker／MPI／ジョブ投入を起動しません。PREPARATION.mdを参照してください。
 
@@ -258,7 +257,7 @@ epsilon = dielectric_function(sigma)
 
 `DFT.run()` と `NativeGSSession.run()` は、反復上限で未収束なら警告し、
 `SCFReviewRequired` を送出して後続計算への自動継続を止めます。
-失敗した実行としてデータを消すことはしません。バッチの保存済み結果／nativeの生存状態は
+失敗した実行としてデータを消すことはしません。バッチの保存済み結果／計算処理の生存状態は
 例外の `result` に保持し、`report_directory` に残差CSV・任意のPNG・report.jsonを保存します。
 MatplotlibがなくてもCSVは利用できます。図の生成失敗と計算失敗を混同しません。
 レポートの保存に失敗しても確認待ちは維持し、元の出力を確認するよう警告します。
@@ -281,9 +280,9 @@ AIが自動的にこの指定で再実行してはいけません。既存結果
 残差の読取・保存・warm startは引き続き可能です。既知の未収束GSからの
 `band_initial_state()`／`tddft_initial_state()` にも同じ確認待ちを適用します。
 
-nativeの `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
+計算処理の `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
 止めた `paused=True` の状態は正常な途中状態です。全反復上限に達した未収束終了だけが
-確認待ちになります。確認待ち後もnative状態は閉じず、保存や診断に利用できます。
+確認待ちになります。確認待ち後もFortran/Cで保持する計算状態は閉じず、保存や診断に利用できます。
 ランク間で `allow_unconverged` の指定を揃えます。計算の更新順・収束閾値は変更しません。
 この方針は以前の「未収束でも警告のみで自動継続」を置き換えます。
 
@@ -341,17 +340,17 @@ R/Tの単純平均や、駆動帯域の `1−R−T` だけで全吸収を推定�
 
 ### 実際の結合計算での確認（2026-11-21）
 
-Apple Silicon・監査済みnative実行ファイルで、実際のLD＋E/H FDTDと
+Apple Silicon・監査済み計算処理実行ファイルで、実際のLD＋E/H FDTDと
 2点TDDFT＋Weyl FDTDを実行しました。入射比の収支残差の絶対値は、LDで
 0.0108%、既に進行していた半分の格子幅・dtで0.00270%、TDDFTで0.000711%でした。
 これは結合・観測処理の確認で、実材料の光学物性の収束認定ではありません。
 利用者の判断に従い、これ以上の精度探索は行っていません。
 
-LDは横方向周期の一様な膜で、実測Eから同じnative LDカーネルでjを再構成しました。
-再構成の最終電流はnativeのLD保存データとrtol=1e-10・atol=1e-18で一致しています。
+LDは横方向周期の一様な膜で、実測Eから同じ計算処理 LD計算ルーチンでjを再構成しました。
+再構成の最終電流は計算処理のLD保存データとrtol=1e-10・atol=1e-18で一致しています。
 生のYee Hを空間方向に位置合わせし、時間中心化済みHを再度時間平均してはいません。
 TDDFTは既存GSをその場で読み、2マクロ点・8 MPIランク・dt=0.003 auで実行し、
-E/H/jと場エネルギーをnative出力から直接取得しました。新しいGSや波動関数は保存していません。
+E/H/jと場エネルギーをSALMONの計算出力から直接取得しました。新しいGSや波動関数は保存していません。
 
 入射を遅らせて初期場を空にした主検証に加え、初期充填波を持つ条件でも
 初期場のエネルギーを差し引いた収支を確認しました。有限時間のR/Tは入射の切り詰めで
@@ -402,21 +401,21 @@ validマスク、警告、時間窓と観測面位置を確認します。負の
 横方向光源・非周期側面・未観測の追加経路がある場合は別途計上が必要です。
 `surface_flux` 自身はMPI通信を行いません。分割面では担当群でpower/energyを加算でき、
 R/Tは分割ごとの比を平均せず、全横断面で評価します。閉曲面の自動配置や回折次数ごとの
-分解、空間補間は自動実行しません。nativeの通常point観測とplane出力は別であり、
+分解、空間補間は自動実行しません。計算処理の通常point観測とplane出力は別であり、
 バッチFDTDの自動取得は下記PlaneMonitorで指定できます。任意の外部配列も渡せます。旧point観測には200点上限が残ります。
 
 Fortranでの面積・時間積分を使い、既存の一様ポート入口は変更しません。
 エネルギーの二重計上を防ぐため `transverse_area` は記録された面積と一致させます。
 NPZサンプル `examples.fdtd_energy` も任意の `area_weights` を読み取れます。
 
-実native FDTDの横方向周期・損失なし誘電体格子（z方向一様）の確認では、
+実Pythonから直接呼ぶFDTDの横方向周期・損失なし誘電体格子（z方向一様）の確認では、
 32点で横断面全体を積分し、収支残差は入射の約0.0107%でした。場を先に平均すると
-入射の約10.1%に相当する透過分を取りこぼしました。最終場の蓄積もnativeの
+入射の約10.1%に相当する透過分を取りこぼしました。最終場の蓄積も計算処理の
 電磁場保存データから評価しています。これは局所的な結合・観測の実装検証であり、
 一般の3D材料の光学精度や多ノード性能の保証ではありません。
 
 
-### Native FDTDの面取得と自動位置合わせ
+### 計算処理 FDTDの面取得と自動位置合わせ
 
 バッチの `FDTD(..., planes=(PlaneMonitor(axis, position), ...))` で面を指定できます。
 軸は0/1/2、位置はbohrです。最も近い格子面を選び、要求値と実位置を記録します。
@@ -446,11 +445,11 @@ check = result.energy_balance(reference, point_work, point_volumes,
 
 `PlaneData` のE/Hは `(時刻数, N1, N2, 3)`、area_weightsは `(N1,N2)` です。
 Eは隣接する2本の辺、Hは4面をFortranで補間し、周期端も折り返して同じ空間位置へ揃えます。
-nativeが保存用に中心化済みのHをそのまま使い、時間平均は重ねません。
+計算処理が保存用に中心化済みのHをそのまま使い、時間平均は重ねません。
 面と直前の隣接面を持つランクだけが、観測面ごとにストリームを追記します。
 所有タイルを読み込んで全面を組み直す処理に追加のMPI集団通信はありません。
 バッチの新規FDTDと、下記の明示的な再開区間の読み取り・連結に対応します。
-embedded NativeEHFieldは下記の明示的なsample_planesスナップショットで取得します。従来の保存/再開の数値契約は変更しません。
+embedded NativeEHFieldは下記の明示的なsample_planesスナップショットで取得します。従来の保存/再開の数値仕様は変更しません。
 
 `plane.time` は0と観測間隔ごとの時刻です。stepsがobservation_strideで割り切れない場合、
 最終観測は最後のstride境界です。物質への仕事と場の始終差もこの時間範囲へ合わせます。
@@ -458,10 +457,10 @@ embedded NativeEHFieldは下記の明示的なsample_planesスナップショッ
 参照計算は同じ格子・入射・時刻設定と面配置を使います。E/Hは返却後読み取り専用です。
 保存済み出力は `read_native_planes(directory, calculation, ranks=...)` でも再取得できます。
 
-対応ランタイムには `SALMONPY_NATIVE_PLANES_V1` が必要です。旧ランタイム、面出力の失敗や
+対応計算プログラムには `SALMONPY_NATIVE_PLANES_V1` が必要です。旧計算プログラム、面出力の失敗や
 不完全なデータは警告して診断不可と記録し、正常終了したFDTDの点観測と計算結果は保持します。
 `result.energy_balance` は不完全な面から収支を捏造しません。importや準備時に自動ビルドせず、
-必要な場合だけ明示的に対応ランタイムを取得/構築します。観測のrawデータ量の目安は
+必要な場合だけ明示的に対応計算プログラムを取得/構築します。観測のrawデータ量の目安は
 面ごとに `8×6×2×N1×N2×(1+steps//stride)` bytesです。時刻タグとタイルヘッダーが加わります。
 
 実回折格子では観測なし/ありの既存点出力128個と、全電磁場保存データが従来実行ファイルと
@@ -471,9 +470,9 @@ embedded NativeEHFieldは下記の明示的なsample_planesスナップショッ
 
 ### バッチ再開の面観測データ
 
-既存nativeの再開処理・更新式は変更しません。再開側には、保存ステップより後の
+既存計算処理の再開処理・更新式は変更しません。再開側には、保存ステップより後の
 観測間隔に沿ったサンプルだけが入ります。時刻ゼロの補充やHの再平均はしません。
-native再開入力は元の`nt_em`と観測間隔を維持し、利用者が計算ノードで明示的に実行します。
+計算処理再開入力は元の`nt_em`と観測間隔を維持し、利用者が計算ノードで明示的に実行します。
 次の読み取り・連結処理は計算を起動しません。
 
 ```python
@@ -494,9 +493,9 @@ budget = result.energy_balance(reference, work, volumes,
 連結時は面の形状・全体時刻・観測間隔・総予定ステップ・保存ステップの接続を検査し、
 欠落・重複・設定不一致を診断のエラーとして通知します。再計算・補間・重複の黙示削除は
 しません。元配列は変えず、連結後も読み取り専用です。参照計算・仕事・場の蓄積差は
-連結した全期間に合わせます。埋め込み実行では下記の確定後だけ取得する入口を使います。
+連結した全期間に合わせます。同じプロセス内での計算実行では下記の確定後だけ取得する入口を使います。
 
-### 埋め込みFDTD：確定後だけ面を取得する
+### 同じプロセス内での計算FDTD：確定後だけ面を取得する
 
 同じ`FDTD.planes`を指定し、場の群の全ランクから`field.sample_planes()`を明示的に呼びます。
 取得できるのはステップ0か`observation_stride`の観測時刻です。Fortranの`sp_eh_plane_read`は
@@ -533,11 +532,11 @@ if snapshots:
 間隔を選んでください。混在サンプルの`--planes-x FRONT BACK --plane-stride 16`は横方向を周期境界にし、
 確定したステップだけで取得して最後に一つの`plane-series`アーカイブへ保存します。既定の実行は変えません。
 
-LDの実計算で直列/MPI2の直接・保護付き復元と再試行を検証し、場の履歴と点出力は一致しました。
+LDの実計算で直列/MPI2の直接・失敗時に元の状態を保つ復元と再試行を検証し、場の履歴と点出力は一致しました。
 従来バッチ版とのE/H差は最大8e-19未満（比較条件rtol1e-12/atol1e-14）です。保存された数値状態は一致します。
 以前からある未使用の座標配列領域は独立プロセス間で値が不定なので、全MPIランクの保存ファイル全体の
 バイト一致とは区別しています。
 
-座標保存の追補（2026-11-21）：新しいランタイムでは未使用の座標配列領域をゼロ初期化します。
+座標保存の追補（2026-11-21）：新しい計算プログラムでは未使用の座標配列領域をゼロ初期化します。
 有効な座標・halo・更新式は変えず、直列/MPI2で従来の場・電流・点出力に一致し、
 保存/復元後も全ランクのチェックポイントがバイト一致しました。上記の未使用領域の差は修正前の記録です。

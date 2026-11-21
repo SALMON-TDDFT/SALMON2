@@ -1,13 +1,13 @@
 # Prepare inputs for offline compute nodes
 
-[日本語](PREPARATION.md) · Topic: `offline_inputs` · Paired revision: `2026-11-15.1`
+[日本語](PREPARATION.md)
 
 Run preparation on a workstation or management/login node where the facility
 permits it. `salmonpy.preparation` collects explicitly selected **local files**,
 validates material parameters through your registered resolver, and records an
 integrity manifest. It never downloads, installs, builds or submits a job.
 
-## Python host
+## Python calling program
 
 ```python
 from salmonpy.preparation import prepare_inputs, verify_inputs
@@ -65,7 +65,7 @@ python -m salmonpy.preparation transferred-inputs --manifest-sha256 RECORDED_SHA
 
 The Python equivalent is `verify_inputs(directory, manifest_sha256=...)`.
 Verification reads only local files and does not import or call registered
-backends. It rejects missing/extra files or directories, symlinks, malformed
+calculation implementations. It rejects missing/extra files or directories, symlinks, malformed
 manifests and hash/size mismatches. It returns a detached manifest dictionary;
 the CLI prints a short integrity-only summary. Omit `manifest_sha256` only when
 an internal consistency check is enough. Hashes within a modified manifest cannot
@@ -74,7 +74,7 @@ OS errors propagate; invalid content raises `InputError`.
 
 Passing verification does not prove all scientific inputs/dependencies are
 present, that the material is physically appropriate, or that a solver will run.
-Load/validate with the chosen backend and test a small case on the target node.
+Load/validate with the chosen calculation implementation and test a small case on the target node.
 Use a new directory for outputs: adding results inside the bundle deliberately
 fails its exact-inventory check. No network blocking is imposed on arbitrary user
 code; the verifier itself makes no network calls.
@@ -112,7 +112,7 @@ new file; existing reports are preserved. Run your calculation separately throug
 your scheduler on allocated compute nodes. No prior report is required to run.
 The mixed calculation sample has no `--input-check` option or checker pipeline.
 The previous MPI preflight example was removed to avoid confusing a check with a
-calculation. Ordinary backend validation and runtime error handling remain.
+calculation. Ordinary calculation implementation validation and runtime error handling remain.
 
 ### Deliberately limited scope
 
@@ -126,13 +126,13 @@ The report lists `checks`, `errors` and `not_checked`. Exit0/status passed means
 only these checks passed; it is **not permission to compute on a management
 node**, a promise of successful execution, or a physical-validity certificate.
 It does not prove that code uses the supplied input, discover computed paths,
-validate arbitrary custom model combinations, certify native namelist semantics,
+validate arbitrary custom model combinations, certify solver namelist semantics,
 verify runtime/MPI/GS compatibility, or establish convergence/memory capacity.
 No automatic repair or execution follows a successful check. Invalid code and
 input are reported independently; exit2 indicates a detected problem.
 
 Do not attempt to support every user-program combination in this checker.
-Future scientific checks should name their exact supported schema/backend and
+Future scientific checks should name their exact supported schema/calculation implementation and
 scope, with unknown combinations reported as unverified rather than forbidden.
 Existing `preflight_inputs(..., registry=...)` is a separate explicitly trusted
 resolver-based material check; `--code` deliberately does not combine with
@@ -141,7 +141,7 @@ resolver-based material check; `--code` deliberately does not combine with
 
 ## Preparation-only FDTD on a management node
 
-`prepare_fdtd(calculation, new_directory, mpi=None)` writes native inputfile and
+`prepare_fdtd(calculation, new_directory, mpi=None)` writes solver inputfile and
 material assets to a new directory and stops. It needs no executable, creates no
 subprocess, initializes no MPI, builds nothing, runs no solver and submits no job.
 It returns a Path without an execution method; successful checks do not continue
@@ -162,7 +162,7 @@ python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-grid 2 1 1
 
 `salmonpy-prepared-fdtd.json` records prepared-not-run status, decomposition, rank
 count and input hashes/sizes, without site-specific executable/launcher paths.
-Existing directories are never overwritten. This is a native SALMON input folder,
+Existing directories are never overwritten. This is a solver SALMON input folder,
 not the prepare_inputs material archive; verify_inputs does not accept this
 format. It is not a physical convergence or runtime-compatibility certificate.
 
@@ -198,7 +198,7 @@ does not necessarily configure a different site's execution model.
 
 SalmonExecutable.run remains the explicit child-process path from serial Python;
 nested-launch protection inside MPI ranks stays enabled. For Python itself as a
-caller-owned MPI application, use ParallelContext and native embedded components
+caller-owned MPI application, use ParallelContext and solver in-process components
 collectively as described in COUPLED.en.md. This addition does not unify the
 separate DFT/TDDFT batch paths.
 
@@ -223,7 +223,7 @@ folder = prepare_dft(model, "dft-input", scf=SCFSettings(max_iterations=300))
 ```
 
 `prepare_tddft(rt_input_file, new_directory, files=None)` preserves a supplied
-native RT input byte-for-byte and copies only explicitly listed local files. It
+solver RT input byte-for-byte and copies only explicitly listed local files. It
 does not rewrite dt, waveform, gauge, parallel layout or directory_read_data.
 It requires no executable/compute-node GS on the management node and does not
 automatically discover, load or duplicate GS data.
@@ -255,10 +255,10 @@ Both examples stop after preparation, without run/submit continuation. The small
 Si DFT fixture is not a convergence certificate. Explicitly launch a matching
 audited SALMON in an allocated site job, passing gs.inp or rt.inp through stdin.
 Verify the recorded executable SHA256 without repeating source/object startup
-audits. HSE must use the fast-PR profile; prepare_dft does not replace provenance
+audits. HSE must use the fast-PR configuration; prepare_dft does not replace provenance
 or capability checks or enable the existing DFT.run HSE batch path.
 
 Python A→J workers are a separate execution mode: TDDFTInitialState.from_salmon
 is a GS snapshot loader, and new_state starts a worker. Do not automatically
 follow preparation with these when only management-node staging was requested.
-Use the existing native embedded path inside caller-owned MPI applications.
+Use the existing solver in-process path inside caller-owned MPI applications.

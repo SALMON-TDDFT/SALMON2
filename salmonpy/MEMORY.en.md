@@ -17,7 +17,7 @@ report = memory_advice(estimate, budget_bytes=4 * 2**30)
 print(report.to_dict())
 ```
 
-Custom backends supply measured/array-derived byte counts and a basis description.
+user-written calculation implementations supply measured/array-derived byte counts and a basis description.
 Use None for unavailable values and unknown for omitted components, never zero.
 known_peak_bytes sums known estimates; estimated_peak_bytes is None if any part
 is unknown. exceeds_budget=False means only that the supplied estimate fits,
@@ -27,7 +27,7 @@ are None.
 With MPI, pass an existing comm and call on every rank. The budget covers the
 SUM across that communicator, not each rank. Supply node-local communicators
 for per-node budgets. Different rank budgets are reported as unknown. Only
-rank0 warns. If backend estimation fails, handle it locally and pass estimate=None
+rank0 warns. If calculation implementation estimation fails, handle it locally and pass estimate=None
 or an unknown estimate; never skip the collective on that rank.
 
 process_memory lazily reads process peak RSS on Linux/macOS, not current use or
@@ -51,7 +51,7 @@ NEW_OUTPUT/memory-advice.json records:
 - Before initialization: grid/LD-pole, SBE matrix and wavefunction-input heuristics,
   with unknown initialization workspaces identified.
 - After initialization and at segment end: rank process peak RSS plus128MiB reserve per rank.
-- Before protected restore: peak RSS plus4 times native payload sizes,32 times
+- Before protected restore: peak RSS plus4 times solver payload sizes,32 times
   JSON sizes, extra snapshot buffers and reserve.
 
 This includes simultaneous original/candidate/read/copy storage. The multipliers
@@ -62,11 +62,11 @@ change at resume without changing physical inputs. Measurement, warning delivery
 and advice-file write failures are diagnostic only and do not set scientific
 failed flags; distinguish them from real invalid input/numerical/MPI failures.
 The sample disables advice when no budget is specified. Automatic estimates here
-cover the ordinary CPU mixed sample, not every DFT/ASE/external backend.
+cover the ordinary CPU mixed sample, not every DFT/ASE/external calculation implementation.
 
 ## Expanded grid and parallel checks on a larger Mac
 
-Keep the4GiB/4-core beginner recipe as its own verified profile. Ask for actual available resources and reserve headroom for the OS and other work. For the supplied64GB/18-core Mac, this campaign uses a48GiB advisory budget and at most15 MPI ranks with one thread each. These are campaign settings, not universal defaults or hard limits.
+Keep the4GiB/4-core beginner recipe as its own verified configuration. Ask for actual available resources and reserve headroom for the OS and other work. For the supplied64GB/18-core Mac, this campaign uses a48GiB advisory budget and at most15 MPI ranks with one thread each. These are campaign settings, not universal defaults or hard limits.
 
 `mpi_mixed_native --field-shape 96 96 96` changes Maxwell grid counts: each axis must be even and >=40 and match its MPI decomposition. Default40³ and2-bohr spacing are unchanged. Enlarging the grid adds outer vacuum, so compare decompositions only at the same grid/input. Default material-point physical coordinates are preserved. Electronic GS grid/k sampling is unchanged: this is not a96³ TDDFT test. The3D fixture tests interfaces;1D remains recommended for production TDDFT coupling.
 
@@ -74,4 +74,4 @@ Field2+SBE1+TDDFT2 uses `mpiexec -n 5 ... --field-grid 1 2 1 --tddft-ranks 2`. F
 
 Source-distribution tool `tools/test_mixed_scaling.py BUILD RUNTIME GS NEW_OUTPUT --rank-budget 18 --memory-budget-gib 48` uses the installed wheel and runs4/5/7/11/15 ranks sequentially twice on identical96³ inputs. A/E/j histories are compared with the first case. Different grid shapes are rejected. Supply MPI-vendor-specific flags with `--launcher-arg`; avoid other heavy work during timing.
 
-`coupled_loop_seconds_max` excludes initialization, output and serial reference replay. Communication metrics include waits, not pure link bandwidth; native FDTD halo exchanges are not separately decomposed. Memory is the sum of per-rank peak RSS values, not simultaneous aggregate RSS or whole-system usage. Resource/timer measurement failures are distinct from calculation failures. These short repeats do not establish universal scalability or physical accuracy.
+`coupled_loop_seconds_max` excludes initialization, output and serial reference replay. Communication metrics include waits, not pure link bandwidth; FDTD called directly from Python halo exchanges are not separately decomposed. Memory is the sum of per-rank peak RSS values, not simultaneous aggregate RSS or whole-system usage. Resource/timer measurement failures are distinct from calculation failures. These short repeats do not establish universal scalability or physical accuracy.

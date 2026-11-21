@@ -3,7 +3,7 @@
 ローカル場のデータ、モデルの要求ポート、既存APIへの明示アダプターを分けます。
 結晶はA/c、LDはEのままです。長さゲージのモデルはEを宣言し、自作モデルはA・E・Hの必要な
 組合せを宣言できます。Hは磁場強度でBではありません。磁気構成則やH→B変換は推定しません。
-この型だけでnative孤立系TDDFTや磁気相互作用が有効になるわけではなく、
+この型だけで計算処理孤立系TDDFTや磁気相互作用が有効になるわけではなく、
 MPIでは後述の明示的なfield_contractsとstep_fieldsを使います。
 
 `FieldValue(value, time=..., position=..., unit=...)`は有限実数3ベクトルと位置の不変コピーを持ちます。
@@ -55,7 +55,7 @@ FieldAdapterは状態を借用し、closeしません。step_indexの既定は0�
 受理済みindexを明示します。接続中にbackendを別途advance/restoreせず、必要なら正しいindexで
 アダプターを作り直してください。既存・自作複数ポートのどちらも、公開されたtiming/dt/timeを更新前後に照合します。
 timeはt0+(受理index+clock_offset)*dtです。属性がないモデルでは呼出側の宣言に依存します。
-物理契約自体はbackendの責務です。入力検査の失敗ではbackendを呼ばず、アダプターを再使用できます。
+物理仕様自体はbackendの責務です。入力検査の失敗ではbackendを呼ばず、アダプターを再使用できます。
 backendが例外を投げた場合はアダプターを無効化し、backendが巻き戻ったとは扱いません。
 MPIや結合全体の原子的更新ではありません。
 
@@ -63,19 +63,19 @@ MPIや結合全体の原子的更新ではありません。
 python -m salmonpy.examples.field_inputs
 ```
 
-wheelサンプルはnative LDの直接呼出しとの一致と、自作の時間差付きE/H受渡しを確認します。
-native SBEの直接計算との一致もテスト対象です。孤立系native接続とMPI通信は、後述の別APIと検証範囲を参照してください。
+wheelサンプルは計算処理 LDの直接呼出しとの一致と、自作の時間差付きE/H受渡しを確認します。
+計算処理 SBEの直接計算との一致もテスト対象です。孤立系計算処理接続とMPI通信は、後述の別APIと検証範囲を参照してください。
 
-## 実験的な孤立系native E接続（ソース作業コピー）
+## 実験的な孤立系計算処理 E接続（ソース作業コピー）
 
-同梱standardランタイムに検証用の別プロトコルを追加しました。
+同梱standard計算プログラムに検証用の別プロトコルを追加しました。
 `SALMONPY_TDDFT_WORKER=E1`で`INIT_E dt capacity E0`、`STEP_E Ex Ey Ez`を受け、
 `SALMONPY_TDDFT_E_V1 step delta_dipole[3] total_dipole[3]`を返します。
-単位は原子単位、双極子はe·bohrです。電子双極子の変化と全電荷双極子はnativeの
+単位は原子単位、双極子はe·bohrです。電子双極子の変化と全電荷双極子は計算処理の
 rt.dataと同じ定義です。電流密度ではなく、暗黙の時間微分や真空セル体積での除算はしません。
 
 検証範囲は孤立系・固定イオン・非偏極PZ・スカラー擬ポテンシャル・1ランク・中点伝播、
-初期E=0です。step nに渡すEはnativeのcalcVboxがindex nで使う値です。
+初期E=0です。step nに渡すEは計算処理のcalcVboxがindex nで使う値です。
 バッチ参照ではこの値を-(A[n+1]-A[n])/dtで準備しますが、worker内ではAを再構成しません。
 AETRS、外部双極子源、磁場との結合は未対応です。周期系は従来のA駆動のままです。
 
@@ -86,7 +86,7 @@ AETRS、外部双極子源、磁場との結合は未対応です。周期系は
 snapshot/restore APIではありません。backend異常時は子プロセスを閉じます。
 光学物性の収束や同一プロセス内の複数solverを保証するテストではありません。
 
-ソースを検査して明示的にビルドした実行ファイルを使用します。既存の配布済みランタイムが
+ソースを検査して明示的にビルドした実行ファイルを使用します。既存の配布済み計算プログラムが
 自動的にE対応するわけではありません。公開ローダーとメモリ上の復元APIはISOLATED_TDDFT.mdを参照してください。
 ローカルのバイナリ別検証記録で対応を判定します。ディスク再開はISOLATED_TDDFT.md、
 MPI packet通信は次節を参照。ビルド済みcatalog配布は残作業です。ソース内の
@@ -96,11 +96,11 @@ MPI packet通信は次節を参照。ビルド済みcatalog配布は残作業で
 
 `ResponseSession(..., field_contracts={point_id: contract, ...})` と
 `session.step_fields({point_id: FieldPacket(...), ...})` を使います。
-全ランクで同一の契約を指定し、点ごとの必要成分・単位・時刻・位置・ゲージを状態作成前に照合します。
+全ランクで同一の仕様を指定し、点ごとの必要成分・単位・時刻・位置・ゲージを状態作成前に照合します。
 入力mappingを渡すのは場のleaderだけで、他ランクはNoneです。点IDはplanの整数transport IDです。
 全点の入力を更新前に検査し、受信側でも不変packetを再構築・検査します。
 物質stateはstep_fieldsを実装し、ゼロ起点で宣言した整数または半ステップ時刻の電荷電流密度jの3成分を返します。
-出力契約はpoint標本・offset=0または1/2のjを1つ指定し、backendにも宣言があれば一致を検査します。
+出力仕様はpoint標本・offset=0または1/2のjを1つ指定し、backendにも宣言があれば一致を検査します。
 既存FieldAdapterでstateが宣言する時刻との整合も検査します。余分な成分は転送しません。
 従来のstep(A)は維持し、同じsessionで両方式を混在させません。
 
@@ -142,7 +142,7 @@ python -m salmonpy.examples.field_sampling
 これはローカルの読取操作で、通信や更新をしません。返り値は元の場から独立した不変コピーです。
 行順はfield.point_ids、位置はbohrです。Hのキーはありません。
 
-- native E/H：Aは(n+1/2)dt、Eはn*dt。位置は登録したマクロセルの中心。
+- FDTDのE/H更新：Aは(n+1/2)dt、Eはn*dt。位置は登録したマクロセルの中心。
 - Multiscale1D：Aはn*dt、Eは(n-1)dt。位置は物質セルのx座標、y=z=0。
 
 各時刻のsamplesを保持し、同じquantity・unit・positionsを持つ標本のtimesとvaluesを
@@ -151,7 +151,7 @@ python -m salmonpy.examples.field_sampling
 このファイルは原子単位の点標本で、Hや波動関数restartではありません。
 Hの取得は次節を参照してください。packet方式の結合は後述のPacketCoupledStepperを参照してください。
 
-## native Hの明示的な集合読取
+## 計算処理 Hの明示的な集合読取
 
 H対応ABIを明示的にビルドした場合、全fieldランクで
 `magnetic = field.sample_magnetic_field()` を呼びます。
@@ -193,14 +193,14 @@ mpiexec -n 3 python -m salmonpy.examples.mpi_packet_coupling NEW_NATIVE --field 
 ### 既存のA駆動binding
 
 `salmonpy.material_response.packetize_A_binding(binding, field_phase='endpoint')`
-で既存のA→j bindingを明示的に包み、Multiscale1Dへ接続します。native E/H結合では
+で既存のA→j bindingを明示的に包み、Multiscale1Dへ接続します。FDTDのE/H更新結合では
 `field_phase='yee_half_step'`を選びます。ResponseSessionには上記と同様、対応する
 点ごとの`field_contracts`を渡します。provider・物質ID・実行方式・電流符号を維持し、
 各状態が別々の受理済みA履歴を持ちます。元の状態は`step(A)`または
 `advance(A_old, A_new)`と、端点A/jの時刻宣言を実装します。
 
 物理ポートの時刻対応を明示する処理で、workerのローカル時計や数値更新順は変えません。
-初期Aはゼロです。Aを取得できないbackendも、この初期化契約を守る必要があります。
+初期Aはゼロです。Aを取得できないbackendも、この初期化仕様を守る必要があります。
 絶対時刻に依存する自作モデルは、この対応の意味を利用者が確認してください。
 `response.timing_records()`に元と変換後の時刻を記録します。E/H変換・補間・双極子の
 規格化は行いません。
@@ -208,7 +208,7 @@ mpiexec -n 3 python -m salmonpy.examples.mpi_packet_coupling NEW_NATIVE --field 
 既存サンプルに`--adapt-a`を付けると明示アダプター、`--legacy`で比較経路を選べます。
 `--runtime RUNTIME --bundle GS_BUNDLE`を追加すると二つの独立した管理TDDFT workerを
 使います。bundleには`rt.inp`とrestartデータが必要です。3ランク、worker各1スレッドで
-実行してください。短い接続回帰であり、物理的な収束検証ではありません。native経路は
+実行してください。短い接続回帰であり、物理的な収束検証ではありません。計算処理経路は
 さらに`--field native --build BUILD_JSON`が必要です。取得・ビルドは明示操作のままです。
 
 このアダプターはleader_only backend・物質群あたり1ランクに限定します。

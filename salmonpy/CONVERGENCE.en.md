@@ -2,9 +2,9 @@
 
 `salmonpy.convergence` separates offline planning from execution. Python handles
 inputs, trial dispatch and records. Finite-value checks, electron-number error
-statistics and observable comparisons run in the bundled Fortran kernel. Import
-and planning never compile, download or start a solver. An older native library
-without this ABI requires an explicit wheel update or kernel rebuild.
+statistics and observable comparisons run in the bundled Fortran calculation routine. Import
+and planning never compile, download or start a solver. An older Fortran/C library
+without this ABI requires an explicit wheel update or calculation routine rebuild.
 
 `plan_grid_scan(cell_angstrom, radii=..., material_id=...)` starts at the smallest
 selected physical PP radius/3, with0.1 angstrom as the default investigation limit.
@@ -53,10 +53,10 @@ report = run_dt_scan(plan, lambda dt: initial.new_state(dt=dt),
 New explicitly built runtimes expose electron_number on process TDDFT states
 and ordinary native/shared/heterogeneous-registry states. It is measured in Fortran
 from occupied, k-weighted spin density and grid volume, not configured nelec.
-run_dt_scan uses this property by default. A custom Fortran/C backend may instead
-supply electron_number=callback. Native queries are collective: all internal MPI
+run_dt_scan uses this property by default. A custom Fortran/C calculation implementation may instead
+supply electron_number=callback. solver queries are collective: all internal MPI
 ranks call in the same order. Queries are read-only, state-handle-specific and
-measure restored density after restart. Supported profiles are crystalline
+measure restored density after restart. Supported configurations are crystalline
 A-driven PZ/TB-mBJ/Libxc-PZ/PBE. Fast PR HSE and isolated E-drive measurement
 are not connected yet. Legacy runtimes still support ordinary calculations;
 missing diagnostics fail explicitly rather than substituting an input count.
@@ -86,7 +86,7 @@ norm is the reference; expected_electrons instead checks against a known count.
 Exceeding the target does not stop a trial. NaN/Inf, nonpositive norm or numerical
 exceptions stop only that trial immediately; finer trials continue. Failed traces
 are excluded from comparisons. Runtime/I/O failures and cleanup errors are distinct.
-Invalid input/backend contracts propagate rather than masquerading as instability.
+Invalid input/calculation implementation contracts propagate rather than masquerading as instability.
 
 The report separates nonbreaking_dt_au from norm_acceptable_dt_au. These are
 observations for the tested duration, not unconditional stability or physical

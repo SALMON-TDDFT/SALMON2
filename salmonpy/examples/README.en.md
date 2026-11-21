@@ -1,13 +1,13 @@
 # Python samples
 
-[日本語](README.md) · Topic: `examples` · Paired revision: `2026-11-19.1`
+[日本語](README.md)
 
 [Si starter: wheel to current](../SI_INTRO.en.md) includes a fixed pseudopotential, input and reference, and explicitly selects a prebuilt runtime.
 
 Use the same Python environment in which the wheel was installed. All samples
 below ship in the wheel. The code is shared by both language editions.
 
-LD and built-in SBE use the native library bundled in the wheel. Pulse creation and analysis need no solver.
+LD and built-in SBE use the Fortran/C library bundled in the wheel. Pulse creation and analysis need no solver.
 For SALMON input exported by `FieldSamples.write_salmon`, use `ae_shape1='input'` and `unit_system='au'`.
 
 ## Start with these three
@@ -16,12 +16,12 @@ For SALMON input exported by `FieldSamples.write_salmon`, use `ae_shape1='input'
 2. **SBE response**: `python -m salmonpy.examples.sbe_response new-sbe-output`. Learn A-to-j and independent states using a synthetic model, not real-material optical data.
 3. **Si current**: follow the [Si starter](../SI_INTRO.en.md) with a matching prebuilt runtime. This short wheel-to-current check does not certify physical convergence.
 
-These three are enough for a first visit. The table below indexes further tasks; MPI/native examples are advanced. Use new output locations outside the source checkout.
+These three are enough for a first visit. The table below indexes further tasks; MPI coupling examples are advanced. Use new output locations outside the source checkout.
 
 | Module under `salmonpy.examples` | Purpose / additional input |
 |---|---|
-| `custom_checkpoint` | User-backend capability/identity/compatibility checks and independent continuation; new output directory, no external solver |
-| `ld_response` | LD time response and permittivity; bundled native kernel |
+| `custom_checkpoint` | User-calculation implementation capability/identity/compatibility checks and independent continuation; new output directory, no external solver |
+| `ld_response` | LD time response and permittivity; bundled compiled calculation routine |
 | `pulse_spectrum` | Pulses and Fourier spectrum; no solver |
 | `geometry_preview` | Material IDs, middle slice, PML contact; new NPZ path |
 | `sbe_response` | Synthetic two-band A-to-J and independent states; new directory |
@@ -115,17 +115,17 @@ law. The TDDFT sample is a short prescribed-A connection test. None is a converg
 optics calculation. The response samples do not propagate FDTD or provide inner-MPI TDDFT.
 See [material interfaces](../FDTD_MATERIALS.en.md) and [distributed scope](../DISTRIBUTED.en.md).
 
-## Couple native E/H FDTD and internally parallel TDDFT
+## Couple FDTD called directly from Python and internally parallel TDDFT
 
 [mpi_coupled_tddft.py](mpi_coupled_tddft.py) uses two field ranks plus two two-rank
-material groups. Follow the [host-library setup and time/state contract](../COUPLED.en.md).
+material groups. Follow the [calling program-library setup and time/state contract](../COUPLED.en.md).
 
 ```sh
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.mpi_coupled_tddft BUILD_JSON GS_BUNDLE RT_INPUT NEW_OUTPUT
 ```
 
 `response.json` stores two-point A/E/J and both clocks; the field directory contains
-the manifest and observations. One native lifetime per process; another trial needs a fresh MPI job.
+the manifest and observations. One solver initialization per process; another trial needs a fresh MPI job.
 
 For practical TDDFT, prefer 1D propagation/layered structures; recommend 3D electronic feedback with SBE or a user-written current solver. This 40³/two-point example is a connection regression, not a 1D reduction or recommended production 3D TDDFT setup.
 
@@ -141,7 +141,7 @@ Requires ASE/f90nml and an audited DFT/TDDFT/PZ runtime. See the [ASE guide](../
 python -m salmonpy.examples.snapshot_restore
 ```
 
-Checks LD/SBE and all four Python fields; installed kernels, no full SALMON required. See [snapshots](../SNAPSHOTS.en.md).
+Checks LD/SBE and all four Python fields; installed calculation routines, no full SALMON required. See [snapshots](../SNAPSHOTS.en.md).
 
 Custom A-driven models can use one serial/MPI contract and an explicit conformance checker: [authoring guide](../MATERIALS.en.md), `python -m salmonpy.examples.custom_material`.
 
@@ -153,7 +153,7 @@ Stage local input files with [prepare_inputs.py](prepare_inputs.py); see the [gu
 
 Prepare a structure/grid input bundle with [prepare_structure.py](prepare_structure.py); see [guide](../STRUCTURE.en.md). Requires ASE.
 
-Run two LD materials with explicit IDs: [configured_ld.py](configured_ld.py). Requires a new output directory and installed native library.
+Run two LD materials with explicit IDs: [configured_ld.py](configured_ld.py). Requires a new output directory and installed Fortran/C library.
 
 Run configured Si DFT→TDDFT: [configured_si.py](configured_si.py), [guide](../DFT_CONFIG.en.md). Requires an existing runtime and ASE/f90nml.
 
@@ -161,15 +161,15 @@ Run configured Si DFT→TDDFT: [configured_si.py](configured_si.py), [guide](../
 
 | Sample | Purpose | Requirements / arguments |
 |---|---|---|
-| [field_inputs.py](field_inputs.py) | A/E/H input contract and custom response | LD kernel |
-| [point_ld.py](point_ld.py) | LD with material and point identities | LD kernel; new output |
+| [field_inputs.py](field_inputs.py) | A/E/H input contract and custom response | LD calculation routine |
+| [point_ld.py](point_ld.py) | LD with material and point identities | LD calculation routine; new output |
 | [point_tddft_restart.py](point_tddft_restart.py) | Per-point TDDFT restart | Catalog, runtime, waveform; new output |
 | [catalog_tddft.py](catalog_tddft.py) | TDDFT from a catalog | Catalog, runtime, waveform; see --help |
 | [mpi_configured_native.py](mpi_configured_native.py) | Configured LD/TDDFT MPI response | 3 ranks; catalog, waveform; TDDFT runtime |
 | [mpi_recorded_material.py](mpi_recorded_material.py) | Recorded custom/SBE serial–MPI comparison | 3 ranks; optional SBE catalog |
 | [mpi_point_identity.py](mpi_point_identity.py) | Point and material identities over MPI | 3 ranks; new output |
-| [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1D field coupled to independent TDDFT groups | 3 ranks with --material-ranks 1; native build and GS |
-| [isolated_response.py](isolated_response.py) | Isolated E-driven dipole response | Validated E-worker, receipt, GS bundle, E NPZ |
+| [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1D field coupled to independent TDDFT groups | 3 ranks with --material-ranks 1; solver build and GS |
+| [isolated_response.py](isolated_response.py) | Isolated E-driven dipole response | Validated E-worker, validation record, GS bundle, E NPZ |
 | [dipole_radiation.py](dipole_radiation.py) | Dipole-to-current mapping for FDTD | No data, or --archive and --cell-volume; no FDTD propagation |
 
 MPI samples also display `--help` from ordinary Python. Computation requires mpi4py and compatible MPI. Check rank options before launching; some defaults exceed a four-core budget.
@@ -178,11 +178,11 @@ MPI samples also display `--help` from ordinary Python. Computation requires mpi
 
 [field_sampling.py](field_sampling.py): explicit spatial weights and staggered-time interpolation of synthetic fields; no solver/data required.
 
-[mpi_packet_coupling.py](mpi_packet_coupling.py): synthetic packet feedback with 1D/native fields; three ranks (native also supports four).
+[mpi_packet_coupling.py](mpi_packet_coupling.py): synthetic packet feedback with one-dimensional fields or FDTD called from Python; three ranks (solver also supports four).
 
 - `molecular_field_selection.py`: explicit own-source vacuum field subtraction on synthetic samples; no solver required.
 
-Larger parallel checks: `mpi_mixed_native` supports `--field-shape`. See [COUPLED.en.md](../COUPLED.en.md) for5–15-rank layouts and measurement scope. The4GiB/4-core beginner profile remains available.
+Larger parallel checks: `mpi_mixed_native` supports `--field-shape`. See [COUPLED.en.md](../COUPLED.en.md) for5–15-rank layouts and measurement scope. The4GiB/4-core beginner configuration remains available.
 
 Offline convergence planning: `python -m salmonpy.examples.convergence_plan NEW_JSON`; see CONVERGENCE.en.md. Explicit illustrative PP radius only; no material computation.
 
@@ -198,7 +198,7 @@ Offline convergence planning: `python -m salmonpy.examples.convergence_plan NEW_
 
 ### Serial TB-mBJ ground states
 
-Use `DFT(..., xc="tbmbj", cval=None)` or `dft_from_atoms(..., xc="tbmbj", cval=1.2)`. Material JSON recipes accept xc and optional cval. None selects the automatic coefficient; a finite value greater than 1e-10 selects a fixed coefficient. The coefficient is retained in GS records, warm-start compatibility checks and TDDFT inputs. TB-mBJ is a model potential: total energies and forces are unvalidated diagnostics, with a warning rather than a run prohibition. ASE Calculator optimization and native parallel SCF support are unchanged. Run `python -m salmonpy.examples.dft_tbmbj --help` for the serial example. Validation here covers synthetic native XC evaluation and interface contracts, not real-material accuracy.
+Use `DFT(..., xc="tbmbj", cval=None)` or `dft_from_atoms(..., xc="tbmbj", cval=1.2)`. Material JSON recipes accept xc and optional cval. None selects the automatic coefficient; a finite value greater than 1e-10 selects a fixed coefficient. The coefficient is retained in GS records, warm-start compatibility checks and TDDFT inputs. TB-mBJ is a model potential: total energies and forces are unvalidated diagnostics, with a warning rather than a run prohibition. ASE Calculator optimization and solver parallel SCF support are unchanged. Run `python -m salmonpy.examples.dft_tbmbj --help` for the serial example. Validation here covers synthetic solver XC evaluation and interface contracts, not real-material accuracy.
 
 ## Optical conductivity and dielectric response: one polarization
 
@@ -241,7 +241,7 @@ Constrained LD fit: `python -m salmonpy.examples.ld_fit --poles 1 2 3`. Compare 
 
 Offline measured optical data: `python -m salmonpy.examples.optical_materials`. Lists pinned CC0 measurements and loads stored coefficients without downloading/refitting.
 
-`python -m salmonpy.examples.ld_response --anisotropic`: synthetic reciprocal tensor material response, not native anisotropic FDTD propagation.
+`python -m salmonpy.examples.ld_response --anisotropic`: synthetic reciprocal tensor material response, not solver anisotropic FDTD propagation.
 
 `fdtd_waveplate`: quarter/half-wave synthetic FDTD; default preview only, --run starts computation. See FDTD_MATERIALS.en.md.
 
@@ -253,7 +253,7 @@ For optional LD-only interface smoothing, add `--subpixel` to `fdtd_waveplate`. 
 
 Mixed MPI sessions route A/field packets only to owning points; J return order is unchanged. See communication_report for the ownership layout.
 
-With a matching spatial-current native runtime, mpi_mixed_native also routes J by field ownership. Only owned coupling-J rows are meaningful off the field leader; use leader output for full-point analysis. See COUPLED.en.md.
+With a matching spatial-current solver runtime, mpi_mixed_native also routes J by field ownership. Only owned coupling-J rows are meaningful off the field leader; use leader output for full-point analysis. See COUPLED.en.md.
 
 Preparation only: `python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-grid 2 1 1` writes FDTD inputs and stops, without solver execution or submission. See PREPARATION.en.md.
 
@@ -261,6 +261,6 @@ Electronic input preparation only: `python -m salmonpy.examples.prepare_electron
 
 `fdtd_energy`: diagnose macro-point work, R/T and energy balance from stored collocated E/j and separated E/H ports; no solver launch.
 
-`fdtd_periodic_slab --native-planes`: native owner-local plane streams, automatic colocation and integrated flux; unmatched runtime warns without discarding the calculation.
+`fdtd_periodic_slab --native-planes`: calculation object-local plane streams, automatic colocation and integrated flux; unmatched runtime warns without discarding the calculation.
 
-The mixed native sample optionally accepts `--planes-x FRONT BACK --plane-stride 16`: transverse-periodic planes captured only after committed steps, saved once as plane-series. Disabled by default.
+The mixed solver sample optionally accepts `--planes-x FRONT BACK --plane-stride 16`: transverse-periodic planes captured only after successfully completed steps, saved once as plane-series. Disabled by default.

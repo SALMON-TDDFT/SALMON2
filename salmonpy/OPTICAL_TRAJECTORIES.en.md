@@ -1,7 +1,7 @@
 # Reuse stored optical trajectories
 
 No calculation, new GS, network access or MPI is started by these APIs. All new
-transforms, weighted summation and differences use the Fortran observation kernel.
+transforms, weighted summation and differences use the Fortran observation calculation routine.
 Python selects arrays, schedules cases and records metadata. Keep original data.
 
 ## Duration and window sensitivity
@@ -62,14 +62,14 @@ k = k_current_contributions(
 ```
 
 SALMON's writer already multiplies band occupation AND k weights. Never multiply
-either again. Native reduction only sums supplied band/spin entries by their
+either again. solver reduction only sums supplied band/spin entries by their
 positive k IDs. Declare the file's sign: matter means J=-j and is converted once;
 charge is kept. These are charge-current spectra, not independent dielectric
 functions of k points. Relative RMS contributions may exceed one under signed
 cancellation and are not probabilities. No missing bands/spins/k points are
 inferred; complete-looking labels alone do not prove completeness.
 
-Native step indices times run dt plus time0 give the sampled times. dt is the
+solver step indices times run dt plus time0 give the sampled times. dt is the
 INTEGRATOR step, not observation-stride*dt. Optional total_current is already
 physical CHARGE current, regardless of the decomposed source sign, at exactly
 the same sampled times. Align it explicitly; no resampling or offset inference.

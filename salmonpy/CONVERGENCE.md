@@ -2,7 +2,7 @@
 
 `salmonpy.convergence` は計画と実行を分けます。計画だけならNumPyで作成でき、
 計算・コンパイル・通信は始まりません。実行時の有限値検査、電子数の保存誤差、
-応答の比較はwheelに同梱するFortranカーネルが担当します。Pythonは試験の
+応答の比較はwheelに同梱するFortran計算ルーチンが担当します。Pythonは試験の
 呼び出しと結果の記録を担当します。古いwheelに必要ABIがなければ、明示的な更新を案内します。
 
 まず少数のk点を固定し、物理的な擬ポテンシャル半径の1/3から格子幅を小さくします。
@@ -41,7 +41,7 @@ temporal = plan_dt_scan(material_id="silicon", duration_fs=3,
 
 ```python
 from salmonpy.convergence import run_current_grid_scan
-# evaluate_gridは各格子のGS/RTをFortran/Cバックエンドで計算する関数です。
+# evaluate_gridは各格子のGS/RTをFortran/C計算処理で計算する関数です。
 # {"scf_converged": bool, "dt_report": run_dt_scanの結果} を返します。
 report = run_current_grid_scan(spatial, evaluate_grid, rtol=0.05, atol=0.0)
 ```
@@ -65,15 +65,15 @@ report = run_dt_scan(
     rtol=1e-5, atol=0.0)
 ```
 
-新しく明示ビルドしたランタイムでは、プロセス分離 `TDDFTState` と通常XCの
-native／共有モデル／異種モデル登録の状態が `electron_number` を持ちます。
+新しく明示ビルドした計算プログラムでは、プロセス分離 `TDDFTState` と通常XCの
+計算処理／共有モデル／異種モデル登録の状態が `electron_number` を持ちます。
 Fortranの密度積分（占有・k点重み・スピンを含む電子密度×格子体積）を返します。
 入力のnelecで代用しません。`run_dt_scan` は省略時にこのプロパティを読みます。
-自作Fortran/Cバックエンドは `electron_number=callback` でも接続できます。
-nativeの取得は全内部MPIランクが同じ順序で呼ぶ集団操作です。状態ハンドルごとに
+自作Fortran/C計算処理は `electron_number=callback` でも接続できます。
+計算処理の取得は全内部MPIランクが同じ順序で呼ぶ集団操作です。状態ハンドルごとに
 取得し、時刻・電流・軌道は更新しません。保存／再開後も復元した密度から測定します。
 対応範囲は結晶A駆動のPZ／TB-mBJ／Libxc-PZ/PBEです。高速PR版HSEと孤立系E駆動の
-測定口は未接続です。既存ランタイムや旧プロトコルは通常計算に使えますが、
+測定口は未接続です。既存計算プログラムや旧プロトコルは通常計算に使えますが、
 実測値が取れなければ診断は具体的なエラーを返します。新wheelだけでは旧本体は更新されません。
 
 ```sh
@@ -90,7 +90,7 @@ mpiexec -n 2 python -m salmonpy.examples.tddft_convergence BUILD_JSON NEW_OUTPUT
 増加率と絶対ずれも併記し、許容値内判定には両側の最大ずれを使います。
 `expected_electrons` を指定すると、それを基準にして初期値のずれも検出します。
 目安を超えても試験は止めません。NaN／Inf・非正のノルム・数値例外だけ、その試験を
-直ちに終え、細かいdtへ進みます。入力・実装の契約違反を数値破綻と偽装しません。
+直ちに終え、細かいdtへ進みます。入力・実装の仕様違反を数値破綻と偽装しません。
 外部処理・I/O失敗はruntime_failure、close失敗はcleanup_errorとして分けます。
 
 - `nonbreaking_dt_au`: 試験時間を破綻せず完走した最大dt。
@@ -100,7 +100,7 @@ mpiexec -n 2 python -m salmonpy.examples.tddft_convergence BUILD_JSON NEW_OUTPUT
 ノルム保存だけで位相・電流・光学応答の精度は保証されません。
 `current_atol` と `current_rtol` を両方指定すれば、共通の物理時刻で電流も比較します。
 最小dtを自動的に収束済みとは扱いません。最後にk点収束と本計算条件を別途確認します。
-MD、HSE等で適用可能な診断かは各バックエンドの測定定義も確認してください。
+MD、HSE等で適用可能な診断かは各計算処理の測定定義も確認してください。
 
 電流の相対RMS5%という既定値は格子のスクリーニング基準であり、誘電関数や高次高調波スペクトルの精度保証ではありません。
 用途に応じて`rtol`／`atol`を厳しくし、目的のスペクトル自体の収束も確認してください。採用した許容値は結果に記録します。既定の数値基準は変更しません。

@@ -1,11 +1,11 @@
-# Standard TDDFT native same-model handles
+# Standard TDDFT solver same-model handles
 
-[日本語](STANDARD_HANDLES.md) · Topic: `standard_tddft_handles` · Revision: `2026-11-18.1`
+[日本語](STANDARD_HANDLES.md)
 
-An explicitly built standard host-MPI runtime now exposes
+An explicitly built standard MPI managed by the calling program runtime now exposes
 `sp_tddft_handle_protocol()==1` and `sp_tddft_model_protocol()==1`. The matching
 header is [native_adapters/standard_tddft_handles.h](native_adapters/standard_tddft_handles.h).
-The native C/C++ contract also backs the opt-in Python
+The solver C/C++ contract also backs the opt-in Python
 `NativeTDDFTBackend.open_model` / `NativeTDDFTModel` and normal multipoint sessions.
 See [Python sharing](SHARED_TDDFT.en.md) for usage. Default `create_state` and
 one-point plans retain the legacy path.
@@ -13,10 +13,10 @@ one-point plans retain the legacy path.
 One process/model uses an immutable periodic, non-symmetric, unpolarized, fixed-ion
 PZ/TB-mBJ/Libxc-PZ/PBE input with middlepoint transverse propagation. **dt, capacity,
 decomposition and initial A are common.** This does not allow different material
-inputs, symmetry groups, per-state dt/capacity, concurrent threads or other native
+inputs, symmetry groups, per-state dt/capacity, concurrent threads or other solver
 solver initializers in the same process. Use a fresh directory with shared,
 verified GS/PP/input files and keep them unchanged throughout the attachment.
-Only RT/current and energy streams are owned by this profile. Optional analysis
+Only RT/current and energy streams are owned by this configuration. Optional analysis
 outputs using global names are refused, rather than silently dropped or overwritten.
 The legacy single-state route retains its documented output/profile scope.
 
@@ -24,25 +24,25 @@ The legacy single-state route retains its documented output/profile scope.
 |---|---|
 | `handle_init(input,dt,capacity,A0,decomposition,&h,j)` | Read model once and create its first state; mutually exclusive with legacy init. |
 | `model_new(&h,j)` | Fresh independent state from original GS, including after all earlier states close; no per-state GS directory copy. |
-| `handle_step(h,Aold,Anew,j)` | Advance the selected owner using the unchanged kernels. Aold must equal its accepted endpoint. |
+| `handle_step(h,Aold,Anew,j)` | Advance the selected owner using the unchanged calculation routines. Aold must equal its accepted endpoint. |
 | `handle_info(h,&step,A,j)` | Read accepted endpoint and current. Time is step×model dt. |
-| `handle_checkpoint(h,path,mode)` | 0 save,1 fresh direct load,2 stage,3 commit,4 cancel. Files are rank-local and host-authenticated. |
-| `handle_transaction(h,mode)` | 0 capture,1 numeric rollback/close own streams,3 reopen,2 release. Host restores owner stream bytes between1 and3. |
+| `handle_checkpoint(h,path,mode)` | 0 save,1 fresh direct load,2 stage,3 commit,4 cancel. Files are rank-local and calling program-authenticated. |
+| `handle_transaction(h,mode)` | 0 capture,1 numeric rollback/close own streams,3 reopen,2 release. calling program restores owner stream bytes between1 and3. |
 | `handle_label(h,buffer,capacity)` | Output prefix; prepend the common base_directory and append `_rt.data` / `_rt_energy.data`. Buffer includes trailing null. |
-| `handle_close(h)` | Release this owner, pending/protected data and initialization MPI children; siblings and host MPI stay live. |
+| `handle_close(h)` | Release this owner, pending/protected data and initialization MPI children; siblings and MPI managed by the calling program stay live. |
 
 Handle calls return **charge-current density j** in atomic units, minus SALMON
 matter current. Text files retain the existing SALMON conventions; read their
 column definitions. A is Cartesian A/c in atomic units; dt is atomic time. The
 **legacy** `sp_tddft_init/step` ABI still returns matter J, and Python performs its
 existing sign conversion. Do not negate a handle result again. x/y/z and rotating
-waveforms are permitted by this full-k profile.
+waveforms are permitted by this full-k configuration.
 
-Host initializes MPI and calls `sp_attach(MPI_Comm_c2f(comm))`. All group ranks call
+calling program initializes MPI and calls `sp_attach(MPI_Comm_c2f(comm))`. All group ranks call
 in the same order on the main thread. Tokens are opaque positive int64 values,
 not user material IDs or pointers. Reuse increments generation; stale or mixed
 rank tokens reject before numerical selection. Label buffer errors agree across
-ranks. Close every handle before `sp_detach`, then let the host finalize MPI.
+ranks. Close every handle before `sp_detach`, then let the calling program finalize MPI.
 One attachment lifetime/process is the supported contract. Importing SALMONpy
 neither builds nor downloads this runtime.
 
@@ -56,7 +56,7 @@ close; registry memory is bounded by peak live states, not total creations.
 
 Direct restart requires the same binary, immutable inputs, dt/capacity and MPI
 partition. Load into a fresh state; history resumes without accepted-step replay.
-Numeric restore does not merge previous text logs. Host owns identity/file hashes
+Numeric restore does not merge previous text logs. calling program owns identity/file hashes
 and per-owner output journaling. These files are not portable canonical archives.
 Known numerical and transactional rejection retains its existing guarantees;
 initialization/allocation/I/O/MPI/process failure does not gain a general retry

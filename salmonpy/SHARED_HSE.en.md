@@ -1,12 +1,16 @@
-# Python shared fast-PR HSE model
+# Create independent fast-HSE calculations for the same material
 
-[日本語](SHARED_HSE.md) · Topic: `shared_fast_hse` · Revision: `2026-11-18.5`
+[日本語](SHARED_HSE.md)
 
-`NativeFastHSEBackend.open_model(initial, dt, context)` returns a
-`NativeFastHSEModel`. It verifies/copies one immutable material/symmetry input bundle and
-attaches one existing host-MPI communicator. The first `new_state` initializes
-the native model; subsequent calls create fresh independent original-GS states.
-There is no hidden numerical template and no per-state GS-directory copy.
+Use this when applying different light pulses to the same material, or placing
+the same material at several macro points. Atomic structure and symmetry inputs
+are shared; each calculation has its own wavefunctions, excitation history and
+current history. Advancing one calculation does not change another.
+
+Prepare the shared model with `NativeFastHSEBackend.open_model(initial, dt, context)`.
+Use `model.new_state(...)` to start independent calculations from the original
+ground state. Material-input checking/copying and MPI attachment occur once;
+electronic initialization occurs on the first `new_state` call.
 
 ```python
 from salmonpy.fast_hse import FastHSEMaterialProvider
@@ -37,13 +41,13 @@ finally:
 
 `context` supplies `solver_comm` and `point_ids`; a caller-owned ParallelContext
 can be used. All subgroup ranks call in the same order from the main thread.
-The communicator must remain alive until every state/model lease is closed.
-Input/library validation happens before the native lifetime is consumed; the
-import itself loads no MPI or native library and does not compile/download.
+The communicator must remain alive until every state/reference to a shared model is closed.
+Input/library validation happens before the solver initialization is consumed; the
+import itself loads no MPI or Fortran/C library and does not compile/download.
 
 `new_state(point_id=None, *, dt=None, capacity=None)` defaults to the model's dt
 and prepared maximum steps. Omitted point IDs get sequential integers. Explicit
-string/integer IDs are retained on `state.point_id`; tokens are separate native
+string/integer IDs are retained on `state.point_id`; tokens are separate solver
 identifiers. Each state owns A/current/clock/capacity, HSE histories and its own
 output basename. `state.model_identity` identifies the common material snapshot.
 Passing dt/capacity does not mutate the model or sibling states. The initial
@@ -53,7 +57,7 @@ The existing state methods `step(A)`, `advance(Aold,Anew)`, `checkpoint(path,Fal
 `checkpoint(path,True)` and `close()` retain their meanings. Direct load requires
 a fresh state with matching dt/capacity and the same binary, GS/input and MPI
 partition; it restores internal history without replaying accepted steps. The
-host authenticates saved files/identity. Text logs start with the new state's
+calling program authenticates saved files/identity. Text logs start with the new state's
 label; numeric restoration does not merge old text output. Ordinary protected
 step journals select only that state's two streams, so rollback does not truncate
 a sibling's output in the common directory.
@@ -66,7 +70,7 @@ The model context manager does not close surviving states: always close them in
 No MPI cleanup is triggered by Python garbage collection.
 
 Scope of the legacy `open_model` route: one immutable **full-k or symmetry-reduced-k** model/process, existing k-only MPI1/2
-backend and CPU/main-thread rules. Legacy `create_state` remains single-lifetime;
+calculation implementation and CPU/main-thread rules. Legacy `create_state` remains single-lifetime;
 choose it or `open_model` for a process. An explicitly rebuilt runtime must expose
 both handle protocol1 and model protocol1. The explicit heterogeneous registry below
 adds different-input models. Automatic rank reassignment and threaded entry remain separate. With context_mpi_protocol1, initialization children retire at owner close.
@@ -84,7 +88,7 @@ mpiexec -n 2 python shared_fast_hse.py BUILD_JSON GS NEW_OUTPUT
 ```
 
 The sample advances two polarizations and verifies fresh direct resume. It checks
-composition/restart, not material convergence. See [native handles](NATIVE_HANDLES.en.md)
+composition/restart, not material convergence. See [solver handles](NATIVE_HANDLES.en.md)
 for the underlying C ABI and remaining source ownership boundaries.
 
 ## Normal mixed MPI sessions
@@ -95,15 +99,15 @@ Pass `points_per_group={material_id: 2}` to `assemble_native_layers`; the
 its own state and ID. Points of the same material are grouped in encounter order,
 including across separate layers. Omit the option to retain one point/group.
 This is an explicit layout choice; budget warnings never change it automatically.
-Known singleton TDDFT cannot share a group; custom backends may provide their own
-factory. Shared native HSE accepts full-k or an explicitly opted-in same-symmetry model.
+Known singleton TDDFT cannot share a group; user-written calculation implementations may provide their own
+factory. Shared Fortran HSE calculation accepts full-k or an explicitly opted-in same-symmetry model.
 
 `ResponseSession` optionally calls `backend.open_group(initial, dt, context)`
 once per local binding. A returned factory supplies `new_state(point_id)` and
 `close()`; `None` uses the existing `create_state` path. All subgroup ranks call
 the same sequence. The session owns the factory, closes states before it, and
-attempts cleanup of all created states even if one cleanup fails. Reusing a backend
-object does not implicitly cache live sessions. User backends need no inheritance.
+attempts cleanup of all created states even if one cleanup fails. Reusing a calculation implementation
+object does not implicitly cache live sessions. User calculation implementations need no inheritance.
 
 The installed normal sample supports `--hse-points-per-group 2`:
 
@@ -129,7 +133,7 @@ one-state filenames and schemas remain unchanged and versions1–3 remain readab
 Resume requires the same binary, inputs and MPI topology. Protected restore stages
 independent candidates: a later-point failure preserves field, LD, SBE and all
 electronic originals and allows retry without replay. This is not process-crash
-recovery or an interchangeable cross-backend archive format.
+recovery or an interchangeable cross-calculation implementation archive format.
 
 Local Taylor and PT-CN tests compared shared versus separate MPI groups, independent
 serial responses, and continuous versus direct resumed currents/fields/energies.
@@ -157,7 +161,7 @@ groups within one model/process and cross-topology restart remain unsupported.
 
 The supplied 3D localized mixed fixture was verified for128 steps (`--steps 128`,
 `--direct-save-at 63`). At a longer256-step run its local field ceased to preserve
-the retained group after145 steps, and admission correctly rejected it while
+the retained group after145 steps, and input checking correctly rejected it while
 protected stepping preserved the originals. A z-polarized source does not ensure
 that every evolving local FDTD field stays along z. Use a symmetry-compatible
 geometry/field or prepare full-k input for that calculation; do not discard small
@@ -173,17 +177,17 @@ remain supported and were regression-tested with the new runtime.
 A newly built runtime exposing `sp_fast_hse_context_mpi_protocol()==1` tags
 communicators created during each synchronous state initialization with a unique
 owner ID. `state.close()` releases its request caches, XC/exchange/FFT owners and
-then those communicators. Other states and the host communicator stay live.
+then those communicators. Other states and the calling program communicator stay live.
 Registry slots are reused without reusing owner IDs during an attachment.
 `sp_fast_hse_mpi_resources(int values[2])` reports live tracked children and registry
-slots for explicit native diagnostics (all subgroup ranks, main thread). It is
+slots for explicit solver diagnostics (all subgroup ranks, main thread). It is
 not an estimate of process memory or a general MPI resource count.
 
 The shared density symmetry map uses MPI_COMM_SELF for the k-only, one-rank
 r-space group so closing its last constructor does not invalidate siblings.
 Other grid decompositions retain their supplied communicator. Unscoped children
-remain attachment-owned; native initialization crashes/allocation/MPI failures,
-unrestricted profiles and concurrent entry remain outside this guarantee.
+remain attachment-owned; solver initialization crashes/allocation/MPI failures,
+unrestricted configurations and concurrent entry remain outside this guarantee.
 The explicit registry below additionally owns/swaps each model's density symmetry map.
 Older runtimes still work in their documented scope but retain children until
 detach. Rebuild explicitly for the new retirement behavior; never patch a binary.
@@ -191,11 +195,11 @@ detach. Rebuild explicitly for the new retirement behavior; never patch a binary
 ## Different-input HSE models in one process
 
 `backend.open_registry(context)` returns `NativeFastHSERegistry` on one existing
-host-MPI subgroup. `registry.open_model(initial, dt)` validates/copies each model
+MPI managed by the calling program subgroup. `registry.open_model(initial, dt)` validates/copies each model
 once; its first `new_state` registers input/unit/symmetry values. Subsequent states
 start independently from that model's GS. The old `open_model` and `create_state`
-routes remain unchanged. Choose a registry or legacy route for an attachment
-lifetime; import never attaches/builds/downloads a native runtime.
+routes remain unchanged. Choose a registry or one-initialization execution method for an attachment
+lifetime; import never attaches/builds/downloads a solver runtime.
 
 ```python
 backend = NativeFastHSEBackend(build_json, work_root, allow_symmetry=True)
@@ -231,10 +235,10 @@ process working directory is changed synchronously and restored by the adapter;
 this is not thread-safe concurrent embedding.
 
 Closing a model stops new states while existing states keep their model alive.
-Closing the registry closes model factories; its native attachment stays until
-the last state closes. Close states explicitly, before host communicator/MPI
+Closing the registry closes model factories; its solver attachment stays until
+the last state closes. Close states explicitly, before calling program communicator/MPI
 retirement. An idle model cannot release the registry's process reservation.
-Collective model mismatch and work-directory failure are checked before native
+Collective model mismatch and work-directory failure are checked before solver
 calls. General Fortran STOP/allocation/MPI/process failure recovery is unchanged.
 
 Use a current explicitly built/audited runtime exposing
@@ -258,13 +262,13 @@ and `assemble_native_layers(..., model_groups={"hse-models": ["hse-a", "hse-b"]}
 Each material retains its own provider/initial GS and every macrocell its own state.
 Equal inner rank counts, one matching library/work root and matching symmetry
 permission are required within the HSE group. Standard TDDFT and HSE still use
-separate native groups. Default plans and `shared_model=True` remain unchanged.
+separate solver groups. Default plans and `shared_model=True` remain unchanged.
 
-`salmonpy.examples.mixed_hse_models` demonstrates ordinary native layer assembly,
+`salmonpy.examples.mixed_hse_models` demonstrates ordinary solver layer assembly,
 FDTD-local LD, SBE, two HSE input IDs and protected direct save/resume. Its
 `materials` JSON uses the existing `salmonpy.native-tddft-materials/1` local input
 schema; this example explicitly chooses HSE providers, rather than guessing a
-backend from filenames. Use k-only decomposition, e.g. `[2,1,1,1,1]`, per material.
+calculation implementation from filenames. Use k-only decomposition, e.g. `[2,1,1,1,1]`, per material.
 The packaged `mixed_hse_models_layers.json` fixes layer IDs/order/thickness;
 `--layers` accepts another layout. `--separate` creates independent material
 groups for comparison. This40³/8³ small 3D fixture tests interfaces, not precision.
@@ -284,23 +288,23 @@ The local-input template is `examples/mixed_hse_models_inputs.json`; replace bun
 ## Per-call file resolution
 
 With directory scope2/3, legacy/shared/registered fast-PR HSE calls use each work
-folder as a native file-resolution base without host chdir. Failure paths release
+folder as a solver file-resolution base without calling program chdir. Failure paths release
 the scope. Older runtimes, including scope1, retain the prior route. This shares
-GS call-admission/cleanup code and does not enable concurrent threaded execution.
+GS call-input checking/cleanup code and does not enable concurrent threaded execution.
 The numerical direct-checkpoint layout is unchanged.
 
-Shared/registered fast-PR HSE states expose `state.timing_seconds` with optional timer protocol1: completed rank-local total, initialization, density and Hartree intervals in seconds. Query collectively on the material communicator. Each handle excludes parked, sibling and host work; unfinished intervals are absent, so total may be zero. Timing is not a numerical checkpoint payload, and restore does not erase spent work. Only the new query needs a matching runtime; older runtimes retain ordinary operations. Singleton timing has a separate legacy timer protocol1; threaded concurrency remains unsupported.
+Shared/registered fast-PR HSE states expose `state.timing_seconds` with optional timer protocol1: completed rank-local total, initialization, density and Hartree intervals in seconds. Query collectively on the material communicator. Each handle excludes parked, sibling and calling program work; unfinished intervals are absent, so total may be zero. Timing is not a numerical checkpoint payload, and restore does not erase spent work. Only the new query needs a matching runtime; older runtimes retain ordinary operations. Singleton timing has a separate legacy timer protocol1; threaded concurrency remains unsupported.
 
 New runtimes also give the fixed-settings initialization guard an explicit model owner: one per registered model or same-material shared factory. Switching models no longer overwrites a process-wide guard. Only successful initialization commits it; failed creation preserves it. Validation predicates, C entry points and numerical checkpoint representation remain unchanged. The standalone legacy path retains its compatibility guard; this does not complete all shared-state isolation.
 
 Reusing a closed model slot for a different material starts a fresh initialization guard for that slot, preserving every other live model.
 
-Checkpoint array-size validation now uses call-local scratch, passed explicitly to each serializer. The existing state-derived bound, malformed-size checks and stream format remain unchanged. This does not add threaded concurrent native execution.
+Checkpoint array-size validation now uses call-local scratch, passed explicitly to each serializer. The existing state-derived bound, malformed-size checks and stream format remain unchanged. This does not add threaded concurrent solver execution.
 
-Fast-PR HSE singleton runtimes with legacy timer protocol1 isolate initialization (with or without symmetry), propagation and close timing from the host. `state.timing_seconds` returns the same four completed counters as shared states. Old runtimes retain ordinary calculations; only the query requires this capability. Timing is not numerical checkpoint data, and MPI/update order/lifetime restrictions remain unchanged.
+Fast-PR HSE singleton runtimes with legacy timer protocol1 isolate initialization (with or without symmetry), propagation and close timing from the calling program. `state.timing_seconds` returns the same four completed counters as shared states. Old runtimes retain ordinary calculations; only the query requires this capability. Timing is not numerical checkpoint data, and MPI/update order/lifetime restrictions remain unchanged.
 
 Checkpoint history g, b and coeff now use scalar IEEE inquiries over every element, retaining the existing metadata checks, rejection and format. Finite/NaN/positive- and negative-infinity tests use synthetic history; they are not new real-electronic-state disk-restart or Fujitsu compiler evidence.
 
-The internal `legacy_settings` fallback remains a sequential, process-owned compatibility route; it is not an independent model owner. Explicit shared/registered models pass model_settings. The HSE slot tables own multiple instances, while active_model/registry_mode/handle_mode remain process selectors. Their presence does not establish reentrant or threaded calls. Retiring the implicit fallback and stabilizing selection/lifetime contracts remain native-ABI work; do not simply reject legacy callers before that migration.
+The internal `legacy_settings` fallback remains a sequential, process-owned compatibility route; it is not an independent model owner. Explicit shared/registered models pass model_settings. The HSE slot tables own multiple instances, while active_model/registry_mode/handle_mode remain process selectors. Their presence does not establish reentrant or threaded calls. Retiring the implicit fallback and stabilizing selection/lifetime contracts remain solver-ABI work; do not simply reject legacy callers before that migration.
 
 Omitting `model_settings` selects `legacy_settings` and emits a warning once per process (only the MPI root writes stderr). Explicit model owners do not warn, and compatibility use remains allowed. New per-instance state belongs in contexts/registry slots rather than additional process-selection flags.

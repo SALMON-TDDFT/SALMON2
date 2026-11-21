@@ -2,14 +2,14 @@
 
 直列のpoint-run記録を既存の二段階MPI応答サービスへつなぐ、明示選択式の機能です。
 整数の通信番号、ランク割当、A/c→電荷電流の更新・加算、場のソルバーは変更しません。
-native backendの能力・制約は従来どおりです。import時にMPIを初期化しません。
+計算処理 backendの能力・制約は従来どおりです。import時にMPIを初期化しません。
 
 全contextランクで同じ`point_record`と`point_map`を
 `ResponseSession(..., dt=..., point_record=record, point_map=mapping)`または
 `CoupledStepper.from_multiscale(..., point_record=record, point_map=mapping)`へ渡します。
 記録は`salmonpy.point-run/1`（[POINT_RUNS.md](POINT_RUNS.md)参照）です。
 plain dataとして作るか、直列状態を作らずに`PointRun.record()`から得られます。
-run_idはホスト側で決め、セッション作成前に共有します。各ランクで別々にUUIDを生成しないでください。
+run_idは呼び出し元プログラム側で決め、セッション作成前に共有します。各ランクで別々にUUIDを生成しないでください。
 
 ```python
 record = {'schema': 'salmonpy.point-run/1', 'run_id': 'experiment-1', 'points': [
@@ -35,7 +35,7 @@ provider/backendへ渡る`SolverContext.point_records`は、自群内の整数�
 既存コールバックのpoint_id引数は整数のままです。metadataを省略するとpoint_recordsと
 `session.identity_record()`はNoneで、従来の利用を維持します。指定時のidentity_recordは
 point_runとmpi_point_map（整数点、利用者点、群名、worldランク）の独立コピーを返します。
-集団native状態を新たな状態ラッパーで包むことはしません。
+集団Fortran/Cで保持する計算状態を新たな状態ラッパーで包むことはしません。
 
 ## 集団での出力
 
@@ -54,7 +54,7 @@ else:
 配列はplan.point_ids順です。時刻は推定しないため明示保存してください。
 point_run、point_axes、mpi_point_mapは予約キーです。`open_point_arrays`で配列hash・点軸・
 利用者ID・通信点と群所有の整合性を検査できます。MPI状態の復元や計算再開は行いません。
-全ランクで同じ順序の呼出しが必要です。プロセス死亡やnative MPI abortは回復不能なので、
+全ランクで同じ順序の呼出しが必要です。プロセス死亡や計算処理 MPI abortは回復不能なので、
 ランチャー・ジョブに制限時間を設けます。通常の出力失敗では数値状態を進めたり無効にしたりしません。
 新しい出力先で再試行できます。既存の出力先は上書きしません。
 metadataの真正性には、別経路で信頼できるmanifestのhashが必要です。

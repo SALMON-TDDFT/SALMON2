@@ -2,6 +2,19 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
+## 現在の作業順（2026-11-22 照合）
+
+| 順序 | 残作業 | 範囲 |
+|---|---|---|
+| 先に整理 | 検証済み変更のcommit／push | 再開データの読込エラー処理、日英・AI文書の読みやすさ改善は未コミット |
+| 1 | 初期化・補助入出力・作業配列の失敗処理 | 未対応箇所を実際に使う経路から絞る。検証済みの保存・読込を作り直さない |
+| 2 | C/Fortranから呼ぶ際の版・互換性確認 | 呼び出し規約の安定化と、残る操作・実行環境での確認 |
+| 3 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
+
+再開ディレクトリの準備まで `06bf7cea` でpush済み。読込処理はsource／wheel各94ケースと両版679テスト（各1件スキップ）で検証済みです。文書は104件を点検し、追加15件を整理、関連16テストを確認しました。
+
+多ノード・施設MPI、大規模I/O、追加保存形式、他環境、Agフィット改善は別枠です。高速HSEの電子数診断と実材料の格子収束調査は利用者指定で後回し、分子は保留、TTMは削除済みです。重いCIを追加で手動起動しません。
+
 ## Current actionable queue — 2026-11-22 (resource inventory and operational follow-ups)
 
 This section takes precedence over historical dated checkboxes below. Historical
@@ -155,8 +168,36 @@ results/residual diagnostics and pauses the downstream workflow for user review
   preserve originals and terminate without hangs. Source/installed ownership,
   normal writer-byte controls,679 tests(one skip),and four native MPI2 direct
   save/restore regressions pass. Not a directory-writability preflight;later
-  writes remain checked by writers. Current follow-up is uncommitted.
+  writes remain checked by writers. Committed/pushed as06bf7cea.
   Record: calc2026/salmonpy-restart-directory-recovery-20261122/summary.json.
+- [x] Required legacy EM restart readers:mandatory collective io_status with
+  checked read-only open/read/close. Shared status precedes payload;local errors
+  agree within solver group;remap combines3 metadata broadcasts into1 status
+  header and gates workspace/payload transfer. No ordinary-step communication
+  changes or compatibility fallback. Source/wheel94 cases each on GNU MPI1/2:
+  missing/truncated/invalid-text/directory errors retain caller MPI/unit600 and
+  explicit repaired retry reads poisoned buffers. Read-only archives accepted;
+  existing1D–5D real/complex ownership/remap tests pass. Actual LD+FDTD64→128
+  resume and1↔2 repartition match continuous raw states;normal prior-runtime
+  controls are unchanged. Shared input/output repartition failure originally
+  overwrote layout metadata;metadata publication now waits for every old payload
+  to read successfully and failed input sets retain identical contents. Later
+  multi-file saves are not atomic. Copied observation text differs only in old
+  trailing blanks;physical values and raw payloads are exact. Both679-test suites
+  pass(one skip),plus four native scalar/tensor MPI2 save/restore regressions.
+  Failed legacy buffers/partial models are invalid,not atomically restored live
+  states. Scope is detected I/O errors,not arbitrary corruption/OS/MPI recovery.
+  Record: calc2026/salmonpy-restart-read-recovery-20261122/summary.json.
+- [x] Current user/AI documentation readability:104 Markdown documents reviewed,
+  explanatory internal labels removed while callable names/paths remain intact.
+  Further15-guide pass corrected obsolete LD state-reconstruction and unconnected
+  Python-model claims against implementation,translated the Japanese onboarding,
+  and added task/state-creation navigation with developer details folded separately.
+  Manual11/public-API5 tests,local links and executable-example checks pass.
+  Records:calc2026/salmonpy-documentation-readability-20261122/{summary,followup-summary}.json.
+- [ ] Pending integration:reader I/O changes and documentation review remain
+  uncommitted after06bf7cea. Commit/push when requested;retain required lightweight
+  source/packaging checks and do not dispatch optional heavy CI.
 - [x] Latest source/installed suites:679 executed,one optional skip,no failures.
   Paired current manuals and AI JSON synchronized. These latest local records
   do not supersede older MPI4/6, multi-platform or physical-convergence evidence.
@@ -175,7 +216,9 @@ results/residual diagnostics and pauses the downstream workflow for user review
    startup returns must be evaluated against the supported profile, not assumed safe.
    Core material/field3D allocation1118 and initial owned LD-state allocation1119
    and material/boundary vectors1120 are now covered below. Remaining separate
-   work is selected restart-reader and initialization/helper I/O (native saves,legacy batch writers and directory creation verified above) and selected auxiliary allocations (LD scratch,
+   work is selected initialization/helper I/O (supported legacy EM readers,native
+   saves,batch writers and directory creation verified above) and selected auxiliary
+   allocations (LD scratch,
    tensor/subpixel/observation and snapshot staging buffers) in
    supported paths; owned file numbers alone do not establish IO-error recovery.
    Do not add restrictions on valid/custom inputs or promise recovery from

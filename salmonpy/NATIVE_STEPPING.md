@@ -1,11 +1,10 @@
-# nativeを含む混在ステップの保護
+# 計算の一ステップが失敗したときに元の状態を保つ
 
-[English](NATIVE_STEPPING.en.md) · Topic: `native_protected_step` · Paired revision: `2026-11-17.3`
+[English](NATIVE_STEPPING.en.md)
 
-`salmonpy.native_steps.native_step_targets` は対応したnative部品を
-[共通のステップ保護](STEPPING.md)へ接続します。明示的に新しくビルドした対応ホストMPI
-ライブラリが必要です。個別の数値復帰・checkpoint契約から全体保護を推定しません。
-旧ライブラリは時間発展前に拒否し、自動fallbackやimport時のビルドは行いません。
+FDTD・LD・電子状態を一緒に更新するとき、一部だけが先へ進むと再試行できません。この機能は更新前の状態を退避し、失敗時に電磁場・物質状態・時刻をまとめて戻します。
+
+`salmonpy.native_steps.native_step_targets` で対応する部品を `StepTarget` にまとめ、`step_protected` で一ステップ進めます。呼び出し元と同じMPIを使ってビルドした共有ライブラリが必要です。対応しないライブラリは時間発展を始める前にエラーを返します。
 
 ```python
 from salmonpy.native_steps import native_step_targets
@@ -23,24 +22,24 @@ except StepRecoveryError as error:
 
 全ランクで参加します。対応は既知の組み込み型に限定します。NativeEHField（PMLと場内の
 全LDを含む）、1ランクのMultiscaleField、周期・非スピン分極・固定イオン・中点伝播の
-標準native TDDFT、高速PR版native HSE、通常サンプルの組み込みSBE端点ラッパーです。
-各native群が数値退避を保持し、FFTプラン・コミュニケータ・所有資源のハンドルは複製しません。
+標準Pythonから直接呼ぶTDDFT、高速PR版Fortran製HSE、通常サンプルの組み込みSBE端点ラッパーです。
+各Fortran/Cで計算するMPI群が数値退避を保持し、FFTプラン・コミュニケータ・所有資源のハンドルは複製しません。
 波動関数、密度／ポテンシャル、XC状態／係数、ACE／履歴／キャッシュ、場／PML／LD／電流と
-受理済み時計を直接戻し、過去の伝播を再実行しません。PythonのA／E／電流／時計／フラグの
-参照も戻します。nativeの任意の複数コンテキストや安定した公開C ABIを追加するものではありません。
+最後に成功した計算時刻を直接戻し、過去の伝播を再実行しません。PythonのA／E／電流／時計／フラグの
+参照も戻します。同じプロセス内の任意の複数計算状態や安定した公開C ABIを追加するものではありません。
 
-自作バックエンドには `custom_targets=(StepTarget(...), ...)` を明示し、ownerを実際の
+自作の計算コードには `custom_targets=(StepTarget(...), ...)` を明示し、ownerを実際の
 local状態に一致させます。未知のラッパー・派生クラスをメソッド名だけで認証しません。
 コールバックは状態と副作用全体を扱い、全群ランクで通信を終えて戻る必要があります。
 checkpointの反映で状態オブジェクトが置き換わった場合、対象を作り直します。古いownerは
-退避前に拒否します。native checkpoint候補とステップ退避の同時使用はPython／nativeの
+退避前に拒否します。計算処理 checkpoint候補とステップ退避の同時使用はPython／計算処理の
 両方で拒否します。
 
 ## 出力と失敗時の扱い
 
 対象出力は、各owner専用作業フォルダ直下の通常RT電流／エネルギー時系列と、E/Hの通常の
 点観測です。退避時に、受理済みの未flush行をflushしてから基準位置を記録します。
-巻戻しではnativeのRT出力を閉じ、失敗試行の追記を基準位置まで戻し、同じユニットを
+巻戻しでは計算処理のRT出力を閉じ、失敗試行の追記を基準位置まで戻し、同じユニットを
 受理済み末尾へ開き直します。正常終了時は受理した行をflushします。通常の `step()` は
 従来の経路と演算順を維持します。
 
@@ -50,9 +49,9 @@ checkpointの反映で状態オブジェクトが置き換わった場合、対�
 ファイルの置換・削除や想定外の新規時系列は、勝手に削除せず失敗扱いにします。
 実行中のフォルダ移動や同時の外部読み書きはしないでください。巻戻しまでの間、仮の追記が
 外から見える場合があり、永続化の原子的公開やMPI／プロセス停止からの復帰ではありません。
-ディスク障害、メモリ枯渇、初期化／外部ライブラリのSTOP、nativeから戻らない異常は対象外です。
-標準native TDDFTの未知エラーも、E/H・HSEと同様にfailedを保持し、後の正常らしい戻り値で
-生存期間を復活させません。
+ディスク障害、メモリ枯渇、初期化／外部ライブラリのSTOP、計算処理から戻らない異常は対象外です。
+標準Pythonから直接呼ぶTDDFTの未知エラーも、E/H・HSEと同様にfailedを保持し、後の正常らしい戻り値で
+初期化から終了までの期間を復活させません。
 
 StepRecoveryErrorのoriginal_preservedがTrueかつcleanup_errorsが空の場合だけ、原因修正後に
 再試行します。自動再試行・波形の減衰・刻み変更はしません。全体退避と部品内部の復帰用退避が
@@ -62,7 +61,7 @@ StepRecoveryErrorのoriginal_preservedがTrueかつcleanup_errorsが空の場合
 
 `salmonpy.examples.mpi_mixed_native`、または推奨の1次元経路
 `salmonpy.examples.mpi_multiscale_tddft` に `--protect-steps` を追加します。
-通常CLIは未処理の例外では停止します。独自ホストは安全に拒否されたステップを捕捉して扱えます。
+通常CLIは未処理の例外では停止します。独自呼び出し元プログラムは安全に拒否されたステップを捕捉して扱えます。
 
 同梱の `examples/mixed_tddft_hse_layers.json` はSBE・TDDFT・HSEの3電子点と、場内2種類のLDを
 配置します。場所は `importlib.resources.files('salmonpy').joinpath('examples/mixed_tddft_hse_layers.json')`
@@ -117,4 +116,4 @@ LD専用群は不要です。格子・形状・並列数は対応しているた
 
 ローカル16ランクで連続実行・保護付き実行・直接再開と、1物質群の失敗／再試行を検証しました。
 これは接続・資源検証であり、収束した3次元TDDFTの物理結果ではありません。実用TDDFTは
-引き続き1次元から始め、利用者の資源に合わせます。自作物質は明示的なbindingと契約で接続します。
+引き続き1次元から始め、利用者の資源に合わせます。自作物質は明示的なbindingと仕様で接続します。

@@ -1,9 +1,14 @@
 # Public Python API and compatibility
 
-[日本語](API.md) · Topic: `public_api` · Paired revision: `2026-11-14.3`
+[日本語](API.md)
 
-Version **0.1.0a5** exposes `salmonpy.__version__`. The distribution metadata has
-the same version. This is a preview, not a stable 1.0 API. The material C ABI preview1 is documented in [C_ABI.en.md](C_ABI.en.md).
+This page describes the available functions and classes, errors and saved data.
+To choose a calculation, start with [getting started](README.en.md) or the
+[examples](examples/README.en.md).
+
+Read the installed version from `salmonpy.__version__`. APIs can change during
+this unreleased development period; use the matching package and documentation.
+For calls from C or Fortran, see [C_ABI.en.md](C_ABI.en.md).
 
 ## Public boundary
 
@@ -20,14 +25,14 @@ field states is not. `StateSnapshot` is a token type, not a caller constructor.
 | `fields`, `geometry`, `analysis`, `outputs` | Pulses, structures, analysis and archives |
 | `dft`, `bands`, `tddft`, `fdtd`, `runtime` | Explicit external solver execution and setup |
 | `ase`, `ase_calculator`, `salmon_vr` | Optional integrations |
-| `distributed`, `material_response`, `embedded_tddft`, `coupled` | Experimental MPI/embedded APIs with their existing lifetime restrictions |
-| `errors`, `snapshots`, `api` | Error families, opaque state tokens and inventory |
+| `distributed`, `material_response`, `embedded_tddft`, `coupled` | Experimental APIs for calculations in the Python process and MPI work sharing |
+| `errors`, `snapshots`, `api` | Error families, objects representing saved states and inventory |
 
 The root `__all__` intentionally exports only the version, `LorentzDrude` and
 error types. It does not eagerly import optional integrations. Import performs
-no compilation, download, native loading or MPI initialization. No console output
+no compilation, download, solver loading or MPI initialization. No console output
 is added by snapshot/restore. Numerical dependencies remain NumPy plus explicitly
-prepared LD/SBE kernels; optional/native solver requirements have not changed.
+prepared LD/SBE calculation routines; requirements for optional packages and calculation programs have not changed.
 
 ## Compatibility policy
 
@@ -36,7 +41,7 @@ release, do not change units, current sign, time layout or array names silently.
 Preview releases may introduce documented breaking changes: pin the tested
 package version and consult the migration note. A future stable release should
 use a deprecation period before removals; no such stability is promised for all
-experimental MPI/embedded functions today. This inventory is an API boundary,
+experimental MPI/in-process functions today. This inventory is an API boundary,
 not a claim that every listed function has equal maturity.
 
 Archive, timing, runtime and snapshot schemas have independent versions.
@@ -44,7 +49,7 @@ Do not infer archive compatibility from the package version alone. In-memory
 snapshots require the exact package version and originating model object.
 
 Migration to a5: numerical update formulas and current conventions are unchanged.
-Crystal interfaces use **A/c → charge-current density j**, with native electronic
+Crystal interfaces use **A/c → charge-current density j**, with solver electronic
 matter current J = -j. The earlier a4 development history changed this convention;
 old data must be interpreted using its recorded metadata, never blindly negated.
 Bulk TDDFT remains transverse by default. Longitudinal feedback is explicit.
@@ -69,7 +74,7 @@ A missing convergence report is a runtime failure, not proof of numerical diverg
 
 An exception family does not imply rollback for a whole calculation. Built-in
 LD/SBE/Python-field step and restore failures preserve the accepted state;
-MPI response/coupling failures may invalidate the session. Native STOP/abort is
+MPI response/coupling failures may invalidate the session. solver STOP/abort is
 not converted into a recoverable Python error by this change.
 
 Process-isolated `TDDFTState` also exposes `save_checkpoint(directory)` and
@@ -81,19 +86,19 @@ For one serial model contract, the explicit conformance checker and the point-MP
 
 `fast_hse.FastHSEMaterialProvider` / `FastHSEResponseBackend` are preview entries for an explicitly built serial fast-PR worker in outer-MPI response groups; see COUPLED.en.md. They do not initialize inner HSE MPI.
 
-`fast_hse_mpi.NativeFastHSEBackend`: experimental host-MPI fast-PR HSE, k-only one/two-rank material groups and same-topology direct restart. Legacy create_state has one native lifetime/process. open_model returns NativeFastHSEModel for independent same-model full-k states; see SHARED_HSE.en.md and COUPLED.en.md.
+`fast_hse_mpi.NativeFastHSEBackend`: experimental MPI managed by the calling program fast-PR HSE, k-only one/two-rank material groups and same-topology direct restart. Legacy create_state has one solver initialization per process. open_model returns NativeFastHSEModel for independent same-model full-k states; see SHARED_HSE.en.md and COUPLED.en.md.
 
-`checkpointing.CheckpointCapability` and `check_checkpoint_compatibility` provide shared declaration/admission for user backends; see [CHECKPOINTING.en.md](CHECKPOINTING.en.md).
+`checkpointing.CheckpointCapability` and `check_checkpoint_compatibility` provide shared declaration and compatibility checking for user calculation implementations; see [CHECKPOINTING.en.md](CHECKPOINTING.en.md).
 
-`checkpointing.CheckpointTarget` and `execute_checkpoint` invoke backend-owned persistence after admission and return opaque results locally.
+`checkpointing.CheckpointTarget` and `execute_checkpoint` invoke calculation implementation-owned persistence after input checking and return opaque results locally.
 
-`CheckpointState` / `restore_checkpoint` stage independent candidates before collective publication. AtomicRestoreError distinguishes preservation of live holders from candidate cleanup failures.
+`CheckpointState` / `restore_checkpoint` stage independent candidates before collective publication. AtomicRestoreError distinguishes preservation of live holders from discarding the prepared restore state failures.
 
-Advisory memory APIs are MemoryEstimate/MemoryReport/memory_advice/process_memory in salmonpy.memory. Excess only warns; this is not admission or an RSS cap. See [MEMORY.en.md](MEMORY.en.md).
+Advisory memory APIs are MemoryEstimate/MemoryReport/memory_advice/process_memory in salmonpy.memory. Excess only warns; this is not input checking or an RSS cap. See [MEMORY.en.md](MEMORY.en.md).
 
-`stepping.StepTarget`, `guarded_step` and `StepRecoveryError` are preview APIs for explicit complete backend rollback contracts. See the paired STEPPING guides.
+`stepping.StepTarget`, `guarded_step` and `StepRecoveryError` are preview APIs for explicit complete calculation implementation rollback contracts. See the paired STEPPING guides.
 
-`native_steps.native_step_targets` is the preview bridge from audited native state/ordinary-output transactions to common protected steps. See the paired NATIVE_STEPPING guides.
+`native_steps.native_step_targets` is the preview bridge from audited solver state/ordinary-output transactions to common protected steps. See the paired NATIVE_STEPPING guides.
 
 ### Ion inputs during solver initialization
 
@@ -115,7 +120,7 @@ allocation failures and global initialization STOP paths remain outside recovery
 
 The standard solver now shares fast-PR HSE's value interfaces: `s_cell_config`,
 `s_cell_geometry`, `s_rgrid_config`, `resolve_cell` and `init_grid_whole_config`.
-Both profiles use capture-only `cell_config_from_input`; the explicit resolvers
+Both configurations use capture-only `cell_config_from_input`; the explicit resolvers
 read no global input. They preserve valid legacy cell precedence, arithmetic,
 periodic/isolated index placement, epsilon rounding and Maxwell consistency
 lengths. Rejected resolutions retain the target geometry/index arrays. These
@@ -124,7 +129,7 @@ coordinates, parallel decomposition, symmetry or FFT resources.
 
 Existing initialization wrappers still capture legacy inputs and normalize `al`
 for downstream consumers. This is not complete different-cell GS/TDDFT reentrancy
-or a new public Python/C interface. The optional RT-step structure profile carries
+or a new public Python/C interface. The optional RT-step structure configuration carries
 the same value types; preparation verifies its new before/after source hashes.
 
 ### Explicit initial orbital layout
@@ -141,12 +146,12 @@ Valid GS/RT selection rules, including the `temperature < -1e-12` RT branch, are
 unchanged. Invalid mode, nonfinite temperature or an unusable resulting layout
 reject without changing the result object. This is selection of initial array
 layout, not full occupation-capacity/physical validation, SCF-input ownership or
-recoverable native initialization. No new public Python/C API is added; remaining
+recoverable solver initialization. No new public Python/C API is added; remaining
 k-point/symmetry/communicator and other solver dependencies still apply.
 
 Fast-PR is the only supported HSE engine. `NativeFastHSEBackend(build_record, work_root,
 allow_symmetry=True)` explicitly permits scalar periodic CPU/full-q/internal-k1/2,
-Taylor/PT-CN symmetry with matching mode capability. Shared symmetry settings are immutable, one native
+Taylor/PT-CN symmetry with matching mode capability. Shared symmetry settings are immutable, one solver
 lifetime per process. The default False and existing C init remain symmetry-denied.
 Internal-k2 requires sp_fast_hse_symmetry_kmpi_protocol()==1. Taylor strict/learned and PT-CN require sp_fast_hse_symmetry_history_protocol()==1; learned PT-CN keeps interval=1 and predictor_corrector=n.
 
@@ -160,9 +165,9 @@ See [the symmetry guide](FAST_HSE_SYMMETRY.en.md) for mixed samples, exact scope
 stable near-zero-gradient XC evaluation and regression checks. Connectivity/restart tests are not
 physical-convergence certificates.
 
-Reduced-k symmetry now supports two internal k ranks and same-partition direct resume with the separate native k-MPI capability. Checkpoint repartitioning remains unsupported; see the symmetry guide.
+Reduced-k symmetry now supports two internal k ranks and same-partition direct resume with the separate solver k-MPI capability. Checkpoint repartitioning remains unsupported; see the symmetry guide.
 
-NativeFastHSEBackend collectively admits periodic cell/grid/atom inputs before native lifetime. Repair source inputs and construct a new provider after InputError. Restart compatibility and general native initialization safety remain separate; see the symmetry guide.
+NativeFastHSEBackend collectively admits periodic cell/grid/atom inputs before solver initialization. Repair source inputs and construct a new provider after InputError. Restart compatibility and general solver initialization safety remain separate; see the symmetry guide.
 
 Missing the SCF threshold emits RuntimeWarning and permits usable finite results
 in downstream workflows. `GroundStateResult.converged` and the saved JSON
@@ -176,14 +181,14 @@ For explicit sequential heterogeneous standard-model switching in one process, s
 `salmonpy.gs_input.GSInputMetadata` / `describe_gs_input` and retained
 `state.input_metadata()` expose immutable declared-input descriptions. The optional
 metadata extra is loaded only on explicit use; source fingerprints do not certify
-physical GS identity or native restore compatibility. See the retained-GS guide.
+physical GS identity or solver restore compatibility. See the retained-GS guide.
 
 `salmonpy.preparation.preflight_inputs(directory, manifest_sha256=None, registry=None)`
-returns a JSON-ready input-admission report without starting a solver. Explicit
+returns a JSON-ready input-input checking report without starting a solver. Explicit
 trusted resolvers are optional; without one the scope is file integrity only.
 See PREPARATION.en.md for batch-job exit codes and per-rank startup reports.
 
-## Declared native execution contracts
+## Declared solver execution contracts
 
 ```python
 from salmonpy.api import native_contract
@@ -204,10 +209,10 @@ query locality; a local diagnostic is not automatically collective.
 This is declared documentation, not a live capability check or a stable-C-ABI
 promise: `runtime_verified` is always false. Query actual runtime/checkpoint
 capabilities separately. Unknown/custom component or route names return
-`known=False`, `status='unverified'` and do not block a custom backend; that
-backend owns its contract. Each result is independent and may be annotated by
-the host without changing later reports. Existing calls, numerical state,
-legacy fallback and accepted calculations are unchanged. Stable C/Fortran host
+`known=False`, `status='unverified'` and do not block a user-written calculation code; that
+calculation implementation owns its contract. Each result is independent and may be annotated by
+the calling program without changing later reports. Existing calls, numerical state,
+legacy fallback and accepted calculations are unchanged. Stable C/Fortran calling program
 ABI conformance remains a separate milestone.
 
 ### Explicit live protocol probe
@@ -220,7 +225,7 @@ report = probe_native_protocols('audited-build.json', component='tddft', route='
 
 CLI: `python -m salmonpy.doctor --native-build audited-build.json --component tddft --route shared --json`.
 Unlike `native_contract` and the separate static checker, this explicitly loads
-native code in a child process after checking the recorded library SHA256 (and
+solver code in a child process after checking the recorded library SHA256 (and
 rechecking in the child). A hash proves identity, not trust or build-audit
 compliance. Use only trusted, audited libraries: loading can run constructors.
 The probe calls only known zero-argument version functions; it creates no solver
@@ -228,10 +233,10 @@ state and does not request MPI initialization/attachment, compilation, installat
 or calculation. Unknown/custom routes do not even open the record or load code.
 
 `protocol_match` describes the selected version queries only. Missing/newer
-versions are reported, never converted to automatic backend rejection or feature
+versions are reported, never converted to automatic calculation implementation rejection or feature
 fallback. `runtime_ready` remains `unverified`, and operation signatures, physical
-profiles and checkpoint/topology compatibility are not certified. A child failure
-is reported without taking down the host; `library_loaded=None` means the failed
+configurations and checkpoint/topology compatibility are not certified. A child failure
+is reported without taking down the calling program; `library_loaded=None` means the failed
 child could not report whether loading completed. Keep this opt-in diagnostic
 separate from `check_job`, which never loads the supplied code.
 
@@ -242,17 +247,17 @@ Query-only C and ISO_C_BINDING Fortran hosts are in
 `--fast-hse` for a fast-HSE library). It checks runtime SHA, audits every linked
 application object, compares returned versions and verifies MPI stays uninitialized.
 This is version-query interoperability, not full model/state/step ABI conformance;
-the native ABI remains experimental.
+the C/Fortran calling interface remains experimental.
 
-### Explicit state-lifecycle host test
+### Explicit state-lifecycle calling program test
 
-`tools/test_io_ownership.py BUILD_RECORD NEW_BUILD_DIR --abi-state --fixture EXISTING_PZ_FIXTURE --state-output NEW_RESULTS_DIR --ranks 2` runs C and ISO_C_BINDING Fortran hosts against an audited standard-TDDFT library. Add `--fast-hse` with a fast-PR-HSE build record and an existing full-k HSE fixture to exercise the same checks. The HSE fixture explicitly sets k-only MPI decomposition for each host run; it does not modify the supplied GS. Add `--state-symmetry` for the reduced-k fixture: it references the supplied `sym.dat`, enables the symmetry-aware HSE initializer and drives z, the direction preserved by this fixture's retained operations. The runner checks that representative k points are actually reported. This is a fixture-specific direction, not a restriction on full-k x/y/z driving. The caller initializes/finalizes MPI. The hosts compare two live states with independent runs, reject a mismatched previous A without changing accepted state, reject stale handles after slot reuse, and confirm a fresh state starts independently. Existing GS files are read in place and checked unchanged; this test neither copies GS data nor writes electronic checkpoints. Select results storage explicitly.
+`tools/test_io_ownership.py BUILD_RECORD NEW_BUILD_DIR --abi-state --fixture EXISTING_PZ_FIXTURE --state-output NEW_RESULTS_DIR --ranks 2` runs C and ISO_C_BINDING Fortran hosts against an audited standard-TDDFT library. Add `--fast-hse` with a fast-PR-HSE build record and an existing full-k HSE fixture to exercise the same checks. The HSE fixture explicitly sets k-only MPI decomposition for each calling program run; it does not modify the supplied GS. Add `--state-symmetry` for the reduced-k fixture: it references the supplied `sym.dat`, enables the symmetry-aware HSE initializer and drives z, the direction preserved by this fixture's retained operations. The runner checks that representative k points are actually reported. This is a fixture-specific direction, not a restriction on full-k x/y/z driving. The caller initializes/finalizes MPI. The hosts compare two live states with independent runs, reject a mismatched previous A without changing accepted state, reject stale handles after slot reuse, and confirm a fresh state starts independently. Existing GS files are read in place and checked unchanged; this test neither copies GS data nor writes electronic checkpoints. Select results storage explicitly.
 
 The common directory-scope declarations are in `native_context.h`, included by both handle headers. On macOS, use the existing `tools/build_embedded_tddft.py::mpi_link_command` policy when linking MPI hosts too: private executable copies of OpenMPI Fortran COMMON sentinels can corrupt MPI_IN_PLACE operations across the shared-library boundary. The runner applies this policy and records link commands and executable hashes. Do not infer correctness from a query-only probe.
 
-Verified scope: standard PZ and fast-PR HSE full/reduced-k fixtures, C/Fortran hosts, MPI 1/2 ranks, paired versus independent currents. HSE uses its own documented signatures and rejection status (1 for mismatched previous A, versus 10 in standard TDDFT). The adapters live only in the common host test; they do not change either public ABI or numerical solver. The reduced fixture runs symmetry-aware PT-CN with learned exchange, 8 full k points represented by4 points. Other XC profiles, geometries and platforms require their own tests; the public native ABI remains experimental. These small fixtures check interoperability and state ownership, not converged material properties.
+Verified scope: standard PZ and fast-PR HSE full/reduced-k fixtures, C/Fortran hosts, MPI 1/2 ranks, paired versus independent currents. HSE uses its own documented signatures and rejection status (1 for mismatched previous A, versus 10 in standard TDDFT). The adapters live only in the common calling program test; they do not change either public ABI or numerical solver. The reduced fixture runs symmetry-aware PT-CN with learned exchange, 8 full k points represented by4 points. Other XC configurations, geometries and platforms require their own tests; the public C/Fortran calling interface remains experimental. These small fixtures check interoperability and state ownership, not converged material properties.
 
-### Prepare the PZ host fixture
+### Prepare the PZ calling program fixture
 
 The standard `--abi-state` fixture needs `rt.inp`, `data_for_restart/` and `pseudo1_rps.dat`. Use `theory='tddft_pulse'`, periodic fixed ions, unpolarized spin, `middlepoint` and `trans_longi='tr'`. Omit `&parallel` from the RT fixture: the runner exercises both 1 and 2 ranks, so its generated template does not pin a decomposition. Cell, atoms, grid, k points, electron count, pseudo and XC must match the GS.
 
@@ -305,7 +310,7 @@ Run `python -m salmonpy.examples.optical_response` for synthetic data, not a
 converged real-material optical calculation.
 
 
-Additive API: salmonpy.preparation.prepare_fdtd(calculation, directory, mpi=None) writes a new native FDTD input folder and returns its Path only. FDTDMPI.rank_arguments and command(executable) configure/preview argv, without execution. See PREPARATION.en.md.
+Additive API: salmonpy.preparation.prepare_fdtd(calculation, directory, mpi=None) writes a new FDTD called directly from Python input folder and returns its Path only. FDTDMPI.rank_arguments and command(executable) configure/preview argv, without execution. See PREPARATION.en.md.
 
 Preparation-only API: prepare_dft(model, directory, scf=None, save_restart=True) and prepare_tddft(input_file, directory, files=None) return a Path without SCF, TDDFT workers, MPI initialization or submission. See PREPARATION.en.md.
 
@@ -315,10 +320,10 @@ Preparation-only API: prepare_dft(model, directory, scf=None, save_restart=True)
 `DFT.run()` and `NativeGSSession.run()` warn and raise `SCFReviewRequired`
 when SCF exhausts its iteration cap without convergence. Automatic downstream
 computation stops for review. Completed data are retained: `exception.result`
-is the saved batch result or still-live native owner; `exception.report_directory`
+is the saved batch result or still-live calculation object; `exception.report_directory`
 points to residual CSV, optional PNG, and report.json. Missing Matplotlib does
 not prevent CSV output. A report-writing failure still pauses continuation and
-warns to inspect the original native output. Normal GS saving settings remain;
+warns to inspect the original solver output. Normal GS saving settings remain;
 `save_restart=False` does not collect a new GS restart dataset.
 
 ```python
@@ -339,9 +344,9 @@ or mixing settings. Only explicit user approval after review warrants
 available. `band_initial_state()` and `tddft_initial_state()` also pause for a
 known unconverged batch GS unless the reviewed override is supplied.
 
-Intentional native step budgets (`run(..., steps=K)` and
+Intentional solver step budgets (`run(..., steps=K)` and
 `continue_scf(steps=M)`) returning `paused=True` are normal partial SCF states.
-Only terminal nonconvergence pauses for review. The native owner remains live
+Only terminal nonconvergence pauses for review. The calculation object remains live
 for diagnosis or saving. All solver ranks must agree on `allow_unconverged`.
 Numerical update order and SCF thresholds are unchanged. This replaces the old
 policy of automatically proceeding after an unconverged-SCF warning.
@@ -404,19 +409,19 @@ See its module docstring for NPZ keys/units. It never launches a solver.
 
 ### Real coupled-run checks (2026-11-21)
 
-On Apple Silicon with an audited native executable, absolute budget residuals
-relative to incident energy were 0.0108% for native LD+E/H FDTD, 0.00270% for
-an already-running half-spacing/half-dt LD check, and 0.000711% for native
+On Apple Silicon with an audited SALMON executable, absolute budget residuals
+relative to incident energy were 0.0108% for solver LD+E/H FDTD, 0.00270% for
+an already-running half-spacing/half-dt LD check, and 0.000711% for solver
 TDDFT+Weyl FDTD. These verify coupling/observation accounting, not converged
 real-material optical properties. No further precision search was performed
 after the user's acceptance of this accuracy.
 
 The LD fixture is a transversely periodic uniform slab. Current was reconstructed
-from measured native E with the identical native LD kernel; final current matches
-native LD checkpoint data at rtol=1e-10, atol=1e-18. Raw Yee H was centered in
+from measured solver E with the identical solver LD calculation routine; final current matches
+solver LD checkpoint data at rtol=1e-10, atol=1e-18. Raw Yee H was centered in
 space; the saved time-centered H was not averaged again in time. TDDFT used
 an existing GS in place, 2 macro points, 8 MPI ranks and dt=.003 au. E/H/j and
-field energy were read directly from native outputs; no new GS/wavefunction data
+field energy were read directly from solver output files; no new GS/wavefunction data
 were saved.
 
 The primary check delays incidence so the initial field is empty. A separate
@@ -477,15 +482,15 @@ Fortran performs area/time integration. The legacy uniform-port path is unchange
 The budget checks transverse_area against the recorded plane area to prevent
 area double-counting. The stored-NPZ fdtd_energy example accepts area_weights.
 
-A real native transversely periodic lossless dielectric grating (z invariant)
+A real solver transversely periodic lossless dielectric grating (z invariant)
 closed at about0.0107% of incident energy with32 transverse samples. Averaging
 fields first lost transmitted energy equivalent to about10.1% of incidence.
-Final stored field energy was included from native field checkpoint data. This
+Final stored field energy was included from solver field checkpoint data. This
 is local observation/accounting verification, not general3D material accuracy
 or multi-node scaling certification.
 
 
-### Native acquisition and automatic E/H colocation
+### solver acquisition and automatic E/H colocation
 
 Specify `planes=(PlaneMonitor(axis, position), ...)` in batch FDTD. Axes are0/1/2,
 positions bohr. The nearest grid plane is selected and requested/actual positions
@@ -516,11 +521,11 @@ check = result.energy_balance(reference, point_work, point_volumes,
 
 PlaneData E/H have shape(time,N1,N2,3), area_weights(N1,N2). Fortran averages
 2 neighboring E edges and4 H faces at a common position with periodic wrapping.
-Native saved H is already centered at E time: no second temporal average.
+solver saved H is already centered at E time: no second temporal average.
 Only ranks owning the plane/preceding plane append per-plane streams. Offline
 tile assembly and colocation add no MPI collectives. This first entry is fresh
 batch FDTD, with explicit restart-segment reading/joining as described below;
-embedded NativeEHField uses explicit sample_planes snapshots, described below;
+in-process NativeEHField uses explicit sample_planes snapshots, described below;
 existing numerical checkpoint/restart contracts are unchanged.
 
 Times include0 and each observation stride. If steps is not divisible by stride,
@@ -544,13 +549,13 @@ placed the plane/preceding plane on different ranks and retained bit-identical
 nonzero colocated E/H. These are local implementation checks, not multi-node
 scaling or converged real-material optical accuracy.
 
-### Native batch restart observation segments
+### solver batch restart observation segments
 
-The existing native restart loader/solver is unchanged. A restarted stream records
+The existing solver restart loader/solver is unchanged. A restarted stream records
 only samples strictly after the checkpoint, at the original global stride; do not
-insert a zero sample or average H again. Native batch restart keeps the original
+insert a zero sample or average H again. solver batch restart keeps the original
 `nt_em` and observation stride. Launch the restart explicitly on the compute node
-using existing native inputs; these reading functions never launch a solver.
+using existing SALMON input files; these reading functions never launch a solver.
 
 ```python
 from salmonpy.fdtd import read_native_planes, join_plane_segments, FDTDResult
@@ -572,12 +577,12 @@ stride, total planned steps and exact checkpoint continuity; gaps, overlaps and
 configuration differences are errors in the diagnostic only. No replay, sample
 invention or implicit removal of duplicates occurs. Source arrays stay unchanged
 and joined arrays are read-only. Reference/work/storage must cover the joined
-interval. Embedded sampling/publication uses the explicit committed-only entry below.
+interval. in-process sampling/publication uses the explicit committed-only entry below.
 
-### Embedded FDTD: committed-only plane snapshots
+### in-process FDTD: committed-only plane snapshots
 
 Set the same `FDTD.planes`, then all field-group ranks explicitly call
-`field.sample_planes()` at step0 or an `observation_stride` boundary. The native
+`field.sample_planes()` at step0 or an `observation_stride` boundary. The solver
 `sp_eh_plane_read` ABI reads only owned saved E/H tiles, without MPI, file writes
 or mutation. Python performs one field-group gather containing tiles and errors;
 only field rank0 receives immutable PlaneData. Other ranks return None. No world
@@ -596,7 +601,7 @@ new branch use a new destination. Crash/OOM/MPI failure atomicity is not claimed
 
 ```python
 from salmonpy.fdtd import combine_plane_samples, FDTDResult
-# Every field rank calls, only at committed steps and native observation times.
+# Every field rank calls, only at committed steps and solver observation times.
 snapshots = []
 for step in range(steps):
     coupled.step_protected(targets)  # called by all participating groups

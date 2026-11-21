@@ -1,16 +1,16 @@
-# Native fast-PR HSE handles
+# solver fast-PR HSE handles
 
-[日本語](NATIVE_HANDLES.md) · Topic: `native_fast_hse_handles` · Revision: `2026-11-18.1`
+[日本語](NATIVE_HANDLES.md)
 
-An explicitly built host-MPI fast-PR runtime exports
+An explicitly built MPI managed by the calling program fast-PR runtime exports
 `sp_fast_hse_handle_protocol()==1` and the declarations in
 `native_adapters/fast_hse_handles.h`. This is a bounded C/C++ entry for multiple
 independent electronic states of **one immutable model** in one attached MPI
-group and working directory. Python legacy `create_state` retains its one-native-lifetime limit;
-[open_model](SHARED_HSE.en.md) now shares the model through state leases. The new entry does not change the ordinary mixed
+group and working directory. Python legacy `create_state` retains its one-solver-lifetime limit;
+[open_model](SHARED_HSE.en.md) now shares the model through independent calculation states. The new entry does not change the ordinary mixed
 sample's rank layout or automatically use multiple contexts in one process.
 
-The host initializes MPI, calls `sp_attach(MPI_Comm_c2f(comm))`, and keeps that
+The calling program initializes MPI, calls `sp_attach(MPI_Comm_c2f(comm))`, and keeps that
 communicator alive. Every operation except the protocol query is collective,
 serial and on the main thread, in the same order on all ranks. Calls never
 initialize/finalize MPI, change the working directory or compile a runtime.
@@ -22,10 +22,10 @@ initialize/finalize MPI, change the working directory or compile a runtime.
 | `handle_new(model,dt,capacity,&h,j)` | Fresh independent state from the original GS of a **live** model token; does not copy its current excitation or propagation. |
 | `handle_step(h,Aold,Anew,j,&energy)` | Existing fast-PR endpoint update on the selected state. |
 | `handle_info(h,&step,A,j)`, `handle_history(h,values)` | Accepted endpoint and eight rank-local history diagnostics. |
-| `handle_transaction(h,mode)` | Modes0 capture,1 numeric rollback/close logs,2 reopen/flush/release,3 reopen. Failed reconnect retains ownership metadata. Host restores saved file bytes before reopening. |
+| `handle_transaction(h,mode)` | Modes0 capture,1 numeric rollback/close logs,2 reopen/flush/release,3 reopen. Failed reconnect retains ownership metadata. calling program restores saved file bytes before reopening. |
 | `handle_checkpoint(h,path,mode)` | Modes0 save,1 fresh direct load,2 stage,3 commit,4 cancel; rank-local paths may differ. Existing identity/partition/authentication requirements apply. |
-| `handle_label(h,buffer,capacity)` | Null-terminated output basename for host journaling; append `_rt.data` / `_rt_energy.data`. |
-| `handle_close(h)` | Release this numerical/FFT/XC owner; does not detach host MPI or invalidate other states. |
+| `handle_label(h,buffer,capacity)` | Null-terminated output basename for calling program journaling; append `_rt.data` / `_rt_energy.data`. |
+| `handle_close(h)` | Release this numerical/FFT/XC owner; does not detach MPI managed by the calling program or invalidate other states. |
 
 All names above have the `sp_fast_hse_` prefix. Tokens are positive opaque int64
 values, never addresses or user material IDs. A slot generation prevents an old
@@ -63,7 +63,7 @@ Shared model input, symmetry, initialization, I/O/timer and MPI ownership are
 still bounded. With context_mpi_protocol1, initialization child communicators retire at state
 close; unscoped children stay until `sp_detach`. This is not a promise of unlimited
 create/close cycling. Close all
-handles before detaching, then let the host finalize MPI. Heterogeneous models,
+handles before detaching, then let the calling program finalize MPI. Heterogeneous models,
 arbitrary communicator changes and concurrent/threaded entry are not enabled.
 Stable token identity does not establish portable checkpoint files: inactive
 legacy workspace is not canonical across independently initialized states.

@@ -1,6 +1,6 @@
 # Structures and maximum grid spacing
 
-[日本語](STRUCTURE.md) · Topic: `structure_grid` · Paired revision: `2026-11-15.1`
+[日本語](STRUCTURE.md)
 
 `salmonpy.structure` provides `StructureInput`, `GridSelection` and
 `grid_from_spacing`. ASE is optional, required only when reading/copying structures.
@@ -48,7 +48,7 @@ cells are rejected for width resolution; no hidden rotation is performed. The
 standalone helper receives only a cell, so the caller must check periodicity.
 DFT's ASE entry checks three periodic axes. Counts are limited to 2**20 per axis;
 this is an input bound, not a memory-budget check. Explicit multiples are user/
-backend constraints, never inferred from rank count. For a backend needing special
+calculation implementation constraints, never inferred from rank count. For a calculation implementation needing special
 alignment, resolve explicitly and pass `selection.counts` as `grid`.
 
 ## Existing DFT / TDDFT entry points
@@ -73,7 +73,7 @@ The example registers a structure/grid resolver with the common material registr
 stages the supplied file, and preserves material ID, source hash, selected frame,
 cell, adopted grid and explicit kmesh in resolved.json. Change settings per material
 in Python using the same resolver/registry and preparation APIs. The sample uses
-one selected file per invocation; it is not a DFT backend registration and does
+one selected file per invocation; it is not a DFT calculation implementation registration and does
 not choose potentials, run GS or certify complete scientific input. It requires
 ASE already available offline. Outputs are outside the input bundle.
 

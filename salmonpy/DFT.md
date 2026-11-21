@@ -64,10 +64,10 @@ with gs.tddft_initial_state(executable=engine, max_steps=1000) as initial:
         j = state.step([1e-4, 0., 0.])  # 新しい端点のA/c、原子単位
 ```
 
-`ground-state.json` に設定・入力・実行ファイルの識別情報・収束結果・nativeファイルの
+`ground-state.json` に設定・入力・実行ファイルの識別情報・収束結果・計算処理ファイルの
 ハッシュを記録します。`native/` に入力・擬ポテンシャル・出力・再開データを保持します。
-ディレクトリ全体を移動して `open` できます。native内の変更・追加・欠落ファイルや
-シンボリックリンクを拒否します。自分のメモや後処理結果はnativeの外へ置いてください。
+ディレクトリ全体を移動して `open` できます。計算処理内の変更・追加・欠落ファイルや
+シンボリックリンクを拒否します。自分のメモや後処理結果は計算処理の外へ置いてください。
 ハッシュは改変検出用であり、第三者による改ざんに対する電子署名ではありません。
 
 初期状態への変換も独立コピーを作り、保存したGSを変更しません。
@@ -85,7 +85,7 @@ TDDFT用入力は元の物理条件を保持して生成します。dtは `new_s
 Libxcには対応ビルドが必要です。今回の実GS一貫テストはmacOS arm64・PZ Siです。
 本体の力は `gs.forces_hartree_per_bohr` で取得できます。力の格子収束は別途確認します。
 ASE Calculatorと固定セル最適化への接続は独立したASE_CALCULATOR.mdに従ってください。
-TB-mBJの新規GSは直列の `DFT(xc="tbmbj", cval=None).run(...)` で作成できます。`cval=None` は自動係数、正の固定係数（1e-10より大きい値）も指定できます。分子・孤立系、応力、MPI起動はこの入口には含みません。native並列SCFの対応範囲は変更していません。
+TB-mBJの新規GSは直列の `DFT(xc="tbmbj", cval=None).run(...)` で作成できます。`cval=None` は自動係数、正の固定係数（1e-10より大きい値）も指定できます。分子・孤立系、応力、MPI起動はこの入口には含みません。計算処理並列SCFの対応範囲は変更していません。
 
 ## 波動関数を初期値として再利用する
 
@@ -93,7 +93,7 @@ TB-mBJの新規GSは直列の `DFT(xc="tbmbj", cval=None).run(...)` で作成で
 
 `info.bin`、`occupation.bin`、`wfn.bin` を専用領域へコピーし、`read_gs_restart_data='wfn'` と反復数リセットを使います。旧原子位置や混合履歴は読み込みません。SCFは新しい原子位置で密度を再計算して始め、元のGSは変更しません。出力の `ground-state.json/initial_guess` に元GSとハッシュを記録します。warm startで必ず高速化するとは限らず、別の局所解への収束や物理量の収束確認は別途必要です。
 
-## 高速HSEのnative GS入口
+## 高速HSEの計算処理 GS入口
 
 DFT(..., xc="hse06")は高速PR版のNativeGSBackend session.run用に使用できます。
 HSE06は全k点・k点方向のMPI分割が対象で、計算機能を宣言した新しいビルドが必要です。
@@ -116,11 +116,11 @@ print(gs.energy_hartree, gs.forces_hartree_per_bohr, gs.restart_saved)
 示し、省略した場合はFalseです。エネルギー・力の読み込みは可能ですが、バンド初期化、
 TDDFT初期化、warm start、GSアーカイブ出力には再開用配列を保存した結果が必要です。
 save_restartを記録していない従来の結果は保存ありとして扱います。
-ランタイムが保存省略を無視しても計算失敗にはせず、警告して実際の保存状態を記録します。
+計算プログラムが保存省略を無視しても計算失敗にはせず、警告して実際の保存状態を記録します。
 
 高速版ソースもgs_status.dat（SALMONPY_GS_V1、Hartree）と
 gs_forces.dat（SALMONPY_FORCES_V1、Hartree/Bohr）を出します。SCFや力の計算順は変えません。
-HSEのnative入口とCLIもこのレポートを出しますが、DFT.runのHSE選択は
+HSEの計算処理入口とCLIもこのレポートを出しますが、DFT.runのHSE選択は
 高速PR版の来歴確認が未接続のため、引き続きNativeGSBackendを使います。
 
 Siサンプルは--no-restartと--max-iterationsに対応します。
@@ -128,7 +128,7 @@ Siサンプルは--no-restartと--max-iterationsに対応します。
 
 ### TB-mBJの直列GS入口
 
-`DFT(..., xc="tbmbj", cval=None)` または `dft_from_atoms(..., xc="tbmbj", cval=1.2)` を使います。JSONの物質レシピでも `xc` と任意の `cval` を指定できます。係数はGS記録、warm startの整合性検査、TDDFT入力へ引き継ぎます。TB-mBJはモデルポテンシャルのため、全エネルギーと力は未検証の診断値として警告し、計算は続行します。ASE Calculatorによる最適化の対象にはしません。サンプルは `python -m salmonpy.examples.dft_tbmbj --help` で確認できます。今回の確認は合成密度のネイティブXC評価とインターフェース検査であり、実材料の物理精度保証ではありません。
+`DFT(..., xc="tbmbj", cval=None)` または `dft_from_atoms(..., xc="tbmbj", cval=1.2)` を使います。JSONの物質レシピでも `xc` と任意の `cval` を指定できます。係数はGS記録、warm startの整合性検査、TDDFT入力へ引き継ぎます。TB-mBJはモデルポテンシャルのため、全エネルギーと力は未検証の診断値として警告し、計算は続行します。ASE Calculatorによる最適化の対象にはしません。サンプルは `python -m salmonpy.examples.dft_tbmbj --help` で確認できます。今回の確認は合成密度の計算処理XC評価とインターフェース検査であり、実材料の物理精度保証ではありません。
 
 
 管理ノードで入力保存だけを行う場合はpreparation.prepare_dftを使います。既存runやwarm startとは別で、自動的に計算へ進みません。日英のPREPARATION.md／PREPARATION.en.mdを参照してください。
@@ -138,7 +138,7 @@ Siサンプルは--no-restartと--max-iterationsに対応します。
 
 `DFT.run()` と `NativeGSSession.run()` は、反復上限で未収束なら警告し、
 `SCFReviewRequired` を送出して後続計算への自動継続を止めます。
-失敗した実行としてデータを消すことはしません。バッチの保存済み結果／nativeの生存状態は
+失敗した実行としてデータを消すことはしません。バッチの保存済み結果／計算処理の生存状態は
 例外の `result` に保持し、`report_directory` に残差CSV・任意のPNG・report.jsonを保存します。
 MatplotlibがなくてもCSVは利用できます。図の生成失敗と計算失敗を混同しません。
 レポートの保存に失敗しても確認待ちは維持し、元の出力を確認するよう警告します。
@@ -161,8 +161,8 @@ AIが自動的にこの指定で再実行してはいけません。既存結果
 残差の読取・保存・warm startは引き続き可能です。既知の未収束GSからの
 `band_initial_state()`／`tddft_initial_state()` にも同じ確認待ちを適用します。
 
-nativeの `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
+計算処理の `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
 止めた `paused=True` の状態は正常な途中状態です。全反復上限に達した未収束終了だけが
-確認待ちになります。確認待ち後もnative状態は閉じず、保存や診断に利用できます。
+確認待ちになります。確認待ち後もFortran/Cで保持する計算状態は閉じず、保存や診断に利用できます。
 ランク間で `allow_unconverged` の指定を揃えます。計算の更新順・収束閾値は変更しません。
 この方針は以前の「未収束でも警告のみで自動継続」を置き換えます。

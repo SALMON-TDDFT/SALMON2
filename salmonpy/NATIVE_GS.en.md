@@ -1,10 +1,10 @@
-# Retained native ground states
+# Retained solver ground states
 
 > Current build layout (2026-11-19): ordinary XC and fast PR HSE both build
 > from runtime/sources/solver. Below, standard/ordinary identifies the API
-> capability profile, not a second maintained source tree. Default builds disable HSE.
+> capability configuration, not a second maintained source tree. Default builds disable HSE.
 
-[日本語](NATIVE_GS.md) · Topic: `retained_native_gs`
+[日本語](NATIVE_GS.md)
 
 With a standard runtime, salmonpy.native_gs keeps several DFT ground states in one process.
 Each owns its input, orbitals, density, occupations, eigenvalues, forces, XC and
@@ -29,16 +29,16 @@ with backend.open(context) as session:
     eigen_b = b.array("eigenvalues")
     a.close()
     energy_b = b.energy_hartree
-# All states close before native detach; MPI_Finalize remains the host's job.
+# All states close before solver detach; MPI_Finalize remains the host's job.
 ```
 
-Decomposition is (k, orbital, x, y, z); its product equals subgroup size. A host
+Decomposition is (k, orbital, x, y, z); its product equals subgroup size. A calling program
 may pass its existing split communicator as context.solver_comm. All ranks call
 matching operations, inputs, material IDs and handles in order on the main thread.
 Lightweight LD/SBE components remain individually usable.
 
 session.run computes SCF. state.info returns total Hartree energy, residual,
-tolerance, iteration count, the native recorded convergence flag, atom and band
+tolerance, iteration count, the solver recorded convergence flag, atom and band
 counts. Unconverged SCF retains the last iterate and pauses for review. material_id and the
 immutable calculation remain attached to the state.
 
@@ -50,10 +50,10 @@ state.array(quantity) returns NativeGSArray(values, lower_indices, quantity, uni
 | occupations | Occupations | dimensionless |
 | eigenvalues | Single-particle energies | Hartree |
 | forces | Atomic forces | Hartree/Bohr |
-| orbitals | Real/complex orbitals returned as complex arrays | native orbital amplitude |
+| orbitals | Real/complex orbitals returned as complex arrays | solver orbital amplitude |
 
-values is a read-only copy, independent of native storage and valid after close.
-Axes and lower_indices preserve native Fortran layout. Density/orbitals are local
+values is a read-only copy, independent of solver storage and valid after close.
+Axes and lower_indices preserve solver Fortran layout. Density/orbitals are local
 to each rank; orbitals may include halos. Orbital axes are
 (x,y,z,spin,orbital,k,image); eigen/occupation axes are (orbital,k,spin), and forces
 are (component,atom). The latter three arrays are natively replicated. There is
@@ -68,24 +68,24 @@ Python scope is periodic full-k unpolarized fixed-ion PZ/Libxc-PZ/PBE and HSE06
 with a declared fast-PR compute runtime. HSE uses k-only MPI by default; explicit Gamma orbital GS is described below. SOC/+U/DC GS,
 full SCF checkpoint/restart and threaded GS/TDDFT are separate; sequential
 GS/RT interleaving and portable array export are described below.
-One native electronic attachment lifetime per process. Info, arrays and close are
-also collective. Close every owner before host MPI finalization.
+One solver electronic attachment lifetime per process. Info, arrays and close are
+also collective. Close every owner before MPI managed by the calling program finalization.
 
 Use an explicitly built/audited standard runtime with sp_gs_protocol()==1. Older
 prebuilt runtimes may lack it. Imports never acquire or compile runtimes.
 tools/build_embedded_tddft.py builds from audited sources/application objects.
 Darwin linking keeps NumPy BLAS symbols separate while sharing MPI COMMON sentinels;
-Fortran host probes use mpi_link_command for the same convention. Linux linking
+Fortran calling program probes use mpi_link_command for the same convention. Linux linking
 stays unchanged. Current measurements are Apple Silicon/GNU/OpenMPI; other
 platforms require their own verification.
 
 Work directory/input/pseudopotential visibility and content are checked on every
-rank before native calls. General Fortran STOP/allocation/MPI/process failure
+rank before calls to the Fortran/C library. General Fortran STOP/allocation/MPI/process failure
 recovery is not promised. Numerical update order and SCF thresholds stay unchanged; terminal nonconvergence now pauses for review.
 The example `mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT`
 uses coarse grids/four iterations for ownership verification, not converged
-material properties. It writes normal native diagnostics/progress, but no automatic
-GS restart bundle. See [the native contract](native_adapters/standard_gs.h).
+material properties. It writes normal solver diagnostics/progress, but no automatic
+GS restart bundle. See [the solver contract](native_adapters/standard_gs.h).
 
 ## Existing GS and in-memory TDDFT
 
@@ -116,7 +116,7 @@ The model owns a copy of initial orbitals, occupations and input values. Closing
 preserves the model; new states are independent and start at the same initial GS.
 A retained GS produced by `session.run` provides the same `tddft_model` method.
 GS imports/solves and RT steps may be interleaved sequentially within one session.
-Session close retires all RT models/states before releasing the native attachment.
+Session close retires all RT models/states before releasing the solver attachment.
 Model creation currently inherits the GS subgroup and decomposition, supports the
 standard periodic full-k unpolarized fixed-ion path, and rejects too many orbital
 ranks for occupied RT bands. No automatic MPI repartitioning or thread concurrency.
@@ -134,57 +134,57 @@ For a regular-mesh state created by `session.run`, all subgroup ranks call:
 from salmonpy.gs_archive import GroundStateArchive
 
 archive = gs.export_archive("new-portable-gs", orbital_block=16)
-# Closing or subsequently changing native owners does not change the archive.
+# Closing or subsequently changing calculation objects does not change the archive.
 gs.close()
 if archive is not None:  # subgroup root only; workers return None
     archive = GroundStateArchive.open("new-portable-gs")
     u = archive.wavefunctions(0)  # k=0, (band,z,y,x), read-only
 ```
 
-This uses the existing GS/2 format and needs no new native ABI or compilation.
+This uses the existing GS/2 format and needs no new C/Fortran calling interface or compilation.
 It preserves orbital/occupation/eigenvalue values, removes orbital halos using
 physical density bounds, and reconstructs density in band order from occupations
 and orbitals. The original mixed density is not exported. Material ID, GS identity,
 runtime hash, recorded convergence, iteration count and pseudopotential hashes/local
-channels are retained as provenance. Pseudopotential bytes are not embedded.
+channels are retained as provenance. Pseudopotential bytes are not in-process.
 Unconverged SCF only warns and exports the last iterate. Existing destinations
 are preserved; failed writes clean their newly claimed incomplete archive.
 
 Current export scope is a DFT-owned, periodic unpolarized fixed-ion regular-k
-state with a host MPI subgroup. Both Gamma and multiple k points are supported. Raw legacy-file imported owners lack a complete model
-and cannot use this entry yet; GS/2-imported owners use the context described below; complete native SCF-state restoration remains future work.
+state with a MPI managed by the calling program subgroup. Both Gamma and multiple k points are supported. Raw legacy-file imported owners lack a complete model
+and cannot use this entry yet; GS/2-imported owners use the context described below; complete solver SCF-state restoration remains future work.
 These are export limits, not restrictions on normal GS/TDDFT calculations.
-The first implementation is verified with synthetic real/complex-shaped native
+The first implementation is verified with synthetic real/complex-shaped solver
 arrays, asymmetric halos and noncubic grids; real retained-GS export and resulting
 TDDFT parity have not yet been measured. No new SCF or real GS collection was
 performed for this change.
 
 This is an array interchange export, not a full SCF restart: mixing history,
 forces, solver resources and original mixed density are not saved.
-`GroundStateArchive.open` reads portable arrays; it does not restore a native GS
-handle. Native import still uses the separately documented, explicitly built
+`GroundStateArchive.open` reads portable arrays; it does not restore a solver GS
+handle. solver import still uses the separately documented, explicitly built
 paired converter and its runtime/potential restrictions in [GS_ARCHIVE.en.md](GS_ARCHIVE.en.md).
 The optional sample `python -m salmonpy.examples.retained_gs BUILD NEW_OUTPUT
 --export-archives` explicitly computes its two coarse two-k-point examples and saves
 archives on the subgroup root (one or two ranks in this demo). Four SCF iterations are an ownership demo, not physical
 convergence; this optional sample was not run in the present no-new-GS campaign.
-Export copies full native orbital buffers including halos and creates reconstructed
+Export copies full solver orbital buffers including halos and creates reconstructed
 density/chunk buffers; orbital_block controls disk chunks, not peak memory.
 
 Regular k coordinates follow SALMON `lattice.f90:init_kvector`: `(i+0.5)/n-0.5`
 with zero-based i, x fastest, then y, then z, and uniform weight1/nk. This is the
 unshifted non-Gamma-centered full mesh generated by immutable `DFT.input_text`,
 not a reconstruction of arbitrary user k tables or symmetry-reduced grids.
-Density sums `weight[k]*occupation[k,b]*abs(u[k,b])**2` in native k/band order.
+Density sums `weight[k]*occupation[k,b]*abs(u[k,b])**2` in solver k/band order.
 Synthetic2/3/6/8-point tests preserve each k/band, coordinates, weights and electron
-count; Gamma output files remain byte-identical to commit b66b97fd. Custom/reduced-k retained export and complete native SCF-state restoration remain future.
-Native GS/2 import retains its own converter/runtime/cell restrictions: being
-exportable does not guarantee compatibility with every native importer.
+count; Gamma output files remain byte-identical to commit b66b97fd. Custom/reduced-k retained export and complete solver SCF-state restoration remain future.
+solver GS/2 import retains its own converter/runtime/cell restrictions: being
+exportable does not guarantee compatibility with every solver importer.
 
 ### MPI export ownership and failure behavior
 
 All subgroup ranks enter matching `export_archive` calls. k/orbital/spatial and
-combined partitions use explicit native lower bounds and physical density bounds,
+combined partitions use explicit solver lower bounds and physical density bounds,
 not an assumed rank numbering. Replicated occupations/eigenvalues must match;
 physical orbital tiles must cover global k/band/grid exactly without overlap.
 The subgroup root writes GS/2 and returns GroundStateArchive; workers return None.
@@ -194,9 +194,9 @@ ranks later if they share that filesystem. Calling `gs.close()` remains collecti
 Root receives one tile per collective to avoid retaining every payload at once;
 it still holds the full global complex wavefunction, local copies, reconstructed
 density and writer buffers. There is no arbitrary memory cutoff. A real allocation
-or write failure is broadcast to all ranks without mutating native GS owners;
+or write failure is broadcast to all ranks without mutating solver GS owners;
 new incomplete archive directories are cleaned, existing outputs preserved.
-Changing MPI topology during native restoration is not implemented by this export.
+Changing MPI topology during solver restoration is not implemented by this export.
 General failed MPI communications/process recovery is outside this contract.
 
 Synthetic actual-MPI4 tests cover k/orbital/spatial/mixed partitions (including
@@ -204,7 +204,7 @@ uneven band splits), serial-file parity, failed bounds/replicas/coverage/metadat
 options/allocation/write operations, retained source arrays and successful retry.
 This does not validate actual SALMON GS export or SCF/RT physics. The runner is
 `tools/test_retained_gs_archive_mpi.py NEW_OUTPUT` under mpiexec -n4, also installed
-under salmonpy/_runtime_source/tools; it never loads a native GS/runtime.
+under salmonpy/_runtime_source/tools; it never loads a solver GS/runtime.
 
 ### Referenced input assets on existing-GS import
 
@@ -212,9 +212,9 @@ under salmonpy/_runtime_source/tools; it never loads a native GS/runtime.
 and `file_kw` k-point tables with their relative subdirectories. These bytes are
 verified on every subgroup rank and retained for in-memory GS→TDDFT models.
 Quoted `!` in filenames is preserved while actual input comments are ignored.
-Missing referenced assets fail admission before native initialization; accepted
+Missing referenced assets fail input checking before solver initialization; accepted
 GS/TDDFT owners remain unchanged. An unreadable required file is not a numerical
-convergence warning: native initialization cannot consume it.
+convergence warning: solver initialization cannot consume it.
 
 The shared existing-GS comparison runner now accepts `--external-k`:
 
@@ -255,23 +255,23 @@ cell = metadata.settings["cell_bohr"]
 It retains user material_id, captured input/asset SHA256 values and a source_id.
 source_id identifies those declared bytes, not physical material equivalence,
 binary authenticity or checkpoint compatibility. Reformatting input or changing
-its file names can change it. The native identity and user material ID are unchanged.
+its file names can change it. The solver identity and user material ID are unchanged.
 `gs.input_metadata()` can be called after close: captured text/assets are retained,
-without reading source files, native calls, MPI or implicit recomputation.
+without reading source files, calls to the Fortran/C library, MPI or implicit recomputation.
 
 The description normalizes explicitly declared au/A_eV_fs cell lengths to bohr,
 ordered species and supported inline/external Cartesian/reduced atomic records
 to fractional positions. It reports explicit grid counts/spacing, regular k-mesh
 settings or external table coordinates/input weights, functional settings and
-species-indexed potential hashes/local channels. Native-normalized k weights and
+species-indexed potential hashes/local channels. solver-normalized k weights and
 omitted defaults are not inferred; ambiguous/unsupported geometry remains None
 with notes. Unknown source units do not silently become atomic units.
-This is a declared-input description, not a query of the effective native model.
+This is a declared-input description, not a query of the effective solver model.
 
 Imported evidence retains unknown convergence/provenance; computed owners retain
 the convergence flag already obtained during run. Reading metadata does not run
 SCF, recertify a GS, enable uncomputed forces, set imported calculation, authorize
-native restoration or enable imported-owner portable export. No new restrictions
+solver restoration or enable imported-owner portable export. No new restrictions
 are imposed on ordinary load/run. Unsupported optional descriptions do not modify
 GS state; callers may catch dependency/input errors independently of computation.
 
@@ -285,7 +285,7 @@ that call it; import or help does not initialize MPI.
 
 ## Initialize a retained GS from portable arrays
 
-`session.load_archive` explicitly connects GS/2 to the existing native loader.
+`session.load_archive` explicitly connects GS/2 to the existing solver loader.
 Prepare a probed GammaRestartConverter or SerialRestartConverter and its paired
 serial SalmonExecutable beforehand. No implicit compiler, download or SCF runs.
 All subgroup ranks call with matching selections; only root reads/converts the
@@ -313,26 +313,26 @@ Manifest/converter/paired-engine/shared-runtime hashes bind the route. Input-der
 metadata remains available through input_metadata; calculation remains None and
 forces uncomputed. Source archives and earlier owners are not overwritten.
 
-This initializes orbitals/occupations in a new native owner. Archive density,
-eigenvalues and energy are not serialized native restart fields; initialization
-reconstructs native potentials/density. Mixing history, native solver caches and
+This initializes orbitals/occupations in a new calculation object. Archive density,
+eigenvalues and energy are not serialized solver restart fields; initialization
+reconstructs solver potentials/density. Mixing history, solver solver caches and
 in-progress GS iterations are not restored. Conversion errors are agreed before
-native calls; new incomplete conversions are cleaned. A completed converted bundle
-is retained for the caller, including if later native admission fails. Existing
-bundle paths are preserved. Native STOP/process/MPI failures retain existing limits.
+calls to the Fortran/C library; new incomplete conversions are cleaned. A completed converted bundle
+is retained for the caller, including if later solver input checking fails. Existing
+bundle paths are preserved. solver STOP/process/MPI failures retain existing limits.
 
 Converter restrictions remain: periodic unpolarized fixed ions, closed-shell even
 electrons, grid>=8, PZ/Libxc-PZ/PBE with a supporting shared runtime; Gamma converter
 is exact-Gamma, multi-k SerialRestartConverter uses aligned positive orthogonal
-cells. Conversion is root/serial, while native initialization supports compatible
+cells. Conversion is root/serial, while solver initialization supports compatible
 k/orbital/spatial subgroups. This is not arbitrary RT/SCF checkpoint repartitioning.
 The paired serial executable is a format identity here, not the running solver.
 
 Recorded incompatible Fortran record-marker/integer widths are rejected before
 conversion. Missing compiler/source attestation or other flag differences warn and
-proceed with the explicitly chosen native loader. Legacy receipts often lack a
-compiler hash; no artificial attestation is invented. General native I/O ABI safety
-across unvalidated compilers/platforms is not promised. Native record environment
+proceed with the explicitly chosen solver loader. Legacy validation records often lack a
+compiler hash; no artificial attestation is invented. General solver I/O ABI safety
+across unvalidated compilers/platforms is not promised. solver record environment
 must agree across ranks; converted receipts/contents are verified before loading.
 
 The sample `salmonpy.examples.portable_gs.current_from_archive(session, ...,
@@ -341,10 +341,10 @@ Keep a single session for repeated calls; each conversion directory is new and
 remains caller-owned. Prepare converter tools on management nodes and stage their
 validated deployment records/binaries before using offline compute nodes.
 
-Gamma array imports also use an equivalent explicit Gamma table so native DFT
+Gamma array imports also use an equivalent explicit Gamma table so solver DFT
 allocates complex orbitals; nonzero imaginary components are preserved rather
 than entering the default real-orbital Gamma branch. The converted k-table hash
-is included in its receipt, with this route marked in archive_origin. Synthetic
+is included in its validation record, with this route marked in archive_origin. Synthetic
 complex Gamma tests pass under orbital/spatial MPI, including exact readback and
 independent/file/current/direct-resume controls.
 
@@ -366,8 +366,8 @@ with backend.open(context) as session:
 
 Only small source metadata/eigenvalue/k/geometry arrays and immutable potentials
 are retained during load. Source wavefunctions or a live source archive object
-are not cached. Re-export can work after source-archive removal, while the native
-GS owner remains live. It reads native orbitals/occupations and removes halos.
+are not cached. Re-export can work after source-archive removal, while the solver
+GS owner remains live. It reads solver orbitals/occupations and removes halos.
 Density is reconstructed with source sampling weights. Geometry/grid/XC/potential
 references, k coordinates/input weights, reference eigenvalues and energy are
 carried from the source archive rather than claimed as freshly computed results.
@@ -375,7 +375,7 @@ carried from the source archive rather than claimed as freshly computed results.
 The optional provenance variant `salmonpy.retained-gs-reexport/1` explicitly labels
 energy_source/eigenvalue_source/sampling_source as source_archive, records the
 source manifest SHA and inherited convergence claim, and leaves current converged
-None. Source/reference values do not imply SCF convergence or native cache
+None. Source/reference values do not imply SCF convergence or solver cache
 restoration. This provenance variant requires a reader supporting it; existing
 GS/2/computed-export provenance is unchanged. calculation stays None and forces
 remain unavailable. Complex reads copy real/imaginary components without
@@ -392,7 +392,7 @@ iteration continuation remains separate.
 
 Call `gs.array(quantity)` on every rank in the GS subgroup, selecting the same
 supported quantity string. Invalid types, unknown quantities, unavailable imported
-forces and differing rank selections raise `InputError` collectively before native
+forces and differing rank selections raise `InputError` collectively before solver
 array access. A corrected request can be retried; retained GS and active TDDFT
 owners are unchanged. This cannot recover a missing rank or mismatched API call
 order. Numerical values and supported quantities are unchanged.
@@ -406,10 +406,10 @@ The existing entry still resets this progress for each fresh SCF call and keeps
 the original arithmetic and convergence policy. Existing GS files, GS/2 import
 and RT checkpoint formats are unchanged. This is internal groundwork: no public
 SCF resume API or complete SCF checkpoint is available yet. The two previous-field
-arrays now remain live with the GS owner until reset/close. HSE source profiles
+arrays now remain live with the GS owner until reset/close. HSE source configurations
 are unchanged by this standard-only slice.
 
-## Fast-profile existing GS import
+## Fast-configuration existing GS import
 
 The standard SCF example above remains supported by the standard runtime. A fast
 build declaring `gs_abi` protocol1 also supports existing-GS import, without SCF:
@@ -436,7 +436,7 @@ collective on the main thread; one attachment lifetime/process as above.
 Fast imports expose density, occupations and orbitals. Their info energy_hartree,
 residual, tolerance and converged are None, not physical zero. Eigenvalues and
 forces were not computed. For import-only records session.run remains unavailable; imported owners cannot export computed results. tddft_model
-requires the additional memory-RT capability described below; the standard profile retains its existing features. No convergence
+requires the additional memory-RT capability described below; the standard configuration retains its existing features. No convergence
 claim follows from importing a synthetic or unlabelled GS.
 
 The existing sample supports this path with no new sample file:
@@ -451,7 +451,7 @@ A newly built fast runtime with `gs_abi.memory_rt == 1` and
 `sp_fast_hse_memory_gs_protocol() == 1` connects `gs.tddft_model(dt=..., max_steps=...)`
 to the fast-PR HSE registry. This slice requires HSE06, atomic units, a compatible
 periodic scalar GS and k-only one/two-rank groups. Existing standard GS→TDDFT
-support is unchanged; ordinary PZ/TB-mBJ/Libxc RT is available in the HSE-disabled fast profile below.
+support is unchanged; ordinary PZ/TB-mBJ/Libxc RT is available in the HSE-disabled fast configuration below.
 
 ```python
 with backend.open(context) as session:
@@ -473,7 +473,7 @@ No SCF, GS restart copy/output, or accepted-step replay is used for this handoff
 Static potentials/symmetry and RT resources are initialized normally. Each model
 retains its own initial orbitals/occupations, so this costs memory; it is not a
 zero-copy interface. Later source GS close/removal and sequential GS imports do
-not replace existing RT model settings. Keep the session/host communicator alive
+not replace existing RT model settings. Keep the session/calling program communicator alive
 until every RT state closes. Model close prevents creation while live children
 remain usable. Calls are collective, main-thread and sequential.
 
@@ -491,9 +491,9 @@ GS close, new states after source removal, interleaved GS import and direct
 restart without replay. These are implementation checks, not physical convergence.
 
 
-### Ordinary XC on the fast source profile (HSE disabled)
+### Ordinary XC on the fast source configuration (HSE disabled)
 
-The same prepared fast-PR source can now build a normal CPU host-MPI library:
+The same prepared fast-PR source can now build a normal CPU MPI managed by the calling program library:
 
 ```sh
 python tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing
@@ -502,7 +502,7 @@ python tools/build_embedded_tddft.py NEW_SOURCE NEW_BUILD --jobs 4 \
 ```
 
 Supply the MPI/compiler/BLAS/Libxc locations for your environment explicitly.
-This profile does not require HSE/FFTW dependencies. Its build record keeps
+This configuration does not require HSE/FFTW dependencies. Its build record keeps
 `salmonpy.embedded-tddft/1`, declares `source_profile="fast-pr"`, `ordinary_rt_abi=1`
 and `gs_abi/1`. New HSE-disabled builds also declare the run mode. Use the existing NativeGSBackend session.load and
 gs.tddft_model APIs or NativeTDDFTBackend file/registry APIs. PZ, TB-mBJ, Libxc-PZ
@@ -518,7 +518,7 @@ consume memory; keep the session and communicator alive for all RT children.
 Sequential subsequent GS imports suspend/resume RT inputs/timers. Main-thread,
 collective and one attachment-lifetime constraints remain.
 
-The ordinary registry reuses the standard embedded-TDDFT source, with compile-time
+The ordinary registry reuses the standard in-process-TDDFT source, with compile-time
 selection of the fast GS seed provider. Fast stencil and XC scratch already belong
 to numerical states, so legacy global-workspace switching is omitted there.
 For file initialization, parser snapshots capture API dt/capacity/MPI decomposition
@@ -528,7 +528,7 @@ unify ordinary XC and HSE registries in one GS session or remove the old source
 tree. New fast-HSE compute records are described below; final tree consolidation remains.
 
 The retained_gs sample's import mode also accepts these records with
---current-steps 16. Native k/orbital/spatial MPI2 response, direct restart and
+--current-steps 16. solver k/orbital/spatial MPI2 response, direct restart and
 different-XC GS interleaving are tested with synthetic fixtures. Old-runtime
 comparisons distinguish exact PZ/TB-mBJ agreement from tiny Libxc differences
 (max5.5e-20au in the measured controls). Resume/fresh-state comparisons remain
@@ -537,7 +537,7 @@ exact. This is execution/numerical parity, not physical convergence.
 Computed PZ/Libxc-PZ/PBE controls used orbital and spatial MPI2: independent
 owners matched exactly. PZ/PBE energy and text reports matched the previous fast
 executable. Four-iteration unconverged PBE still differs from the old standard
-profile by about 3.4e-7 Hartree; no standard-profile identity or physical
+configuration by about 3.4e-7 Hartree; no standard-configuration identity or physical
 convergence claim is made.
 
 Computed GS owners use the same tddft_model entry. With an HSE-disabled,
@@ -572,7 +572,7 @@ mpiexec -n 2 python -m salmonpy.examples.retained_gs BUILD_JSON NEW_OUTPUT --xc 
 New HSE inputs explicitly set exx_pre_scf_threshold=0, so the requested SCF
 iterations start in HSE rather than a PBE warmup phase. Nonconvergence warns and
 returns the last iterate. Batch DFT.run HSE reports remain unconnected and direct
-users to this native entry. No conventional-HSE fallback is used. Physical force
+users to this solver entry. No conventional-HSE fallback is used. Physical force
 accuracy and convergence remain separate validation tasks.
 
 Darwin HSE libraries reuse the ordinary TDDFT linker policy to bind the selected
@@ -599,14 +599,14 @@ If a runtime ignores output suppression, warn and record actual output rather
 than turning a completed calculation into a failure.
 
 The fast source now emits gs_status.dat (SALMONPY_GS_V1, Hartree) and gs_forces.dat
-(SALMONPY_FORCES_V1, Hartree/Bohr), preserving SCF/force operation order. Native
+(SALMONPY_FORCES_V1, Hartree/Bohr), preserving SCF/force operation order. solver
 HSE and CLI produce these reports too; batch DFT.run HSE selection still requires
 fast-PR provenance integration, so use NativeGSBackend for HSE. The existing
 dft_si sample accepts --no-restart and --max-iterations for this workflow.
 
 ### NLCC migration before solver-source consolidation
 
-The fast source now carries the standard profile's NLCC Libxc energy weighting
+The fast source now carries the standard configuration's NLCC Libxc energy weighting
 and core-force correction. The valence-plus-core density supplied to Libxc also
 weights its energy density. Core forces differentiate the actually sampled core
 table using each material's species, boundary configuration and XC potential.
@@ -632,7 +632,7 @@ state. Assignment deep-copies its numerical arrays. Arithmetic and update order
 are unchanged. Existing fresh-SCF calls reset this progress. This establishes
 ownership for checkpointing, not a completed public no-reinitialization SCF
 continuation or complete portable checkpoint. Mixing/CG/potential/cache continuation
-remains next. Execution order is SCF persistence→shared ownership/recovery/native
+remains next. Execution order is SCF persistence→state sharing, error recovery and C/Fortran interfaces
 ABI→NLCC/units. Fast-HSE norm diagnostics and a physical grid campaign are deferred
 at the user's request. No GS datasets are collected by the validation probes.
 
@@ -693,12 +693,12 @@ only; it does not collect GS wavefunction/density datasets.
 The same run(steps=...), snapshot/restore and continue_scf entry supports full-k
 CPU fast-PR HSE06, including Gamma and internal k-MPI. Select
 `decomposition=(comm.size, 1, 1, 1, 1)` and a matching HSE build; the ordinary
-HSE-disabled runtime cannot execute this profile. There is no slow HSE fallback.
+HSE-disabled runtime cannot execute this configuration. There is no slow HSE fallback.
 
 Snapshots also retain the explicit owner's ACE/damped operator, cached
 source/action/occupation, factor/PT-CN history arrays and flags, exchange energy,
 support decisions, actual mixing age and PBE pre-SCF phase/count/first iteration.
-The owner's FFT/backend kernel stays live; it is moved aside during numerical
+The owner's FFT/calculation implementation calculation routine stays live; it is moved aside during numerical
 copying, never intrinsically copied, recreated or evaluated by restore. System
 owner pointers are rebound to the same live context, not to the saved payload.
 A subsequent natural PBE→HSE transition still builds the target exchange as in a
@@ -716,7 +716,7 @@ process/disk restart remain outside the current entry.
 mpiexec -n 2 python -m salmonpy.examples.scf_resume HSE_BUILD_JSON NEW_OUTPUT --xc hse06
 ```
 
-Native controls compare density, occupations, orbitals, eigenvalues, forces and
+solver controls compare density, occupations, orbitals, eigenvalues, forces and
 metadata to both continuous new and fixed preceding runtimes. Cuts before/after
 the PBE→HSE switch retain mixing history; a separate tight-threshold test confirms
 nonconvergence warns. Interleaved different-material snapshots remain independent.
@@ -725,7 +725,7 @@ they do not establish physical convergence. No GS datasets are collected.
 
 ### Common checkpoint binding
 
-`state.checkpoint_capability` declares native-scf-memory/1 for this live owner.
+`state.checkpoint_capability` declares solver-scf-memory/1 for this live owner.
 `state.checkpoint_target()` binds save; `state.checkpoint_target(snapshot)` also
 binds direct restore. Use execute_checkpoint from CHECKPOINTING.en.md; the scf_resume
 example now exercises this common entry. Payloads stay local Fortran memory.
@@ -741,7 +741,7 @@ Multi-component direct callbacks remain non-atomic.
 explicit fractional rotations and translations. operations has shape (n,3,4):
 the first three columns are the rotation and the fourth is the fractional shift.
 Data are copied and immutable. No symmetry discovery, cell standardization or
-network lookup occurs. Native fast-PR admission retains the existing fractional
+network lookup occurs. solver fast-PR input checking retains the existing fractional
 signed-permutation subset and checks that cell/grid/atoms/k stars are compatible.
 The user chooses a subgroup preserving the actual crystal and, for later RT,
 the applied field; this does not impose a global z-polarization restriction.
@@ -756,11 +756,11 @@ ops[1, :2, :2] = -np.eye(2)  # C2 about z; identity is also retained
 calculation = replace(calculation, symmetry=SymmetryOperations(ops, directions="yyn"))
 ```
 
-`input_assets` includes generated sym.dat and pseudopotentials. Native/batch
+`input_assets` includes generated sym.dat and pseudopotentials. In-process and separate-executable calculations
 inputs write these same owned bytes; MPI checks asset content before entry.
 Symmetry hashes enter model/warm-start identity and assets follow GS→HSE TDDFT.
 Default symmetry=None preserves existing input text and calculation paths.
-Reduced-k native SCF currently uses CPU fast-PR HSE, full q, one/two internal
+Reduced-k solver SCF currently uses CPU fast-PR HSE, full q, one/two internal
 k ranks. Pause/continue/snapshot, direct restore and protected numerical staging
 use the same APIs as full k. Explicit symmetric PZ/Libxc-PZ/Libxc-PBE SCF uses the same APIs.
 Internal k-MPI2 and spatial-MPI2 controls verify interleaved-material isolation,
@@ -807,7 +807,7 @@ a new GS). It is not a prerequisite for ordinary prebuilt-runtime use.
 ### Disk SCF checkpoints and fresh-process continuation
 
 A matching new runtime supports `state.save_scf(new_directory)` and loading in a
-fresh host with `session.run(calculation, scf=scf, material_id=..., restart=directory)`.
+fresh calling program with `session.run(calculation, scf=scf, material_id=..., restart=directory)`.
 This differs from reusable converged-GS `export_archive()` output. The runtime
 SHA256, material ID, input/pseudopotential/symmetry assets, rank count and actual
 MPI decomposition must match. This is not a changed-input warm start or repartitioned restart.
@@ -835,19 +835,19 @@ success. Initial guessed orbitals/density, mixing initialization, initial energy
 evaluation and all SCF iterations are skipped. `executed_iterations` counts work
 actually performed in the current process; prior counters remain in the manifest.
 FFT handles, pointers and MPI communicator IDs are not serialized. The HSE FFT
-kernel is prepared when the next natural iteration needs it, without replay.
+calculation routine is prepared when the next natural iteration needs it, without replay.
 
 PZ/Libxc-PZ/PBE and fast-PR HSE controls cover k-MPI2, ordinary-XC spatial-MPI2,
 C2 reduced k and the PBE-prestage→HSE boundary: save at3 plus5 iterations in a fresh
 process exactly matches continuous8. A corrupt rank file is rejected before
-state creation; native read failure preserves the existing state. These are
+state creation; solver read failure preserves the existing state. These are
 execution regressions, not physical convergence certification. Terminal nonconvergence
 retains the result and pauses for residual-history review.
 
 The existing scf_resume sample accepts `--save-scf NEW_CHECKPOINT` to save the
 paused boundary. A separate invocation uses `--restart CHECKPOINT`; keep material
 settings, `--xc`, symmetry, `--iterations` and MPI decomposition identical. The
-accepted SCF position is restored from the file. Format: salmonpy.native-scf-disk/1;
+accepted SCF position is restored from the file. Format: salmonpy.solver-scf-disk/1;
 optional ABI: sp_gs_scf_disk_protocol()==1. Different binaries, changed topology
 and portable GS conversion remain outside this format.
 
@@ -857,7 +857,7 @@ and portable GS conversion remain outside this format.
 diagnostics/report.json. The logarithmic figure shows residual detail and a second panel overlaying
 the residual and threshold, and explicitly labels unconverged results. CSV columns are accepted iteration,
 residual, threshold and PBE-prestage flag. Initial no-mixing iterations do not
-evaluate this residual and are excluded. The residual follows the chosen native
+evaluate this residual and are excluded. The residual follows the chosen solver
 SCF convergence metric; it is not a physical convergence certificate.
 
 `state.array("scf_history")` returns the same read-only4×iteration-count array.
@@ -894,7 +894,7 @@ for candidate in prepared["states"].values():
 Staging authenticates files/inputs and reads detached numerical candidates; the
 common API votes across participants. Handled staging failure discards candidates
 and leaves originals available for continuation. Recreate checkpoint targets for
-a retry after failure. Formats and I/O remain backend-owned under the existing
+a retry after failure. Formats and I/O remain calculation implementation-owned under the existing
 common contract.
 
 For one owner, `state.restore_scf(directory)` uses the same staged implementation.
@@ -906,22 +906,22 @@ outside this rollback guarantee.
 The existing scf_resume sample uses `--disk --save-scf NEW_CHECKPOINT --protected`
 for the common disk path. Omitting --disk retains its existing memory behavior.
 
-### Numerical-candidate cleanup
+### Numerical-discarding the prepared restore state
 
-Prepared native SCF candidates support `candidate.close()` (equivalent to discard)
+Prepared solver SCF candidates support `candidate.close()` (equivalent to discard)
 and context-manager use. Leaving the context before publish discards only the
 candidate and preserves original numerical values. Closing an already published
 or discarded candidate is a no-op; a closed candidate cannot be published.
 
 Closing the Python GS owner first discards its Python-owned pending candidate.
 Closing a memory snapshot first discards an unpublished candidate derived from
-that snapshot. Host-code exceptions can therefore unwind these contexts without
+that snapshot. calling program-code exceptions can therefore unwind these contexts without
 leaving GS/MPI resources reserved. A snapshot does not discard unrelated candidates.
 
 All MPI ranks must call close/publish/discard in matching order. No garbage
 collector/destructor performs MPI operations. Reservations staged directly by an
-external C host remain that host's responsibility; Python never silently discards
-them, and native admission/refusal remains in effect.
+external C calling program remain that calling program's responsibility; Python never silently discards
+them, and solver input checking/refusal remains in effect.
 
 ### Changing k-MPI rank count at restart
 
@@ -930,7 +930,7 @@ and fast-PR HSE06 SCF restart between k-only layouts; measured controls cover1�
 Default restart still requires the same decomposition. Opt in explicitly:
 
 ```python
-# Same calculation/scf/material_id and runtime; open the new host MPI group with
+# Same calculation/scf/material_id and runtime; open the new MPI managed by the calling program group with
 # decomposition=(comm.size,1,1,1,1).
 with session.run(calculation, scf=scf, material_id="Si",
                  restart=checkpoint_directory, repartition=True) as state:
@@ -944,7 +944,7 @@ Admission validates format, runtime SHA256, material/input identity, contiguous
 nonoverlapping old k ranges and all old rank-file hashes before creation.
 Fortran reads overlapping donors and reindexes every wavefunction/CG k slice,
 retaining density/mixing/Poisson/XC numerical state and residual history. The
-continuation's parallel inputs bind to new live resources. Native staging also
+continuation's parallel inputs bind to new live resources. solver staging also
 checks complete target-k coverage before publication. Source files stay intact.
 
 Immediately restored orbitals/density/occupation/eigenvalues/history exactly match
@@ -975,7 +975,7 @@ assets and runtime must match. PZ/Libxc-PZ/PBE1↔2 controls compare exact resto
 orbital slices, zero SCF bootstrap work and continued trajectories at the existing
 rtol1e-9/atol1e-10. Fortran reindexes orbital/CG buffers and retains replicated
 density, mixing, XC, Poisson and residual history. Real or complex orbitals use
-the same native path. No Python numerical rearrangement occurs in the loader.
+the same solver path. No Python numerical rearrangement occurs in the loader.
 
 The sample accepts `--orbital-parallel --save-scf NEW_CHECKPOINT`, followed by
 `--orbital-parallel --restart CHECKPOINT --repartition` on a fresh rank count.
@@ -988,7 +988,7 @@ Default and common protected restore still require identical MPI layouts.
 
 A new explicitly built runtime declaring `sp_gs_hse_orbital_protocol()` version1 or2
 accepts retained fast-PR HSE06 GS with `decomposition=(1, comm.size, 1, 1, 1)`
-and Gamma-only sampling. The CPU full-support profile is periodic, unpolarized,
+and Gamma-only sampling. The CPU full-support configuration is periodic, unpolarized,
 fixed-ion, orthogonal-cell, integer fully occupied spin pairs, with no symmetry,
 localization or pair-screening approximation. These are the existing Gamma
 exchange implementation's requirements. The k-only HSE path is unchanged.
@@ -996,7 +996,7 @@ exchange implementation's requirements. The k-only HSE path is unchanged.
 `save_scf()` and `run(restart=...)` preserve the same runtime/input/MPI layout.
 Wavefunction/CG, density/mixing, ACE and Gamma exchange workspace (including
 its progress/gauge/source data) are owned by each state and serialized directly.
-Backend procedure pointers and communicator IDs are not serialized; borrowed
+calculation implementation procedure pointers and communicator IDs are not serialized; borrowed
 communicators are rebound on restore. No SCF iteration or accepted ACE rebuild
 is used to reconstruct the saved numerical state.
 
@@ -1010,7 +1010,7 @@ execution controls; they do not establish physical grid/k convergence.
 
 ### Changing fast-PR HSE orbital rank count
 
-Use the explicit, immutable backend option `hse_orbital=True` on both saving and
+Use the explicit, immutable calculation implementation option `hse_orbital=True` on both saving and
 restoring hosts, including one rank. It selects the same full-support Gamma
 orbital exchange algorithm instead of interpreting a one-rank layout as the
 default k-only algorithm. This requires HSE-orbital protocol2; migration also
@@ -1048,7 +1048,7 @@ this dense Gamma contract; HSE spatial GS uses the dedicated entry below. Common
 A matching runtime declaring `sp_gs_scf_r_repartition_protocol()` version1 or2 accepts
 periodic scalar fixed-ion PZ/Libxc-PZ/PBE SCF restart between pure spatial
 layouts. Use `decomposition=(1, 1, nx, ny, nz)` with `nx*ny*nz == comm.size`
-on each fresh host. Only the parallel block may differ; runtime, material ID,
+on each fresh calling program. Only the parallel block may differ; runtime, material ID,
 physical inputs, assets, SCF cap and mixing settings must match.
 
 ```python
@@ -1119,7 +1119,7 @@ These are execution checks, not physical convergence certification.
 The existing sample uses `--xc hse06 --spatial-parallel` on both sides; save with
 `--save-scf NEW_CHECKPOINT`, then use `--restart CHECKPOINT --repartition` on the
 new rank count. Existing default k/orbital and legacy CLI behavior is preserved.
-The profile is periodic scalar, orthogonal-cell, fully occupied integer spin pairs,
+The configuration is periodic scalar, orthogonal-cell, fully occupied integer spin pairs,
 fixed-ion, CPU, full-support Gamma with dense ACE and untiled gauges. Packed or
 distributed ACE, tiled gauges, sparse localization and multi-k layouts; mixed orbital/spatial support requires the protocol2 entry below.
 Changed-runtime migration and HSE spatial GS→RT remain outside this entry.
@@ -1129,7 +1129,7 @@ Changed-runtime migration and HSE spatial GS→RT remain outside this entry.
 A runtime declaring `sp_gs_scf_m_repartition_protocol()==1` supports ordinary
 PZ/Libxc-PZ/PBE pure-to-mixed and mixed-to-mixed layout changes through the same
 explicit `run(restart=..., repartition=True)` entry. The five decomposition
-values are `(k, orbital, x, y, z)` and their product must equal the new host MPI
+values are `(k, orbital, x, y, z)` and their product must equal the new MPI managed by the calling program
 group size. Keep physical grid/k set, electrons/bands, SCF/mixing, material ID,
 assets and runtime identical. Do not derive the physical k mesh from rank count.
 
@@ -1150,7 +1150,7 @@ orbital and k indices from grid_bounds/orbital_bounds/k_bounds. All wavefunction
 CG slices are copied into the new ownership, including periodic halo copies.
 Density, potential, Fourier density and mixing histories are already replicated
 over old orbital/k groups: exactly one replica per spatial domain is used,
-without adding it again. Native staging checks separate wave and scalar coverage
+without adding it again. solver staging checks separate wave and scalar coverage
 and publishes only after collective success. Static new-layout resources and
 dead FFT/XC scratch follow the spatial contract; no density/eigenstate/SCF replay
 reconstructs the saved accepted state. Default same-layout restore is unchanged.
@@ -1175,14 +1175,14 @@ Use `hse_spatial=True` for both source and target hosts. Compute protocol
 spatial decomposition, e.g. `(1,2,2,1,1)` (four ranks). The physical k mesh stays
 Gamma `(1,1,1)`, without symmetry reduction, and every orbital group owns at
 least one fully occupied spin-pair band. This extends the dense, full-support,
-CPU, scalar, orthogonal-cell profile; it does not enable multi-k spatial HSE.
+CPU, scalar, orthogonal-cell configuration; it does not enable multi-k spatial HSE.
 
 With mixed-repartition protocol2, use the existing explicit
 `run(restart=checkpoint, repartition=True)` on a new rank group. Fortran maps
 wavefunctions/CG history, dense ACE columns, cached exchange source/action and
 spatial source/previous buffers by global orbital index and physical grid row.
 Replicated gauge/occupation and scalar mixing state are retained without summing
-replicas; communication handles belong to the new host. Restoration loads the
+replicas; communication handles belong to the new calling program. Restoration loads the
 accepted numerical state without SCF/density/exchange reconstruction.
 
 The existing example accepts `--xc hse06 --decomposition 1 O X Y Z` on both
@@ -1211,7 +1211,7 @@ Do not set hse_spatial/hse_orbital or request the Gamma Wannier exchange path.
 
 Accepted wavefunctions, dense ACE/cache rows and SCF/mixing history remain local.
 For exchange refresh only, Fortran gathers full-grid scratch within each spatial
-group and calls the existing fast k-distributed kernel, then keeps local rows.
+group and calls the existing fast k-distributed calculation routine, then keeps local rows.
 Exchange FFT/work is replicated across spatial ranks: this is a compatibility
 bridge, not spatial FFT acceleration or a promise of reduced peak memory.
 Account for full-grid exchange scratch and communication when choosing a scale.
@@ -1293,9 +1293,9 @@ with a separately rebuilt library, explicitly use
 `repartition=True` only when changing to a supported MPI layout.
 
 A new checkpoint records a `salmonpy.scf-rebuild/1 or /2` contract: all recorded solver
-and adapter source hashes/build schema; native stream storage sizes and byte
+and adapter source hashes/build schema; solver stream storage sizes and byte
 patterns for integer/integer8/real8/complex8/logical true/false/character; HSE/FFTW
-layout flags; and OS/architecture. The native probe needs no MPI or GS state and
+layout flags; and OS/architecture. The solver probe needs no MPI or GS state and
 writes no files. Different binaries are accepted only with an equal recorded
 contract. Missing proof, changed source, representation or platform is rejected
 before creating a GS owner. Input, material, assets, hashes and MPI checks stay
@@ -1334,10 +1334,10 @@ same-source only. Add `repartition=True` separately for a supported MPI change.
 
 The packaged `scf_compatibility.json` lists exact directed source-fingerprint
 pairs with evidence IDs. No reverse or transitive compatibility is inferred.
-Complete type-definition/generated-IO source fingerprints, native byte layout,
+Complete type-definition/generated-IO source fingerprints, solver byte layout,
 HSE/FFTW flags, OS/architecture and numerical-state revision are checked.
 Matching byte layout alone never admits a new version. A change to stored
-numerical meaning requires a native state-revision update and migration/retesting.
+numerical meaning requires a calculation state-revision update and migration/retesting.
 Legacy contracts without codec information require an explicitly validated exact
 legacy-source pair. Input, assets, material ID and file-integrity checks remain.
 
@@ -1353,7 +1353,7 @@ New saves retain the current contract and origin without modifying old files.
 seconds: `total`, `initialization`, `scf_iterations`, and `write_results`. Call
 collectively in matching order; these values are not MPI sums or maxima. Creating
 or continuing another GS owner leaves the first owner's timing unchanged. The
-host's running timers are parked and resumed excluding time lent to GS work.
+calling program's running timers are parked and resumed excluding time lent to GS work.
 
 These are lifetime diagnostics. Numerical snapshot restore does not rewind spent
 work, and fresh-process SCF restart starts fresh timers. Older runtimes retain
@@ -1365,7 +1365,7 @@ certify concurrent threaded calls or independent timing for TDDFT states.
 Activating a model restores its unit selectors and derived output conversion
 factors together. Existing SALMON constants/formulas are retained; Python module
 boundaries remain in atomic units. DOS, PDOS, band and AVS writers acquire and
-close their own temporary file units, preserving host units1/77/100/101. AVS keeps
+close their own temporary file units, preserving calling program units1/77/100/101. AVS keeps
 its legacy fp argument while using a temporary unit internally.
 
 Output routing still uses each owner's working directory and input settings.
@@ -1373,23 +1373,23 @@ Temporary-unit ownership does not permit concurrent threaded calls. See the
 next section for retained-GS directory scoping. File-unit handles are not numerical snapshot fields, and restoring
 numerical state does not rewind output files.
 
-### Retained GS calls without changing the host working directory
+### Retained GS calls without changing the calling program working directory
 
-Runtimes with directory scope1/2 keep the host process working directory unchanged
+Runtimes with directory scope1/2 keep the calling program process working directory unchanged
 for retained GS create/continue/numerical restore. Each call passes the owner's
-working folder to native path resolution. Input, pseudopotential, symmetry,
+working folder to solver path resolution. Input, pseudopotential, symmetry,
 output and restart file operations resolve relative paths there; absolute paths
 retain their meaning. Normal `session.run` and `continue_scf` usage is unchanged.
 
-The temporary scope is released on exceptions and remote-rank admission failure.
+The temporary scope is released on exceptions and remote-rank input checking failure.
 It adds no fields to numerical snapshots or logical input records, so restoring
 numerical state uses the current owner's folder. Older runtimes retain the
 previous temporary-directory-switch implementation.
 
-Python FDTD and older-runtime compatibility paths may still switch directories. Native solver calls
+Python FDTD and older-runtime compatibility paths may still switch directories. solver solver calls
 remain sequential on the main thread; this is not concurrent solver reentrancy.
 
-GS and TDDFT share path admission/cleanup. Retained GS accepts scope1/2;
+GS and TDDFT share path input checking/cleanup. Retained GS accepts scope1/2;
 standard TDDFT and fast-PR HSE require scope2 for their expanded RT file paths.
 
 
@@ -1398,10 +1398,10 @@ standard TDDFT and fast-PR HSE require scope2 for their expanded RT file paths.
 `DFT.run()` and `NativeGSSession.run()` warn and raise `SCFReviewRequired`
 when SCF exhausts its iteration cap without convergence. Automatic downstream
 computation stops for review. Completed data are retained: `exception.result`
-is the saved batch result or still-live native owner; `exception.report_directory`
+is the saved batch result or still-live calculation object; `exception.report_directory`
 points to residual CSV, optional PNG, and report.json. Missing Matplotlib does
 not prevent CSV output. A report-writing failure still pauses continuation and
-warns to inspect the original native output. Normal GS saving settings remain;
+warns to inspect the original solver output. Normal GS saving settings remain;
 `save_restart=False` does not collect a new GS restart dataset.
 
 ```python
@@ -1422,9 +1422,9 @@ or mixing settings. Only explicit user approval after review warrants
 available. `band_initial_state()` and `tddft_initial_state()` also pause for a
 known unconverged batch GS unless the reviewed override is supplied.
 
-Intentional native step budgets (`run(..., steps=K)` and
+Intentional solver step budgets (`run(..., steps=K)` and
 `continue_scf(steps=M)`) returning `paused=True` are normal partial SCF states.
-Only terminal nonconvergence pauses for review. The native owner remains live
+Only terminal nonconvergence pauses for review. The calculation object remains live
 for diagnosis or saving. All solver ranks must agree on `allow_unconverged`.
 Numerical update order and SCF thresholds are unchanged. This replaces the old
 policy of automatically proceeding after an unconverged-SCF warning.

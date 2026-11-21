@@ -124,7 +124,7 @@ with tddft_from_atoms(
 Aは原子単位のA/c、戻り値は**電荷電流密度j**（SALMON物質電流Jの負号）です。
 
 実行可能な例は [examples/ase_tddft.py](examples/ase_tddft.py)。
-[Si入門例](SI_INTRO.md)で取得・展開したランタイムを再利用できます。
+[Si入門例](SI_INTRO.md)で取得・展開した計算プログラムを再利用できます。
 
 ```sh
 python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --verify-independence

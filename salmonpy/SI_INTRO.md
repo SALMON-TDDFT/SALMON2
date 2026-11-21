@@ -1,10 +1,10 @@
 # Si入門：wheel導入から電荷電流まで
 
-[English](SI_INTRO.en.md) · Topic: `si_intro` · Paired revision: `2026-11-14.2`
+[English](SI_INTRO.en.md)
 
 実際のSi基底状態をSCF計算し、指定したA/cパルスで時間発展させ、電荷電流を固定の
 期待値と比較する入門例です。入力・Si擬ポテンシャル・期待値・出典はwheelに含めます。
-計算本体は別のビルド済みランタイムを使います。この手順にコンパイルやソース取得は不要です。
+計算本体は別のビルド済み計算プログラムを使います。この手順にコンパイルやソース取得は不要です。
 
 ## 1. 配布されたwheelを導入する
 
@@ -28,9 +28,9 @@ python -m salmonpy.examples.si_intro --help
 を保持してください。この例のPython依存はNumPyのみです。Windows用計算本体はこの
 入門例では提供しません。Windows版LD/SBE wheelの対応とTDDFTの対応は別です。
 
-## 2. 対応するビルド済みランタイムを取得する
+## 2. 対応するビルド済み計算プログラムを取得する
 
-[SALMONpyランタイム試用版Release](https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14)から取得します。[CI 43554502676](https://github.com/otobetomohito/SALMONpy/actions/runs/43554502676)で3環境が成功したコミット `8006261b9e48541b591e496a813b3f06ca5fc1b1` の配布物です。
+[SALMONpy計算プログラム試用版Release](https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14)から取得します。[CI 43554502676](https://github.com/otobetomohito/SALMONpy/actions/runs/43554502676)で3環境が成功したコミット `8006261b9e48541b591e496a813b3f06ca5fc1b1` の配布物です。
 
 | Machine / 環境 | ZIP |
 |---|---|
@@ -43,7 +43,7 @@ python -m salmonpy.examples.si_intro --help
 ## 3. 準備して計算する
 
 ソースツリー外の新規保存先を選びます。準備では外側ZIPの固定ハッシュを照合し、通常の
-ランタイム導入処理で内側ZIP・実行ファイル・依存ライブラリを検証します。固定入力と
+計算プログラム導入処理で内側ZIP・実行ファイル・依存ライブラリを検証します。固定入力と
 擬ポテンシャルも手元にコピーします。暗黙のダウンロードはありません。
 
 ```sh
@@ -74,7 +74,7 @@ DFTとTDDFTは順番に実行します。メモリ予算は記録値であり、
 基準のエネルギーは約 **−31.7465390575 Hartree**、電流成分の絶対最大値は約
 **1.47275×10⁻⁶ a.u.** です。自動照合の許容差はエネルギー絶対誤差1e−7 Hartree、
 電流の各成分が `atol=1e-9`、`rtol=1e-5` です。SCF反復数は診断値で、完全一致の条件ではありません。
-期待値は固定したmacOS arm64ランタイムで作成しています。他OSの成果物があることだけでは、
+期待値は固定したmacOS arm64計算プログラムで作成しています。他OSの成果物があることだけでは、
 この入門例のOS間の数値一致を検証したことにはなりません。
 
 設定は立方Si 8原子、セル長10.26 bohr、32電子・32状態、実空間格子16³、k点2³、PZです。
@@ -85,7 +85,7 @@ GS残差の基準は1e−10です。時間発展はdt=0.02 a.u.で20ステップ
 ## 同梱データの出典
 
 `examples/si_intro_data/input.json` に固定条件、`provenance.json` に入手元と
-ランタイム識別子・各ファイルのハッシュを保存します。`Si_rps.dat` はSALMONの固定コミット
+計算プログラム識別子・各ファイルのハッシュを保存します。`Si_rps.dat` はSALMONの固定コミット
 `3322d0561c0cad5180679136b3eddbe8b909487c` の `samples/exercise_04_bulkSi_gs` から取得しています。
 SHA256は `8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c` です。
 元のApache-2.0ライセンスを `LICENSE.txt` として保持します。旧KY書式には生成時のXCメタデータが

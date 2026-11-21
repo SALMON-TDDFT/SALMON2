@@ -11,8 +11,8 @@ For beginner workflows, apply manual.json beginner_intake before choosing calcul
 This project is intended for a separate repository; do not create a PR or merge
 into SALMON itself. Use README.en.md / README.md for English / Japanese onboarding.
 
-This is a standalone SALMONpy layout. Bundled kernels live in native/. Complete SALMON sources are bundled in runtime/sources, with only fast-PR HSE supported. Full SALMON is an explicitly built runtime; see runtime/README.md in the source checkout.
+This is a standalone SALMONpy layout. Bundled calculation routines live in native/. Complete SALMON sources are bundled in runtime/sources, with only fast-PR HSE supported. Full SALMON is an explicitly built runtime; see runtime/README.md in the source checkout.
 
-Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). Legacy coupling has one point/group and one native lifetime/process. SHARED_HSE.md describes explicit same-model full-k Python state leases; explicit points_per_group now connects same-model full/reduced-k shared HSE to normal sessions; do not infer heterogeneous reentrancy or automatic rank assignment.
+Experimental MPI managed by the calling program TDDFT and FDTD updates of E and H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). Legacy coupling has one point/group and one solver initialization per process. SHARED_HSE.md describes explicit same-model full-k Python independent calculation states; explicit points_per_group now connects same-model full/reduced-k shared HSE to normal sessions; do not infer heterogeneous reentrancy or automatic rank assignment.
 
 New numerical work belongs in Fortran/C. Python owns inputs, scheduling, dispatch and records. Timestep diagnostics use measured electron-number conservation, default relative target1e-5; target exceedance is a reported diagnostic, not an automatic stop. Stop only the numerically broken trial.

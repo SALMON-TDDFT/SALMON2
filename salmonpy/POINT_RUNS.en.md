@@ -35,8 +35,8 @@ Resource-owning custom states must implement close(); context-only resource
 managers are not supported. States without resources may omit close().
 A state context closes just that point. Run close is idempotent. No concurrent
 calls, MPI dispatch, checkpoints or restart mapping are provided in this layer.
-Delegated snapshot/restore retains the backend's existing restrictions, without
-adding identity to its native checkpoint format.
+Delegated snapshot/restore retains the calculation implementation's existing restrictions, without
+adding identity to its saved solver state format.
 
 ## User models
 
@@ -48,8 +48,8 @@ address. Definition/initial identity is checked again before creating each state
 Keep other provenance in output metadata. Shared material IDs must have identical
 definition digests; shared initial IDs must name the same material and initial
 content. The same raw returned state object is rejected for multiple points, but
-hidden shared arrays or native globals cannot be detected: independence remains
-the custom backend's responsibility. No execution/physical capability is certified
+hidden shared arrays or solver globals cannot be detected: independence remains
+the user-written calculation code's responsibility. No execution/physical capability is certified
 by an identity record. Existing configuration registry validation still applies
 when resolving JSON inputs; this Python binding is not an arbitrary JSON importer.
 
@@ -79,12 +79,12 @@ For explicit identity propagation/output in MPI response sessions see
 [MPI_IDENTITY.en.md](MPI_IDENTITY.en.md). PointRun itself remains serial; restart is not provided.
 
 Point-bound managed TDDFT disk restore is now available: [POINT_CHECKPOINTS.en.md](POINT_CHECKPOINTS.en.md).
-The earlier restart limitations still apply to MPI whole sessions and general backends.
+The earlier restart limitations still apply to MPI whole sessions and general calculation implementations.
 
 ## In-memory snapshots with point identity
 
-`PointState.snapshot()` wraps the backend-owned snapshot with immutable `salmonpy.point-snapshot/1` identity. `state.restore(saved)` checks run, point, material-definition and initial-state identity plus package version before calling the backend. Cross-point/run and raw backend tokens are rejected. Even with explicit matching run/point IDs, the backend must still validate its model, time step and other settings.
+`PointState.snapshot()` wraps the calculation implementation-owned snapshot with immutable `salmonpy.point-snapshot/1` identity. `state.restore(saved)` checks run, point, material-definition and initial-state identity plus package version before calling the calculation implementation. Cross-point/run and raw calculation implementation tokens are rejected. Even with explicit matching run/point IDs, the calculation implementation must still validate its model, time step and other settings.
 
-This is process-local rewind, not branching, cloning, disk persistence or an MPI-wide transaction. Unsupported custom backends raise `SnapshotError`. Backend restore-failure guarantees remain the backend's responsibility; identity rejection invokes no backend restore callback. Raw-state snapshot APIs are unchanged.
+This is process-local rewind, not branching, cloning, disk persistence or an MPI-wide transaction. Unsupported user-written calculation implementations raise `SnapshotError`. calculation implementation restore-failure guarantees remain the calculation implementation's responsibility; identity rejection invokes no calculation implementation restore callback. Raw-state snapshot APIs are unchanged.
 
 `python -m salmonpy.examples.point_ld /new/output/directory` also verifies cross-point rejection and exact current continuation after same-point restore.

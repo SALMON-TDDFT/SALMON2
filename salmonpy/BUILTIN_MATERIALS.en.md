@@ -1,10 +1,10 @@
 # Built-in LD and SBE material configurations
 
-[日本語](BUILTIN_MATERIALS.md) · Topic: `builtin_materials` · Paired revision: `2026-11-15.1`
+[日本語](BUILTIN_MATERIALS.md)
 
 `builtin_material_registry()` explicitly creates a new MaterialRegistry with
 `salmonpy.ld`/`ld` and `salmonpy.sbe`/`sbe` resolvers, adapter version `1`.
-No registration, resolver or model factory initializes native states, fetches data,
+No registration, resolver or model factory initializes calculation states, fetches data,
 or compiles. `new_state` needs the existing installed LD/SBE library.
 
 ```python
@@ -72,7 +72,7 @@ The resolved parameters contain `file_sha256`. Model creation reloads and rechec
 against the catalog. Changed files are rejected, not silently accepted as the
 same material. This is initialization work, not a per-step hash. File sizes and
 memory are not automatically budgeted; constructing a catalog and later a model
-requires loading again. Neither pass initializes native handles.
+requires loading again. Neither pass initializes solver handles.
 
 ## Identity and independent states
 
@@ -90,8 +90,8 @@ SBE. The catalog's optional `initial_states` source/prepare recipes are **not
 selected or consumed** by this factory. There is no implicit excited-state load.
 
 Custom resolvers can still be added to the registry, but this factory dispatches
-the documented built-in backend/model pairs and known adapter version. No automatic
-imports from backend names. Generic saved-TDDFT adapters, general capability schemas,
+the documented built-in calculation implementation/model pairs and known adapter version. No automatic
+imports from calculation implementation names. Generic saved-TDDFT adapters, general capability schemas,
 point/run IDs, MPI placement, and automatic output/restart identity propagation
 remain separate milestones. Output helpers do not automatically inspect wrappers;
 explicitly save `material.record()` alongside your results.

@@ -27,12 +27,12 @@ point_ids = [p['point_id'] for p in archive.metadata['point_run']['points']]
 再作成できません。new_state自体が失敗した場合は再試行できます。分岐・反復計算には別runを使います。
 run.closeは全状態のcloseを試み、最初の失敗を再送出します。失敗したcloseを自動再試行しません。
 準備済みモデルは呼出側所有で、全状態を解放するまで維持してください。
-new_stateは初期化済み状態を返す契約で、状態のcontext-entry hookは呼びません。
+new_stateは初期化済み状態を返す仕様で、状態のcontext-entry hookは呼びません。
 資源を持つ自作状態はclose()を実装してください。contextメソッドだけで資源管理する状態は未対応です。
 資源を持たない軽量な状態ではclose()を省略できます。
 状態のcontextはその点だけを解放し、run.closeは二度目以降何もしません。
 この層には同時呼出し、MPI割当、checkpoint、restart対応表はありません。
-委譲されるsnapshot/restoreも既存backendの制約を維持し、native checkpointへIDは追加しません。
+委譲されるsnapshot/restoreも既存backendの制約を維持し、計算処理 checkpointへIDは追加しません。
 
 ## 自作モデル
 
@@ -42,7 +42,7 @@ new_stateは初期化済み状態を返す契約で、状態のcontext-entry hoo
 オブジェクトのメモリアドレスは使いません。状態生成前にもidentityを照合します。
 他の出典情報は出力metadataへ保存します。同じ物質IDの定義digest、同じ初期状態IDの物質と内容は
 一致する必要があります。複数点に同一の状態オブジェクトを返す場合は拒否しますが、隠れた共有配列や
-nativeグローバル変数までは検出できません。独立性は自作backend側でも保証してください。
+計算処理グローバル変数までは検出できません。独立性は自作backend側でも保証してください。
 identityから物理的妥当性・実行能力は認定しません。JSON設定の解決時は引き続きregistryの検証が必要です。
 このPythonのbindingは任意JSONを読み込む仕組みではありません。
 
@@ -72,8 +72,8 @@ PointRun自体の直列専用という制約やrestart未対応は維持しま�
 
 ## 点ID付きのメモリsnapshot
 
-`PointState.snapshot()` は内部バックエンドのsnapshotを `salmonpy.point-snapshot/1` の不変な点情報で包みます。`state.restore(saved)` は実験・点・物質定義・初期状態のIDとパッケージ版を照合してからバックエンドを呼びます。別の点や実験、裸のバックエンドtokenは拒否されます。明示した同一run/point IDであっても、バックエンドのモデル・時間刻み等の整合性検査は引き続き必要です。
+`PointState.snapshot()` は内部計算処理のsnapshotを `salmonpy.point-snapshot/1` の不変な点情報で包みます。`state.restore(saved)` は実験・点・物質定義・初期状態のIDとパッケージ版を照合してから計算処理を呼びます。別の点や実験、裸の計算処理tokenは拒否されます。明示した同一run/point IDであっても、計算処理のモデル・時間刻み等の整合性検査は引き続き必要です。
 
-これはプロセス内の巻き戻し用であり、分岐・複製やディスク保存、MPI全体のトランザクションではありません。snapshot未対応の自作バックエンドでは `SnapshotError` となります。バックエンドの復元失敗時の保証はその実装に従います。点ID不一致の拒否では内部のrestoreを呼びません。裸の状態に対する従来のsnapshot APIは変わりません。
+これはプロセス内の巻き戻し用であり、分岐・複製やディスク保存、MPI全体のトランザクションではありません。snapshot未対応の自作の計算コードでは `SnapshotError` となります。計算処理の復元失敗時の保証はその実装に従います。点ID不一致の拒否では内部のrestoreを呼びません。裸の状態に対する従来のsnapshot APIは変わりません。
 
 `python -m salmonpy.examples.point_ld /new/output/directory` は別の点への復元拒否と、同一点での復元後の電流一致も確認します。

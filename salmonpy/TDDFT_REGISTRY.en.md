@@ -1,16 +1,16 @@
 # Different standard TDDFT models in one process
 
-[日本語](TDDFT_REGISTRY.md) · Topic: `heterogeneous_tddft_models` · Revision: `2026-11-18.1`
+[日本語](TDDFT_REGISTRY.md)
 
-`NativeTDDFTBackend.open_registry(context)` creates one explicit host-MPI
+`NativeTDDFTBackend.open_registry(context)` creates one explicit MPI managed by the calling program
 attachment. `registry.open_model(initial, dt, decomposition=...)` registers an
 independent immutable material model; `model.new_state(point_id)` returns the same
 A/c→charge-current state interface as the shared-model API. Different models can
 have different inputs, XC, cells/grids/k meshes/atoms/PP references, dt/capacity and
 inner decomposition. All use the same communicator; each decomposition product
 must match its size. A model's own inputs are fixed, and each state starts its
-original GS independently. Material/point labels belong to the host, not opaque
-native tokens.
+original GS independently. Material/point labels belong to the calling program, not opaque
+solver tokens.
 
 ```python
 from salmonpy.embedded_tddft import NativeTDDFTBackend
@@ -47,7 +47,7 @@ model_groups now co-locates selected IDs, as described below. Direct registry
 hosts can also use states themselves.
 
 Use an explicitly built/verified CPU runtime with `sp_tddft_registry_protocol()==1`.
-The profile remains periodic, full-k/no symmetry reduction, unpolarized fixed-ion
+The configuration remains periodic, full-k/no symmetry reduction, unpolarized fixed-ion
 PZ/TB-mBJ automatic/fixed-c/Libxc-PZ/PBE, middlepoint transverse, initial A=0 in Python.
 x/y/z and rotating A work. A is Cartesian A/c, dt atomic time, output j is atomic
 charge-current density; do not negate it again. HSE is the separate fast-PR engine
@@ -59,7 +59,7 @@ that is held until first new_state (or closed if unused).
 All subgroup ranks call in the same order on the main thread. Registry mode is
 explicit and cannot mix legacy initializers or implicit model_new. Default
 single-model entry points remain unchanged. Model/registry close prevents new
-creation while live states can finish; close all states before host MPI finalizes.
+creation while live states can finish; close all states before MPI managed by the calling program finalizes.
 Closing one model leaves siblings intact. Group-wide model choices are checked
 before queued state delivery, and model cleanup uses deterministic token order.
 A handled close failure attempts remaining owners and permits close retry.
@@ -90,13 +90,13 @@ failed registration and rank-independent cleanup. Existing Si fixtures with
 16³/8³ grids, different cells/atom/k counts and five XC choices check ownership;
 no new GS is computed. This is implementation parity, not material convergence.
 See [shared TDDFT](SHARED_TDDFT.en.md) for base states and parser ownership, and
-[native registry header](native_adapters/standard_tddft_models.h) for C/C++.
+[solver registry header](native_adapters/standard_tddft_models.h) for C/C++.
 
 ## Ordinary material layouts and mixed runs
 
 Use `assemble_native_layers(..., model_groups={"film": ["silicon-pbe", "silicon-tbmbj"]})`
 to assign all points of the listed IDs to one material MPI group. Bind each ID to
-`NativeTDDFTBackend(..., registry_model=True)`. Standard native bindings in that
+`NativeTDDFTBackend(..., registry_model=True)`. Standard solver bindings in that
 group share the library and work root, while each keeps its input and internal
 decomposition. Each decomposition product and ranks_per_point must match the
 shared group size. Every macro point has independent state.
@@ -117,18 +117,18 @@ Stage inputs, pseudopotentials and runtime before running on offline compute nod
 Material/point IDs and actual MPI placement remain in outputs and aggregate
 checkpoints; restarting with changed partitions is unsupported.
 
-Custom backends retain prepare/open_group/create_state. They may register shared
+user-written calculation implementations retain prepare/open_group/create_state. They may register shared
 closeable owners in SolverContext.group_resources, released in insertion order
 after states and material factories. All subgroup ranks must register resources
 and enter callbacks in matching order. Different-input built-in fast-PR HSE
 models still require separate groups.
 
-## Host working directory
+## calling program working directory
 
-Runtimes with directory scope2/3 avoid host chdir during registration, state
-creation, stepping, direct checkpoints and close. The native resolver uses each
+Runtimes with directory scope2/3 avoid calling program chdir during registration, state
+creation, stepping, direct checkpoints and close. The solver resolver uses each
 model/state work folder for relative files and releases the scope after exceptions
-or rank-local admission failure. Older runtimes, including scope1, retain the
+or rank-local input checking failure. Older runtimes, including scope1, retain the
 legacy switch. Main-thread sequential calls remain required. Numerical checkpoint
 fields and update order are unchanged.
 

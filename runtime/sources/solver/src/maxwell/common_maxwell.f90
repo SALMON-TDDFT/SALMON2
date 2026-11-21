@@ -37,6 +37,7 @@ module common_maxwell
   public :: input_r_bin_em
   public :: output_r_txt_em
   public :: output_r_bin_em
+  private :: restart_read_report
   private :: restart_stage_open,restart_stage_close,restart_stage_commit,restart_save_status
   public :: txtfile_copy_em
   
@@ -704,11 +705,10 @@ contains
   
   !=========================================================================================
   != input restart txt file ================================================================
-  subroutine input_r_txt_em(ifn,is,ie,in_name,i0d,i1d,r0d,r1d)
+  subroutine input_r_txt_em(ifn,is,ie,in_name,i0d,i1d,r0d,r1d,io_status)
     use salmon_global,   only: directory_read_data
     use communication,   only: comm_is_root,comm_bcast
     use parallelization, only: nproc_id_global,nproc_group_global
-    use communication,   only: comm_is_root
     implicit none
     integer,     intent(in)           :: ifn
     integer,     intent(in)           :: is,ie
@@ -718,17 +718,28 @@ contains
     real(8),     intent(out),optional :: r0d
     real(8),     intent(out),optional :: r1d(is:ie)
     
-    integer :: io_unit
+    integer,intent(inout) :: io_status
+    integer :: io_unit,ios
+    character(:),allocatable :: read_path
+    if(io_status/=0)return
+    ios=0
 
     if(comm_is_root(nproc_id_global)) then
-      open(newunit=io_unit,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'.data'),status='old')
-      if    (present(i0d)) then; read(io_unit,*) i0d   ;
-      elseif(present(i1d)) then; read(io_unit,*) i1d(:);
-      elseif(present(r0d)) then; read(io_unit,*) r0d   ;
-      elseif(present(r1d)) then; read(io_unit,*) r1d(:);
-      end if
-      close(io_unit)
+      read_path=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'.data')
+      open(newunit=io_unit,file=read_path,status='old',action='read',iostat=ios)
+      if(ios==0)then
+        if    (present(i0d)) then; read(io_unit,*,iostat=ios) i0d   ;
+        elseif(present(i1d)) then; read(io_unit,*,iostat=ios) i1d(:);
+        elseif(present(r0d)) then; read(io_unit,*,iostat=ios) r0d   ;
+        elseif(present(r1d)) then; read(io_unit,*,iostat=ios) r1d(:);
+        end if
+        call restart_stage_close(io_unit,ios)
+      endif
+      call restart_read_report(read_path,ios)
     end if
+    call comm_bcast(ios,nproc_group_global)
+    io_status=abs(ios)
+    if(io_status/=0)return
     if    (present(i0d)) then; call comm_bcast(i0d   ,nproc_group_global);
     elseif(present(i1d)) then; call comm_bcast(i1d(:),nproc_group_global);
     elseif(present(r0d)) then; call comm_bcast(r0d   ,nproc_group_global);
@@ -740,10 +751,10 @@ contains
   
   !=========================================================================================
   != input restart binary file =============================================================
-  subroutine input_r_bin_em(ifn,is,ie,nsg_p,flag_same,read_mode,in_name,r1d,r2d,r3d,r4d,r5d,c1d,c2d,c3d,c4d,c5d,ipe)
+  subroutine input_r_bin_em(ifn,is,ie,nsg_p,flag_same,read_mode,in_name,r1d,r2d,r3d,r4d,r5d,c1d,c2d,c3d,c4d,c5d,ipe,io_status)
     use salmon_global,   only: directory_read_data
     use parallelization, only: nproc_id_global,nproc_group_global
-    use communication,   only: comm_is_root,comm_bcast,comm_summation
+    use communication,   only: comm_is_root,comm_bcast,comm_summation,comm_get_max
     implicit none
     integer,     intent(in)           :: ifn
     integer,     intent(in)           :: is(5),ie(5)
@@ -775,26 +786,38 @@ contains
     complex(8),allocatable :: c4d_p(:,:,:,:)
     complex(8),allocatable :: c5d_p(:,:,:,:,:)
     
-    integer :: io_unit
+    integer,intent(inout) :: io_status
+    integer :: io_unit,ios,header(12)
+    character(:),allocatable :: read_path
+    if(io_status/=0)return
+    ios=0
+    i_inf=0
+    is_p=0;ie_p=0
 
     select case(read_mode)
     case('single')
       if(comm_is_root(nproc_id_global)) then
-        open(newunit=io_unit,file=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name// '.bin'),&
-             status='old',form='unformatted',access='stream')
-        if    (present(r1d)) then; read(io_unit) r1d(:)        ;
-        elseif(present(r2d)) then; read(io_unit) r2d(:,:)      ;
-        elseif(present(r3d)) then; read(io_unit) r3d(:,:,:)    ;
-        elseif(present(r4d)) then; read(io_unit) r4d(:,:,:,:)  ;
-        elseif(present(r5d)) then; read(io_unit) r5d(:,:,:,:,:);
-        elseif(present(c1d)) then; read(io_unit) c1d(:)        ;
-        elseif(present(c2d)) then; read(io_unit) c2d(:,:)      ;
-        elseif(present(c3d)) then; read(io_unit) c3d(:,:,:)    ;
-        elseif(present(c4d)) then; read(io_unit) c4d(:,:,:,:)  ;
-        elseif(present(c5d)) then; read(io_unit) c5d(:,:,:,:,:);
-        end if
-        close(io_unit)
+        read_path=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name// '.bin')
+        open(newunit=io_unit,file=read_path,status='old',action='read',form='unformatted',access='stream',iostat=ios)
+        if(ios==0)then
+          if    (present(r1d)) then; read(io_unit,iostat=ios) r1d(:)        ;
+          elseif(present(r2d)) then; read(io_unit,iostat=ios) r2d(:,:)      ;
+          elseif(present(r3d)) then; read(io_unit,iostat=ios) r3d(:,:,:)    ;
+          elseif(present(r4d)) then; read(io_unit,iostat=ios) r4d(:,:,:,:)  ;
+          elseif(present(r5d)) then; read(io_unit,iostat=ios) r5d(:,:,:,:,:);
+          elseif(present(c1d)) then; read(io_unit,iostat=ios) c1d(:)        ;
+          elseif(present(c2d)) then; read(io_unit,iostat=ios) c2d(:,:)      ;
+          elseif(present(c3d)) then; read(io_unit,iostat=ios) c3d(:,:,:)    ;
+          elseif(present(c4d)) then; read(io_unit,iostat=ios) c4d(:,:,:,:)  ;
+          elseif(present(c5d)) then; read(io_unit,iostat=ios) c5d(:,:,:,:,:);
+          end if
+          call restart_stage_close(io_unit,ios)
+        endif
+        call restart_read_report(read_path,ios)
       end if
+      call comm_bcast(ios,nproc_group_global)
+      io_status=abs(ios)
+      if(io_status/=0)return
       if    (present(r1d)) then; call comm_bcast(r1d(:)        ,nproc_group_global);
       elseif(present(r2d)) then; call comm_bcast(r2d(:,:)      ,nproc_group_global);
       elseif(present(r3d)) then; call comm_bcast(r3d(:,:,:)    ,nproc_group_global);
@@ -810,28 +833,35 @@ contains
       if(flag_same) then
         !read information
         ii = nproc_id_global; write(id_name,*) ii;
-        open(newunit=io_unit,file= &
-             resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin'),&
-             status='old',form='unformatted',access='stream')
-        read(io_unit) is_p; read(io_unit) ie_p; read(io_unit) i_inf; close(io_unit);
+        read_path=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin')
+        open(newunit=io_unit,file=read_path,status='old',action='read',form='unformatted',access='stream',iostat=ios)
+        if(ios==0)then
+          read(io_unit,iostat=ios) is_p
+          if(ios==0)read(io_unit,iostat=ios) ie_p
+          if(ios==0)read(io_unit,iostat=ios) i_inf
+          call restart_stage_close(io_unit,ios)
+        endif
+        call restart_read_report(read_path,ios)
         
         !read and input
-        if(i_inf==1) then
-          open(newunit=io_unit,file= &
-             resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin'),&
-               status='old',form='unformatted',access='stream')
-          if    (present(r1d)) then; read(io_unit) r1d(:)        ;
-          elseif(present(r2d)) then; read(io_unit) r2d(:,:)      ;
-          elseif(present(r3d)) then; read(io_unit) r3d(:,:,:)    ;
-          elseif(present(r4d)) then; read(io_unit) r4d(:,:,:,:)  ;
-          elseif(present(r5d)) then; read(io_unit) r5d(:,:,:,:,:);
-          elseif(present(c1d)) then; read(io_unit) c1d(:)        ;
-          elseif(present(c2d)) then; read(io_unit) c2d(:,:)      ;
-          elseif(present(c3d)) then; read(io_unit) c3d(:,:,:)    ;
-          elseif(present(c4d)) then; read(io_unit) c4d(:,:,:,:)  ;
-          elseif(present(c5d)) then; read(io_unit) c5d(:,:,:,:,:);
-          end if
-          close(io_unit)
+        if(i_inf==1.and.ios==0) then
+          read_path=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin')
+          open(newunit=io_unit,file=read_path,status='old',action='read',form='unformatted',access='stream',iostat=ios)
+          if(ios==0)then
+            if    (present(r1d)) then; read(io_unit,iostat=ios) r1d(:)        ;
+            elseif(present(r2d)) then; read(io_unit,iostat=ios) r2d(:,:)      ;
+            elseif(present(r3d)) then; read(io_unit,iostat=ios) r3d(:,:,:)    ;
+            elseif(present(r4d)) then; read(io_unit,iostat=ios) r4d(:,:,:,:)  ;
+            elseif(present(r5d)) then; read(io_unit,iostat=ios) r5d(:,:,:,:,:);
+            elseif(present(c1d)) then; read(io_unit,iostat=ios) c1d(:)        ;
+            elseif(present(c2d)) then; read(io_unit,iostat=ios) c2d(:,:)      ;
+            elseif(present(c3d)) then; read(io_unit,iostat=ios) c3d(:,:,:)    ;
+            elseif(present(c4d)) then; read(io_unit,iostat=ios) c4d(:,:,:,:)  ;
+            elseif(present(c5d)) then; read(io_unit,iostat=ios) c5d(:,:,:,:,:);
+            end if
+            call restart_stage_close(io_unit,ios)
+          endif
+          call restart_read_report(read_path,ios)
         else
           if    (present(r1d)) then; r1d(:)         = 0.0d0;
           elseif(present(r2d)) then; r2d(:,:)       = 0.0d0;
@@ -845,63 +875,85 @@ contains
           elseif(present(c5d)) then; c5d(:,:,:,:,:) = (0.0d0,0.0d0);
           end if
         end if
+        io_status=abs(ios)
+        call comm_get_max(io_status,nproc_group_global)
+        if(io_status/=0)return
       else
         do ii=0,(nsg_p-1)
           !read information
           if(comm_is_root(nproc_id_global)) then
             write(id_name,*) ii;
-            open(newunit=io_unit,file= &
-             resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin'),&
-                 status='old',form='unformatted',access='stream')
-            read(io_unit) is_p; read(io_unit) ie_p; read(io_unit) i_inf; close(io_unit);
+            read_path=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '_inf.bin')
+            open(newunit=io_unit,file=read_path,status='old',action='read',form='unformatted',access='stream',iostat=ios)
+            if(ios==0)then
+              read(io_unit,iostat=ios) is_p
+              if(ios==0)read(io_unit,iostat=ios) ie_p
+              if(ios==0)read(io_unit,iostat=ios) i_inf
+              call restart_stage_close(io_unit,ios)
+            endif
+            call restart_read_report(read_path,ios)
           end if
-          call comm_bcast( is_p,nproc_group_global);
-          call comm_bcast( ie_p,nproc_group_global);
-          call comm_bcast(i_inf,nproc_group_global);
+          header(1:5)=is_p;header(6:10)=ie_p
+          header(11)=i_inf;header(12)=abs(ios)
+          call comm_bcast(header,nproc_group_global)
+          io_status=header(12)
+          if(io_status/=0)return
+          is_p=header(1:5);ie_p=header(6:10);i_inf=header(11)
+          ios=0
           
           if(i_inf==1) then
             !allocate array used in the previous calculation
             if    (present(r1d)) then
-              allocate(r1d_p(is_p(1):ie_p(1)))
+              allocate(r1d_p(is_p(1):ie_p(1)),stat=ios)
             elseif(present(r2d)) then
-              allocate(r2d_p(is_p(1):ie_p(1),is_p(2):ie_p(2)))
+              allocate(r2d_p(is_p(1):ie_p(1),is_p(2):ie_p(2)),stat=ios)
             elseif(present(r3d)) then
-              allocate(r3d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3)))
+              allocate(r3d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3)),stat=ios)
             elseif(present(r4d)) then
-              allocate(r4d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4)))
+              allocate(r4d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4)),stat=ios)
             elseif(present(r5d)) then
-              allocate(r5d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4),is_p(5):ie_p(5)))
+              allocate(r5d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4),is_p(5):ie_p(5)),stat=ios)
             elseif(present(c1d)) then
-              allocate(c1d_p(is_p(1):ie_p(1)))
+              allocate(c1d_p(is_p(1):ie_p(1)),stat=ios)
             elseif(present(c2d)) then
-              allocate(c2d_p(is_p(1):ie_p(1),is_p(2):ie_p(2)))
+              allocate(c2d_p(is_p(1):ie_p(1),is_p(2):ie_p(2)),stat=ios)
             elseif(present(c3d)) then
-              allocate(c3d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3)))
+              allocate(c3d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3)),stat=ios)
             elseif(present(c4d)) then
-              allocate(c4d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4)))
+              allocate(c4d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4)),stat=ios)
             elseif(present(c5d)) then
-              allocate(c5d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4),is_p(5):ie_p(5)))
+              allocate(c5d_p(is_p(1):ie_p(1),is_p(2):ie_p(2),is_p(3):ie_p(3),is_p(4):ie_p(4),is_p(5):ie_p(5)),stat=ios)
             end if
             
+            io_status=abs(ios)
+            if(ios/=0)call restart_read_report(in_name//': remap workspace',ios)
+            call comm_get_max(io_status,nproc_group_global)
+            if(io_status/=0)return
+
             !read and share
             if(comm_is_root(nproc_id_global)) then
               write(id_name,*) ii;
-              open(newunit=io_unit,file= &
-             resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin'),&
-                   status='old',form='unformatted',access='stream')
-              if    (present(r1d)) then; read(io_unit) r1d_p(:)        ;
-              elseif(present(r2d)) then; read(io_unit) r2d_p(:,:)      ;
-              elseif(present(r3d)) then; read(io_unit) r3d_p(:,:,:)    ;
-              elseif(present(r4d)) then; read(io_unit) r4d_p(:,:,:,:)  ;
-              elseif(present(r5d)) then; read(io_unit) r5d_p(:,:,:,:,:);
-              elseif(present(c1d)) then; read(io_unit) c1d_p(:)        ;
-              elseif(present(c2d)) then; read(io_unit) c2d_p(:,:)      ;
-              elseif(present(c3d)) then; read(io_unit) c3d_p(:,:,:)    ;
-              elseif(present(c4d)) then; read(io_unit) c4d_p(:,:,:,:)  ;
-              elseif(present(c5d)) then; read(io_unit) c5d_p(:,:,:,:,:);
-              end if
-              close(io_unit)
+              read_path=resolve_path(trim(adjustl(directory_read_data))//'/'//in_name//'_'//trim(adjustl(id_name))// '.bin')
+              open(newunit=io_unit,file=read_path,status='old',action='read',form='unformatted',access='stream',iostat=ios)
+              if(ios==0)then
+                if    (present(r1d)) then; read(io_unit,iostat=ios) r1d_p(:)        ;
+                elseif(present(r2d)) then; read(io_unit,iostat=ios) r2d_p(:,:)      ;
+                elseif(present(r3d)) then; read(io_unit,iostat=ios) r3d_p(:,:,:)    ;
+                elseif(present(r4d)) then; read(io_unit,iostat=ios) r4d_p(:,:,:,:)  ;
+                elseif(present(r5d)) then; read(io_unit,iostat=ios) r5d_p(:,:,:,:,:);
+                elseif(present(c1d)) then; read(io_unit,iostat=ios) c1d_p(:)        ;
+                elseif(present(c2d)) then; read(io_unit,iostat=ios) c2d_p(:,:)      ;
+                elseif(present(c3d)) then; read(io_unit,iostat=ios) c3d_p(:,:,:)    ;
+                elseif(present(c4d)) then; read(io_unit,iostat=ios) c4d_p(:,:,:,:)  ;
+                elseif(present(c5d)) then; read(io_unit,iostat=ios) c5d_p(:,:,:,:,:);
+                end if
+                call restart_stage_close(io_unit,ios)
+              endif
+              call restart_read_report(read_path,ios)
             end if
+            call comm_bcast(ios,nproc_group_global)
+            io_status=abs(ios)
+            if(io_status/=0)return
             if    (present(r1d)) then; call comm_bcast(r1d_p(:)        ,nproc_group_global);
             elseif(present(r2d)) then; call comm_bcast(r2d_p(:,:)      ,nproc_group_global);
             elseif(present(r3d)) then; call comm_bcast(r3d_p(:,:,:)    ,nproc_group_global);
@@ -1043,6 +1095,15 @@ contains
     
     return
   end subroutine input_r_bin_em
+
+  subroutine restart_read_report(name,ios)
+    use parallelization,only:nproc_id_global
+    character(*),intent(in) :: name
+    integer,intent(in) :: ios
+    if(ios/=0)write(*,'(A,I0,A,I0,2A)') &
+      'SALMONPY_RESTART_READ_ERROR rank=',nproc_id_global,' iostat=',ios,' input=',trim(name)
+  end subroutine restart_read_report
+
   
   !=========================================================================================
   != output restart txt file ===============================================================

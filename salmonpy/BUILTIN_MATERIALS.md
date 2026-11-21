@@ -1,10 +1,10 @@
 # 組み込みLD・SBEの物質設定
 
-[English](BUILTIN_MATERIALS.en.md) · Topic: `builtin_materials` · Paired revision: `2026-11-15.1`
+[English](BUILTIN_MATERIALS.en.md)
 
 `builtin_material_registry()`で、`salmonpy.ld`／`ld`と`salmonpy.sbe`／`sbe`の
 検証関数を持つMaterialRegistryを明示作成します。アダプター版は`1`です。
-登録・設定解決・モデル作成ではnative状態の初期化・取得・コンパイルを行いません。
+登録・設定解決・モデル作成ではFortran/Cで保持する計算状態の初期化・取得・コンパイルを行いません。
 `new_state`では既存の導入済みLD/SBEライブラリが必要です。
 
 ```python
@@ -19,7 +19,7 @@ with material.new_state(dt=0.02) as state:
 
 モデルに応じて状態引数を選びます。LDは**E駆動**で`initial_field`、SBEは**A/c駆動**で
 `initial_A`と`time0`を使います。数値計算・電流・snapshot/restore・contextでの解放は
-既存状態へ委譲し、契約や更新順を変えません。LDをA駆動に変換する機能ではなく、
+既存状態へ委譲し、仕様や更新順を変えません。LDをA駆動に変換する機能ではなく、
 その場合は既存の明示的なLD結合アダプターを使います。
 
 ## LDパラメータ
@@ -37,7 +37,7 @@ with material.new_state(dt=0.02) as state:
 ```
 
 5項目すべて必須です。単位はGaussian原子単位・角周波数を明示し、受動的な等方極と
-背景誘電率1という既存契約です。LorentzDrudeの検証を使い、未知キー・他の単位は拒否します。
+背景誘電率1という既存仕様です。LorentzDrudeの検証を使い、未知キー・他の単位は拒否します。
 値は書式例であり実測物性値ではありません。eV/fsからの自動換算は行いません。
 
 ## SBEパラメータ
@@ -68,7 +68,7 @@ ASEの行ベクトル・Åを無変換で渡さないでください。directory
 採用parametersには`file_sha256`を記録し、モデル作成時も再読込してカタログと照合します。
 変更されたファイルを同じ物質として黙って使用せず拒否します。毎stepでなく初期化時の処理です。
 ファイル容量・メモリ予算の自動推定はなく、カタログ作成と後のモデル作成で再度読み込みます。
-この2回の読込ではnativeハンドルは作りません。
+この2回の読込では計算処理ハンドルは作りません。
 
 ## IDと独立状態
 
@@ -99,9 +99,9 @@ python -m salmonpy.examples.configured_ld new-ld-run
 ```
 
 合成の二物質例です。入力一式を準備して独立状態を確認し、ID・電流を入力一式の**外**の
-response.jsonに保存します。完全版SALMONランタイムや通信は不要です。
+response.jsonに保存します。完全版SALMON計算プログラムや通信は不要です。
 
-DFT設定とGS→TDDFTへのID継承も[DFT_CONFIG.md](DFT_CONFIG.md)で利用できます。LD/SBEのE/A契約は変わりません。
+DFT設定とGS→TDDFTへのID継承も[DFT_CONFIG.md](DFT_CONFIG.md)で利用できます。LD/SBEのE/A仕様は変わりません。
 
 保存済みGS/1に限定した明示的なID選択は、別入口の
 `tddft_from_catalog`で利用できます。[INITIAL_STATES.md](INITIAL_STATES.md)参照。

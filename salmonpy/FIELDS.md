@@ -1,6 +1,6 @@
 # 場の部品（j→A）と物質との結合
 
-[English](FIELDS.en.md) · Topic: `macro-field` · Paired revision: `2026-11-14.2`
+[English](FIELDS.en.md)
 
 `salmonpy.maxwell` は、光と物質の結合ループを場の側から閉じる部品です。
 物質の部品（TDDFT、SBE、利用者のモデル）は A を受けて電流を返します（A→J）。
@@ -114,7 +114,7 @@ result = couple(material, layer, dt=.02, steps=4000, output_directory='new-run')
 - 薄膜の透過係数が、解析解 −iω/(−iω+γ) と一致する
 - 1次元の真空伝播（c·dt = h）が解析解と相対 1×10⁻⁵ 以内で一致し、反射が残らない
 - 1セル厚の1次元計算と薄膜モデルが一致する
-- 同梱の SBE カーネルで `Transverse` と結合した結果が `crystal.respond` とビット一致する
+- 同梱の SBE 計算ルーチンで `Transverse` と結合した結果が `crystal.respond` とビット一致する
 - `Longitudinal` と結合した結果が SALMON の漸化式とビット一致する
 
 SALMON 本体との直接比較は `tools/test_longitudinal_salmon.py` で行います（外部 SALMON が必要）。
@@ -123,8 +123,8 @@ SALMONpy の TDDFT ワーカー（`tr`）＋場の部品で計算します。400
 相対 3×10⁻¹⁵ 以下で、SALMON の出力桁と一致しました。1次元では格子全体の A も一致します。
 記録は `docs/maxwell-field-validation-2026-11-14.md` にあります。
 
-## ホスト向けAPIと状態保存
+## 呼び出し元プログラム向けAPIと状態保存
 
 [公開API・例外](API.md)と[メモリ上のsnapshot／restore](SNAPSHOTS.md)を参照してください。
 0.1.0a5からLD・SBE・4種類のPythonの場で固定dtの保存・復元を使えます。
-ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。
+計算処理FDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。

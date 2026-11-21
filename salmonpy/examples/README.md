@@ -1,30 +1,30 @@
 # Pythonサンプル集
 
-[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-19.1`
+[English](README.en.md)
 対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、
-[Si入門：wheelから電流まで](../SI_INTRO.md)は、固定の擬ポテンシャル・入力・期待値を同梱し、配布済みランタイムを明示して使う手順です。
+[Si入門：wheelから電流まで](../SI_INTRO.md)は、固定の擬ポテンシャル・入力・期待値を同梱し、配布済み計算プログラムを明示して使う手順です。
 
-LD/SBEには構築済みのネイティブライブラリが必要です。import時にコンパイルは行いません。
+LD/SBEにはビルド済みの計算用共有ライブラリが必要です。import時にコンパイルは行いません。
 下記の `python` はSALMONpyをインストールした環境のPythonを指します。
 
 まず、使ってよい総メモリ・CPUコア数・目的を決めてください。以下の格子や時間刻みは
 APIの使い方を示す例です。メモリ上限や物理量の収束を保証するものではありません。
 出力先は作業用ディレクトリを指定してください。生成したデータをコードツリーへ保存しません。
 
-LDと内蔵SBEはwheel同梱のネイティブライブラリを使います。波形の作成・解析はソルバー不要です。
+LDと内蔵SBEはwheel同梱のFortran/Cの共有ライブラリを使います。波形の作成・解析はソルバー不要です。
 `FieldSamples.write_salmon` の出力をSALMONで使う場合は `ae_shape1='input'`、`unit_system='au'` を指定します。
 
 ## まずこの3本
 
 1. **LD単独応答**：`python -m salmonpy.examples.ld_response`。wheelだけで材料応答を試します。
 2. **SBE単独応答**：`python -m salmonpy.examples.sbe_response new-sbe-output`。合成模型でA→jと独立状態を試します。実材料の物性例ではありません。
-3. **Siの電流**：[Si入門](../SI_INTRO.md)。対応する配布済みランタイムを準備して、wheelから電流までを確認します。短い動作確認であり、物理量の収束保証ではありません。
+3. **Siの電流**：[Si入門](../SI_INTRO.md)。対応する配布済み計算プログラムを準備して、wheelから電流までを確認します。短い動作確認であり、物理量の収束保証ではありません。
 
-初めて使う場合はこの順で十分です。以下の一覧は目的別の追加例、MPI・nativeの例は応用向けです。出力先にはコードツリー外の新しい場所を使ってください。
+初めて使う場合はこの順で十分です。以下の一覧は目的別の追加例、MPIで計算を結合する例は応用向けです。出力先にはコードツリー外の新しい場所を使ってください。
 
 | 目的 | サンプル | 追加で必要なもの |
 |---|---|---|
-| 自作バックエンドの保存対応・互換性検査と独立再開 | [custom_checkpoint.py](custom_checkpoint.py) | 新規出力先。外部ソルバー不要 |
+| 自作の計算コードの保存対応・互換性検査と独立再開 | [custom_checkpoint.py](custom_checkpoint.py) | 新規出力先。外部ソルバー不要 |
 | LDの時間応答・誘電率 | [ld_response.py](ld_response.py) | wheel内のLDライブラリ |
 | パルス作成・スペクトル | [pulse_spectrum.py](pulse_spectrum.py) | なし |
 | 形状・材料ID・PMLとの接触確認 | [geometry_preview.py](geometry_preview.py) | 新規.npz保存先 |
@@ -96,7 +96,7 @@ SALMON VR用書き出し: [salmon_vr_export.py](salmon_vr_export.py)。詳細は
 
 ## 多材料・MPIサンプル
 
-大文字の引数は利用環境のパスへ置き換えます。`RUNTIME` は管理済み**直列**ランタイム、
+大文字の引数は利用環境のパスへ置き換えます。`RUNTIME` は管理済み**直列**計算プログラム、
 `MPI_BUILD_JSON` はMPIビルド完了時の `build.json` です。相互に代用できません。
 `GS_BUNDLE` はRT入力・擬ポテンシャル・再開データを含む自己完結したディレクトリです。
 `RT_INPUT` はその中の入力ファイル名です。保存GSと汎関数・格子などを一致させてください。
@@ -132,14 +132,14 @@ LD例は有限サイズの人工構造、独自応答例は人工的な履歴則
 ## E/H FDTDと内部MPI TDDFTを結合する
 
 [mpi_coupled_tddft.py](mpi_coupled_tddft.py) は場2ランク＋物質2群×2ランクの6ランク例です。
-[ホスト共有ライブラリの準備・時刻と状態の契約](../COUPLED.md)に従います。
+[呼び出し元プログラム共有ライブラリの準備・時刻と状態の仕様](../COUPLED.md)に従います。
 
 ```sh
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.mpi_coupled_tddft BUILD_JSON GS_BUNDLE RT_INPUT NEW_OUTPUT
 ```
 
 `response.json` は二点のA/E/Jと二つの時計、場ディレクトリは実行記録と観測ログを保持します。
-一プロセス一回のネイティブ生成に限定され、別の試行は新しいMPIジョブで開始します。
+一プロセス一回の計算処理生成に限定され、別の試行は新しいMPIジョブで開始します。
 
 TDDFTでは実用上1次元の伝播・層構造を推奨し、電子応答を結合する3次元はSBEまたはユーザー作成の電流計算コードを推奨します。この40³・二点の例は接続回帰用で、1次元化や3次元TDDFTの標準的な研究条件を示すものではありません。
 
@@ -147,7 +147,7 @@ TDDFTでは実用上1次元の伝播・層構造を推奨し、電子応答を�
 
 `python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --verify-independence`
 
-ASE・f90nmlと、DFT/TDDFT/PZ対応の監査済みランタイムが必要です。[ASEガイド](../ASE.md)を参照。中性電子数を自動決定し、短いSi接続試験を1スレッドで実行します。光学物性の収束例ではありません。
+ASE・f90nmlと、DFT/TDDFT/PZ対応の監査済み計算プログラムが必要です。[ASEガイド](../ASE.md)を参照。中性電子数を自動決定し、短いSi接続試験を1スレッドで実行します。光学物性の収束例ではありません。
 
 ## snapshotの再実行
 
@@ -155,11 +155,11 @@ ASE・f90nmlと、DFT/TDDFT/PZ対応の監査済みランタイムが必要で�
 python -m salmonpy.examples.snapshot_restore
 ```
 
-LD・SBEと4種類のPythonの場を検査します。導入済みカーネルが必要で、SALMON本体は不要です。[保存と復元](../SNAPSHOTS.md)を参照してください。
+LD・SBEと4種類のPythonの場を検査します。導入済み計算ルーチンが必要で、SALMON本体は不要です。[保存と復元](../SNAPSHOTS.md)を参照してください。
 
-自作A駆動モデルは直列・MPIで同じ契約を使えます。[作り方と適合チェッカー](../MATERIALS.md)、`python -m salmonpy.examples.custom_material`を参照してください。
+自作A駆動モデルは直列・MPIで同じ仕様を使えます。[作り方と適合チェッカー](../MATERIALS.md)、`python -m salmonpy.examples.custom_material`を参照してください。
 
-物質ID・自作バックエンドの設定検証は [material_config.py](material_config.py)。追加データ不要で、設定だけを検証します。
+物質ID・自作の計算コードの設定検証は [material_config.py](material_config.py)。追加データ不要で、設定だけを検証します。
 
 See [CONFIG.en.md](../CONFIG.en.md) / [CONFIG.md](../CONFIG.md).
 
@@ -167,32 +167,32 @@ See [CONFIG.en.md](../CONFIG.en.md) / [CONFIG.md](../CONFIG.md).
 
 構造ファイル・物質ID・幅指定から転送用入力を作る例：[prepare_structure.py](prepare_structure.py)。[手順](../STRUCTURE.md)。ASEが必要です。
 
-物質ID付き設定からLD二物質を実行：[configured_ld.py](configured_ld.py)。新規出力先と同梱nativeライブラリが必要です。
+物質ID付き設定からLD二物質を実行：[configured_ld.py](configured_ld.py)。新規出力先と同梱計算処理ライブラリが必要です。
 
-物質設定からSiのDFT→TDDFTを実行：[configured_si.py](configured_si.py)。[手順](../DFT_CONFIG.md)。既存ランタイムとASE/f90nmlが必要です。
+物質設定からSiのDFT→TDDFTを実行：[configured_si.py](configured_si.py)。[手順](../DFT_CONFIG.md)。既存計算プログラムとASE/f90nmlが必要です。
 
 ## 追加の接続・入力サンプル
 
 | サンプル | 目的 | 必要条件・引数 |
 |---|---|---|
-| [field_inputs.py](field_inputs.py) | A/E/H入力の契約と自作応答 | LD kernel |
+| [field_inputs.py](field_inputs.py) | A/E/H入力の仕様と自作応答 | LD kernel |
 | [point_ld.py](point_ld.py) | 材料IDと点IDを保持したLD計算 | LD kernel; new output |
 | [point_tddft_restart.py](point_tddft_restart.py) | 点ごとのTDDFT再開 | Catalog, runtime, waveform; new output |
 | [catalog_tddft.py](catalog_tddft.py) | カタログからTDDFTを開始 | Catalog, runtime, waveform; see --help |
 | [mpi_configured_native.py](mpi_configured_native.py) | 設定済みLD／TDDFTのMPI応答 | 3 ranks; catalog, waveform; TDDFT runtime |
 | [mpi_recorded_material.py](mpi_recorded_material.py) | 記録付き自作物質／SBEの直列・MPI比較 | 3 ranks; optional SBE catalog |
 | [mpi_point_identity.py](mpi_point_identity.py) | MPIで点IDと材料情報を保持 | 3 ranks; new output |
-| [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1次元場と独立TDDFT群を結合 | 3 ranks with --material-ranks 1; native build and GS |
+| [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1次元場と独立TDDFT群を結合 | 3 ranks with --material-ranks 1; 計算処理 build and GS |
 | [isolated_response.py](isolated_response.py) | 孤立系のE駆動・双極子出力 | Validated E-worker, receipt, GS bundle, E NPZ |
 | [dipole_radiation.py](dipole_radiation.py) | 双極子からFDTDへ渡す電流を作成 | No data, or --archive and --cell-volume; no FDTD propagation |
 
 MPIサンプルも通常のPythonから `--help` を表示できます。実計算には mpi4py と互換MPIが必要です。MPIの既定ランク数が予算を超える場合は、そのまま実行せず、対応するランク数指定を確認してください。
 
-[mpi_field_inputs.py](mpi_field_inputs.py): 3ランクで異なるA/E/H契約を持つ合成物質を計算。入力不一致の更新前拒否も確認します。
+[mpi_field_inputs.py](mpi_field_inputs.py): 3ランクで異なるA/E/H仕様を持つ合成物質を計算。入力不一致の更新前拒否も確認します。
 
 [field_sampling.py](field_sampling.py): 合成場の時刻差と明示的な空間重みを使う補間。外部データ・ソルバー不要。
 
-[mpi_packet_coupling.py](mpi_packet_coupling.py): 合成物質と1D／native場のpacket往復結合。3ランク（nativeは4ランクも可）。
+[mpi_packet_coupling.py](mpi_packet_coupling.py): 合成物質と1D／計算処理場のpacket往復結合。3ランク（計算処理は4ランクも可）。
 
 - `molecular_field_selection.py`：分子自身の真空場だけを引く電場選択。人工標本のみ、ソルバー不要。
 
@@ -212,7 +212,7 @@ MPIサンプルも通常のPythonから `--help` を表示できます。実計�
 
 ### TB-mBJの直列GS入口
 
-`DFT(..., xc="tbmbj", cval=None)` または `dft_from_atoms(..., xc="tbmbj", cval=1.2)` を使います。JSONの物質レシピでも `xc` と任意の `cval` を指定できます。係数はGS記録、warm startの整合性検査、TDDFT入力へ引き継ぎます。TB-mBJはモデルポテンシャルのため、全エネルギーと力は未検証の診断値として警告し、計算は続行します。ASE Calculatorによる最適化の対象にはしません。サンプルは `python -m salmonpy.examples.dft_tbmbj --help` で確認できます。今回の確認は合成密度のネイティブXC評価とインターフェース検査であり、実材料の物理精度保証ではありません。
+`DFT(..., xc="tbmbj", cval=None)` または `dft_from_atoms(..., xc="tbmbj", cval=1.2)` を使います。JSONの物質レシピでも `xc` と任意の `cval` を指定できます。係数はGS記録、warm startの整合性検査、TDDFT入力へ引き継ぎます。TB-mBJはモデルポテンシャルのため、全エネルギーと力は未検証の診断値として警告し、計算は続行します。ASE Calculatorによる最適化の対象にはしません。サンプルは `python -m salmonpy.examples.dft_tbmbj --help` で確認できます。今回の確認は合成密度の計算処理XC評価とインターフェース検査であり、実材料の物理精度保証ではありません。
 
 ## 誘電関数・光学伝導率（単一偏光）
 
@@ -250,7 +250,7 @@ epsilon = dielectric_function(sigma)
 
 混在MPIのA／場パケットは担当点だけへ配ります。Jの場への返却順は同じです。通信の情報はcommunication_reportで確認できます。
 
-担当J配信に対応するnativeランタイムでは、通常のmpi_mixed_native例も場の空間分割に応じてJを配信します。代表ランク以外の結合J配列は担当行だけが有効です。全点の後処理には代表の保存出力を使ってください。詳しくはCOUPLED.mdを参照してください。
+担当J配信に対応する計算処理計算プログラムでは、通常のmpi_mixed_native例も場の空間分割に応じてJを配信します。代表ランク以外の結合J配列は担当行だけが有効です。全点の後処理には代表の保存出力を使ってください。詳しくはCOUPLED.mdを参照してください。
 
 準備だけ: `python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-grid 2 1 1` はFDTD入力保存で終了し、計算・投入はしません。PREPARATION.mdを参照してください。
 
@@ -258,6 +258,6 @@ epsilon = dielectric_function(sigma)
 
 `fdtd_energy`: 保存済みマクロ点E/j・分離済みE/Hポートから吸収仕事、R/T、収支を診断（ソルバー起動なし）。
 
-`fdtd_periodic_slab --native-planes`: native所有タイルから横断面を取得・位置合わせして流束を表示。対応ランタイムが必要で、未対応なら計算結果を保持して警告します。
+`fdtd_periodic_slab --native-planes`: 計算処理所有タイルから横断面を取得・位置合わせして流束を表示。対応計算プログラムが必要で、未対応なら計算結果を保持して警告します。
 
-混在nativeサンプルは任意の`--planes-x FRONT BACK --plane-stride 16`で横周期境界の面を確定後だけ取得し、最後にplane-seriesへまとめます。既定は取得しません。
+混在計算処理サンプルは任意の`--planes-x FRONT BACK --plane-stride 16`で横周期境界の面を確定後だけ取得し、最後にplane-seriesへまとめます。既定は取得しません。

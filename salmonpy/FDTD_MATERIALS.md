@@ -1,8 +1,8 @@
 # FDTDの独自材料と界面
 
-[English](FDTD_MATERIALS.en.md) · Topic: `fdtd_materials` · Paired revision: `2026-11-21.1`
+[English](FDTD_MATERIALS.en.md)
 
-検証済みv2ランタイムで、`python -m salmonpy.examples.fdtd_layers MANAGED_RUNTIME NEW_DIRECTORY`
+検証済みv2計算プログラムで、`python -m salmonpy.examples.fdtd_layers MANAGED_RUNTIME NEW_DIRECTORY`
 を実行します。1プロセス・1スレッドの人工的な有限サイズ二層の例であり、収束した無限多層膜の光学計算ではありません。
 
 等方的な分散材料は `LorentzDrude(plasma_frequency=..., strength=[...], resonance=[...], damping=[...])`
@@ -21,13 +21,13 @@
 
 - 電場の辺の両端が非真空なら、座標が小さい側のセルの材料モデル全体を使用します。どちらかが真空なら、従来の真空界面の係数を維持します。
 - 磁場の位置では、固定した空間順序で最初の非真空セルを選びます。Hxでは `(i,j,k)`、`(i,j+1,k)`、`(i,j,k+1)`、`(i,j+1,k+1)` の順、HyとHzも対応する横断面で同様です。すべて真空なら真空係数です。
-- ネイティブMPIの初期化時に材料格子の面・辺・角を通信します。E/HとLDの時間更新順は変更しません。
+- 計算処理MPIの初期化時に材料格子の面・辺・角を通信します。E/HとLDの時間更新順は変更しません。
 
 検証対象の単一材料・真空の結果は従来と一致します。異種材料界面では旧来のID優先処理から結果が変わります。
 サブピクセル精度、回転に対する不変性、収束次数の改善を保証する方法ではありません。
 観測点の従来形式のログに出る材料パラメーターは隣接する**セル**の値で、補間される電場の辺の有効係数ではありません。
 
-複数材料の実行では旧v1ランタイムを拒否します。v2を明示的に取得・ビルドしてください。importでの自動ビルドはありません。
+複数材料の実行では旧v1計算プログラムを拒否します。v2を明示的に取得・ビルドしてください。importでの自動ビルドはありません。
 `salmonpy-run.json` の `interface_assignment` に方式を記録します。各 `run` は独立した計算状態を作ります。
 材料係数や時間刻みを変えるときは新しい計算を作成します。
 
@@ -50,12 +50,12 @@ result = solver.run(calculation, "NEW_OUTPUT", mpi=FDTDMPI((2, 2, 1)), threads=1
 ```
 
 mpiexecや初期化済みmpi4pyの内部ではなく、新しい直列Pythonプロセスから実行します。
-FDTDMPIの3整数が空間分割、その積がMPIランク数です。既定の `launcher=("mpiexec",)` はホスト用の引数タプルへ変更でき、シェル展開は行いません。
+FDTDMPIの3整数が空間分割、その積がMPIランク数です。既定の `launcher=("mpiexec",)` は呼び出し元プログラム用の引数タプルへ変更でき、シェル展開は行いません。
 各方向に最低2セル/ランクが必要です。MPI起動の対象は現在macOS/Linuxです。
 
-`python -m salmonpy.runtime build` にUSE_MPI=ONとホストのMPI C/Fortranコンパイラを指定して明示的に構築します。
+`python -m salmonpy.runtime build` にUSE_MPI=ONと呼び出し元プログラムのMPI C/Fortranコンパイラを指定して明示的に構築します。
 RUNTIME.mdに従い、ビルド並列数はメモリ・CPU予算で選んでください。完成時のビルド記録とバイナリのハッシュでMPI対応を確認します。
-対応情報のない古い記録は再ビルドが必要で、CMakeCacheの書き換えだけではMPI対応になりません。配布済み直列ランタイムはMPI版ではありません。
+対応情報のない古い記録は再ビルドが必要で、CMakeCacheの書き換えだけではMPI対応になりません。配布済み直列計算プログラムはMPI版ではありません。
 別の手段で監査済みの実行ファイルを用意した場合、低水準の `SalmonExecutable(...,mpi_enabled=True)` は呼び出し側による明示的な対応表明です。
 バイナリの自動判定ではありません。
 
@@ -69,11 +69,11 @@ python -m salmonpy.examples.fdtd_mpi_layers MPI_BUILD_JSON NEW_DIRECTORY --grid 
 
 例は1・2・3極の人工的なLD三材料を使い、材料セル数を表示します。メモリ使用量は未測定です。本計算の規模決定には資源見積もりと収束確認が必要です。
 
-TDDFTなどの電子応答をE/Hへ返すには、別の[ネイティブ結合入口](COUPLED.md)を使います。上記のバッチAPIの材料リストへTDDFTを渡す方式ではありません。
+TDDFTなどの電子応答をE/Hへ返すには、別の[Pythonから直接呼ぶFDTDと電子計算の結合入口](COUPLED.md)を使います。上記のバッチAPIの材料リストへTDDFTを渡す方式ではありません。
 
 ## 横方向周期のスラブ
 
-`Boundaries(('pml','pml','periodic','periodic','periodic','periodic'))`でx方向をPML、y・z方向を周期境界にできます。周期指定は同じ軸の両面へ設定し、周期位相0で接続します。座標と材料IDプレビューは従来の中心原点を維持します。Fortranの場用通信が各軸の境界を使い、電子状態計算の周期設定を変更しません。PMLに接する材料への既存検査も維持します。旧ランタイムではなく、この軸別境界に対応したランタイムを用意してください。
+`Boundaries(('pml','pml','periodic','periodic','periodic','periodic'))`でx方向をPML、y・z方向を周期境界にできます。周期指定は同じ軸の両面へ設定し、周期位相0で接続します。座標と材料IDプレビューは従来の中心原点を維持します。Fortranの場用通信が各軸の境界を使い、電子状態計算の周期設定を変更しません。PMLに接する材料への既存検査も維持します。旧計算プログラムではなく、この軸別境界に対応した計算プログラムを用意してください。
 
 `python -m salmonpy.examples.fdtd_periodic_slab RUNTIME NEW_OUTPUT`は誘電体、`--ld`付きはLDスラブです。Fresnelの複素透過率との比較は明示的な`tools/test_fdtd_periodic.py AUDITED_MPI_BUILD_JSON NEW_RESULTS`で行います。計算はFortran、フーリエ和と解析式は検証用Cで評価します。256×8×8、1／2ランクの検証で、3周波数の相対複素誤差は誘電体で最大約0.0554%、LDで約0.0375%でした。横方向の観測点と1／2ランクの結果も一致しています。これは指定した合成スラブの検証であり、任意材料や全条件の精度保証ではありません。現在の共通格子初期化には細いMPI分割での最小領域制約が残るため、この例は横8格子を使います。
 
@@ -87,7 +87,7 @@ TDDFTなどの電子応答をE/Hへ返すには、別の[ネイティブ結合�
 epsilon_ij=epsilon*delta_ijです。LorentzDrude.from_config(tensor)、FDTDのmaterials、
 LDMaterialProviderで共通に受け取ります。三次元E/Hに限定する方針は撤回しています。
 permittivity_tensor(omega)は読み取り専用の複素(...,3,3)配列です。旧scalar入口も保持します。
-FDTD.tensor_materialsと実行記録で表現を確認できます。native E/H FDTDは等方・独立対角・相反非対角テンソルに対応しています。単独／MPI物質応答の独立対角・非対角更新は下記の実装を参照してください。酸化物と仮定・帯域はOPTICAL_DATA.mdを参照してください。
+FDTD.tensor_materialsと実行記録で表現を確認できます。Pythonから直接呼ぶFDTDは等方・独立対角・相反非対角テンソルに対応しています。単独／MPI物質応答の独立対角・非対角更新は下記の実装を参照してください。酸化物と仮定・帯域はOPTICAL_DATA.mdを参照してください。
 
 ## 対角テンソルFDTDと波長板
 
@@ -99,7 +99,7 @@ P/J/Qの更新順とYee格子の物質界面割当は従来どおりです。
 対角入力は `media_type='ld-diagonal'` と `salmonpy-ld-diagonal.dat` の組です。
 `input_text()` だけを保存して終えず、`input_assets()` も保存してください。
 通常の `SalmonExecutable.run` と `NativeEHField` は資産を自動配置し、来歴にはSHA256を記録します。
-資産がない旧ランタイムへ新入力を渡さず、明示ビルドまたは対応配布を利用します。
+資産がない旧計算プログラムへ新入力を渡さず、明示ビルドまたは対応配布を利用します。
 scalarのepsilon_em/f_ldは先頭軸の互換情報で、完全な対角値はこの資産にあります。
 元の等方入力は資産を持たず、従来と同じ入力・演算経路です。
 
@@ -124,17 +124,17 @@ S3=2 Im(Ex conj(Ey))/S0、フーリエ規約exp(+i omega t)を明示します。
 
 phasorは台形則によるフーリエ積分で、単位はE(au)×時間(au)です。パルスのピーク振幅ではなく、偏光の評価には規格化した比を使います。
 
-## 相反非対角native E/H FDTD
+## 相反非対角Pythonから直接呼ぶFDTD
 
 実験室系のSPD背景行列epsilon_infinityと、極ごとのPSD強度行列を持つ
 TensorLorentzDrudeを渡します。共鳴・減衰は極の行列成分間で共通のスカラーです。
-反対称な磁気光学応答は対象外です。native E/Hバックエンドの一次元相当・二次元相当・
+反対称な磁気光学応答は対象外です。FDTDのE/H更新計算処理の一次元相当・二次元相当・
 三次元の構造で同じ材料表現を使います。別のmaxwell.pyのAのみの場へ異方性背景を
 追加する機能ではありません。非ゼロBloch位相は新しい演算子では未対応です
 （Python FDTDにはその指定口はありません）。
 
 完全テンソルはmedia_type='ld-tensor'とsalmonpy-ld-tensor.datを使い、バッチと
-NativeEHFieldの両方で自動配置します。対応ランタイムと資産SHA256を確認します。
+NativeEHFieldの両方で自動配置します。対応計算プログラムと資産SHA256を確認します。
 独立な6成分を保持し、位置の異なるYee電場を、対になる辺→節点の平均とその転置平均で
 結びます。物質が所有する辺へ射影し、別物質の極履歴は混ぜません。
 対角前処理付き共役勾配法でEを解き、同じ極演算子をJに加えてから従来のP・Qを更新します。
@@ -142,7 +142,7 @@ NativeEHFieldの両方で自動配置します。対応ランタイムと資産S
 
 FDTD(..., tensor_rtol=1e-10, tensor_maxiter=200)で連立更新の許容誤差と回数を
 指定します。有限値のまま回数に達した場合は警告して継続します。残差を確認して調整してください。
-非有限演算や非正の曲率の場合は試行を拒否し、nativeホストでは元の状態へ戻して再試行できます。
+非有限演算や非正の曲率の場合は試行を拒否し、計算処理呼び出し元プログラムでは元の状態へ戻して再試行できます。
 PEC固定電場は作用範囲から除きます。完全テンソルの直接チェックポイントは材料行列と
 更新条件を照合し、不一致は反映前に拒否します。従来の等方・対角の保存形式は維持します。
 場チェックポイントのMPI再分割を追加したものではありません。
@@ -163,7 +163,7 @@ waveplate_diagnostic(..., angle=pi/6)は実験室系Eを受け、phasorとStokes
 ```sh
 mpiexec -n 2 python tools/test_eh_deep_recovery_mpi.py BUILD_JSON NEW_OUTPUT --baseline --resume-midpoint --tensor
 ```
-既存のnative復元検査を共用します。ソースの作業コピーと、確保した計算資源が必要です。
+既存の計算処理復元検査を共用します。ソースの作業コピーと、確保した計算資源が必要です。
 
 
 ## LD専用：中心周波数に合わせた界面平滑化
@@ -178,12 +178,12 @@ smoothed = replace(calculation, smoothing=SubpixelSmoothing())
 # Impulseには中心周波数が無いためSubpixelSmoothing(reference_omega=...)を指定します。
 ```
 
-対象は明示的なLD材料を含むnative E/H FDTDです。一次元的・二次元的・三次元の
+対象は明示的なLD材料を含むPythonから直接呼ぶFDTDです。一次元的・二次元的・三次元の
 配置で利用できます。SBE・TDDFTや利用者のA→j状態には適用しません。
 少なくとも片側がLDである界面だけを平滑化し、相手は通常の誘電体でも構いません。
 LDが無い場合や磁性・導電率付き背景が未対応の場合は警告し、元の係数を保持します。
-native応答点の近傍は界面平滑化から除外します。電子密度や電流の規格化、
-Maxwellとの結合契約を変更する処理ではありません。
+計算処理応答点の近傍は界面平滑化から除外します。電子密度や電流の規格化、
+Maxwellとの結合仕様を変更する処理ではありません。
 
 専用Fortranモジュールが直方体・楕円体の局所平面の占有率と法線を求め、
 入力の中心角周波数に対応する受動的テンソル係数を初期化します。
@@ -201,7 +201,7 @@ Maxwellとの結合契約を変更する処理ではありません。
 
 salmonpy-subpixel.dat（版2）はrun()/NativeEHFieldが配置し、モデル・保存データの
 識別情報に含めます。バッチ入力を自分で書き出す場合はinput_text()だけでなく
-input_assets()も出力してください。対応する監査済みランタイムが必要です。
+input_assets()も出力してください。対応する監査済み計算プログラムが必要です。
 不足・破損した係数ファイルは黙って無視しません。
 salmonpy-subpixel-summary.jsonに参照周波数、全体の極スロット数、除外した応答点数、
 平滑化・局所代替の標本数、整合誤差、背景からの保守的な時間刻み目安を記録します。
@@ -210,7 +210,7 @@ salmonpy-subpixel-summary.jsonに参照周波数、全体の極スロット数�
 
 メモリは各材料の有効極スロット総数×担当格子数に比例し、セルごとのテンソルを
 保持します。同じ共鳴周波数・減衰を持つ極も現状は統合しません。
-多数のLDモデルではnativeの配列容量の見積もりを確認してください。
+多数のLDモデルでは計算処理の配列容量の見積もりを確認してください。
 直接保存は係数も含み、不一致モデルの復元を拒否します。
 この機能によってFDTDのMPI再分割再開に対応するわけではありません。
 

@@ -1,8 +1,8 @@
 # Material configuration → DFT → TDDFT
 
-[日本語](DFT_CONFIG.md) · Topic: `dft_material_config` · Paired revision: `2026-11-15.1`
+[日本語](DFT_CONFIG.md)
 
-`builtin_material_registry()` explicitly includes backend `salmonpy.dft`, model
+`builtin_material_registry()` explicitly includes calculation implementation `salmonpy.dft`, model
 `dft`, adapter version `1`. This resolves local structure/potential references into
 the existing DFT API, with no runtime launch, acquisition or compilation. ASE is
 an optional dependency required for this resolver; LD/SBE registration stays usable
@@ -84,7 +84,7 @@ Material ID and definition digest persist in the live DFT→GS→TDDFT→state p
 `record()` on material/GS returns identity for explicit result metadata. The digest
 identifies fixed material input, not SCF execution, GS bytes, pulse or dt. Existing
 GS/TDDFT manifests carry their own data hashes. This is **not** a generic JSON
-TDDFT backend or a loader selecting catalog.initial_states recipes. Disk identity
+TDDFT calculation implementation or a loader selecting catalog.initial_states recipes. Disk identity
 persistence, point/run IDs, MPI assignment and arbitrary saved-GS selection remain
 separate work. Passing `.model` or `.result` to other APIs transfers responsibility
 for preserving that identity to the caller.
@@ -117,7 +117,7 @@ load(path,status) retains a model-owned parser and post-coordinate input values;
 run(status) activates them for sequential legacy SCF, and clear() releases input
 and scratch. A rejected unsupported replacement preserves the existing model.
 
-Scope: periodic full-k unpolarized fixed-ion PZ/TB-mBJ/Libxc-PZ/PBE. The host first
+Scope: periodic full-k unpolarized fixed-ion PZ/TB-mBJ/Libxc-PZ/PBE. The calling program first
 initializes MPI, comm_attach, math/parallel infrastructure and timers. All subgroup
 ranks call the same model in matching order. Runs switch/restore caller input and
 unit views, calc_mode, actual symmetry switches, modulo tables and XC scratch.
@@ -149,4 +149,4 @@ Cartesian force basis after symmetry averaging.
 
 ### Serial TB-mBJ ground states
 
-Use `DFT(..., xc="tbmbj", cval=None)` or `dft_from_atoms(..., xc="tbmbj", cval=1.2)`. Material JSON recipes accept xc and optional cval. None selects the automatic coefficient; a finite value greater than 1e-10 selects a fixed coefficient. The coefficient is retained in GS records, warm-start compatibility checks and TDDFT inputs. TB-mBJ is a model potential: total energies and forces are unvalidated diagnostics, with a warning rather than a run prohibition. ASE Calculator optimization and native parallel SCF support are unchanged. Run `python -m salmonpy.examples.dft_tbmbj --help` for the serial example. Validation here covers synthetic native XC evaluation and interface contracts, not real-material accuracy.
+Use `DFT(..., xc="tbmbj", cval=None)` or `dft_from_atoms(..., xc="tbmbj", cval=1.2)`. Material JSON recipes accept xc and optional cval. None selects the automatic coefficient; a finite value greater than 1e-10 selects a fixed coefficient. The coefficient is retained in GS records, warm-start compatibility checks and TDDFT inputs. TB-mBJ is a model potential: total energies and forces are unvalidated diagnostics, with a warning rather than a run prohibition. ASE Calculator optimization and solver parallel SCF support are unchanged. Run `python -m salmonpy.examples.dft_tbmbj --help` for the serial example. Validation here covers synthetic solver XC evaluation and interface contracts, not real-material accuracy.

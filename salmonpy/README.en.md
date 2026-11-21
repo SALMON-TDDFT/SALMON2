@@ -1,21 +1,24 @@
-# SALMONpy — getting started
+# SALMONpy: material response, electronic dynamics and light propagation in Python
 
-Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
+[日本語](README.md)
 
-> Solver sources are bundled under `runtime/sources` (inside `_runtime_source`
-> in wheels). Prepare a new external build directory using the current runtime
-> guide. No upstream checkout or compatibility-patch application is required.
-> Historical validation commands below describe earlier layouts.
+Use LD, SBE, DFT, TDDFT and FDTD independently or combine them. Structure and pulse
+preparation and analysis of existing results can also be used on their own.
+This is a development release and is not yet published on PyPI.
 
-[日本語](README.md) · Topic: `getting-started` · Paired revision: `2026-11-13.4`
+| How to use it | Calculations | Preparation |
+|---|---|---|
+| Calculate material response from Python | LD, SBE, pulses, geometry and analysis | Install a matching distribution wheel |
+| Run SALMON in a separate process | DFT, TDDFT, FDTD and bands | Also install a compatible SALMON executable |
+| Advance a calculation one step at a time from Python | Couple electronic calculations, FDTD and user-written code | Also prepare the shared library and MPI |
 
-SALMONpy provides independent material-response and analysis components. It is a
-preview, not a published PyPI release. The project is intended to move to its own
-repository; this branch is not intended for merging into SALMON itself.
+Start with the first row. For additional programs, follow the [installation guide](RUNTIME.en.md).
+Prefer a matching prebuilt distribution; explicitly build the bundled sources only when needed.
+A separate upstream SALMON checkout is not required.
 
 ## Install and diagnose
 
-Obtain a **repaired wheel** matching your OS, CPU architecture and CPython version.
+Obtain a **distribution wheel** matching your OS, CPU architecture and CPython version.
 Python 3.10+ is required, but the wheel must also match your specific interpreter.
 
 ```sh
@@ -36,11 +39,11 @@ Start with [LD → SBE → Si current](examples/README.en.md#start-with-these-th
 | Task | Python entry | Requirements |
 |---|---|---|
 | Permittivity and E-driven P/J | `salmonpy.LorentzDrude` | Wheel |
-| Crystalline A-to-J with SBE | `salmonpy.sbe` | Wheel; band/transition data for real materials |
+| Crystalline A/c-to-j response with SBE | `salmonpy.sbe` | Wheel; band/transition data for real materials |
 | Field components (j→A) coupled to matter: tr / lo / thin film / 1D propagation | `salmonpy.maxwell` | NumPy and a matter component; [FIELDS.en.md](FIELDS.en.md) |
 | Pulses, geometry and analysis | `fields`, `geometry`, `analysis`, `outputs` | NumPy; Matplotlib for plots |
 | Ground-state DFT and forces | `salmonpy.dft` | Compatible full SALMON and pseudopotentials |
-| Crystalline A-to-J with TDDFT | `salmonpy.tddft` | Compatible full SALMON and matching GS |
+| Crystalline A/c-to-j response with TDDFT | `salmonpy.tddft` | Compatible full SALMON and matching GS |
 | Electromagnetic propagation | `salmonpy.fdtd` | Compatible full SALMON |
 | Band calculations and plots | `salmonpy.bands` | Compatible full SALMON, GS, Matplotlib |
 | ASE structures, bands, energy/forces | `salmonpy.ase`, `salmonpy.ase_calculator` | Corresponding solver plus optional ASE dependencies |
@@ -75,7 +78,7 @@ validation are in [PACKAGING.md](PACKAGING.md).
 See [materials and MPI FDTD](FDTD_MATERIALS.en.md), [response service](DISTRIBUTED.en.md),
 and [commands and outputs](examples/README.en.md). The field role in the latter two
 supplies prescribed A. For internal-MPI TDDFT and E/H coupling use the separate
-[experimental native coupling](COUPLED.en.md) and `mpi_coupled_tddft` sample
+[experimental solver coupling](COUPLED.en.md) and `mpi_coupled_tddft` sample
 (two field ranks plus two two-rank material groups = six ranks).
 Do not nest the batch FDTD launcher inside an MPI job.
 
@@ -93,10 +96,10 @@ Do not nest the batch FDTD launcher inside an MPI job.
   The separate `embedded_tddft` entry supplies internal MPI with the restrictions
   in [COUPLED.en.md](COUPLED.en.md).
 - DFT: periodic, fixed ions, unpolarized, PZ/Libxc-PZ/Libxc-PBE. TDDFT also supports
-  native TB-mBJ from a matching converged GS; midpoint propagation only.
+  solver TB-mBJ from a matching converged GS; midpoint propagation only.
 - ASE Calculator: PZ/Libxc-PZ/Libxc-PBE with scalar KY/NC-UPF potentials; energy/forces, opt-in wavefunction warm start, no stress.
   Establish grid, k-point and SCF convergence; egg-box effects affect force checks.
-- FDTD has a batch entry and a separate restricted native E/H step/coupling entry
+- FDTD has a batch entry and a separate restricted FDTD updates of E and H step/coupling entry
   in [COUPLED.en.md](COUPLED.en.md). Periodic boundaries and oblique incidence are not exposed.
 
 ## Budgets and failures
@@ -113,7 +116,7 @@ Output archives require an indexed arrays.npz and matching array names, shapes,
 dtypes and finite values. verify=False skips hashes only, not structural checks.
 Opening reads arrays one at a time, so allow memory for the largest array.
 An output archive is not a restart checkpoint. Preserve complete GS directories
-for reuse and do not edit their hashed native files. Close TDDFT states with
+for reuse and do not edit their hashed solver files. Close TDDFT states with
 `with`; send/response timeouts terminate or recover the worker as documented.
 
 ## Ask an AI assistant
@@ -130,17 +133,17 @@ instructions are still mixed-language. It is not yet a fully translated referenc
 catalog and getting-started guidance. Reuse known resource answers.
 
 For source development, see [PACKAGING.md](PACKAGING.md); source-only build/test
-commands require a checkout. Restart Python after rebuilding native libraries.
+commands require a checkout. Restart Python after rebuilding Fortran/C libraries.
 
 Public desktop visualization: [SALMON_VR.en.md](SALMON_VR.en.md).
 
 For practical electronic-feedback calculations, start TDDFT with 1D propagation/layered structures. Recommend 3D with SBE or a user-written current solver. This is a cost-based recommendation, not a capability restriction; see [dimension selection](COUPLED.en.md).
 
-## Host API and state snapshots
+## calling program API and state snapshots
 
 See [public API and errors](API.en.md) and [in-memory snapshots](SNAPSHOTS.en.md).
 LD, SBE and the four Python fields support fixed-dt snapshot/restore since 0.1.0a5.
-This does not add native FDTD/TDDFT/MPI restart or change current/time conventions.
+For saving FDTD, TDDFT or MPI calculations to disk and restarting them, follow the [checkpoint guide](CHECKPOINTING.en.md).
 
 Custom A-driven models can use one serial/MPI contract and an explicit conformance checker: [authoring guide](MATERIALS.en.md), `python -m salmonpy.examples.custom_material`.
 

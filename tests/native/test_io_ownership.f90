@@ -153,26 +153,41 @@ program fdtd_restart_io_host
  call output_r_txt_em(600,1,1,'single','integer',i0d=7,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_txt_em(600,1,1,'integer',i0d=ri)
+ call input_r_txt_em(600,1,1,'integer',i0d=ri, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(ri/=7)stop 31
  call check_units
  call output_r_txt_em(600,1,2,'single','integers',i1d=ia,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
- call input_r_txt_em(600,1,2,'integers',i1d=ib)
+ call input_r_txt_em(600,1,2,'integers',i1d=ib, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(ib/=ia))stop 32
  call output_r_txt_em(600,1,1,'single','real',r0d=.125d0,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
- call input_r_txt_em(600,1,1,'real',r0d=rr)
+ call input_r_txt_em(600,1,1,'real',r0d=rr, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(rr/=.125d0)stop 33
  call output_r_txt_em(600,1,2,'single','reals',r1d=ra,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
- call input_r_txt_em(600,1,2,'reals',r1d=rb)
+ call input_r_txt_em(600,1,2,'reals',r1d=rb, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(rb/=ra))stop 34
  call check_units
  call output_r_txt_em(600,1,2,'all','local_reals',r1d=ra,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_txt_em(600,1,2,'local_reals_0',r1d=rb)
+ call input_r_txt_em(600,1,2,'local_reals_0',r1d=rb, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(rb/=ra))stop 35
  call check_units
  is=1;ie=2;is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -186,14 +201,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_r1',r1d=a1,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r1',r1d=b1)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r1',r1d=b1, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a1/=b1))stop 41
  call check_units
  a1=a1+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_r1',r1d=a1,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r1',r1d=b1)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r1',r1d=b1, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a1/=b1))stop 42
  call check_units
  b1=0
@@ -201,7 +222,10 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r1',r1d=b1)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r1',r1d=b1, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(b1/=(a1+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -209,14 +233,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_r2',r2d=a2,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r2',r2d=b2)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r2',r2d=b2, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a2/=b2))stop 41
  call check_units
  a2=a2+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_r2',r2d=a2,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r2',r2d=b2)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r2',r2d=b2, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a2/=b2))stop 42
  call check_units
  b2=0
@@ -224,7 +254,10 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r2',r2d=b2)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r2',r2d=b2, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(b2/=(a2+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -232,14 +265,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_r3',r3d=a3,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r3',r3d=b3)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r3',r3d=b3, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a3/=b3))stop 41
  call check_units
  a3=a3+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_r3',r3d=a3,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r3',r3d=b3)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r3',r3d=b3, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a3/=b3))stop 42
  call check_units
  b3=0
@@ -247,7 +286,10 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r3',r3d=b3)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r3',r3d=b3, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(b3/=(a3+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -255,14 +297,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_r4',r4d=a4,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r4',r4d=b4)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r4',r4d=b4, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a4/=b4))stop 41
  call check_units
  a4=a4+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_r4',r4d=a4,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r4',r4d=b4)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r4',r4d=b4, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a4/=b4))stop 42
  call check_units
  b4=0
@@ -270,7 +318,10 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r4',r4d=b4)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r4',r4d=b4, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(b4/=(a4+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -278,14 +329,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_r5',r5d=a5,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r5',r5d=b5)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_r5',r5d=b5, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a5/=b5))stop 41
  call check_units
  a5=a5+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_r5',r5d=a5,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r5',r5d=b5)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_r5',r5d=b5, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(a5/=b5))stop 42
  call check_units
  b5=0
@@ -293,7 +350,10 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r5',r5d=b5)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r5',r5d=b5, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(b5/=(a5+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -301,14 +361,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_c1',c1d=c1,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c1',c1d=d1)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c1',c1d=d1, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c1/=d1))stop 41
  call check_units
  c1=c1+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_c1',c1d=c1,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c1',c1d=d1)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c1',c1d=d1, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c1/=d1))stop 42
  call check_units
  d1=0
@@ -316,7 +382,10 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c1',c1d=d1)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c1',c1d=d1, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(d1/=(c1+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -324,14 +393,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_c2',c2d=c2,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c2',c2d=d2)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c2',c2d=d2, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c2/=d2))stop 41
  call check_units
  c2=c2+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_c2',c2d=c2,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c2',c2d=d2)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c2',c2d=d2, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c2/=d2))stop 42
  call check_units
  d2=0
@@ -339,7 +414,10 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c2',c2d=d2)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c2',c2d=d2, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(d2/=(c2+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -347,14 +425,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_c3',c3d=c3,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c3',c3d=d3)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c3',c3d=d3, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c3/=d3))stop 41
  call check_units
  c3=c3+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_c3',c3d=c3,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c3',c3d=d3)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c3',c3d=d3, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c3/=d3))stop 42
  call check_units
  d3=0
@@ -362,7 +446,10 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c3',c3d=d3)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c3',c3d=d3, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(d3/=(c3+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -370,14 +457,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_c4',c4d=c4,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c4',c4d=d4)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c4',c4d=d4, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c4/=d4))stop 41
  call check_units
  c4=c4+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_c4',c4d=c4,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c4',c4d=d4)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c4',c4d=d4, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c4/=d4))stop 42
  call check_units
  d4=0
@@ -385,7 +478,10 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c4',c4d=d4)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c4',c4d=d4, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(d4/=(c4+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
@@ -393,14 +489,20 @@ program fdtd_restart_io_host
  call output_r_bin_em(600,is,ie,'single','single_c5',c5d=c5,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c5',c5d=d5)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'single','single_c5',c5d=d5, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c5/=d5))stop 41
  call check_units
  c5=c5+real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','local_c5',c5d=c5,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c5',c5d=d5)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','local_c5',c5d=d5, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(c5/=d5))stop 42
  call check_units
  d5=0
@@ -408,17 +510,26 @@ program fdtd_restart_io_host
  call MPI_Barrier(nproc_group_global,ierr)
  k=mod(nproc_id_global+1,nproc_size_global)
  is(1)=2*k+1;ie(1)=is(1)+1
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c5',c5d=d5)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_c5',c5d=d5, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(d5/=(c5+real(k-nproc_id_global,8)*8d0)))stop 43
  call check_units
  is(1)=2*nproc_id_global+1;ie(1)=is(1)+1
  c5=c5-real(nproc_id_global,8)*8d0
  call output_r_bin_em(600,is,ie,'all','inactive',r1d=a1,ipe=0,io_status=save_status)
  if(save_status/=0)error stop "restart save failed"
- call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','inactive',r1d=b1)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.true.,'all','inactive',r1d=b1, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(b1/=0d0))stop 44
  call check_units
- call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r1',r1d=b1,ipe=0)
+ call input_r_bin_em(600,is,ie,nproc_size_global,.false.,'all','local_r1',r1d=b1,ipe=0, &
+            io_status=save_status)
+ if(save_status/=0)error stop 'Required EM restart read failed'
+
  if(any(b1/=0d0))stop 45
  call check_units
  if(nproc_id_global==0)then

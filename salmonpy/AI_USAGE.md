@@ -1,10 +1,21 @@
-# SALMONpy: AI向け利用・実装ガイド
+# SALMONpy：AI向け利用・実装ガイド
 
-LD単独利用のPython試作APIを提供しています。実際の入口は `LorentzDrude` の `respond`、`new_state`、`permittivity` です。構築方法・単位・時間位置は README.md と examples/ld_response.py を参照してください。FDTDには外部実行ファイルを使うバッチ入口があります。WORKFLOWS.mdを参照してください。結晶は共通A駆動インターフェースを持ち、内蔵SBE速度ゲージと初期状態ローダーを提供します。TDDFTはPZ／TB-mBJ／Libxc-PZ／Libxc-PBE・中点伝播のプロセス分離型接続を提供します。存在しないAPIを例示しないでください。
+利用者が行いたい計算から入口を選びます。最初に `manual.json` の検索と[サンプル集](examples/README.md)を使い、既に分かっている条件を再質問せず、目的・使用可能な総メモリ・CPU数の不足分だけを確認してください。
+
+| 目的 | 使う入口・ガイド |
+|---|---|
+| 材料応答・パルス・構造・解析を単独で使う | `ld`・`sbe`・`fields`・`geometry`・`analysis` |
+| 保存GSから電子状態を進める | `tddft`、[利用手順](WORKFLOWS.md) |
+| 電子計算とFDTDを一ステップずつ結合する | [結合手順](COUPLED.md) |
+| 同じ物質の独立した計算を複数作る | [TDDFT](SHARED_TDDFT.md)・[高速HSE](SHARED_HSE.md) |
+| 異なる物質入力を同じMPI群で使う | [TDDFTの登録](TDDFT_REGISTRY.md)・[HSEの登録](SHARED_HSE.md) |
+| 保存・再開や失敗時の状態保持を使う | [保存・再開](CHECKPOINTING.md)・[時間更新](NATIVE_STEPPING.md) |
+
+各ガイドの実行手順・使用するライブラリの条件を確認してください。開発・検証の補足や `docs/plans/` の過去の「未接続」「今後」の記述を、現在の対応機能一覧として扱いません。公開API一覧に名前があることと、使用する計算ライブラリで動作確認済みであることは別です。存在しないAPIや未測定の物理精度を案内しないでください。
 
 ## 物質応答の境界
 
-結晶の公開インターフェースはA駆動のみです。TDDFTとSBEは、内部状態と新旧Aを受けて時間発展しJを返す交換可能な物質応答として設計します。結晶にE駆動の選択肢を追加しないでください。SBEは既存の演算順を保った共有Fortranカーネルに接続しています。
+結晶の公開インターフェースはA駆動のみです。TDDFTとSBEは、内部状態と新旧Aを受けて時間発展しJを返す交換可能な物質応答として設計します。結晶にE駆動の選択肢を追加しないでください。SBEは既存の演算順を保った共有Fortran計算ルーチンに接続しています。
 
 E,Hを扱うFDTDとA駆動の結晶の間には結合処理を置きます。単位、ゲージ、時間位置、符号、座標回転、Jの体積規格化は現行マルチスケール実装に準拠して確定し、アダプターで明示します。Aの積分履歴は結合側、波動関数・密度行列は物質側が保持します。
 
@@ -32,13 +43,13 @@ IEEE判定は各要素へのスカラー呼び出しに限定します。GSは�
 
 変更後は独立LDの旧演算との比較とFDTD全体の比較を行います。単一スレッドのビット一致と並列の数値許容差検証を区別します。再開互換性や未検証の計算機での動作を推定だけで保証しないでください。
 
-## 入力の寿命
+## 設定を決めるタイミング
 
 INPUT_CONTRACT.md に従います。材料係数はモデル作成時、dtと初期条件は状態作成時、Eは各stepで指定します。`material.config` と `state.config` は確定値の読み取り専用レコードです。設定変更は新しいモデル・状態の作成で行い、private属性を書き換えません。`respond` は毎回新規状態です。設定レコードはチェックポイントではありません。
 
 ## 配布
 
-本体ランタイムの準備は RUNTIME.md / RUNTIME.en.md と manual.json の `runtime` タスクに従います。既存の監査済みランタイムを再利用し、次にOS・CPU・必要機能に合う配布物を探します。対応品がない場合だけ明示的な `python -m salmonpy.runtime build` を案内します。importやinstall失敗を理由に自動ビルドしません。独立SALMONpyの非公開Releaseと期限付きActions配布物を区別し、公開URLを作り話で補わないでください。Libxcを必要とする計算には `--require libxc` を付け、PZ版に勝手に代替しません。取得・検証した `load_runtime` の戻り値を既存の `executable=` に渡します。
+本体計算プログラムの準備は RUNTIME.md / RUNTIME.en.md と manual.json の `runtime` タスクに従います。既存の監査済み計算プログラムを再利用し、次にOS・CPU・必要機能に合う配布物を探します。対応品がない場合だけ明示的な `python -m salmonpy.runtime build` を案内します。importやinstall失敗を理由に自動ビルドしません。独立SALMONpyの非公開Releaseと期限付きActions配布物を区別し、公開URLを作り話で補わないでください。Libxcを必要とする計算には `--require libxc` を付け、PZ版に勝手に代替しません。取得・検証した `load_runtime` の戻り値を既存の `executable=` に渡します。
 
 wheelの構築と修復・OS別検証は PACKAGING.md に従います。検証済み環境とCI設定のみの環境を混同しません。wheel利用者にはFortranコンパイラを要求せず、ソース構築時のみ要求します。
 
@@ -57,7 +68,7 @@ SBEの長さゲージ・バイナリ再開は未対応です。四次Taylor法�
 ユニタリー性や自動誤差制御を保証しません。APIは刻み幅を自動変更しません。
 
 
-## TDDFTの接続と寿命
+## TDDFTの呼び出しと終了
 
 `salmonpy.tddft.TDDFTInitialState.from_salmon` は自己完結した入力ディレクトリを
 複製し、ハッシュ付きの初期スナップショットを所有します。初期GSのバイナリ解釈は
@@ -89,16 +100,16 @@ BANDS.mdを参照してください。`bands.BandStructure.from_salmon` と `.pl
 明示してください。経路上の価電子帯上端を全域のVBMと呼ばないでください。
 
 バンドの計算入口は `BandInitialState.from_salmon` → `run(BandPath, ...)`。
-初期束の外の新規保存先、対応した監査済み実行ファイルを使い、SCFが反復上限で未収束なら警告とSCFReviewRequiredで一旦止め、残差履歴を利用者が確認するまで後続へ進めません。実行完了とSCF収束を区別し、`GroundStateResult.converged` と `ground-state.json` の `converged` を確認して未収束を収束済みと説明しません。残差・閾値・反復数は保存されます。破損出力・非有限値・native実行失敗は引き続きエラーです。
+初期束の外の新規保存先、対応した監査済み実行ファイルを使い、SCFが反復上限で未収束なら警告とSCFReviewRequiredで一旦止め、残差履歴を利用者が確認するまで後続へ進めません。実行完了とSCF収束を区別し、`GroundStateResult.converged` と `ground-state.json` の `converged` を確認して未収束を収束済みと説明しません。残差・閾値・反復数は保存されます。破損出力・非有限値・計算処理実行失敗は引き続きエラーです。
 
 ASE連携は任意の独立モジュール `salmonpy.ase`。ASE.mdを参照。
 `run_bands` は構造を照合し、ASEのk点列をそのまま計算します。Calculator・力は独立したASE_CALCULATOR.mdの対応範囲を参照してください。
 
 GS作成は `salmonpy.dft.DFT`、ASE変換は `salmonpy.ase.dft_from_atoms`。DFT.mdに従います。ASE入口の電子数はKY/NC-UPFの価電子数から中性系として決定・照合します。直接DFTでは電子数を明示します。軌道数・格子条件・k点は必須で、収束保証のある自動既定値はありません。
-`salmonpy.ase.tddft_from_atoms` はGSを保存して既存TDDFT初期状態を返します。ASE.en.mdとexamples/ase_tddft.pyも参照してください。結晶はA/c駆動、戻り値は電荷電流j。状態は独立で、ランタイムの自動取得・コンパイルはしません。
+`salmonpy.ase.tddft_from_atoms` はGSを保存して既存TDDFT初期状態を返します。ASE.en.mdとexamples/ase_tddft.pyも参照してください。結晶はA/c駆動、戻り値は電荷電流j。状態は独立で、計算プログラムの自動取得・コンパイルはしません。
 収束済み `GroundStateResult` からバンド／TDDFT初期状態を作れます。PZ／Libxc-PZ／Libxc-PBE・KY／NC-UPFのCalculatorと本体の力はASE_CALCULATOR.mdを参照してください。
 
-`salmonpy.ase_calculator.SalmonCalculator` は任意依存の独立モジュール。energy/forcesのみ、PZ／Libxc-PZ／Libxc-PBEとKY／NC-UPF・単一ランクが対象です。Libxc対応ランタイムと擬ポテンシャルの整合を確認します。
+`salmonpy.ase_calculator.SalmonCalculator` は任意依存の独立モジュール。energy/forcesのみ、PZ／Libxc-PZ／Libxc-PBEとKY／NC-UPF・単一ランクが対象です。Libxc対応計算プログラムと擬ポテンシャルの整合を確認します。
 NLCC付きUPFの力は検証記録なしではCalculatorが計算前に拒否します。信頼できるバンドルをload_runtime(..., required=['nlcc-forces'])、または監査済みビルドと検証記録をload_validated_buildで読み込んだ場合のみCPU・非スピン分極NC・PZ/Libxc-PZ/PBEの力を有効にします。SalmonExecutable(path,sha256)だけでは無効です。記録はバイナリ・既知パッチ・微分検査・固定Si8実行検査に結び付け、移動後にも実行検査します。互換パッチのXC重み・全密度勾配・明示的コア力の修正は旧バイナリに自動適用されません。実装回帰と物理的な収束を区別し、メタGGA・OpenACC・スピン分極Libxcの力を検証済みと説明しないでください。
 `warm_start=True` は直前の互換なGSの波動関数だけを再利用し、既定Falseです。セル・計算条件が変われば新規SCF、元データが破損すればエラーです。旧原子位置・混合履歴は再利用しません。
 結晶TDDFTの基本はtransverse（trans_longi=tr）。Longitudinalは明示的な場の選択です。孤立系・non-collinear・Ehrenfestは初版の目標として残しますが、今回のASE APIの対応済み機能には含めません。
@@ -135,7 +146,7 @@ manual.jsonの `beginner_intake` を必ず適用します。新しい計算を�
 ## 並列経路を選ぶ
 
 LD中心の光伝播には `fdtd_mpi` タスクを選び、既存MPI FDTDの各ランク内で多数のLD状態を管理します。
-起動元は直列Pythonです。MPI版の完成ビルド記録が必要で、配布用直列ランタイムとは区別します。
+起動元は直列Pythonです。MPI版の完成ビルド記録が必要で、配布用直列計算プログラムとは区別します。
 所定のAに対する独自応答は `distributed_response`、二点TDDFTは `distributed_tddft` を選びます。
 これらはPythonを一度MPI起動し、標準例では一物質群に一物質・一マクロ点を割り当てます。
 内部MPIのTDDFTとE/Hフィードバックには `native_coupled` タスクとCOUPLED.mdを使います。
@@ -143,9 +154,9 @@ LD中心の光伝播には `fdtd_mpi` タスクを選び、既存MPI FDTDの各�
 ## 場の部品（j→A）
 
 `salmonpy.maxwell` の場の部品は `step(j_n) → A_{n+1}` です。`Transverse`／`Longitudinal`／`ThinFilm`／`Multiscale1D` は SALMON の tr／lo／2d／1次元多スケールと同じ式・順序・初期条件です。部品間のインターフェースでは電荷電流 j を受け渡し、物質の内部は SALMON の物質電流 J を保持します（j = −J）。crystal プロトコルは j を返します。J_matter を宣言した部品だけ `maxwell.couple` が変換します。場の部品に J を直接渡さないでください。t=0 の電流は場に戻しません。1次元では x が伝播方向です。座標回転、背景誘電率のある1次元媒質、2次元・3次元の Weyl 伝播、再開は未対応として扱い、対応済みと例示しないでください。時刻配置は `salmonpy.timing`（`salmonpy.time/1`）で宣言し、`couple()` が結合前に検査します。新しい部品には `timing` を実装し、検査を回避する変換を書かないでください。詳細は FIELDS.md を参照してください。
-これは一群一点・一プロセス一回のネイティブ寿命に限定した実験的APIです。
+これは一群一点・一プロセス一回の計算処理寿命に限定した実験的APIです。
 既存FDTDバッチと応答サービスを並べるだけで結合したと説明しません。
-ネイティブ結合のE時刻n·dtと電子時刻(n+1/2)·dtを混同しません。再開、回転、サブサイクルは未対応です。
+Pythonから直接呼ぶFDTDと電子計算の結合のE時刻n·dtと電子時刻(n+1/2)·dtを混同しません。再開、回転、サブサイクルは未対応です。
 実行前に不足する資源予算を確認し、例のランク・スレッド・状態数と、未測定のメモリ使用量を明示します。
 機能ごとの実行例・出力形式は examples/README.md / README.en.md にあります。
 
@@ -177,7 +188,7 @@ LD・合成SBE・波形・形状・保存の公式例を実行します。ソー
 wheelハッシュと実際の読込元を記録します。これはスモークテストであり、先行Notebookの
 追加の解析解・保存則検証や、外部SALMON・MPIの検証を含みません。
 
-## 公開契約とメモリ上の状態保存（0.1.0a5）
+## 公開仕様とメモリ上の状態保存（0.1.0a5）
 
 `public_api` と `snapshots` タスクを参照。公開名は `salmonpy.api.PUBLIC_API`、
 版は `salmonpy.__version__`。例外は `salmonpy.errors` の親と分類を使い、
@@ -188,9 +199,9 @@ SalmonpyErrorになるとは説明しません。詳細はAPI.md/API.en.md。
 同じモデルオブジェクト、同じdt・開始時刻と場の容量・駆動条件を要求します。
 保存はメモリ上の不変コピーで、失敗したrestoreは状態を変えません。保存数と状態サイズの
 分だけ追加メモリが必要です。トークンは編集・シリアライズせず、Zarr GSや出力NPZと混同しません。
-手動結合では同じ受理済み時刻で場と物質を両方保存します。MPI全体の原子的復元、可変dt、
-埋め込みTDDFTやネイティブE/Hの復元は未対応です。プロセス分離TDDFTのディスク再開は下記の専用APIで対応し、
-出力アーカイブやネイティブ波動関数checkpointとは区別してください。
+手動結合では同じ最後に成功した計算時刻で場と物質を両方保存します。MPI全体の原子的復元、可変dt、
+Pythonと同じプロセスで実行するTDDFTや計算処理E/Hの復元は未対応です。プロセス分離TDDFTのディスク再開は下記の専用APIで対応し、
+出力アーカイブや計算処理波動関数checkpointとは区別してください。
 examples/snapshot_restore.pyは実行可能な例です。結晶の基本はtransverse・A/c駆動です。
 
 プロセス分離TDDFTのrestoreは別ワーカーでA履歴を再生し、各端点電流をrtol=1e-12・atol=1e-14で照合後に切替えます。失敗時は元ワーカーを保持します。同一初期モデル・dt・初期A・容量・実行ファイル・スレッド数を要求し、復元コストは履歴長に比例、検証中は2ワーカー分の資源が必要です。SNAPSHOTS.mdを参照。
@@ -209,20 +220,20 @@ materials.check_material(initial, drive)で利用者指定A波形について独
 materials.bind_material(initial, key=..., identity=...)は同じnew_state/step(A)モデルをMaterialBindingへ変換します。明示TimeSpecが必要です。
 MPIは1ランク/物質群の計算点分散であり、単一の直列モデルの内部並列化ではありません。identityは作者が版・全設定・初期データを識別して指定します。
 宣言されたJ_matterのみjへ変換し、物理精度やfailure atomicityを証明しません。本番でチェッカーを暗黙実行しません。
-native TDDFTは既存のmanaged provider、LDは既存E駆動adapterを使います。MATERIALS.md/enとexamples/custom_material.pyを参照してください。
+Pythonから直接呼ぶTDDFTは既存のmanaged provider、LDは既存E駆動adapterを使います。MATERIALS.md/enとexamples/custom_material.pyを参照してください。
 
-## 自作ネイティブ物質のC ABIプレビュー1
+## 自作計算処理物質のC ABIプレビュー1
 
 c_material.CMaterial(library, sha256, configuration_bytes)は公開ヘッダinclude/salmonpy_material.hのABI1を読みます。
-モデル/状態は独立int64 handles、固定dtの端点Ac→電荷電流j、明示TimeSpec、statusコード、失敗時原子性が契約です。
-CMaterialは共通respond/check_material/bind_materialで使え、モデルclose後も既存状態が閉じるまでnativeモデル解放を延期します。
-ライブラリは信頼できる実行コードで、SHA照合は障害隔離ではありません。ロード済みファイルは置換せず版ごとに別ファイル、全native呼出しはprocess-wide直列化、Pythonモデル/状態の同時呼出しは未対応です。
-C++/Fortranホスト例は明示build、ソース/全object監査を保持。Cプラグインの製造解検証であり、LD/SBE永続handle化や複数native TDDFT contextを実装済みと説明しません。
+モデル/状態は独立int64 handles、固定dtの端点Ac→電荷電流j、明示TimeSpec、statusコード、失敗時原子性が仕様です。
+CMaterialは共通respond/check_material/bind_materialで使え、モデルclose後も既存状態が閉じるまで計算処理モデル解放を延期します。
+ライブラリは信頼できる実行コードで、SHA照合は障害隔離ではありません。ロード済みファイルは置換せず版ごとに別ファイル、全計算処理呼出しはprocess-wide直列化、Pythonモデル/状態の同時呼出しは未対応です。
+C++/Fortran呼び出し元プログラム例は明示build、ソース/全object監査を保持。Cプラグインの製造解検証であり、LD/SBE永続handle化や複数Pythonから直接呼ぶTDDFT contextを実装済みと説明しません。
 C_ABI.md/enを参照。MPI collective C ABI、波動関数checkpoint、GPUは別作業です。
 
 ## SBE永続ハンドル
 
-SBEInitialStateのモデル配列を一度ネイティブへ準備し、状態は独立したaccepted/trial密度を持ちます。
+SBEInitialStateのモデル配列を一度計算処理へ準備し、状態は独立したaccepted/trial密度を持ちます。
 通常stepはA/J3成分だけ渡し、density/snapshot時だけ全密度をexportします。close/context managerと補助GC解放に対応。
 初期モデルはdata-onlyのasdict/pickle/deepcopyを維持し、nativecacheは外部weak-key登録で移送しません。
 shared velocity kernels/演算順序/既存OMP外側k分割は不変。常駐メモリはモデルnativecopyと各状態のrho2枚を必要とします。
@@ -231,17 +242,17 @@ shared velocity kernels/演算順序/既存OMP外側k分割は不変。常駐メ
 
 ## LDの状態保持
 
-LD.md／LD.en.mdに従います。係数と極ごとの履歴は状態ごとに保持し、stepではEと総P/Jだけを受け渡します。close／withで解放し、respondとMPI応答サービスも所有状態を解放します。固定のメモリ上限はありません。snapshot／restoreは同一モデル・固定dtでのみ利用し、状態そのもののpickleは案内しません。共有LDカーネルと物理的P/Jの規約は不変です。
+LD.md／LD.en.mdに従います。係数と極ごとの履歴は状態ごとに保持し、stepではEと総P/Jだけを受け渡します。close／withで解放し、respondとMPI応答サービスも所有状態を解放します。固定のメモリ上限はありません。snapshot／restoreは同一モデル・固定dtでのみ利用し、状態そのもののpickleは案内しません。共有LD計算ルーチンと物理的P/Jの規約は不変です。
 
 TDDFTの保存用GSは状態の参照で保持し、初期モデルclose後も既存状態の再生に使えます。初期モデルclose後のnew_stateは拒否し、最後の状態解放後に保存用も削除します。N状態でN+1組、restore検証中は追加の作業用コピーが必要です。論理コピー量と実ファイルシステム上の物理占有量は区別します。
 
 ## GS/2配列アーカイブ
 
-`salmonpy.gs_archive.save_ground_state`／`GroundStateArchive.open` は明示的に渡した周期・非スピン分極のGS配列のZarr v3入出力です。GS_ARCHIVE.md／GS_ARCHIVE.en.mdに従い、k,band,z,y,xのセル周期u、reduced逆格子k、原点0・端点なしの格子を使います。SALMONpy DFT生成のΓ点GS/1はGroundStateResult.export_archiveでGS/2へ書き出せます。SCF収束の再認定は行いません。GS/2からのTDDFTはΓ点・直列GNUランタイムに固定した監査済みGammaRestartConverterを明示指定した場合だけ利用できます。擬ポテンシャルは参照だけで自動取得しません。Fortran stream helperはチャンクの実数I/Oだけで、完全なSALMONアダプターではありません。
+`salmonpy.gs_archive.save_ground_state`／`GroundStateArchive.open` は明示的に渡した周期・非スピン分極のGS配列のZarr v3入出力です。GS_ARCHIVE.md／GS_ARCHIVE.en.mdに従い、k,band,z,y,xのセル周期u、reduced逆格子k、原点0・端点なしの格子を使います。SALMONpy DFT生成のΓ点GS/1はGroundStateResult.export_archiveでGS/2へ書き出せます。SCF収束の再認定は行いません。GS/2からのTDDFTはΓ点・直列GNU計算プログラムに固定した監査済みGammaRestartConverterを明示指定した場合だけ利用できます。擬ポテンシャルは参照だけで自動取得しません。Fortran stream helperはチャンクの実数I/Oだけで、完全なSALMONアダプターではありません。
 
-Γ点GS変換ではgs_native.GammaRestartConverterを使い、対象実行ファイルSHA256・実コンパイラ/Fortran_FLAGS・擬ポテンシャルhash・GFORTRAN_CONVERT_UNITを照合します。MPI／多k／別ABIの汎用変換とは説明しません。合成軌道での実ランタイム接続試験と物理的なGS検証を区別します。
+Γ点GS変換ではgs_native.GammaRestartConverterを使い、対象実行ファイルSHA256・実コンパイラ/Fortran_FLAGS・擬ポテンシャルhash・GFORTRAN_CONVERT_UNITを照合します。MPI／多k／別ABIの汎用変換とは説明しません。合成軌道での実計算プログラム接続試験と物理的なGS検証を区別します。
 
-GS書き出しは新しいexporter付きGammaRestartConverterを明示指定します。実数/複素数の直列Γ点のみ、原子単位のgs_eigen.dataとネイティブ占有数の一致を必須にします。密度は軌道と占有数から再構成し、混合履歴の保存と呼びません。provenanceに由来・元GS等のhash・局所チャネルを記録し、再入力時の局所チャネルも検査します。実GSを収集せず合成データで接続試験することと物理検証を区別します。
+GS書き出しは新しいexporter付きGammaRestartConverterを明示指定します。実数/複素数の直列Γ点のみ、原子単位のgs_eigen.dataと計算処理占有数の一致を必須にします。密度は軌道と占有数から再構成し、混合履歴の保存と呼びません。provenanceに由来・元GS等のhash・局所チャネルを記録し、再入力時の局所チャネルも検査します。実GSを収集せず合成データで接続試験することと物理検証を区別します。
 
 複数k点は新しいSerialRestartConverterを明示指定し、座標軸に沿う直交セル・直列・非スピン分極のみです。GammaRestartConverterはΓ限定を維持します。元GS書き出しは検証済み通常kmeshとgs_k.dataを照合し、再入力はhash付きkpoints.datをfile_kwへ渡します。密度・電子数はk点重みを含めます。波動関数/占有数と、k点テキスト・重み再規格化による電流丸め差を区別し、一般メッシュの電流比較はrtol1e-12/atol1e-14を使います。
 
@@ -251,7 +262,7 @@ GS書き出しは新しいexporter付きGammaRestartConverterを明示指定し�
 
 ## 高速HSEの本体接続（開発用）
 
-RUNTIME.md/enのnative owner経路に従います。`--explicit-routing`で準備した高速版は、
+RUNTIME.md/enの計算処理 owner経路に従います。`--explicit-routing`で準備した高速版は、
 明示的な検証時に`SALMONPY_HSE_CONTEXT=1`でTDDFT本体へ独立HSE ownerを結合します。
 FFT・ACE・履歴の交互実行検査と、本体電流/エネルギーの32ケース比較を区別します。
 共通かつ不変のglobal設定、直列・非スピン分極・全支持の範囲です。TDDFT全体の複数状態・
@@ -262,12 +273,12 @@ status=2は計測不可です。GitHub Actionsは利用枠節約のため、新�
 ## TDDFT全体の独立状態の開発用検査
 
 RUNTIME.md/enの「状態ごとの固定dtを持つTDDFT全体の独立状態」に従います。tddft_context.f90は
-nativeの全step引数を所有し、dt以外は同じ設定・同じGSから独立初期化した2状態の交互実行を検査します。
+計算処理の全step引数を所有し、dt以外は同じ設定・同じGSから独立初期化した2状態の交互実行を検査します。
 異なるA波形、逆順、片方の破棄/再生成、別プロセス参照との配列比較、本体Acos2参照を使います。
 rt_stepの返すjは電荷電流、エネルギーは毎ステップ、単位は原子単位です。
 内部Fortranの開発用入口であり、既存Python TDDFTの制約を解除したとは説明しません。
 XC作業配列・modulo表は各状態へ移しましたが、global入力・初期化設定の共有は残ります。異なるXC/grid/k、MPI、同時呼出しは
-未対応です。保存した基本設定の変更や非有限Aは進める前に拒否しますが、全native失敗の原子性や
+未対応です。保存した基本設定の変更や非有限Aは進める前に拒否しますが、全計算処理失敗の原子性や
 RSS上限は保証しません。traceは合成検査専用で、checkpointではありません。
 
 内部Fortranのrt_open(..., delta_t=...)では状態ごとの固定dtを指定できます。有限・正の値のみ、
@@ -298,7 +309,7 @@ s_rgrid_configとinit_grid_whole_configは、実空間格子の境界・halo・�
 
 
 resolve_cellはs_cell_configからセル形状と格子間隔を決める内部ルーチンです。結果は値として独立し、
-不正値・体積ゼロでは変更しません。native互換層のglobal al正規化とk/pseudo/XCの依存は残るため、
+不正値・体積ゼロでは変更しません。計算処理互換層のglobal al正規化とk/pseudo/XCの依存は残るため、
 セル設定全体の独立化や異なるセルのTDDFT対応済みとは案内しません。
 
 
@@ -377,7 +388,7 @@ MateriAppsを構造取得APIと呼ばず、実際の提供元と出典を記録�
 
 計算ノードのインターネット接続を前提にしません。未確認なら接続可否と準備・転送先を確認し、
 既知の施設制約は再質問しません。RUNTIME.md/enの手順で取得と実行を分け、計算先に合う
-wheelと依存、ローカルカタログとランタイムZIP、構造/スーパーセル・擬ポテンシャル・入力・
+wheelと依存、ローカルカタログと計算プログラムZIP、構造/スーパーセル・擬ポテンシャル・入力・
 初期状態と全参照データを事前準備します。版・出典・hashを記録し、転送後の照合と実計算ノードでの
 小規模確認を案内します。実行時のDB検索・URL取得、暗黙ダウンロードや自動ビルドを提案しません。
 不足物を列挙して準備段階へ戻します。ログインノードの通信可否も推測しません。
@@ -408,7 +419,7 @@ LD/SBEに加えDFT設定接続とGS→TDDFTの橋渡しは下記を参照。LD�
 SBEは既存の3種類のSALMONテキストをhash付きで読み、変更時は再解決を要求します。
 モデル/状態にmaterial_idとdefinition_digestを保持しますが、point/run ID、MPI割当、
 出力/restartの自動ID継承やinitial_statesレシピの選択は未対応。record()を結果と明示保存します。
-状態作成で導入済みnativeが必要です。登録/解決/モデル作成にnative起動・通信・コンパイルはありません。
+状態作成で導入済み計算処理が必要です。登録/解決/モデル作成に計算処理起動・通信・コンパイルはありません。
 
 ## DFT物質設定からTDDFTへ
 
@@ -422,7 +433,7 @@ ConfiguredMaterial.run→ConfiguredGroundState.tddft_initial_state→new_state�
 ## 保存GSをIDで選ぶ
 
 `saved_gs_selection`とINITIAL_STATES.md/enに従い、tddft_from_catalogを明示呼出します。
-GS/1のsource相対パスとground-state.jsonのSHA256、DFT material_idを指定。全nativeファイルと
+GS/1のsource相対パスとground-state.jsonのSHA256、DFT material_idを指定。全計算処理ファイルと
 構造/PP/ライセンスを管理ノードで収集・転送し、verify_inputsで照合します。GS生成時と同じ
 実行ファイルhashを要求し、機種間restart互換性やSCF再実行は暗黙に提供しません。
 material/initial_state IDと各digestはモデル・状態に保持し、record()を結果に保存します。
@@ -455,7 +466,7 @@ metadataは宣言値の整合性検査でありproviderの実体・物理・rest
 bind_recorded_materialで接続し、response_identityでIDを手で写さず点記録を生成します。
 物質群は1ランク。全ランクで同じrun_id/point_mapを指定し、モデルをセッションより長く保持します。
 recordは準備と状態生成で再照合しますが、虚偽のhash宣言は検出しません。LDのE変換は明示の専用経路、
-TDDFTは管理ランタイム専用providerを使います。設定済みTDDFTの専用factoryは後続です。
+TDDFTは管理計算プログラム専用providerを使います。設定済みTDDFTの専用factoryは後続です。
 
 ## 設定済みTDDFT/LD専用binding
 
@@ -463,7 +474,7 @@ TDDFTは管理ランタイム専用providerを使います。設定済みTDDFT�
 管理runtimeを明示しsnapshotを借用します。binding/prepareではコピーもworker起動もしません。
 bind_configured_ld_endpointsは既存のA端点差分→E変換を明示的に選ぶ入口です。
 response_identityでIDを継承し、物質群は各1ランク、TDDFTは独立子worker。準備モデルはセッション解放後にclose。
-群内native MPIや半陰的E/H結合・資源上限・物理収束の保証へ拡張解釈しません。
+群内計算処理 MPIや半陰的E/H結合・資源上限・物理収束の保証へ拡張解釈しません。
 
 ## 点ID付きTDDFT checkpoint
 
@@ -477,7 +488,7 @@ LD/SBEや自作backendのディスクserializerとして案内しません。生
 
 `field_input`とFIELD_INPUT.md/enを参照。FieldPacketは任意A/E/HをFieldValueで持ち、
 Noneとゼロを区別。TimeSpec・単位・ゲージ・位置をFieldContractで宣言し、FieldAdapter.step_fieldsへ渡します。
-AはA/c、HはBではありません。結晶はAのまま、LDはE。長さゲージはE必須ですが、native孤立系の接続完了ではありません。
+AはA/c、HはBではありません。結晶はAのまま、LDはE。長さゲージはE必須ですが、計算処理孤立系の接続完了ではありません。
 既存stepへの橋はlegacy_quantityを明示し、A/c:auまたはE:auの端点値だけを渡します。
 自作step_fieldsには宣言成分だけ渡し、半ステップや単位・位置を検査します。補間・微分・単位変換はしません。
 MPIのA/E/H転送は後述の明示的なpacket経路を使います。磁気物理の対応はbackendごとに確認します。状態は借用、backend例外でadapterは無効です。
@@ -499,17 +510,17 @@ FDTDセル体積、配向・個数を明示し、最初の区間電流をゼロ�
 ResponseSessionのfield_contractsとstep_fieldsで明示的なA/E/Hを転送できます。
 FIELD_INPUT.md/enとmpi_field_inputs.pyを参照。戻り値は電荷電流密度jです。
 孤立系の双極子を自動で規格化したり、場の時空間補間を推測しないでください。
-既存step(A)との混在・MPI全体のrollback・native結合driverへの自動接続は未対応です。
+既存step(A)との混在・MPI全体のrollback・計算処理結合driverへの自動接続は未対応です。
 
 場の補間にはfield_sampling.SampledField/sample_packetを使えます。
 利用者が選ぶ空間の凸重みとexact/linear時間方針を明示し、範囲外へ外挿しません。
-成分の時計・単位を保ち、Hを推定で補いません。native結合は後述の明示された時刻配置に限定します。
+成分の時計・単位を保ち、Hを推定で補いません。計算処理結合は後述の明示された時刻配置に限定します。
 
 NativeEHField/MultiscaleFieldのsample_fields()で1ステップ後からA/E標本を取得できます。
-nativeではA=(n+1/2)dt、E=n*dt、1DではA=n*dt、E=(n-1)dtです。
+計算処理ではA=(n+1/2)dt、E=n*dt、1DではA=n*dt、E=(n-1)dtです。
 Hをゼロで補わないこと。sample_fields自体は履歴を蓄積せず、結合更新もしません。
 
-H対応native ABIではsample_magnetic_field()を全fieldランクから明示的に呼べます。
+H対応C/Fortranの呼び出し規約ではsample_magnetic_field()を全fieldランクから明示的に呼べます。
 raw Hは(n+1/2)dt、保存用の時間平均Hはn*dtです。両者を混同しないでください。
 旧ABIのH欠落を0で補わず、対応runtimeを明示ビルドするかHを必要としない経路を選びます。
 
@@ -519,7 +530,7 @@ t0/clock_offsetは0、位置・単位は厳密一致。一般補間や既存電�
 FIELD_INPUTの表とmpi_packet_coupling例を参照。双極子をjとみなさないでください。
 
 既存A駆動bindingのpacket化はpacketize_A_bindingを明示的に呼びます。
-field_phaseはendpoint（1D）またはyee_half_step（native E/H）を必須指定。
+field_phaseはendpoint（1D）またはyee_half_step（FDTDのE/H更新）を必須指定。
 元の端点A/j宣言、ゼロ初期Aを要求し、電荷電流の符号を再反転しません。
 絶対時刻依存の自作モデルへ機械的に適用せず、時刻対応を確認します。
 response.timing_recordsに元/変換後の宣言が残ります。FIELD_INPUT.md/enと
@@ -533,7 +544,7 @@ provided_driveまたはenvironment_scattered_onlyを使い、対象自身だけ�
 DIPOLE_RADIATION.md/enとmolecular_field_selection例を参照してください。
 純粋な標本選択であり、native/孤立系TDDFTの双方向結合・放射反作用の完成とは説明しません。
 
-分子のnative/reference帰還は開発用振動子で順序検証済みですが、保持したEによる
+分子から電磁場への応答の受け渡しは開発用振動子で順序検証済みですが、保持したEによる
 結合仕事の差が1次で減るだけで、結合全体の保存則は未達です。振動子単体の約2次精度と
 混同せず、孤立系TDDFTの双方向対応を宣言しません。新しい検証スキルの一般判定も、
 SALMON固有の更新順・固定dt・資源予算やユーザー所有の物理収束判断を上書きしません。
@@ -573,13 +584,13 @@ HSE交換の電子数・温度・状態数（nelec/temperature/nstate）は、�
 ```sh
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.mpi_mixed_multiscale NEW_OUTPUT
 ```
-場1ランク、物質点2ランクで動かし、非ゼロの応答と独立した直列更新との一致を検査します。点ID10/20と物質キー、A/c・電荷電流j、通信時間を保存します。LDは端点A差分からEを得ます。native E/Hの半陰的LD更新と同じ方式ではありません。
+場1ランク、物質点2ランクで動かし、非ゼロの応答と独立した直列更新との一致を検査します。点ID10/20と物質キー、A/c・電荷電流j、通信時間を保存します。LDは端点A差分からEを得ます。FDTDのE/H更新の半陰的LD更新と同じ方式ではありません。
 
-4ランクにして`--runtime RUNTIME --bundle GS_BUNDLE --input rt.inp`を指定すると、管理済み直列TDDFTワーカーを第三点に接続する入口を使えます。Si入門系の実GS（PZ、16³格子、2×2×2 k点）を用いた4ランク・100ステップの三種類混在実行は、直列計算と完全一致しました。実GSと対応ランタイムを明示的に用意してください。これは管理済み直列ワーカーの検証で、TDDFT群内部のMPI並列とは別の経路です。光学物性の収束は保証しません。記録: `docs/mixed-three-material-validation-2026-11-16.md`。
+4ランクにして`--runtime RUNTIME --bundle GS_BUNDLE --input rt.inp`を指定すると、管理済み直列TDDFTワーカーを第三点に接続する入口を使えます。Si入門系の実GS（PZ、16³格子、2×2×2 k点）を用いた4ランク・100ステップの三種類混在実行は、直列計算と完全一致しました。実GSと対応計算プログラムを明示的に用意してください。これは管理済み直列ワーカーの検証で、TDDFT群内部のMPI並列とは別の経路です。光学物性の収束は保証しません。記録: `docs/mixed-three-material-validation-2026-11-16.md`。
 
 最終構成は、FDTDランク内の多数のLD状態と、別MPI群のSBE/TDDFT状態の混在です。この小規模サンプルの「LD一セルに一ランク」を本番の配置方針にしないでください。実材料の収束や三次元混在対応を保証するサンプルではありません。
 
-## native E/H内のLDと、SBE・内部MPI TDDFT
+## FDTDのE/H更新内のLDと、SBE・内部MPI TDDFT
 
 `mpi_mixed_native`は、場1ランクが二種類のLD領域を持ち、別の1ランクがSBE、別の2ランクが1点のTDDFTを担当する接続試験です。外側4ランクでTDDFTの軌道分割を内部2ランクにします。
 ```sh
@@ -587,9 +598,9 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.example
 ```
 `--tddft-ranks 1`なら外側3ランクです。`--without-ld`はLD領域を真空にする対照条件です。BUILD_JSONは同じMPI環境で明示ビルドした`tools/build_embedded_tddft.py`の記録、SERIAL_RUNTIMEは応答再計算の比較用です。自動ビルド・ダウンロードは行いません。
 
-LDはnative E/Hの既存の係数・補助量・更新順を使います。電子状態はA/c駆動を維持し、受け渡しは電荷電流jです。点ID10はSBE、20はTDDFT、LD領域ID1/2は場の材料格子上で管理します。電子点の周辺はLDと重複させません。半ステップずれの場時計と物質の局所時計を区別します。
+LDはFDTDのE/H更新の既存の係数・補助量・更新順を使います。電子状態はA/c駆動を維持し、受け渡しは電荷電流jです。点ID10はSBE、20はTDDFT、LD領域ID1/2は場の材料格子上で管理します。電子点の周辺はLDと重複させません。半ステップずれの場時計と物質の局所時計を区別します。
 
-この40³格子・電子2点の小さな三次元配置は接続検査用です。実用TDDFTは引き続き一次元伝播を推奨します。巨大な多数LD、分散した複数FDTDランク、全計算再開、物理収束の検証とは区別してください。ネイティブ異常は回復可能ではなく、サンプルはMPIジョブを停止します。
+この40³格子・電子2点の小さな三次元配置は接続検査用です。実用TDDFTは引き続き一次元伝播を推奨します。巨大な多数LD、分散した複数FDTDランク、全計算再開、物理収束の検証とは区別してください。計算処理異常は回復可能ではなく、サンプルはMPIジョブを停止します。
 
 検証済み: 128ステップ、TDDFT内部1/2ランクの場・電流比較、直列応答再計算、LDなし対照、LD単独の従来一致、wheel導入後実行。範囲と誤差は`docs/native-mixed-material-validation-2026-11-16.md`を参照してください。
 
@@ -607,37 +618,37 @@ x/y/z各方向の2分割は、128ステップで場1ランクの結果と完全�
 
 配置には `salmonpy.layers.assemble_native_layers` と `examples/mixed_layers.json` を使用する。物理設定を配置JSONへ重複させず、準備済みの物質IDとモデル／MaterialBindingを渡す。Bohr単位、厚み切り上げ、全電子セルの独立点化、必要ランク数と実際の厚みを利用者へ示す。ランク予算はメモリ制限ではない。LDと電子点の禁止された近接を真空で黙って変更しない。構成関数はMPI・GS計算・ダウンロードを開始しない。自作コードも明示的なMaterialBindingで接続する。詳細と実行例はCOUPLED.md／COUPLED.en.md。
 
-## native混在サンプルの直接保存／復元
+## 計算処理混在サンプルの直接保存／復元
 
-`examples/mpi_mixed_native.py` の `--direct-save-at N` と `--direct-resume PATH` を使う。入力・nativeライブラリ・GS・分割・全ステップ数は同じに保ち、新しい出力先へ復元する。場/PML/LD/SBE/周期PZ／TB-mBJ／Libxc-PZ・PBE中点TDDFTの内部状態と積算A・直前電流・時計を直接復元する。`restored_step` と `native_steps_this_job` で過去の時間発展を再計算していないことを確認する。参照用の独立シリアル計算は検証のため別途実行される。保存は同じ環境・MPI構成の同梱サンプル用であり、汎用バックエンド保存やHSE・未検証XCの直接復元を推定しない。詳細はCOUPLED日英ガイド。
+`examples/mpi_mixed_native.py` の `--direct-save-at N` と `--direct-resume PATH` を使う。入力・計算処理ライブラリ・GS・分割・全ステップ数は同じに保ち、新しい出力先へ復元する。場/PML/LD/SBE/周期PZ／TB-mBJ／Libxc-PZ・PBE中点TDDFTの内部状態と積算A・直前電流・時計を直接復元する。`restored_step` と `native_steps_this_job` で過去の時間発展を再計算していないことを確認する。参照用の独立シリアル計算は検証のため別途実行される。保存は同じ環境・MPI構成の同梱サンプル用であり、汎用計算処理保存やHSE・未検証XCの直接復元を推定しない。詳細はCOUPLED日英ガイド。
 
 TB-mBJ（自動／固定cval）とLibxc-PBEは、場1＋SBE1＋TDDFT内部軌道MPI2の4ランクでも、直接保存63→残り65ステップの再開が連続128ステップとビット単位で一致した。分割を同じに保つこと。場2＋SBE1＋TDDFT2は5ランク必要で、4コア枠では未検証。
 
-HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベースラインを利用者向けエンジンに追加しない。高速HSEの直接保存／復元はACE・因子履歴・専用伝播器・native資源を含む対応が必要で、中点伝播のXC許可リストへ名前だけを追加しない。
+HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベースラインを利用者向けエンジンに追加しない。高速HSEの直接保存／復元はACE・因子履歴・専用伝播器・計算処理資源を含む対応が必要で、中点伝播のXC許可リストへ名前だけを追加しない。
 
-高速PR版HSEは `native_adapters/tddft_context.f90` の内部serial Fortran入口で直接保存／復元に対応した。`rt_checkpoint(ctx,path,restore,status)` と `rt_accepted_step(ctx)` を使い、新しいプロセスで同じ元GS・入力から初期化した後に内部数値状態を読み、残りだけ進める。ACE・因子／PT-CN履歴とFFT資源の再構築を含む。`tools/test_hse_direct_checkpoint.py` は1／2スレッド、2／3 k点、4伝播設定、6／7分割の32ケースで電流・エネルギー・内部トレースが完全一致した。これはhost-MPI/FDTD結合の高速HSE対応や安定したPython/C APIを意味しない。通常HSEは追加しない。詳細はRUNTIME日英ガイド。
+高速PR版HSEは `native_adapters/tddft_context.f90` の内部serial Fortran入口で直接保存／復元に対応した。`rt_checkpoint(ctx,path,restore,status)` と `rt_accepted_step(ctx)` を使い、新しいプロセスで同じ元GS・入力から初期化した後に内部数値状態を読み、残りだけ進める。ACE・因子／PT-CN履歴とFFT資源の再構築を含む。`tools/test_hse_direct_checkpoint.py` は1／2スレッド、2／3 k点、4伝播設定、6／7分割の32ケースで電流・エネルギー・内部トレースが完全一致した。これは呼び出し元プログラムが管理するMPI/FDTD結合の高速HSE対応や安定したPython/C APIを意味しない。通常HSEは追加しない。詳細はRUNTIME日英ガイド。
 
 高速PR版HSEの外側MPI／FDTD接続は `fast_hse.FastHSEMaterialProvider` と `FastHSEResponseBackend` を使う。専用serialワーカーを明示ビルドし、各HSE点は1ランク群にする。HSE内部MPIではない。場1／2ランク＋SBE1＋HSE1と場内LDを結合し、共有保存先へ直接保存／復元する。`mpi_mixed_native --fast-hse-build ... --layers mixed_hse_layers.json` の手順はCOUPLED日英ガイド。初期電流は実測値を返し、差し引かない。ゼロ場サンプルでは1e-12 au以下を要求。入力の高速伝播器と学習条件を守り、通常HSE・Gammaの未対応学習モードへフォールバックしない。全ランクの保存検査後にHSE LOADを行い、counter/current/Aを照合する。
 
-内部k点MPIの高速PR版HSEは `fast_hse_mpi.NativeFastHSEBackend` を明示ビルドしたホストMPIライブラリへ接続する。従来のcreate_stateは物質群1／2ランク、軌道／実空間分割なし、1群1点、メインスレッド・1プロセス1寿命。明示的なopen_modelの全k点共有状態はSHARED_HSE.mdに従う。場1＋SBE1＋HSE2と場内LDの4ランク例は `--fast-hse-mpi-build ... --hse-ranks 2`。同じ分割・バイナリ・共有保存先でランク別直接保存／復元し、過去ステップの再計算をしない。静的初期化と独立serial参照比較は別途行う。全shardの検査後に反映するが、後段I/O失敗や群間での原子的巻戻しは保証しない。失敗後はジョブを中止する。入力、制約、計測範囲はCOUPLED日英ガイドに従う。
+内部k点MPIの高速PR版HSEは `fast_hse_mpi.NativeFastHSEBackend` を明示ビルドした呼び出し元プログラムが管理するMPIライブラリへ接続する。従来のcreate_stateは物質群1／2ランク、軌道／実空間分割なし、1群1点、メインスレッド・1プロセスにつき初期化1回。明示的なopen_modelの全k点共有状態はSHARED_HSE.mdに従う。場1＋SBE1＋HSE2と場内LDの4ランク例は `--fast-hse-mpi-build ... --hse-ranks 2`。同じ分割・バイナリ・共有保存先でランク別直接保存／復元し、過去ステップの再計算をしない。静的初期化と独立serial参照比較は別途行う。全shardの検査後に反映するが、後段I/O失敗や群間での原子的巻戻しは保証しない。失敗後はジョブを中止する。入力、制約、計測範囲はCOUPLED日英ガイドに従う。
 
-層構成では任意の `backend.supported_group_sizes` を検査する。高速HSEは(1,2)。対応ランク数の宣言は空でない正の整数の重複なしtuple。未宣言の自作バックエンドへ未確認の能力を推定しない。数値・再開の能力検査は別途必要。
+層構成では任意の `backend.supported_group_sizes` を検査する。高速HSEは(1,2)。対応ランク数の宣言は空でない正の整数の重複なしtuple。未宣言の自作の計算コードへ未確認の能力を推定しない。数値・再開の能力検査は別途必要。
 
 対応ランク数の任意宣言はResponseSessionの直接接続でも物質準備前に集合検査する。宣言を全群で照合し、tupleの順序差は同一視する。Aパケットラッパーも宣言を保持する。
 
-直接保存サンプルはnative-direct/2の互換情報を全ランクで照合してからLOADする。保存方式・save/restore宣言・所有ランク／点・場と電子の内部分割を比較する。同じ総ランク数でも分割が違えば拒否する。manifest/1は情報不足のため新経路では復元不可、元の対応版を使う。任意のsnapshotを直接保存とみなさず、再生方式を混入させない。自作direct-state/1にはcheckpoint_format／checkpoint_modes／checkpoint_decompositionを明示する。汎用保存APIの完成や原子的復元を意味しない。
+直接保存サンプルは計算処理-direct/2の互換情報を全ランクで照合してからLOADする。保存方式・save/restore宣言・所有ランク／点・場と電子の内部分割を比較する。同じ総ランク数でも分割が違えば拒否する。manifest/1は情報不足のため新経路では復元不可、元の対応版を使う。任意のsnapshotを直接保存とみなさず、再生方式を混入させない。自作direct-state/1にはcheckpoint_format／checkpoint_modes／checkpoint_decompositionを明示する。汎用保存APIの完成や原子的復元を意味しない。
 
-保存対応の共通入口は `checkpointing.CheckpointCapability` と `check_checkpoint_compatibility`。自作コードは通常の群mappingと宣言を渡せる。直列はcomm=None、MPIは既存のcommを渡し、全ランクで操作と保存情報を一致させる。ローカル設定エラーはmappingの検査かlocal_errorで集合的に扱う。identityで実装・固定モデル入力・ランタイムを識別する。APIは宣言・MPI分割・必要ファイル名の照合のみで、ファイル本体のハッシュ検査、候補の寿命検査、I/O・LOADはホスト側が担当する。CHECKPOINTING日英ガイドとcustom_checkpoint例を参照。旧native-direct/2の互換情報は変更しない。
+保存対応の共通入口は `checkpointing.CheckpointCapability` と `check_checkpoint_compatibility`。自作コードは通常の群mappingと宣言を渡せる。直列はcomm=None、MPIは既存のcommを渡し、全ランクで操作と保存情報を一致させる。ローカル設定エラーはmappingの検査かlocal_errorで集合的に扱う。identityで実装・固定モデル入力・計算プログラムを識別する。APIは宣言・MPI分割・必要ファイル名の照合のみで、ファイル本体のハッシュ検査、候補の寿命検査、I/O・LOADは呼び出し元プログラム側が担当する。CHECKPOINTING日英ガイドとcustom_checkpoint例を参照。旧計算処理-direct/2の互換情報は変更しない。
 
-保存／復元の実行入口は `checkpointing.CheckpointTarget` と `execute_checkpoint`。引数なしのsave／restore関数を渡し、パスや保存形式はバックエンドが決める。戻り値はcompatibilityのJSONとプロセス内のfield／statesで、保存トークンや配列をMPI転送・コピーしない。失敗は例外で通知し、Falseなどの戻り値はエラー扱いしない。MPIでは群の点数差を同期スロットで扱い、コールバック失敗後は次のスロットへ進まない。実行済み変更の巻き戻しやバックエンド内部の通信停止からの回復は保証しない。完了markerやハッシュ認証はホストの方針で管理する。custom_checkpoint例は実際のJSON保存と復元も共通入口から呼ぶ。
+保存／復元の実行入口は `checkpointing.CheckpointTarget` と `execute_checkpoint`。引数なしのsave／restore関数を渡し、パスや保存形式は計算処理が決める。戻り値はcompatibilityのJSONとプロセス内のfield／statesで、保存トークンや配列をMPI転送・コピーしない。失敗は例外で通知し、Falseなどの戻り値はエラー扱いしない。MPIでは群の点数差を同期スロットで扱い、コールバック失敗後は次のスロットへ進まない。実行済み変更の巻き戻しや計算処理内部の通信停止からの回復は保証しない。完了markerやハッシュ認証は呼び出し元プログラムの方針で管理する。custom_checkpoint例は実際のJSON保存と復元も共通入口から呼ぶ。
 
-元の状態を維持する復元はCheckpointStateとrestore_checkpointを使う。各Targetはstage_restoreで独立候補を読み、全ランクの成功合意後にホルダー一式を切り替える。ホルダー外の別名は旧状態を指すため、計算はlive.field／live.statesを通して再開する。元へLOADする関数をstage_restoreに登録せず、可変の数値バッファを共有しない。初期化済み不変native資源は専用候補契約に従う。discard_restoreは失敗した準備についてNoneも受け、自群の通信手順を完了する。候補破棄の失敗はAtomicRestoreError.cleanup_errors、元の維持はoriginal_preservedで確認する。既存execute_checkpointは既定で非原子的。保護経路で未対応を検出したら自動で従来経路へ下げない。再ビルドしたnative FDTD／TDDFT／高速PR HSEには実験的な数値候補ABI（mode2準備／3反映／4破棄）がある。内部ヘルパーとMPI試験はCHECKPOINTINGを参照。全群の候補成功後に別途native反映と準備済みPythonメタデータの更新が必要で、ホルダー切替だけでは完了しない。初期化済み不変資源の共有は維持するが数値候補は分離する。複数native lifetimeの同時実行ではない。通常mpi_mixed_nativeの--direct-resumeは候補対応ABIでの保護復元が既定。場内全LD・SBEの独立ハンドルとPython側の時計・電流・アダプター・所有リスト・framesを反映前に準備する。進行済みセッションの準備失敗でもfailedを立てず、元を維持して全ランクで継続／再試行できる。成功後はsession.statesを参照し、旧SBE解放エラーはcheckpoint_cleanup_errorsへ分ける。旧ABI・プロセス分離HSE・自作direct-onlyは事前拒否。明示的な--unprotected-direct-restore／protected=Falseだけが従来方式で、自動fallbackは禁止。古いABIは版確認で拒否し、反映時のメモリ枯渇やプロセス異常は回復保証外。
+元の状態を維持する復元はCheckpointStateとrestore_checkpointを使う。各Targetはstage_restoreで独立候補を読み、全ランクの成功合意後にホルダー一式を切り替える。ホルダー外の別名は旧状態を指すため、計算はlive.field／live.statesを通して再開する。元へLOADする関数をstage_restoreに登録せず、可変の数値バッファを共有しない。初期化済み不変計算処理資源は専用候補仕様に従う。discard_restoreは失敗した準備についてNoneも受け、自群の通信手順を完了する。候補破棄の失敗はAtomicRestoreError.cleanup_errors、元の維持はoriginal_preservedで確認する。既存execute_checkpointは既定で非原子的。保護経路で未対応を検出したら自動で従来経路へ下げない。再ビルドしたPythonから直接呼ぶFDTD／TDDFT／高速PR HSEには実験的な数値候補ABI（mode2準備／3反映／4破棄）がある。内部ヘルパーとMPI試験はCHECKPOINTINGを参照。全群の候補成功後に別途計算処理反映と準備済みPythonメタデータの更新が必要で、ホルダー切替だけでは完了しない。初期化済み不変資源の共有は維持するが数値候補は分離する。複数計算処理 lifetimeの同時実行ではない。通常mpi_mixed_nativeの--direct-resumeは候補対応ABIでの保護復元が既定。場内全LD・SBEの独立ハンドルとPython側の時計・電流・アダプター・所有リスト・framesを反映前に準備する。進行済みセッションの準備失敗でもfailedを立てず、元を維持して全ランクで継続／再試行できる。成功後はsession.statesを参照し、旧SBE解放エラーはcheckpoint_cleanup_errorsへ分ける。旧ABI・プロセス分離HSE・自作direct-onlyは事前拒否。明示的な--unprotected-direct-restore／protected=Falseだけが従来方式で、自動fallbackは禁止。古いABIは版確認で拒否し、反映時のメモリ枯渇やプロセス異常は回復保証外。
 
-通常混在のライブ巻戻しは既存native出力ファイルを切り詰めない。保存framesと以後のstep戻り値を使うか、
+通常混在のライブ巻戻しは既存SALMONの計算出力ファイルを切り詰めない。保存framesと以後のstep戻り値を使うか、
 新規MPIジョブ・出力先で再開する。数値の一致とappend済みファイル全体のバイト一致を混同しない。
 
 ## メモリ助言（停止しない）
-既知の4GiB・4コア等は聞き直さず再利用する。通常混在では--memory-budget-gibを設定し、MPIランク×OMPスレッドを割当コア数内にする（BLASも1スレッド）。初期化前概算・初期化後最大RSS・復元前の候補同時保持と一時コピーをmemory-advice.jsonで確認する。超過時は警告と超過量を示し、勝手に停止・格子変更・ランク変更しない。強制上限はユーザーが撤回済み。MEMORY日英ガイドとmemory.MemoryEstimate／memory_adviceを参照。未取得部分をゼロにしない。Noneとunknownは不明。低い見積もりを実行可能保証にせず、倍率はnative heap上限の証明ではない。最大RSSは現在値でも子ワーカー合計でもない。資源計測・警告・助言出力の失敗を計算失敗と区別し、failedを立てない。自作バックエンドは明示したバッファ量と根拠を渡し、見積もり失敗でも集合呼出を省略せず不明を渡す。
+既知の4GiB・4コア等は聞き直さず再利用する。通常混在では--memory-budget-gibを設定し、MPIランク×OMPスレッドを割当コア数内にする（BLASも1スレッド）。初期化前概算・初期化後最大RSS・復元前の候補同時保持と一時コピーをmemory-advice.jsonで確認する。超過時は警告と超過量を示し、勝手に停止・格子変更・ランク変更しない。強制上限はユーザーが撤回済み。MEMORY日英ガイドとmemory.MemoryEstimate／memory_adviceを参照。未取得部分をゼロにしない。Noneとunknownは不明。低い見積もりを実行可能保証にせず、倍率は計算処理 heap上限の証明ではない。最大RSSは現在値でも子ワーカー合計でもない。資源計測・警告・助言出力の失敗を計算失敗と区別し、failedを立てない。自作の計算コードは明示したバッファ量と根拠を渡し、見積もり失敗でも集合呼出を省略せず不明を渡す。
 
 ## 混在サンプルのIDと再開
 
@@ -645,21 +656,21 @@ HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベース
 
 `identity.json`、通常実行の `result.json` と `point-response` アーカイブに同じ識別情報を引き継ぎます。直接保存の外側の形式は `salmonpy.native-direct/3`、再計算方式は `salmonpy.native-replay/2` です。数値状態の内部形式と更新順は変更しません。直接復元はIDとMPI分割を数値状態の読み込み前に照合し、保存時は全ランクでのID一致を検査します。
 
-IDのない旧保存を使う場合だけ `--legacy-checkpoint-identity` を明示します。これは識別情報を検証できない旧経路であり、新形式のID不一致を回避する指定ではありません。保護付き復元は引き続き既定です。自作ホストでは `ResponseSession` の `point_record` / `point_map` に識別情報を渡してください。IDは呼び出し側の宣言であり、物理精度の認証ではありません。
+IDのない旧保存を使う場合だけ `--legacy-checkpoint-identity` を明示します。これは識別情報を検証できない旧経路であり、新形式のID不一致を回避する指定ではありません。失敗時に元の状態を保つ復元は引き続き既定です。自作呼び出し元プログラムでは `ResponseSession` の `point_record` / `point_map` に識別情報を渡してください。IDは呼び出し側の宣言であり、物理精度の認証ではありません。
 
 ## 点ID付きのメモリsnapshot
 
-`PointState.snapshot()` は内部バックエンドのsnapshotを `salmonpy.point-snapshot/1` の不変な点情報で包みます。`state.restore(saved)` は実験・点・物質定義・初期状態のIDとパッケージ版を照合してからバックエンドを呼びます。別の点や実験、裸のバックエンドtokenは拒否されます。明示した同一run/point IDであっても、バックエンドのモデル・時間刻み等の整合性検査は引き続き必要です。
+`PointState.snapshot()` は内部計算処理のsnapshotを `salmonpy.point-snapshot/1` の不変な点情報で包みます。`state.restore(saved)` は実験・点・物質定義・初期状態のIDとパッケージ版を照合してから計算処理を呼びます。別の点や実験、裸の計算処理tokenは拒否されます。明示した同一run/point IDであっても、計算処理のモデル・時間刻み等の整合性検査は引き続き必要です。
 
-これはプロセス内の巻き戻し用であり、分岐・複製やディスク保存、MPI全体のトランザクションではありません。snapshot未対応の自作バックエンドでは `SnapshotError` となります。バックエンドの復元失敗時の保証はその実装に従います。点ID不一致の拒否では内部のrestoreを呼びません。裸の状態に対する従来のsnapshot APIは変わりません。
+これはプロセス内の巻き戻し用であり、分岐・複製やディスク保存、MPI全体のトランザクションではありません。snapshot未対応の自作の計算コードでは `SnapshotError` となります。計算処理の復元失敗時の保証はその実装に従います。点ID不一致の拒否では内部のrestoreを呼びません。裸の状態に対する従来のsnapshot APIは変わりません。
 
 `python -m salmonpy.examples.point_ld /new/output/directory` は別の点への復元拒否と、同一点での復元後の電流一致も確認します。
 
-## native TDDFTの更新前エラー拒否（限定対応）
+## Pythonから直接呼ぶTDDFTの更新前エラー拒否（限定対応）
 
-新しく準備・ビルドした標準embedded TDDFTには `sp_tddft_error_protocol() == 1` があり、以下を結合先の物質MPI群だけで照合します。10: 不正・非有限入力／古いA／入力ファイル不在、11: ランク間不一致、12: 状態未作成・使用済み初期化、13: ステップ上限、14: 未確定の復元候補あり。これらは数値更新前に全ランク同じコードで返り、既存の受理済み状態を変更しません。初期化前の10/11は生存期間を消費せず、Pythonからも入力を修正して初期化を再試行できます。失敗時の作業ディレクトリは診断用に残ります。
+新しく準備・ビルドした標準embedded TDDFTには `sp_tddft_error_protocol() == 1` があり、以下を結合先の物質MPI群だけで照合します。10: 不正・非有限入力／古いA／入力ファイル不在、11: ランク間不一致、12: 状態未作成・使用済み初期化、13: ステップ上限、14: 未確定の復元用の別状態あり。これらは数値更新前に全ランク同じコードで返り、既存の最後に成功した計算状態を変更しません。初期化前の10/11は初期化から終了までの期間を消費せず、Pythonからも入力を修正して初期化を再試行できます。失敗時の作業ディレクトリは診断用に残ります。
 
-Pythonは版付きの契約と全ランク一致を確認できた拒否だけを `InputError` とします。旧ライブラリ・未知のコード・非有限な戻り値は `RuntimeFailure` のままで、状態保持を推定しません。MPI群の全員が同じ入口へ参加する必要があります。無効なポインタ、MPI・プロセス異常、確保失敗は対象外です。本項の更新前検査ではソルバー深部を扱いません（次節の限定した深部復帰を参照）。初期化に入った後は引き続き1プロセス1生存期間です。高速HSEとnative FDTDのエラー契約はこの変更では拡張していません。
+Pythonは版付きの仕様と全ランク一致を確認できた拒否だけを `InputError` とします。旧ライブラリ・未知のコード・非有限な戻り値は `RuntimeFailure` のままで、状態保持を推定しません。MPI群の全員が同じ入口へ参加する必要があります。無効なポインタ、MPI・プロセス異常、確保失敗は対象外です。本項の更新前検査ではソルバー深部を扱いません（次節の限定した深部復帰を参照）。初期化に入った後は引き続き1プロセス1初期化から終了までの期間です。高速HSEとPythonから直接呼ぶFDTDのエラー仕様はこの変更では拡張していません。
 
 この保証は個別TDDFT状態の更新前拒否です。結合ドライバで他の部品が既に進んだ場合、全体の巻き戻しを保証せず、従来どおりセッションを失敗扱いにします。通常計算中の一般的な原子性が完成したとは判断しないでください。
 
@@ -677,19 +688,19 @@ FDTD2＋SBE1＋TDDFT2は `mpiexec -n 5 ... --field-grid 1 2 1 --tddft-ranks 2`�
 
 ## TDDFT深部の数値異常と直接巻き戻し
 
-新しく準備・ビルドした標準native TDDFTは `sp_tddft_recovery_protocol() == 1` を持ち、各ステップの数値状態をメモリへ退避します。伝播後の波動関数（20）、密度（21）、Hartree場（22）、XCポテンシャル／エネルギー（23）、電流／全エネルギー（24）を検査し、保護経路の伝播器エラー（25）も返します。検査は物質MPI群全体で合意してから戻ります。エラー時は波動関数・密度・場・伝播履歴・XC状態・カウンタ・管理フラグを受理済み状態へ直接戻し、伝播の再実行をしません。失敗したステップの通常RT出力も追加しません。
+新しく準備・ビルドした標準Pythonから直接呼ぶTDDFTは `sp_tddft_recovery_protocol() == 1` を持ち、各ステップの数値状態をメモリへ退避します。伝播後の波動関数（20）、密度（21）、Hartree場（22）、XCポテンシャル／エネルギー（23）、電流／全エネルギー（24）を検査し、保護経路の伝播器エラー（25）も返します。検査は物質MPI群全体で合意してから戻ります。エラー時は波動関数・密度・場・伝播履歴・XC状態・カウンタ・管理フラグを最後に成功した計算状態へ直接戻し、伝播の再実行をしません。失敗したステップの通常RT出力も追加しません。
 
-Pythonの `NativeTDDFTBackend` が返す状態の `advance(A_old,A_new)` は、版付き契約と全ランク一致を確認できた復帰だけを `NumericalError` で通知します。`A` と `steps` はそのままで、原因を修正して同じ受理時刻から再試行できます。不正な波形を自動的に弱めたり、固定dtを変更したりしません。旧ライブラリや未知のエラーは `RuntimeFailure` の保守的な扱いを維持し、復帰を推定しません。
+Pythonの `NativeTDDFTBackend` が返す状態の `advance(A_old,A_new)` は、版付き仕様と全ランク一致を確認できた復帰だけを `NumericalError` で通知します。`A` と `steps` はそのままで、原因を修正して同じ受理時刻から再試行できます。不正な波形を自動的に弱めたり、固定dtを変更したりしません。旧ライブラリや未知のエラーは `RuntimeFailure` の保守的な扱いを維持し、復帰を推定しません。
 
 対象は周期・非スピン分極・固定イオン・中点伝播のPZ、TB-mBJ（自動／固定係数）、Libxc-PZ/PBEです。SOC、+U、jellium、イオン運動／力出力、Gram–Schmidt、projection/unfold、microscopic Maxwell結合などの保護対象外設定は更新前に15を返します。標準バッチ計算は従来の演算経路を使います。既存の外部checkpoint形式も変更しません。メモリ退避・有限性検査の費用が毎ステップ増えるため、資源見積もりには余裕を残してください。予算は警告のみです。
 
-これはTDDFT群の状態保証です。FDTD・他の物質がすでに進んだ混在ステップ全体を自動巻き戻しする契約ではありません。MPI／プロセス停止、確保失敗、未制御の外部ライブラリSTOP、初期化深部のSTOPや出力装置障害は未対応です。試験専用の一部ランク障害注入は `SALMONPY_RECOVERY_TESTING` を明示して別ビルドした場合のみで、本番ビルドには注入用C入口がありません。
+これはTDDFT群の状態保証です。FDTD・他の物質がすでに進んだ混在ステップ全体を自動巻き戻しする仕様ではありません。MPI／プロセス停止、確保失敗、未制御の外部ライブラリSTOP、初期化深部のSTOPや出力装置障害は未対応です。試験専用の一部ランク障害注入は `SALMONPY_RECOVERY_TESTING` を明示して別ビルドした場合のみで、本番ビルドには注入用C入口がありません。
 
 ## 高速PR版HSEの深部数値異常からの復帰
 
 新しい `NativeFastHSEBackend` 用ライブラリは `sp_fast_hse_recovery_protocol() == 1` を宣言します。対応範囲は周期・非スピン分極・固定イオンの高速PR版HSE06、Taylor4／学習PT-CN、物質群内k点分割のMPI1／2です。通常版HSEへの切替はしません。
 
-各ステップ前に電子状態とACE・因子／PT-CN履歴・交換キャッシュ・カウンタを退避します。FFTプランやMPIコミュニケータなどの所有資源はコピーしません。波動関数・密度・Hartree・XC・端点の有限性検査に加え、対応したACE演算エラー、PT-CNの収束／Gram／射影検査、履歴更新エラーを物質群全体で合意して返します。受理済み状態を直接戻し、過去ステップや交換履歴を再計算しません。失敗試行の通常RT出力を追加せず、A・時計・電流・エネルギーを維持します。診断ログは残ることがあります。
+各ステップ前に電子状態とACE・因子／PT-CN履歴・交換キャッシュ・カウンタを退避します。FFTプランやMPIコミュニケータなどの所有資源はコピーしません。波動関数・密度・Hartree・XC・端点の有限性検査に加え、対応したACE演算エラー、PT-CNの収束／Gram／射影検査、履歴更新エラーを物質群全体で合意して返します。最後に成功した計算状態を直接戻し、過去ステップや交換履歴を再計算しません。失敗試行の通常RT出力を追加せず、A・時計・電流・エネルギーを維持します。診断ログは残ることがあります。
 
 Pythonは宣言された版と全ランクの既知エラーを確認できる場合だけ `NumericalError` を返し、同じ受理時刻から修正した入力で再試行できます。旧ライブラリ・未知エラーは `RuntimeFailure` の保守的扱いを維持します。dtや入力振幅を自動変更しません。退避と検査のメモリ・時間費用は増え、予算超過は警告のみです。
 
@@ -697,23 +708,23 @@ Pythonは宣言された版と全ランクの既知エラーを確認できる�
 
 検証用 `tools/test_fast_hse_deep_recovery_mpi.py BUILD GS NEW_OUTPUT --steps 32 --fault-step 13` は2ランク、OMP／BLAS1、外側のtimeoutで実行します。`--split` は4ランクの独立2群です。`--overflow-A 1e100` はPT-CNの実数値発散試験用で、科学計算の入力ではありません。`--faults` は `SALMONPY_RECOVERY_TESTING` を明示した別ビルドだけに使い、本番には注入用入口を含めません。検証記録は `docs/fast-hse-deep-recovery-validation-2026-11-17.md` です。合成小規模系の実装検証であり、物理精度の収束保証ではありません。
 
-高速HSEのNumericalErrorは物質群の受理状態維持を意味する。ResponseSession全体を自動再試行しない。ホストは場と他物質の進行を管理する。未知エラーや旧ABIでは継続しない。
+高速HSEのNumericalErrorは物質群の受理状態維持を意味する。ResponseSession全体を自動再試行しない。呼び出し元プログラムは場と他物質の進行を管理する。未知エラーや旧ABIでは継続しない。
 
-## native FDTDの数値異常復帰
+## Pythonから直接呼ぶFDTDの数値異常復帰
 
-新しい標準ホストMPIライブラリは `sp_eh_recovery_protocol() == 1` を宣言します。`NativeEHField.advance` は対応する検査付き入口を選び、場・PML・場内の全LD・電流格子・時計をメモリ退避します。E更新後（20）、LD更新後（21）、H更新後（22）、点サンプル／積算A／通常観測出力の演算（23）の異常を場MPI群で合意し、退避した状態へ直接戻します。波の再伝播はしません。既知の復帰では `NumericalError` を返し、PythonのA・E・時計・failedも維持するため、入力を修正して再試行できます。失敗試行の通常観測ファイルは追加しませんが、診断・進行表示は残る場合があります。
+新しい標準呼び出し元プログラムが管理するMPIライブラリは `sp_eh_recovery_protocol() == 1` を宣言します。`NativeEHField.advance` は対応する検査付き入口を選び、場・PML・場内の全LD・電流格子・時計をメモリ退避します。E更新後（20）、LD更新後（21）、H更新後（22）、点サンプル／積算A／通常観測出力の演算（23）の異常を場MPI群で合意し、退避した状態へ直接戻します。波の再伝播はしません。既知の復帰では `NumericalError` を返し、PythonのA・E・時計・failedも維持するため、入力を修正して再試行できます。失敗試行の通常観測ファイルは追加しませんが、診断・進行表示は残る場合があります。
 
-対象は現在のnative E/H平面波経路と場内LDです。線形応答専用経路、ASE／ART、周波数別観測は更新前に拒否します。バッチFDTDは従来経路を維持します。新しい入口を持たない旧バイナリ・未知エラーでは復帰を推定せず、従来の失敗扱いです。初期化・確保・MPI／プロセス停止・外部STOP・出力装置障害は保証外です。場群単体の保証であり、`CoupledStepper`／`ResponseSession`全体を自動巻戻し・自動再試行する機能ではありません。退避と検査の費用を見込み、メモリ予算は引き続き警告に使います。
+対象は現在のFDTDのE/H更新平面波経路と場内LDです。線形応答専用経路、ASE／ART、周波数別観測は更新前に拒否します。バッチFDTDは従来経路を維持します。新しい入口を持たない旧バイナリ・未知エラーでは復帰を推定せず、従来の失敗扱いです。初期化・確保・MPI／プロセス停止・外部STOP・出力装置障害は保証外です。場群単体の保証であり、`CoupledStepper`／`ResponseSession`全体を自動巻戻し・自動再試行する機能ではありません。退避と検査の費用を見込み、メモリ予算は引き続き警告に使います。
 
 `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` を1／2ランク、OMP／BLAS1、外側timeoutで実行します。`--split` は4ランクの独立2群です。`--faults` は明示した別の `SALMONPY_RECOVERY_TESTING` ビルドだけに使います。本番には注入入口を含めません。数値オーバーフローの試験値は科学入力ではありません。
 
 ## 共通のステップ保護
 
-STEPPING日英ガイドとmanual.jsonのprotected_stepを参照。StepTargetのcapture／rollback／releaseは完全な状態と副作用を扱う利用者宣言で、トークンをMPI転送しない。CoupledStepper.step_protectedは各local ownerの対象を一つずつ要求し、結合メタデータも戻す。再試行はStepRecoveryError.original_preservedがTrueかつcleanup_errorsが空の場合だけ、原因修正後に明示する。監査済みnative全体の退避・通常出力保護はnative_steps.native_step_targetsの別契約で接続する。個別の数値復帰プロトコルから全体の安全を推定しない。
+STEPPING日英ガイドとmanual.jsonのprotected_stepを参照。StepTargetのcapture／rollback／releaseは完全な状態と副作用を扱う利用者宣言で、トークンをMPI転送しない。CoupledStepper.step_protectedは各local ownerの対象を一つずつ要求し、結合メタデータも戻す。再試行はStepRecoveryError.original_preservedがTrueかつcleanup_errorsが空の場合だけ、原因修正後に明示する。監査済み計算処理全体の退避・通常出力保護はnative_steps.native_step_targetsの別仕様で接続する。個別の数値復帰プロトコルから全体の安全を推定しない。
 
-## native混在ステップと出力の保護
+## 計算処理混在ステップと出力の保護
 
-NATIVE_STEPPING日英ガイドを参照。対応する新規ビルドとnative_step_targetsを明示し、step_protectedを全ランクで呼ぶ。通常例は--protect-steps。受理済み未flush行を先にflushし、失敗試行のRT／点観測追記を巻き戻して同じRTユニットを開き直す。仮の追記は一時的に見え得るため同時外部アクセス・クラッシュ原子性を保証しない。作業フォルダ直下の専用通常.dataのみ。密度などの未監査出力を黙って無効化せず事前拒否。未知native失敗・復元／解放失敗ではfailedを復活させない。targetはlive ownerに結び付くためcheckpoint反映で状態が置換されたら作り直す。Cpp候補とstep退避の同時利用は拒否。HSEは高速PRのみ。別GSは--hse-bundleで明示し、HSE固有の入力ハッシュと初期状態IDを保持する。メモリは退避同時保持の未較正費用と実測ピークを助言し、超過で停止しない。過去時間発展の再生はせず、再試行するのは拒否されたステップだけ。
+NATIVE_STEPPING日英ガイドを参照。対応する新規ビルドとnative_step_targetsを明示し、step_protectedを全ランクで呼ぶ。通常例は--protect-steps。受理済み未flush行を先にflushし、失敗試行のRT／点観測追記を巻き戻して同じRTユニットを開き直す。仮の追記は一時的に見え得るため同時外部アクセス・クラッシュ原子性を保証しない。作業フォルダ直下の専用通常.dataのみ。密度などの未監査出力を黙って無効化せず事前拒否。未知計算処理失敗・復元／解放失敗ではfailedを復活させない。targetはlive ownerに結び付くためcheckpoint反映で状態が置換されたら作り直す。Cpp候補とstep退避の同時利用は拒否。HSEは高速PRのみ。別GSは--hse-bundleで明示し、HSE固有の入力ハッシュと初期状態IDを保持する。メモリは退避同時保持の未較正費用と実測ピークを助言し、超過で停止しない。過去時間発展の再生はせず、再試行するのは拒否されたステップだけ。
 
 ## HSEの本筋と対称性
 
@@ -721,9 +732,9 @@ HSEは高速PR版のみを使い、対称性・star／orbit再利用・ACEを本
 FAST_HSE_SYMMETRY日英ガイドとfast_hse_symmetryタスクを参照。通常版へ切り替えたり、標準側の
 別の縮約演算に合わせて高速版を変更しない。
 
-NativeFastHSEBackend(...,allow_symmetry=True) と新しい対応nativeライブラリを明示する。
+NativeFastHSEBackend(...,allow_symmetry=True) と新しい対応計算処理ライブラリを明示する。
 既定Falseは対称性を拒否。対称性opt-inは内部k1／2・CPU・周期・非スピン分極・full-q・factor-off
-Taylor strict/learned・PT-CN off/learnedには対応するhistory capabilityを確認する。旧経路は1プロセス1寿命・共有対称化設定不変。open_modelの複数状態は現状では対称性なし・全k点のみ。内部2ランクにはsp_fast_hse_symmetry_kmpi_protocol()==1を確認する。
+Taylor strict/learned・PT-CN off/learnedには対応するhistory capabilityを確認する。旧経路は1プロセスにつき初期化1回・共有対称化設定不変。open_modelの複数状態は現状では対称性なし・全k点のみ。内部2ランクにはsp_fast_hse_symmetry_kmpi_protocol()==1を確認する。
 新C入口sp_fast_hse_init_symmetryとsp_fast_hse_symmetry_protocol()==1が必要。旧バイナリから
 対応を推定しない。有限で一致したstatus34だけが状態維持のInputErrorで、Aの修正後に再試行可。
 外場の自動投影・微小成分の切捨て・通常HSEへのfallbackは禁止。FDTD全体にはstep_protectedを使う。
@@ -741,7 +752,7 @@ probe_hse_low_gradient.pyは生のLibxc診断で、wrapper修正後も感度True
 元の失敗例と通常回帰の結果・ハッシュを保持する。数値一致は物理収束の保証ではない。
 内部MPI2で全／縮約k点と直接再開を検証済み。保存時と同じ分割を使い、分割変更はしない。次は初期化範囲の検証。分子の作業は保留。
 
-高速HSEのsym.datは、native寿命前に形式・有限値・保持された群の構造を事前検査する。
+高速HSEのsym.datは、計算状態の初期化前に形式・有限値・保持された群の構造を事前検査する。
 InputErrorなら元入力を直しproviderを作り直して再試行可。既存providerの入力を黙って変更しない。
 続くNumPy-onlyの幾何検査で、有効セル・原子配置／種別・格子と対称性整合を検査する。
 k-star・擬ポテンシャル内容・再開バイナリとの互換性や全初期化異常復帰は保証しない。
@@ -752,19 +763,19 @@ k-star・擬ポテンシャル内容・再開バイナリとの互換性や全�
 
 高速PR版HSEの外場A/cはCartesianの3成分で、z限定ではありません。x/yや円偏光には実際の全時刻のAとセル・原子配置を保つ対称群を選ぶか、対応する全k点初期状態を使います。一般セルとz非保存群には新コアのcapabilityが必要です。波形の投影・微小成分の切捨て・群の自動変更はしません。詳細はFAST_HSE_SYMMETRY.md／FAST_HSE_SYMMETRY.en.mdを参照してください。
 
-対称性付き高速PRのTaylor strict／learnedとPT-CNには `sp_fast_hse_symmetry_history_protocol()==1` を持つ明示ビルドを使います。学習PT-CNは既存方式どおり exact interval=1・predictor_corrector=n。設定を自動変更しません。履歴・ready・予測状態を保存し、受理済み時刻を再生せずに再開します。異なるモデルを同一プロセスで自由に混在できるとは説明しません。
+対称性付き高速PRのTaylor strict／learnedとPT-CNには `sp_fast_hse_symmetry_history_protocol()==1` を持つ明示ビルドを使います。学習PT-CNは既存方式どおり exact interval=1・predictor_corrector=n。設定を自動変更しません。履歴・ready・予測状態を保存し、最後に成功した計算時刻を再生せずに再開します。異なるモデルを同一プロセスで自由に混在できるとは説明しません。
 
 ## Python共有HSEモデル
 
-NativeFastHSEBackend.open_model(initial,dt,context)で入力を一度だけ検証・コピーし、NativeFastHSEModel.new_state(point_id,dt=...,capacity=...)で元GSから独立した状態を作る。最初のnew_stateがnative初期化を行う。状態ごとのstep/checkpoint/closeと出力ラベルを使い、直接復元は対応する新規状態へ行う。model.closeは生成を止めるだけで、生存状態は最後に閉じるまで接続を保持する。finallyで全状態を明示closeする。空のままのモデルや全状態終了後も、開いているモデルから再生成でき、隠れた完全電子状態を保持しない。model protocol1の新しいランタイムが必要。既存のMPI点配置や異種物質の同一プロセス対応を自動変更しない。SHARED_HSE日英ガイドとexamples/shared_fast_hse.pyに従う。
+NativeFastHSEBackend.open_model(initial,dt,context)で入力を一度だけ検証・コピーし、NativeFastHSEModel.new_state(point_id,dt=...,capacity=...)で元GSから独立した状態を作る。最初のnew_stateが計算状態の初期化を行う。状態ごとのstep/checkpoint/closeと出力ラベルを使い、直接復元は対応する新規状態へ行う。model.closeは生成を止めるだけで、生存状態は最後に閉じるまで接続を保持する。finallyで全状態を明示closeする。空のままのモデルや全状態終了後も、開いているモデルから再生成でき、隠れた完全電子状態を保持しない。model protocol1の新しい計算プログラムが必要。既存のMPI点配置や異種物質の同一プロセス対応を自動変更しない。SHARED_HSE日英ガイドとexamples/shared_fast_hse.pyに従う。
 
 同一物質・セル・kメッシュ・対称操作の共有HSEは allow_symmetry=True で縮約k点にも対応する。shared_symmetry_protocol1の明示ビルドが必要。外場が実際の保持群に適合することを検査し、群や外場を自動変更しない。通常混在セッションはshared_model=Trueとpoints_per_groupを明示する。
 
-context_mpi_protocol1の新しい高速PRランタイムでは、rt_open初期化で作った子コミュニケータは状態所有とし、state.closeで通信要求・XC／FFT資源の後に解放する。共通資源・ホストMPIは維持する。異種入力対応や全MPI資源の独立化、初期化異常復帰まで完了とは説明しない。
+context_mpi_protocol1の新しい高速PR計算プログラムでは、rt_open初期化で作った子コミュニケータは状態所有とし、state.closeで通信要求・XC／FFT資源の後に解放する。共通資源・呼び出し元プログラムが管理するMPIは維持する。異種入力対応や全MPI資源の独立化、初期化異常復帰まで完了とは説明しない。
 
-標準TDDFTのcontext_mpi_protocol1は初期化〜初期電流の子コミュニケータを状態終了時に回収し、pending復元候補も破棄する。一native寿命／プロセスの制約は維持する。ホストMPI継続と多重状態対応を混同しない。MPIラッパーの内部コンパイラ指定もビルド記録に残す。
+標準TDDFTのcontext_mpi_protocol1は初期化〜初期電流の子コミュニケータを状態終了時に回収し、pending復元用の別状態も破棄する。一計算処理寿命／プロセスの制約は維持する。呼び出し元プログラムが管理するMPI継続と多重状態対応を混同しない。MPIラッパーの内部コンパイラ指定もビルド記録に残す。
 
-標準TDDFTのhandle/model protocol1は、同じ全k点物質・dt・容量・MPI分割・初期Aの独立native状態を扱う実験的C入口。返すjは電荷電流で、旧sp_tddft_init/stepの物質Jとは異なる。保護／候補／A／保存上限は状態所有。Python create_stateの一寿命制約は維持し、共有生成器・異種入力対応とは説明しない。STANDARD_HANDLES日英と対応ヘッダーを参照。
+標準TDDFTのhandle/model protocol1は、同じ全k点物質・dt・容量・MPI分割・初期Aの独立Fortran/Cで保持する計算状態を扱う実験的C入口。返すjは電荷電流で、旧sp_tddft_init/stepの物質Jとは異なる。保護／候補／A／保存上限は状態所有。Python create_stateの一寿命制約は維持し、共有生成器・異種入力対応とは説明しない。STANDARD_HANDLES日英と対応ヘッダーを参照。
 
 ## 収束診断と数値処理の配置
 
@@ -772,7 +783,7 @@ context_mpi_protocol1の新しい高速PRランタイムでは、rt_open初期�
 
 格子収束はrun_current_grid_scanを主入口とし、各格子で電子数保存1e-5を満たしたdtの電流を比較します。共通物理時刻・3成分の相対RMS誤差5%以下を既定基準にします。エネルギーの一致で電流収束を代用せず、SCF未収束やdt未解決を確定扱いにしません。基準を変える場合は利用者の指定を記録します。
 
-開発優先順位は4（SCFの完全保存・再開）→5（共有状態・初期化・異常復帰・native ABI）→3（NLCC・単位換算）です。1（高速HSEノルム）・2（物理格子収束確認）は保留し、分子作業も保留を維持します。共通ソースのSCF進捗の状態所有は、完全なSCF継続APIの実装とは区別してください。
+開発優先順位は4（SCFの完全保存・再開）→5（共有状態・初期化・異常復帰・C/Fortranの呼び出し規約）→3（NLCC・単位換算）です。1（高速HSEノルム）・2（物理格子収束確認）は保留し、分子作業も保留を維持します。共通ソースのSCF進捗の状態所有は、完全なSCF継続APIの実装とは区別してください。
 
 通常PZ/Libxc-PZ/PBEのSCFはsession.run(..., steps=K)で反復境界に停止し、continue_scf(steps=M)、snapshot()/restore()で混合履歴を保ったメモリ内継続ができます。実測した初期化／実行反復カウンタを確認し、波動関数だけのwarm startを完全なSCF復元と呼ばないでください。スナップショットは同じ生存状態・ビルド・MPI分割に限定し、ディスク／プロセス再開を実装済みと案内しないでください。新APIでも終端のSCF未収束は結果を保持して確認待ちにします。意図的なpaused=Trueの途中停止は対象外です。
 
@@ -786,7 +797,7 @@ restore_checkpointで独立した数値候補を準備でき、全参加者の�
 publishしてから継続します。holderの中身は準備済み候補で、独立したGSソルバーでは
 ありません。準備途中の処理可能な失敗では元の状態を保持して候補を破棄できますが、
 反映時の致命的なメモリ／プロセス故障の一般的ロールバック保証ではありません。
-旧ランタイムは保護付き準備を拒否します。直接復元は引き続き非原子的です。
+旧計算プログラムは保護付き準備を拒否します。直接復元は引き続き非原子的です。
 SCF未収束は警告して結果を保持します。
 
 SymmetryOperationsをDFTへ渡すとsym.datを含む資産を物質ごとに保持し、縮約k点HSEの
@@ -795,29 +806,29 @@ SCF継続・保護付き準備に使えます。CPU・全q点・内部k点MPI1�
 部分群が必要ですが、偏光全体のz限定ではありません。旧版の対称力でCartesianへの
 戻し忘れを再現し、Fortranで修正しました。対称化した力だけは意図的な単位補正です。
 固定格子Siの全点／縮約点のE・密度・力は記録した許容差内ですが、構造最適化等の精度認定ではありません。
-旧ランタイムにsp_gs_cartesian_force_protocol宣言がなければ、力を警告付きで保持して
+旧計算プログラムにsp_gs_cartesian_force_protocol宣言がなければ、力を警告付きで保持して
 基底未確認と表示します。Hartree/bohrを推測せず、暗黙ビルドやPython自動変換をしないでください。
 
 ## GS保存・再利用の基本方針（2026-11-19追記）
 
-利用者の最新指示ではGSを保存して再利用する経路を基本とします。以前のGSデータ収集禁止を、保存機能の開発・利用の禁止へ拡大解釈しません。収束済みGSの再利用と、混合履歴を含む反復途中の完全再開は別の機能です。snapshot()は同じ生存ownerのメモリ内保存です。新しい対応ランタイムではsave_scf()とrun(restart=...)による同一ビルド・同一入力・同一MPI分割のディスク再開を使えます。異なるランタイムへの移行は未対応です。MPI再分割は後述の対応protocolの範囲で明示します。保存先は指定された結果領域とし、不要な複製は作りません。通常XCの明示的対称性付きSCFもメモリ内保存・保護付き復元に対応します。
+利用者の最新指示ではGSを保存して再利用する経路を基本とします。以前のGSデータ収集禁止を、保存機能の開発・利用の禁止へ拡大解釈しません。収束済みGSの再利用と、混合履歴を含む反復途中の完全再開は別の機能です。snapshot()は同じ生存ownerのメモリ内保存です。新しい対応計算プログラムではsave_scf()とrun(restart=...)による同一ビルド・同一入力・同一MPI分割のディスク再開を使えます。異なる計算プログラムへの移行は未対応です。MPI再分割は後述の対応protocolの範囲で明示します。保存先は指定された結果領域とし、不要な複製は作りません。通常XCの明示的対称性付きSCFもメモリ内保存・失敗時に元の状態を保つ復元に対応します。
 
-SCFデータ保存時には残差履歴も確認します。新しいnative GSのsave_scf()はdiagnostics/以下にCSVと任意のPNGを出します。未収束は警告してデータを保持し、グラフの有無とSCF成功・失敗を混同しません。Matplotlibがなくても保存済み数値データとCSVは使えます。履歴の計算・保持はFortran側で行います。
+SCFデータ保存時には残差履歴も確認します。新しい計算処理 GSのsave_scf()はdiagnostics/以下にCSVと任意のPNGを出します。未収束は警告してデータを保持し、グラフの有無とSCF成功・失敗を混同しません。Matplotlibがなくても保存済み数値データとCSVは使えます。履歴の計算・保持はFortran側で行います。
 
-複数のnative SCFをディスクからまとめて戻す場合はcheckpoint_target(directory=...)と共通restore_checkpointを使います。全候補をpublishしてから再開し、失敗後はtargetを作り直します。restore_scfの複数回直接呼出しを全体の原子的復元と扱いません。
+複数の計算処理 SCFをディスクからまとめて戻す場合はcheckpoint_target(directory=...)と共通restore_checkpointを使います。全候補をpublishしてから再開し、失敗後はtargetを作り直します。restore_scfの複数回直接呼出しを全体の原子的復元と扱いません。
 
-native SCFの準備済み復元候補を使わない場合はclose/discardまたはwith文で破棄します。GS状態のcloseと元のsnapshotのcloseも、それぞれが所有するPython候補を先に破棄します。MPI各rankで同順に呼び、Cホストが直接作った予約やGCによる自動MPI終了まで保証すると説明しません。
+計算処理 SCFの準備済み復元用の別状態を使わない場合はclose/discardまたはwith文で破棄します。GS状態のcloseと元のsnapshotのcloseも、それぞれが所有するPython候補を先に破棄します。MPI各rankで同順に呼び、C呼び出し元プログラムが直接作った予約やGCによる自動MPI終了まで保証すると説明しません。
 
-通常XCのSCFディスク再開では、対応ランタイムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSEのk／軌道分割変更は後述の対応protocolで扱います。通常XCの空間分割は後述の専用入口を使い、HSE空間GSと通常XCの混合配置は後述の専用入口を使い、HSEのΓ点軌道×空間混合は後述のprotocol2入口を使います。既定と共通保護付き復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
+通常XCのSCFディスク再開では、対応計算プログラムと新形式のglobal k範囲メタデータがある場合、run(restart=...,repartition=True)でk-only MPI1↔2の変更を検証済みです。同じbinary・物理入力・物質IDを使い、Fortranが配列を再配置します。高速HSEのk／軌道分割変更は後述の対応protocolで扱います。通常XCの空間分割は後述の専用入口を使い、HSE空間GSと通常XCの混合配置は後述の専用入口を使い、HSEのΓ点軌道×空間混合は後述のprotocol2入口を使います。既定と共通失敗時に元の状態を保つ復元の同一分割条件を勝手に緩めません。担当開始k点がGaussian乱数seedに含まれるため、MPI分割を変えた別の初期軌道生成を比較基準にせず、保存元と同じ初期状態からの連続実行と比べます。
 
 ## SCFのk点MPI数を変える再開
 
-`NativeGSSession.run(restart=..., repartition=True)` は同じランタイム・物質・
+`NativeGSSession.run(restart=..., repartition=True)` は同じ計算プログラム・物質・
 物理入力を保ち、k点だけのMPI分割を変える明示的な入口です。通常XCはprotocol1/2、
 密なACEを使う高速PR版HSEはk-repartition protocol2が必要です。確認済みは1↔2ランク、
 HSEの全k点／縮約k点とPBE準備段階です。FortranがACE・キャッシュ・履歴を再配置し、
-SCFを再実行しません。HSEの軌道分割は後述の専用入口を使い、HSE空間GSは後述の専用入口を使います。packed/distributed ACE、異なるランタイムは
-未対応です。保護付き復元のMPI分割は従来どおり同一にします。詳細はNATIVE_GS.md／
+SCFを再実行しません。HSEの軌道分割は後述の専用入口を使い、HSE空間GSは後述の専用入口を使います。packed/distributed ACE、異なる計算プログラムは
+未対応です。失敗時に元の状態を保つ復元のMPI分割は従来どおり同一にします。詳細はNATIVE_GS.md／
 NATIVE_GS.en.mdを参照し、物理収束の検証と混同しないでください。
 
 通常XCの純粋な軌道並列も同じ明示的再開入口を使います。両側は
@@ -825,7 +836,7 @@ NATIVE_GS.en.mdを参照し、物理収束の検証と混同しないでくだ�
 新保存のorbital_boundsを要求します。高速HSEの軌道並列は後述のprotocol2を使います。k／軌道間の配置変更は
 未対応です。サンプルは両側に `--orbital-parallel` を指定します。
 
-高速PR版HSEのGamma軌道並列SCFは、新ランタイムの
+高速PR版HSEのGamma軌道並列SCFは、新計算プログラムの
 `sp_gs_hse_orbital_protocol()` の版1または2 がある場合、同じMPI分割への直接保存／再開を
 使えます。サンプルは両側に `--xc hse06 --orbital-parallel` を指定し、再開側に
 `--restart` を渡します。ランク数変更には後述のprotocol2を使います。ACEとGamma交換作業状態を
@@ -840,14 +851,14 @@ orbital-repartition protocol2が必要です。密なACE・タイルなしgauge�
 Gamma SCFを対象とし、空間／混合配置や軌道GS→RTを対応済みとは案内しません。
 サンプルの `--xc hse06 --orbital-parallel` はこの明示設定を行います。
 
-通常XCの純粋な空間分割変更は、spatial-repartition protocol1の新ランタイムで
+通常XCの純粋な空間分割変更は、spatial-repartition protocol1の新計算プログラムで
 `NativeGSBackend(..., decomposition=(1,1,nx,ny,nz))` と
 `run(restart=..., repartition=True)` を使います。新保存のgrid_boundsが必要です。
 Fortranが密度・ポテンシャル・軌道／CG内部値と混合履歴を再配置し、SCFは再実行しません。
 周期haloは内部値からコピーします。新分割の静的FFT／通信資源と履歴を持たないXC／
 FFT作業バッファの準備を、GS再計算と混同しないでください。比較は格子内部で行います。
 サンプルは両側に `--spatial-parallel` を指定します。対象はPZ／Libxc-PZ／PBEで、
-HSE空間GSと通常XCの混合配置は後述の専用入口を使います。HSE混合は後述のΓ点protocol2入口を使い、別ランタイム移行は未対応です。
+HSE空間GSと通常XCの混合配置は後述の専用入口を使います。HSE混合は後述のΓ点protocol2入口を使い、別計算プログラム移行は未対応です。
 
 高速PR版HSEの空間SCF再開は、保存側・再開側とも
 `NativeGSBackend(..., decomposition=(1,1,nx,ny,nz), hse_spatial=True)` を使い、
@@ -857,17 +868,17 @@ Fortranが密なACEと交換作業配列の格子行を直接再配置し、SCF�
 検証済みは1↔2、PBE準備段階、16³2↔4と二方向分割です。CPU・全支持・Gamma・
 直交セル・固定イオン・全占有スピン対・タイルなしgaugeの範囲です。hse_orbitalとは
 同時に指定しません。サンプルは `--xc hse06 --spatial-parallel` を両側に指定します。
-複数k点×空間は後述のhse_kspace経路を参照し、packed/tiled/sparse表現・別ランタイム移行・空間HSE GS→RTを
+複数k点×空間は後述のhse_kspace経路を参照し、packed/tiled/sparse表現・別計算プログラム移行・空間HSE GS→RTを
 対応済みとは案内しません。これは実装検証で、物理収束の認定ではありません。
 
-通常XCの混合並列SCF再開はmixed-repartition protocol1の対応ランタイムで、
+通常XCの混合並列SCF再開はmixed-repartition protocol1の対応計算プログラムで、
 `NativeGSBackend(..., decomposition=(k, orbital, nx, ny, nz))` と
 `run(restart=..., repartition=True)` を使います。積はMPI群のサイズに合わせますが、
 物理的なk点・格子やSCF条件を変えません。保存rankのgrid/orbital/k範囲を併せた
 5次元被覆でFortranが再配置します。密度・ポテンシャル・混合履歴はk／軌道群に
 複製済みなので二重に足しません。再初期軌道やSCF反復で状態を作り直しません。
 例は `--decomposition K O X Y Z` として公開し、物理k格子は固定です。
-この通常XC入口はPZ／Libxc-PZ／PBEです。HSE混合は次のΓ点protocol2入口を使い、異なるランタイムへの移行は未対応です。
+この通常XC入口はPZ／Libxc-PZ／PBEです。HSE混合は次のΓ点protocol2入口を使い、異なる計算プログラムへの移行は未対応です。
 
 高速PR版HSEのΓ点SCFで軌道×空間を混合する時は、保存元・復元先とも
 `NativeGSBackend(..., decomposition=(1,O,X,Y,Z), hse_spatial=True)` を使う。
@@ -884,8 +895,8 @@ continue_scfする。再初期化した波動関数や交換作用で置き換�
 decomposition=(K,1,X,Y,Z)を明示する。compute sp_gs_hse_kspace_protocol1/2/3と
 mixed-repartition3を要求する。全一様k格子・CPU・完全占有スピン対・直交セル、
 対称性縮約／軌道分割なし。hse_spatial／hse_orbitalやΓ点Wannier入力と混ぜない。
-受理済み状態は空間局所だが、交換更新の全格子FFT作業は空間ランクで複製される。
-メモリ削減や交換FFTの空間高速化と説明しない。既存の高速k点カーネルを使い、
+最後に成功した計算状態は空間局所だが、交換更新の全格子FFT作業は空間ランクで複製される。
+メモリ削減や交換FFTの空間高速化と説明しない。既存の高速k点計算ルーチンを使い、
 低速HSEには戻さない。再開はrun(restart=...,repartition=True)、過去SCF／交換の
 再計算0を確認する。サンプルは--xc hse06 --hse-kspace --decomposition K 1 X Y Z。
 
@@ -917,7 +928,7 @@ scf_restart_originとexecuted_iterations==0を確認し、再保存時は元を�
 異なるソース版ではcompatible_runtime="declared"／--declared-runtimeを明示し、
 scf_compatibility.jsonの正確な保存元→復元先の登録だけを使う。逆向き・推移・任意の
 同形式版を推定しない。Trueは同一ソース限定、既定は同一SHA。codecの型／生成IO
-指紋、native表現、OS/CPU、数値状態版も一致が必要。初期登録は状態版照会の追加
+指紋、計算処理表現、OS/CPU、数値状態版も一致が必要。初期登録は状態版照会の追加
 だけで演算／保存項目に変更がない通常XC・高速PR HSEの組。数値意味が変わる版には
 適用しない。scf_restart_originのcompatibility_declarationと再計算0を確認する。
 汎用checkpointやTDDFTの引数ではない。ソース差をレビューし、実測した組だけを
@@ -931,77 +942,77 @@ MPI合計・最大や物理精度の指標ではない。別GSの作成／継続
 
 モデル切替では単位名と出力換算係数を同時復元する。境界は原子単位のまま、既存
 SALMONの換算定数・式を保持する。DOS/PDOS/band/AVSは呼出しごとの空きファイル番号
-を使いホストのファイルを閉じない。各状態の作業フォルダと入力の出力先設定を使う。
+を使い呼び出し元プログラムのファイルを閉じない。各状態の作業フォルダと入力の出力先設定を使う。
 ファイル番号を数値checkpointに入れず、復元で出力を巻き戻すと説明しない。
 作業ディレクトリのプロセス共有、同時スレッド実行の制約が解消したと推定しない。
 
 保持GSではdirectory scope1/2/3対応runtimeを自動検出し、作成／継続／復元の際に
-os.chdirを使わず状態フォルダをnativeパス解決に渡す。相対ファイルは状態基準、
+os.chdirを使わず状態フォルダを計算処理パス解決に渡す。相対ファイルは状態基準、
 絶対パスは維持。例外・他ランク準備失敗でも範囲を解除する。論理入力／数値保存に
 一時prefixを追加しない。旧runtimeの従来経路は維持する。旧runtime向けwrapperの
-CWD切替や同時スレッド実行まで解消したと推定せず、native呼出しはメインスレッドで
+CWD切替や同時スレッド実行まで解消したと推定せず、計算処理呼出しはメインスレッドで
 順次行う。通常のrun/continue_scfの呼出し方は変えず、import時にビルドしない。
 
 通常TDDFT（通常／共有／異入力登録）と高速PR HSE（通常／共有／登録）は、scope2/3
-runtimeでホストCWDを変更しない共通native呼出しを使う。scope1はGSだけの対応で、
+runtimeで呼び出し元プログラムCWDを変更しない共通計算処理呼出しを使う。scope1はGSだけの対応で、
 TDDFTでは旧切替へ戻す。import時にビルドせず、対応runtimeは明示的に準備する。
 相対ファイルは各work基準、絶対パスは維持。準備のrank合意と例外時解除を共通化し、
 数値の保存形式・時刻・電流符号は維持する。FDTDはscope3で同じ経路を使い、scope1/2では従来の切替を維持する。
-主スレッド逐次の制約は維持し、同時native実行まで対応したと説明しない。
+主スレッド逐次の制約は維持し、同時計算処理実行まで対応したと説明しない。
 
-標準TDDFTの共有／登録ハンドルは新しいtimer protocol1でstate.timing_secondsを物質MPI群から集団照会できる。total/initialization/density/hartreeはrankローカル完了区間の秒。totalは未完了の区間を含めず、生存中0の場合がある。ホスト・兄弟状態・park中の時間を除き、数値checkpointには入れず復元でも計測値を巻き戻さない。旧runtimeの通常計算を止めず、新照会だけは明示的な対応runtimeを要する。高速HSEやlegacy singletonのtimer分離まで完了と説明しない。
+標準TDDFTの共有／登録ハンドルは新しいtimer protocol1でstate.timing_secondsを物質MPI群から集団照会できる。total/initialization/density/hartreeはrankローカル完了区間の秒。totalは未完了の区間を含めず、生存中0の場合がある。呼び出し元プログラム・兄弟状態・park中の時間を除き、数値checkpointには入れず復元でも計測値を巻き戻さない。旧runtimeの通常計算を止めず、新照会だけは明示的な対応runtimeを要する。高速HSEやlegacy singletonのtimer分離まで完了と説明しない。
 
 高速PR HSEもtimer protocol1対応の共有／登録ハンドルからstate.timing_secondsを集団照会できる。単位・完了区間・park中除外・復元で計測を巻き戻さない条件は標準TDDFTと同じ。legacy singletonは別のlegacy timer protocol1で扱い、新診断のために旧runtimeの通常計算を拒否しない。
 
-標準native TDDFTの終了時、ホストのFortran unit30を閉じない修正が新規runtimeにある。共有ハンドルとlegacy singletonの両経路が対象。数値状態／更新順／保存形式は変更しない。古い固定runtimeをその場で改変せず、必要時だけ明示ビルド／対応配布を利用する。その他I/O所有権や一般異常復帰の完了とは説明しない。
+標準Pythonから直接呼ぶTDDFTの終了時、呼び出し元プログラムのFortran unit30を閉じない修正が新規runtimeにある。共有ハンドルとlegacy singletonの両経路が対象。数値状態／更新順／保存形式は変更しない。古い固定runtimeをその場で改変せず、必要時だけ明示ビルド／対応配布を利用する。その他I/O所有権や一般異常復帰の完了とは説明しない。
 
-標準TDDFT／高速PR HSEは新規runtimeで更新中も既存の状態MPI ownerを有効にし、遅延生成された子communicatorを状態終了時に回収する。戻る経路では所有範囲を解除し、他状態・ホストのMPIを維持する。Pythonからの呼出し方／分割／数値checkpointは同じ。一般のMPI障害復帰・自由な同時native実行と混同しない。
+標準TDDFT／高速PR HSEは新規runtimeで更新中も既存の状態MPI ownerを有効にし、遅延生成された子communicatorを状態終了時に回収する。戻る経路では所有範囲を解除し、他状態・呼び出し元プログラムのMPIを維持する。Pythonからの呼出し方／分割／数値checkpointは同じ。一般のMPI障害復帰・自由な同時計算処理実行と混同しない。
 
 高速PR HSEの初期化整合性ガードは新runtimeでモデル所有。登録モデルごと／同一モデル生成器ごとに保持し、切替で共通記録を上書きしない。検査条件を緩めず、成功した初期化だけ記録を更新。C API／数値checkpointは不変。legacy単独の互換記録やその他共有設定まで分離完了と説明しない。
 
-高速HSEのcheckpoint配列サイズ上限は呼出しローカルで、各serializerへ明示的に渡す。上限式・不正サイズ検査・stream形式は従来どおり。ユーザーのメモリ予算や新しい計算制限を追加する変更ではない。同時native実行まで対応と説明しない。
+高速HSEのcheckpoint配列サイズ上限は呼出しローカルで、各serializerへ明示的に渡す。上限式・不正サイズ検査・stream形式は従来どおり。ユーザーのメモリ予算や新しい計算制限を追加する変更ではない。同時計算処理実行まで対応と説明しない。
 
 標準TDDFT singletonも新runtimeでinit/step/closeの計測を状態所有にする。legacy timer protocol1時にstate.timing_secondsを物質群から照会できる。古いruntimeの計算を拒否せず新照会だけ対応版が必要。HSE singletonは対応する別のlegacy timer protocol1を確認し、同時スレッド対応と混同しない。
 
-高速PR HSE singletonも新runtimeのlegacy timer protocol1でinit/init_symmetry・step・closeの計測をホストから分離する。state.timing_secondsは4項目のrankローカル完了秒数。共有ハンドル用protocolと別なので能力照会を確認する。旧runtimeの通常計算を止めず、新照会のみ対応版が必要。MPI障害復帰や同時実行まで対応と説明しない。
+高速PR HSE singletonも新runtimeのlegacy timer protocol1でinit/init_symmetry・step・closeの計測を呼び出し元プログラムから分離する。state.timing_secondsは4項目のrankローカル完了秒数。共有ハンドル用protocolと別なので能力照会を確認する。旧runtimeの通常計算を止めず、新照会のみ対応版が必要。MPI障害復帰や同時実行まで対応と説明しない。
 
 FDTDとHSE履歴検査のIEEE問い合わせはスカラーに限定し全要素を走査する。従来の閾値・MPI拒否・拒否時状態保持を維持し、新たな停止条件と説明しない。R0検証はGNU/macOSとMPI、合成履歴であり、Fujitsuコンパイル・実電子状態の新たなディスク再開検証まで完了と主張しない。
 
-R1対応native FDTD closeはpending復元候補とstep_savedを解放する。途中終了で完走時解析を強制しない。任意のsp_eh_resourcesはfield/step_saved/pendingの3確保フラグのみで総メモリ・MPI解放の保証ではない。R2のMPI所有権対応と混同しない。
+R1対応Pythonから直接呼ぶFDTD closeはpending復元用の別状態とstep_savedを解放する。途中終了で完走時解析を強制しない。任意のsp_eh_resourcesはfield/step_saved/pendingの3確保フラグのみで総メモリ・MPI解放の保証ではない。R2のMPI所有権対応と混同しない。
 
-R2 native FDTDはMPI子groupをfield所有にしcache終了後に回収する。sp_eh_mpi_resourcesはlive/slots/field_ownedの3値で、slots残存をリークと判定しない。親接続を外す前のlive数と別所有者の保持、detach後の0を検証する。既存sp_eh_resourcesの3確保フラグとは別。分割・更新順・数値checkpoint・一場寿命制約は同じで、一般MPI障害復帰や複数場同時実行と説明しない。
+R2 Pythonから直接呼ぶFDTDはMPI子groupをfield所有にしcache終了後に回収する。sp_eh_mpi_resourcesはlive/slots/field_ownedの3値で、slots残存をリークと判定しない。親接続を外す前のlive数と別所有者の保持、detach後の0を検証する。既存sp_eh_resourcesの3確保フラグとは別。分割・更新順・数値checkpoint・一場寿命制約は同じで、一般MPI障害復帰や複数場同時実行と説明しない。
 
-相反テンソルLDはTensorLorentzDrudeを使う。強度は(poles,3,3)の実対称正半定値、背景は(3,3)の実対称正定値。方向未知は従来どおり独立1成分の等方モデル。単独応答・MPI材料入口・process-local snapshot/restoreは対応。native FDTDは主軸が格子に沿う対角テンソルに対応し、非対角電場更新は未接続。input_textとinput_assetsの組を保持し、scalarへ縮約して通してはいけない。permittivity_tensorで成分を明示し、A端点のJは分散極だけ、背景行列は場側が所有する。非相反応答・自動回転・一般テンソルフィット・新しいディスク再開形式までは実装済みと説明しない。
+相反テンソルLDはTensorLorentzDrudeを使う。強度は(poles,3,3)の実対称正半定値、背景は(3,3)の実対称正定値。方向未知は従来どおり独立1成分の等方モデル。単独応答・MPI材料入口・process-local snapshot/restoreは対応。Pythonから直接呼ぶFDTDは主軸が格子に沿う対角テンソルに対応し、非対角電場更新は未接続。input_textとinput_assetsの組を保持し、scalarへ縮約して通してはいけない。permittivity_tensorで成分を明示し、A端点のJは分散極だけ、背景行列は場側が所有する。非相反応答・自動回転・一般テンソルフィット・新しいディスク再開形式までは実装済みと説明しない。
 
 波長板サンプルfdtd_waveplateは--runを省くとプレビューのみで計算を開始しない。人工的な無損失板の検証であり、実酸化物の材料データや実験的精度保証と説明しない。carrierのStokes診断はFortran、比較は真空中平板のFresnel・多重反射込み。
 
-相反非対角のnative E/H FDTDはFDTD_MATERIALS.md/enの入口を使います。Yee補間と連立E更新、分散J→P→Q、直接チェックポイントに接続済みです。等方／対角と分けて資産を生成し、古いランタイムへ渡さないでください。tensor_maxiter到達は警告、非有限試行は状態保持して再試行です。回転波長板はexamples.fdtd_waveplateの--angle-degreesを指定し、既定はプレビューのみです。別のA-only場への異方性背景や反対称磁気光学まで対応したと解釈しないでください。
+相反非対角のPythonから直接呼ぶFDTDはFDTD_MATERIALS.md/enの入口を使います。Yee補間と連立E更新、分散J→P→Q、直接チェックポイントに接続済みです。等方／対角と分けて資産を生成し、古い計算プログラムへ渡さないでください。tensor_maxiter到達は警告、非有限試行は状態保持して再試行です。回転波長板はexamples.fdtd_waveplateの--angle-degreesを指定し、既定はプレビューのみです。別のA-only場への異方性背景や反対称磁気光学まで対応したと解釈しないでください。
 
 
 ## 全体通信を最小限にする
 
 ジョブ全体のcollectiveは初期化、必要な異常合意、明示的な最終集約に絞ります。
-物質点ごと・ランタイム読み込みごとの全体通信を追加しません。担当グループと
+物質点ごと・計算プログラム読み込みごとの全体通信を追加しません。担当グループと
 点所有者への受け渡しを優先し、診断結果は原則として代表ランクだけへ集めます。
 既存の通信が生存を確認できる場合、追加のBarrierや生存確認allreduceを入れません。
 同じ段階の状態・データ検査を一つにまとめても、有限性検査、物理的に必要な総和、
 異常時の一貫した拒否、保存／復元・再試行の保証は維持します。
 
 検証専用mpi_runtime_receiptは初期bcast一回と最後のroot gather一回で終了します。
-ランタイムの各再利用はMPI通信をしません。NativeEHField.advanceのPython側検査は
-担当場グループ内で六回から二回へ統合しています。native内部の通信はこの回数に
+計算プログラムの各再利用はMPI通信をしません。NativeEHField.advanceのPython側検査は
+担当場グループ内で六回から二回へ統合しています。計算処理内部の通信はこの回数に
 含めません。ResponseSessionのAは所有点分だけをScattervで配り、場パケットも担当点の
 辞書だけをscatterします。担当点が無い場グループと単一ランク群への追加配布は
-省きます。Jは所有点分を代表へ回収します。対応するnative FDTD結合では、
+省きます。Jは所有点分を代表へ回収します。対応するPythonから直接呼ぶFDTD結合では、
 Yee辺への加算先を持つ場ランクだけへ担当点Jを配ります。
 物質群のprivateなresponse._Aは担当行だけが現在値です。全点の履歴には場の代表が
 保存した出力を使い、物質群の非担当行を全点データとして扱わないでください。
-native Jの担当範囲はFortranのsp_eh_current_maskで取得し、境界をまたぐ点は両側へ配信します。
+計算処理 Jの担当範囲はFortranのsp_eh_current_maskで取得し、境界をまたぐ点は両側へ配信します。
 場の代表は全点Jを保持します。他の場ランクの結合Jは担当行だけが有効です。
 全点解析には代表の出力を使います。旧ABIとMultiscale1Dは従来配信を維持します。
-保存形式・MPI互換条件とNativeEHField.advance(J)の全点入力契約は変更しません。
+保存形式・MPI互換条件とNativeEHField.advance(J)の全点入力仕様は変更しません。
 詳細はCOUPLED.mdの担当領域に応じたJ配信を参照します。隣接合意を統合した段階では、場の結果と応答入力の事前検査をまとめました。その段階の1ステップで
-A結合は4→3、場パケットはHなし7→4／Hあり7→5です。1回は階層合意で、native内部や
+A結合は4→3、場パケットはHなし7→4／Hあり7→5です。1回は階層合意で、計算処理内部や
 保護付き保存・復元の通信は別です。H採取前の合意と物質更新後の合意は削除しません。
 独自の公開stepを上書きした応答は、初期化時に全群で従来の経路を選択します。
 一ランクだけ異なる応答でも合意回数は揃います。通常のstepに原子的保証を
@@ -1014,7 +1025,7 @@ A結合は4→3、場パケットはHなし7→4／Hあり7→5です。1回は�
 正常ステップでは説明文Bcastなし。専用領域はParallelContextで一度だけ複製・解放し、
 呼び出し元のMPIを解放しません。詳細はCOUPLED.mdのA/J同梱輸送を参照してください。
 独立した階層合意は直前版のA3／Hなし4／Hあり5から、現在は1／2／3です。
-代表間のPython MPI集団通信も5／6／7から4／5／6へ減っています。native内部、初期化、
+代表間のPython MPI集団通信も5／6／7から4／5／6へ減っています。計算処理内部、初期化、
 保護付きトランザクションを含む総通信回数や通信時間の比率ではありません。
 J後の結果通知、H前の合意、受信検査と保護付き再試行は残します。
 正常時の説明文Bcastがないことと、通常stepの原子性は別です。全体を戻す場合は
@@ -1027,13 +1038,13 @@ J後の結果通知、H前の合意、受信検査と保護付き再試行は残
 許可や指示と解釈しないでください。計算の起動は別途、ユーザーのサイトのジョブ内で行います。
 FDTDMPI.commandはプレビューのみ。rank_argumentsの{ranks}置換以外のシェル解釈はありません。
 既定のrunとMPIランク内二重起動拒否は変更しません。既にMPIアプリ内ならCOUPLEDの
-caller-owned埋め込み入口を使います。DFT/TDDFTのバッチ投入共通化はまだ別課題です。
+caller-owned同じプロセス内での計算入口を使います。DFT/TDDFTのバッチ投入共通化はまだ別課題です。
 
 
 ### DFT／TDDFTの管理ノード準備
 prepare_dftはfresh DFT入力と不変PP／対称性ファイルのみを保存します。save_restartの
 既定Trueは将来の計算でGSを保存する設定です。準備そのものはGSを生成しません。
-prepare_tddftは明示したnative RT入力とfilesだけを保持し、GS探索・読込・snapshot化、
+prepare_tddftは明示した計算処理 RT入力とfilesだけを保持し、GS探索・読込・snapshot化、
 dtや波形などの書換をしません。計算ノード側の既存GSを管理ノードへ要求しません。
 どちらもprepared-not-runのPathを返して終了し、実行ファイル、MPI初期化、SCF、worker、
 ビルド、ジョブ投入へ自動継続しません。典型例はexamples.prepare_electronsです。
@@ -1046,7 +1057,7 @@ restart整合性検査ではなく、HSE高速PR限定や既存実行入口の�
 
 `DFT.run()` と `NativeGSSession.run()` は、反復上限で未収束なら警告し、
 `SCFReviewRequired` を送出して後続計算への自動継続を止めます。
-失敗した実行としてデータを消すことはしません。バッチの保存済み結果／nativeの生存状態は
+失敗した実行としてデータを消すことはしません。バッチの保存済み結果／計算処理の生存状態は
 例外の `result` に保持し、`report_directory` に残差CSV・任意のPNG・report.jsonを保存します。
 MatplotlibがなくてもCSVは利用できます。図の生成失敗と計算失敗を混同しません。
 レポートの保存に失敗しても確認待ちは維持し、元の出力を確認するよう警告します。
@@ -1069,9 +1080,9 @@ AIが自動的にこの指定で再実行してはいけません。既存結果
 残差の読取・保存・warm startは引き続き可能です。既知の未収束GSからの
 `band_initial_state()`／`tddft_initial_state()` にも同じ確認待ちを適用します。
 
-nativeの `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
+計算処理の `run(..., steps=K)` と `continue_scf(steps=M)` で意図的に反復境界へ
 止めた `paused=True` の状態は正常な途中状態です。全反復上限に達した未収束終了だけが
-確認待ちになります。確認待ち後もnative状態は閉じず、保存や診断に利用できます。
+確認待ちになります。確認待ち後もFortran/Cで保持する計算状態は閉じず、保存や診断に利用できます。
 ランク間で `allow_unconverged` の指定を揃えます。計算の更新順・収束閾値は変更しません。
 この方針は以前の「未収束でも警告のみで自動継続」を置き換えます。
 
@@ -1085,8 +1096,8 @@ E/Hの位置・時刻、jの符号、担当体積・面積、場の始終エネ�
 非一様な周期面はreflection_transmissionのarea_weightsとsurface_fluxで全点の局所流束を積分します。面内平均E/Hの外積で代用しません。閉曲面の自動観測や回折次数別の分解は未実装です。
 
 実結合の収支確認済み範囲はAPIの日英「実際の結合計算での確認」節を参照します。
-LDは観測Eから同じnativeカーネルでjを再構成し最終native電流と照合、TDDFTは2点・8ランク
-のnative E/H/j出力を直接使っています。初期充填波がある場合の初期エネルギーを無視せず、
+LDは観測Eから同じ計算処理計算ルーチンでjを再構成し最終計算処理電流と照合、TDDFTは2点・8ランク
+のFDTDのE/H更新/j出力を直接使っています。初期充填波がある場合の初期エネルギーを無視せず、
 有限時間のR/T>1をクリップしません。実材料の光学収束まで確認済みと説明しないでください。
 
 横方向周期セルの全面積分では、E/Hの時空間位置合わせ、面積重み、周期端点の重複、
@@ -1094,31 +1105,31 @@ LDは観測Eから同じnativeカーネルでjを再構成し最終native電流�
 面積平均でありenergy_balanceが面積を一度掛けます。MPI面分割では比を平均しません。
 バッチFDTDの自動面取得はPlaneMonitorを明示し、旧point観測の200点制限とは区別します。
 
-PlaneMonitorを指定したバッチFDTDは所有タイルをnativeから取得し、FortranでYee E/Hを
+PlaneMonitorを指定したバッチFDTDは所有タイルを計算処理から取得し、FortranでYee E/Hを
 空間位置合わせしてresult.planesへ返します。時間中心化済みHを二重に平均しません。
 result.reflection_transmission(reference)／energy_balanceで診断へ接続し、物質仕事と場の始終差は
-明示的な観測値を使います。旧ランタイムや面診断失敗をFDTD計算失敗と混同しません。
+明示的な観測値を使います。旧計算プログラムや面診断失敗をFDTD計算失敗と混同しません。
 この入口はfresh batch用であり、NativeEHFieldや再開ストリームの自動統合を対応済みと案内しません。
 管理ノードではprepare_fdtdまで、runは利用者が計算環境で明示的に呼びます。
 
 
-## 埋め込みFDTDの面取得
+## 同じプロセス内での計算FDTDの面取得
 
 NativeEHField.sample_planesは場の全ランクから、保護付きstep/復元が確定し候補を解放した後に明示的に呼びます。場のrank0だけに不変PlaneDataを返し、診断失敗は警告+Noneで計算状態を変えません。Fortranの局所読み出しは状態更新/MPI/IOなし、Pythonは場の群のgather一度だけです。観測時刻で取得し、combine_plane_samplesで等間隔時系列にして既存の流束/R/T/収支へ渡します。output_directoryは単一サンプルの任意保存で上書き禁止、失敗時も既存出力と計算を保ちます。確定前に呼んで投機状態を公開しないこと。後の復元が以前の独立観測アーカイブを自動削除するとは案内しません。混在サンプルの--planes-x/--plane-strideは明示的な横周期境界と確定後の間引き取得を選択します。仕事・場の蓄積差は観測期間に合わせて明示します。
 
-新しいnative FDTDでは未使用座標領域をゼロ初期化し、計算で使う座標・haloは従来式のままです。既存のソース/保存ファイルを一括書換えしません。再現用の小さな明示的テストはtools/test_fdtd_coordinates.pyで、SALMONジョブ・MPI・GSは実行せず、任意指定コンパイラで依存のない座標ルーチンだけを検査します。GNU検証済み、Fujitsu未検証です。
+新しいPythonから直接呼ぶFDTDでは未使用座標領域をゼロ初期化し、計算で使う座標・haloは従来式のままです。既存のソース/保存ファイルを一括書換えしません。再現用の小さな明示的テストはtools/test_fdtd_coordinates.pyで、SALMONジョブ・MPI・GSは実行せず、任意指定コンパイラで依存のない座標ルーチンだけを検査します。GNU検証済み、Fujitsu未検証です。
 
 
-## native FDTDの局所格子エラー
+## Pythonから直接呼ぶFDTDの局所格子エラー
 
 新しいE/Hの1106は既存の最小局所格子条件による初期化拒否で、正常な計算の停止条件を増やしません。全領域境界表を使うため新たな合意通信もありません。sp_eh_init_recovery_protocol()==1と全ランク一致1106を確認した場合だけ、NativeEHFieldは失敗接続と初期化予約を解放します。同じ親MPIを保ち、利用者が設定を直して新しい保存先で再試行できます。ジョブ投入後の割当・入力自動修正はしません。旧版・未知コードや任意STOP/OOM/MPI障害まで回復可能と案内しないでください。
 
 
-明示的なMPI配置では1105（Maxwell分割の既存条件・接続群サイズ不一致）、1107（実際の配置処理の未実装分岐）も、プロトコル1と全ランク一致が確認できた場合に再試行可能です。1106と同様、失敗接続・初期化予約を解放し、親MPIを保ちます。配置名は外側でホワイトリスト化せず、実際のmapperの分岐に任せます。独自backend/nativeの追加方式を先回りで拒否しないこと。自動分割・Fujitsuトポロジー・任意の確保/MPI異常まで対応済みとは案内しません。
+明示的なMPI配置では1105（Maxwell分割の既存条件・接続群サイズ不一致）、1107（実際の配置処理の未実装分岐）も、プロトコル1と全ランク一致が確認できた場合に再試行可能です。1106と同様、失敗接続・初期化予約を解放し、親MPIを保ちます。配置名は外側でホワイトリスト化せず、実際のmapperの分岐に任せます。利用者が追加した計算コードや共有ライブラリの方式を先回りで拒否しないこと。自動分割・Fujitsuトポロジー・任意の確保/MPI異常まで対応済みとは案内しません。
 
 ### Recoverable material-ID CUBE input errors
 
-Native E/H initialization returns1115 for unavailable, malformed, truncated,
+FDTD updates of E and H initialization returns1115 for unavailable, malformed, truncated,
 nonfinite or grid-count-mismatched SALMON material-ID CUBE input. Reported tiny
 reader staging-buffer allocation failure returns1116; this allocation path has
 not been fault-injected and does not cover general OOM or solver allocations.
@@ -1160,7 +1171,7 @@ metadata, array order, copy trimming and communication/reconstruction operations
 are unchanged. No additional startup or per-step collective is introduced.
 
 The existing I/O fixture has an explicit --fdtd-restart-io mode: synthetic EM
-arrays only, no SCF/GS data. GNU MPI1/2 tests preserve host units600/601/700/701
+arrays only, no SCF/GS data. GNU MPI1/2 tests preserve calling program units600/601/700/701
 while exercising text values, real/complex1–5D binary arrays, single/all modes,
 same-layout and cyclically exchanged target-domain reads, inactive payloads and
 text copying. Control/occupied outputs and prior-runtime outputs match byte for
@@ -1183,16 +1194,16 @@ record; its earlier implicit close at process termination is no longer needed.
 No module-wide file selector is added. Fourier transforms, normalizations, field
 updates, loop/file ordering, names, record formats and MPI operations are retained.
 
-The existing native I/O tool has --fdtd-spectrum-io, using actual small LD+FDTD
+The existing solver I/O tool has --fdtd-spectrum-io, using actual small LD+FDTD
 lifecycles with no electronic GS. GNU MPI1/2 controls cover isolated and periodic
 impulse response, isolated non-unit-background raw response, Fourier planes, and
 separate ASE and ART cases with three frequencies and both window variants. Caller-owned
 units600/601/602 remain connected to their original files. Named spectral outputs
 are closed before return; expected numeric outputs are nonempty and finite.
 Unoccupied, occupied and previous-runtime outputs are compared byte for byte.
-These are output/host-contract regressions in atomic units, not convergence or
-material-property certification. Native E/H's existing supported-mode limits are
-not lifted: the batch host used here enables spectral modes, not the embedded
+These are output/calling program-contract regressions in atomic units, not convergence or
+material-property certification. FDTD updates of E and H's existing supported-mode limits are
+not lifted: the batch calling program used here enables spectral modes, not the in-process
 step interface. No extra runtime collective, automatic build or startup run is
 introduced. TTM has been removed; general IO-error recovery remains separate.
 
@@ -1200,7 +1211,7 @@ TTM is excluded from SALMONpy: unpublished implementation, automatic input-file 
 
 ### Recoverable automatic MPI factorization failure
 
-Native E/H returns1117 when the existing automatic MPI distributor cannot assign
+FDTD updates of E and H returns1117 when the existing automatic MPI distributor cannot assign
 its rank count. The current automatic domain routine factors2/3/5; this is a limit
 of that algorithm, not a blanket rank-count restriction. A supported explicit
 spatial partition remains usable (tested with7 ranks). No Python/outer factor
@@ -1218,24 +1229,24 @@ per-step work is added. This does not handle allocation, Fujitsu topology, MPI
 failure or every specialized initialization stage.
 
 Local GNU tests cover unchanged automatic choices on MPI1/2 and helper failure/
-continuation on1/2/7. Native MPI7 repeats raw/public automatic-failure rejection,
+continuation on1/2/7. solver MPI7 repeats raw/public automatic-failure rejection,
 keeps parent MPI alive, releases owned children and retries explicit decomposition;
 32-step fields, point bytes and direct checkpoint/resume match the prior runtime.
 This is local contract/regression evidence, not multi-node scaling certification.
 
 ### Retrying rejected LD tensor/subpixel input
 
-The existing native readers already return1110 for missing/invalid diagonal or
+The existing solver readers already return1110 for missing/invalid diagonal or
 reciprocal-tensor material sidecars and1113 for a missing/invalid reference
-subpixel profile. For these cold errors the native initializer destroys the
+subpixel configuration. For these cold errors the solver initializer destroys the
 candidate and releases its child resources. Python now recognizes these two
 unanimous statuses with sp_eh_init_recovery_protocol1, detaches, and releases its
 failed lifetime reservation. Correct/stage the material file and retry in a new
 work directory on the same caller communicator. Error messages identify the
-material input instead of reporting a generic native rejection.
+material input instead of reporting a generic solver rejection.
 
 No Fortran routine, input validation, coefficient arithmetic, file format,
-communication or native binary changed in this correction. The existing audited
+communication or solver binary changed in this correction. The existing audited
 runtime is reused by recorded SHA256. Unknown/mixed statuses or an absent/wrong
 recovery protocol do not enable retry. Handled coefficient/Bloch-mode returns are addressed below; arbitrary allocation,
 IO-device, MPI or process failure remain outside the bounded guarantee.
@@ -1245,18 +1256,18 @@ and --material-input-admission. GNU MPI1/2 repeat missing, invalid-header, trunc
 and nonfinite-file rejection twice each through the public Python constructor;
 candidate/attachment resources are released and the parent communicator remains
 usable. Valid material initialization then completes32 steps and direct restore.
-Compare against the pre-change Python package with the same native binary; this
+Compare against the pre-change Python package with the same solver binary; this
 is an input/lifecycle regression, not a new material-convergence certificate.
 
 ### Retrying handled coefficient/special-mode initialization errors
 
-Python also recognizes existing native cold returns1111 (nonfinite diagonal/
+Python also recognizes existing solver cold returns1111 (nonfinite diagonal/
 tensor LD update coefficients),1112 (nonzero Bloch phase with the unsupported
 off-diagonal tensor mode), and1114 (invalid subpixel update coefficients).
 Only unanimous codes with initialization recovery protocol1 release the failed
-lifetime. The native initializer already deallocates its candidate, releases its
+lifetime. The solver initializer already deallocates its candidate, releases its
 send/receive cache before its owned MPI children, and returns; the correction is
-Python's classification and diagnostic text, not a native numerical change.
+Python's classification and diagnostic text, not a solver numerical change.
 
 Correct the input/mode and use a new work directory on the same communicator.
 This does not implement Bloch/off-diagonal tensor evolution, silently set Bloch
@@ -1268,25 +1279,25 @@ process failures remain outside this bounded retry guarantee.
 
 --coefficient-admission in the existing E/H tool uses material-input-mode
 (diagonal,tensor,subpixel) to exercise1111/1112/1114. Finite but oversized test
-rates provoke the existing coefficient guards; a native periodic test input
+rates provoke the existing coefficient guards; a solver periodic test input
 provokes the existing unsupported Bloch/tensor return. GNU MPI1/2 repeat each
 failure and then run valid32-step/direct-resume controls. Reader rejections are
-combined in the same fixture. The old SHA256-verified native binary is reused;
+combined in the same fixture. The old SHA256-verified solver binary is reused;
 no solver rebuild, extra numerical calculation in Python or new collective.
 
 ### Retrying handled early grid/boundary/time errors
 
-Native E/H already returns1101 for inconsistent cell/spacing/grid-count input,
+FDTD updates of E and H already returns1101 for inconsistent cell/spacing/grid-count input,
 1102 for incompatible periodic/boundary faces,1103 for an invalid duration/
 step-count/time-step specification, and1104 when dt is not below its existing
 CFL bound. Python now releases the failed initialization reservation for these
 recognized unanimous returns only when initialization recovery protocol1 exists.
-The native cold candidate/owned-child cleanup remains the same. Correct the
+The solver cold candidate/owned-child cleanup remains the same. Correct the
 input and retry with a new work directory on the same caller communicator.
 
-No new input restriction, automatic repair, CFL threshold change, native binary
+No new input restriction, automatic repair, CFL threshold change, solver binary
 change or collective is introduced. This aligns Python's error classification
-with existing native behavior. Unknown/mixed statuses, missing protocol and
+with existing solver behavior. Unknown/mixed statuses, missing protocol and
 other unhandled failures remain conservative. Rejected directories are retained;
 this does not promise rollback of staged or diagnostic files. No automatic job
 resubmission or solver execution is added to preparation/checking workflows.
@@ -1298,7 +1309,7 @@ direct checkpoint restore. Field/point/shape/checkpoint bytes match earlier vali
 controls. This is a local lifecycle regression, not all initialization/IO-error
 recovery or cross-platform/physical-convergence certification.
 
-Native FDTD core-allocation recovery:1118 is a retryable cold-init return only
+FDTD called directly from Python core-allocation recovery:1118 is a retryable cold-init return only
 when all field ranks agree and the runtime declares the initialization recovery
 protocol. It covers material-ID/scratch and core split-E/H/coefficient/saved-E/H
 3D allocations, not all LD/PML/auxiliary arrays or OS/MPI failures. Budget excess
@@ -1306,7 +1317,7 @@ remains advisory; do not introduce a hard memory-budget stop. Failure injection
 belongs only in a separate `SALMONPY_RECOVERY_TESTING` build and the explicit
 `--allocation-admission` validation; never in production or automatic import.
 
-Native cold-init1119 extends recoverable allocation failure to the initial
+solver cold-init1119 extends recoverable allocation failure to the initial
 `ld_allocate`'s24 pole/current/polarization/coefficient/history arrays. Require
 unanimous1119 and the declared initialization recovery protocol for retry.
 The owner cleans partial state before retry; do not reuse a partial LD object.
@@ -1315,15 +1326,15 @@ reallocation or PML/observation allocations. Keep memory-budget excess advisory.
 `--ld-allocation-admission` uses only an explicit test runtime; production must
 not export the fault hook. No additional per-step collective is introduced.
 
-Native cold-init1120 covers three material coefficient vectors and six boundary
+solver cold-init1120 covers three material coefficient vectors and six boundary
 E/H coefficient vectors. Permit retry only with unanimous known1120 and the
-runtime's init-recovery protocol. Share the material gate with LD admission:one extra field-group startup
+runtime's init-recovery protocol. Share the material gate with LD input checking:one extra field-group startup
 agreement with LD,two without LD,and no extra step collective. PML bulk3D coefficients are already in1118; small
 automatic PML workspaces and arbitrary auxiliary/OS/MPI failures are excluded.
 Do not claim blanket PML/OOM recovery or change budget warnings into hard stops.
 `--aux-allocation-admission` belongs only to an explicit testing runtime.
 
-Optional native point-output failures (obsN_at_point_rt.data header/append) warn
+Optional solver point-output failures (obsN_at_point_rt.data header/append) warn
 with SALMONPY_POINT_OUTPUT_WARNING and continue physical evolution. Never turn
 these optional I/O errors into an automatic abort. A later observation retries
 append after the destination/header is repaired. Missing/partial rows are not
@@ -1361,10 +1372,10 @@ SALMONPY_FREQUENCY_MAP_WARNING and continue other windows/planes/energies and
 cleanup. Keep every existing Fourier accumulation/MPI aggregation;no extra
 collective or recomputation. Missing/partial maps are not fabricated or retried
 after finalization. Verify coverage before analysis. This is the batch path:
-native E/H's unsupported diagnostic return15 is unchanged;do not claim native
+FDTD updates of E and H's unsupported diagnostic return15 is unchanged;do not claim solver
 protected stepping/checkpoint support for these accumulators. Other output and
 required restart errors remain separate policies. The explicit test option
---fdtd-spectrum-io --plane-map-faults focuses the existing host probe on two
+--fdtd-spectrum-io --plane-map-faults focuses the existing calling program probe on two
 energies,three planes,two windows and real optional-output faults;it is not CI
 physics validation or an automatic import-time calculation.
 
@@ -1374,20 +1385,20 @@ Fourier processing and every integration/MPI reduction even if a file cannot be
 written;ASE/ART windows own independent units/status/names. No extra collective
 or recomputation. Missing/partial tables are not fabricated or retried after
 finalization:check required trajectory/energy/window coverage before analysis.
-Native E/H unsupported-diagnostic return15 is unchanged;this is batch support.
+FDTD updates of E and H unsupported-diagnostic return15 is unchanged;this is batch support.
 Required restart-save and allocation failures remain separate policies.
 The explicit --fdtd-spectrum-io --spectrum-faults probe reuses LR isolated,
 periodic,non-unit-background,ASE and ART cases with actual file faults;do not
 turn this local validation into mandatory CI physical-observable reproduction.
 
-Required native checkpoint saves are not optional diagnostics. Nonzero from
+Required saved solver state saves are not optional diagnostics. Nonzero from
 sp_eh_checkpoint(path,0) means the save failed even if other ranks produced new
 files. Existing files are not overwritten and live numerical state/clocks remain
 unchanged. Catch/report failure;repair or choose a new empty destination and retry.
 Preserve committed data and quarantine failed-attempt files;do not silently reuse
 an incomplete set or delete prior data. Per-rank distinct paths and higher-level
-all-success/integrity publication are required;raw native calls are not atomic
-multi-file archives. Existing native failure/retry is verified,no new format or
+all-success/integrity publication are required;raw calls to the Fortran/C library are not atomic
+multi-file archives. Existing solver failure/retry is verified,no new format or
 numerical implementation was necessary. Do not generalize this result to legacy
 batch restart writers,mid-stream disk-full/close-only errors or process/MPI loss.
 
@@ -1395,8 +1406,18 @@ batch restart writers,mid-stream disk-full/close-only errors or process/MPI loss
 
 `data_for_restart` text/binary helpers require explicit `io_status`; no unpublished-API backward-compatibility fallback is provided. Caller initializes the phase status to zero; first local failure skips subsequent local saves. Adjacent exclusive `.salmonpy-pending` staging checks open/write/close before rename. Failed staging evidence is retained. Batch callers perform one owning-group agreement per metadata/checkpoint phase and exit nonzero on required-save failure; ordinary time steps gain no agreement.
 
-Do not interpret per-file publication as an atomic archive: files/ranks can contain mixed generations after a failed phase, and no fsync guarantee is made. Preserve a separate completed restart directory; quarantine failed staging files before explicit retry. Do not reuse a failed set merely because individual files exist. Native protected restoration remains a separate path. The explicit GS-free `tools/test_em_restart_save.py NEW_OUTPUT` exercises maintained writers under MPI1/2; `--reference-source PREPARED_TREE` additionally compares all supported normal payload bytes.
+Do not interpret per-file publication as an atomic archive: files/ranks can contain mixed generations after a failed phase, and no fsync guarantee is made. Preserve a separate completed restart directory; quarantine failed staging files before explicit retry. Do not reuse a failed set merely because individual files exist. solver protected restoration remains a separate path. The explicit GS-free `tools/test_em_restart_save.py NEW_OUTPUT` exercises maintained writers under MPI1/2; `--reference-source PREPARED_TREE` additionally compares all supported normal payload bytes.
 
 ### Batch restart-directory creation status
 
 Existing restart directories, including valid directory symlinks, return zero status. Creation failure is agreed once within the owning MPI group using a replacement for the existing creation barrier; batch ranks then exit nonzero. Conflicting existing files/targets are preserved. Do not treat directory-existence success as a writability certificate; actual writers handle I/O errors. No new ordinary-step communication, automatic preflight, or backward-compatibility branch is introduced.
+
+### Required batch EM restart readers
+
+Reader `io_status` is mandatory and collective within the owning solver group: initialize it to zero on all participating ranks and call readers in the same order. Checked read-only open/read/close precedes publication; shared-read status gates payload broadcasts, local reads agree failures, and remapped metadata uses one status-bearing header instead of three broadcasts. Workspace status is agreed before payload transfer. This adds restart/setup gates, not ordinary-step communication. No compatibility fallback is supplied.
+
+A batch failed read terminates initialization nonzero before using invalid values. Low-level helpers return an agreed error while preserving caller MPI/file ownership; explicit repair and status reset permit retry. Their failed buffers and a partially initialized batch model must be discarded, not published as valid state. They do not provide whole-model atomic rollback; solver candidate-based protected restoration remains separate. Never rewrite the input archive to suppress errors. In midpoint comparisons, legacy observation-file copying can strip trailing spaces from previously written rows; compare values separately while retaining exact binary payload comparisons.
+
+Explicit local validation: `tools/test_em_restart_read.py BUILD_JSON NEW_OUTPUT --batch`; no GS is required. Keep this physical run out of required CI.
+
+For shared input/output restart paths, new layout metadata is published only after every required old payload is read successfully; a failed read must leave that input set unchanged. This does not make later multi-file checkpoint saves atomic. Keep a separately completed archive.

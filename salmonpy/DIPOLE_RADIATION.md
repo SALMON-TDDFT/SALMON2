@@ -24,17 +24,17 @@ j = mapping.current([[0.,0.,0.]], [[0.,0.,.001]], dt=.003)
 その静電場を初期化する機能ではありません。電気双極子近似で、分子の空間電荷分布、
 磁気・高次多極子放射、局所場・自己場の帰還は扱いません。
 
-## native E/Hへの接続
+## FDTDのE/H更新への接続
 
 `drive_native_dipoles(field, mapping, dipoles, dt=...)`は初期状態のNativeEHFieldを借用します。
 場グループの全ランクから同じ引数で呼び、他のグループからは呼びません。
 双極子は(samples,molecules,3)、時刻は0からn*dtです。
 読取専用のE/j履歴、それぞれの時刻、分子ID・点IDを返します。
 Eはt=0を含み、jは区間平均を中点時刻で表します。
-マクロセルからYee格子への分配とFDTD更新は既存native処理のままです。
+マクロセルからYee格子への分配とFDTD更新は既存計算処理処理のままです。
 Python側でもう一度Yee格子へ分配しないでください。
 
-nativeの初期化条件により最初の区間電流はゼロが必要です。
+計算処理の初期化条件により最初の区間電流はゼロが必要です。
 すぐ変化する既存波形を使う場合は、呼出側で初期双極子を1回繰り返します。
 これによるdtの遅延をAPI内に隠しません。
 
@@ -49,8 +49,8 @@ result = drive_native_dipoles(field, mapping, delayed, dt=field.dt)
 
 場はlen(delayed)-1ステップ以上の容量を持ち、点の順序・体積が一致する必要があります。
 時間刻みも一致させ、補間は明示的に行います。全波形を最初の更新前に検査し、ランク間で照合します。
-backend異常時に計算全体を巻き戻す契約ではありません。場のcloseは呼出側が担当します。
-NativeEHFieldの明示的build record、ホストMPI context、境界から離れた真空近傍、
+backend異常時に計算全体を巻き戻す仕様ではありません。場のcloseは呼出側が担当します。
+NativeEHFieldの明示的build record、呼び出し元プログラムが管理するMPI context、境界から離れた真空近傍、
 平面波入力という制約は引き継ぎます。分子の放射だけを見る場合はパルス振幅をゼロにします。
 入射場を残す場合は出力に両方の寄与が含まれます。境界・CFL条件はFDTD側で扱います。
 
@@ -66,7 +66,7 @@ python -m salmonpy.examples.dipole_radiation
 
 wheel内の軽量例は電流生成と総量保存だけを確認します。
 ソース内のtools/test_dipole_radiation_mpi.pyは明示したembedded library recordと新しい出力先で
-native FDTDを実行します（合計2または3ランク）。tools/test_isolated_worker.pyが出力した
+Pythonから直接呼ぶFDTDを実行します（合計2または3ランク）。tools/test_isolated_worker.pyが出力した
 NPZを追加引数にすると分子の実測双極子も使えます。
 検証記録はdocs/dipole-radiation-validation-2026-11-15.mdです。
 短いC₂H₂波形は接続試験で、収束した分子発光スペクトルではありません。
@@ -91,7 +91,7 @@ python -m salmonpy.examples.dipole_radiation --archive ISOLATED_OUTPUT --cell-vo
 
 8000は使用するFDTDセルの実際の体積（bohr³）に置き換えてください。
 単位・等間隔の時刻・分極電流生成と保存則を確認する例で、FDTD自体は起動しません。
-native伝播までの実行は上記のMPI検証スクリプトに分けています。
+計算処理伝播までの実行は上記のMPI検証スクリプトに分けています。
 
 ## 分子へ渡す電場の明示選択
 
@@ -119,12 +119,12 @@ native伝播までの実行は上記のMPI検証スクリプトに分けてい�
 python -m salmonpy.examples.molecular_field_selection
 ```
 
-native場と参照場の因果的な更新、振動子による仕事の収支検証、孤立系TDDFTへの
+計算処理場と参照場の因果的な更新、振動子による仕事の収支検証、孤立系TDDFTへの
 実際の帰還は後続です。この選択処理だけで双方向結合が完成したとは扱いません。
 
 ### 開発用の帰還順序検証（公開TDDFTループではありません）
 
-ソース側の`tools/test_molecular_feedback_mpi.py`は、独立した二つのnative真空場と
+ソース側の`tools/test_molecular_feedback_mpi.py`は、独立した二つの計算処理真空場と
 調和振動子で帰還を検証します。最初の区間を明示的に保持し、E(n)から次区間の双極子と
 電流を求め、場のn+1ステップへ渡します。合計4ランク・各1スレッドです。
 照射だけの別計算と比較して自己場の差し引きを確認します。この振動子の中点積分を、

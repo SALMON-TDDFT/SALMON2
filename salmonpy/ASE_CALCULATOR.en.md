@@ -1,4 +1,4 @@
-# ASE Calculator: energy, native forces and warm start
+# ASE Calculator: energy, solver forces and warm start
 
 `salmonpy.ase_calculator.SalmonCalculator` is an optional independent module.
 It supports energy (eV) and forces (eV/Å) for neutral, periodic, unpolarized
@@ -79,7 +79,7 @@ geometry, and SCF iteration count is reset. Old ionic coordinates and mixing
 history are not reused. Source identity is recorded in ground-state.json.
 The ASE-independent equivalent is
 `model.run(engine, NEW_DIRECTORY, initial_guess=previous_ground_state)`;
-this explicit path rejects incompatible guesses before launching native code.
+this explicit path rejects incompatible guesses before launching solver code.
 
 Warm start is not guaranteed to reduce iterations or reach the same local minimum.
 Compare fresh and warm energies/forces at the same SCF tolerance for your system.
@@ -96,7 +96,7 @@ long optimizations can use substantial disk space.
 
 Fixed-cell ASE optimization/Born–Oppenheimer MD is distinct from coupled
 Ehrenfest electron/ion propagation. Isolated systems, non-collinear spin and
-Ehrenfest remain first-release targets requiring native interface work.
+Ehrenfest remain first-release targets requiring solver interface work.
 Crystalline TDDFT uses **transverse** (`trans_longi='tr'`) as its standard;
 Longitudinal is an explicitly chosen field component, not a default.
 
@@ -109,4 +109,4 @@ The Calculator does not publish unconverged forces or retain an old force result
 Readjust SCF settings after inspection. `ground-state.json` remains complete
 with `converged=false`; completion of execution is distinct from convergence.
 Opening saved results for inspection remains allowed. Invalid/missing output,
-nonfinite values and failed native execution remain errors.
+nonfinite values and failed solver execution remain errors.

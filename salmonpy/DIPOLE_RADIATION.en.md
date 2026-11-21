@@ -27,17 +27,17 @@ current. Their electrostatic field is not initialized by this radiation source.
 This is the electric-dipole approximation; resolved molecular charge distributions,
 magnetic/multipole radiation and local-field/self-field feedback are not included.
 
-## Native E/H connection
+## FDTD updates of E and H connection
 
 `drive_native_dipoles(field, mapping, dipoles, dt=...)` borrows a fresh
 `NativeEHField`. Call collectively on every field-group rank, using identical
 inputs; other groups do not call this function. A precomputed trajectory has shape
 (samples,molecules,3) at times n*dt from zero. The function returns readonly E/j
 histories and their times, plus molecule/point IDs. E samples include t=0 and j
-samples label interval averages at midpoint times. Native macro-cell to Yee-edge
+samples label interval averages at midpoint times. solver macro-cell to Yee-edge
 mapping and FDTD numerical updates remain unchanged; do not deposit on edges twice.
 
-The first current interval must be zero, following native initialization. If an
+The first current interval must be zero, following solver initialization. If an
 existing molecular trace changes immediately, explicitly repeat its initial
 sample. This delays the source by one dt, and is not hidden inside the API:
 
@@ -52,9 +52,9 @@ result = drive_native_dipoles(field, mapping, delayed, dt=field.dt)
 
 The field must have capacity for len(delayed)-1 steps, matching point order and
 volumes. Source dt must equal field dt; resampling is explicit. The complete
-trajectory is validated and agreed before the first update. Backend failure does
+trajectory is validated and agreed before the first update. calculation implementation failure does
 not roll back an entire trajectory. Caller closes the field. NativeEHField still
-requires its explicit build record, host MPI context, interior vacuum source
+requires its explicit build record, MPI managed by the calling program context, interior vacuum source
 neighborhood and plane-wave input. Use zero pulse amplitude to isolate molecular
 radiation. An existing incident field can instead remain present; outputs then
 contain both contributions. Boundary and CFL checks remain FDTD responsibilities.
@@ -71,8 +71,8 @@ python -m salmonpy.examples.dipole_radiation
 ```
 
 This lightweight wheel example checks current construction and conservation only.
-In a source checkout, `tools/test_dipole_radiation_mpi.py` performs actual native
-FDTD tests with an explicitly supplied embedded library record and a new output
+In a source checkout, `tools/test_dipole_radiation_mpi.py` performs actual solver
+FDTD tests with an explicitly supplied library called in the Python process record and a new output
 directory, using two or three total ranks. An optional NPZ from
 `tools/test_isolated_worker.py` supplies recorded molecular dipoles. See
 `docs/dipole-radiation-validation-2026-11-15.md` for measured scope. The short C2H2
@@ -100,7 +100,7 @@ python -m salmonpy.examples.dipole_radiation --archive ISOLATED_OUTPUT --cell-vo
 
 Replace 8000 with the physical volume of each intended FDTD cell in bohr³.
 This verifies units, uniform sample times, polarization-current construction and
-conservation; it does not launch FDTD. Full native propagation remains in the
+conservation; it does not launch FDTD. Full solver propagation remains in the
 MPI regression script described above.
 
 ## Explicit molecular drive selection
@@ -138,7 +138,7 @@ isolated-TDDFT feedback remain future work. This selector does not close that ga
 ### Development feedback schedule (not a public TDDFT loop)
 
 The source-only `tools/test_molecular_feedback_mpi.py` exercises a harmonic
-oscillator with two independent native vacuum fields. After an explicit first
+oscillator with two independent solver vacuum fields. After an explicit first
 interval hold, sampled E(n) drives the next dipole interval and its current is
 supplied to field step n+1. Four total ranks, one thread each, suffice. A separate
 illumination-only baseline verifies own-source subtraction. This is an oscillator

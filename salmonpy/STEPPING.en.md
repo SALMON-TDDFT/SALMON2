@@ -1,10 +1,10 @@
 # Protected steps with explicit backend callbacks
 
-[日本語](STEPPING.md) · Topic: `protected_step` · Paired revision: `2026-11-17.1`
+[日本語](STEPPING.md)
 
-`salmonpy.stepping` lets a host protect one operation across explicit owners.
+`salmonpy.stepping` lets a calling program protect one operation across explicit owners.
 `StepTarget(key, owner, capture, rollback, release=None)` declares a complete
-backend-owned backup contract. Tokens remain local and opaque: SALMONpy does not
+calculation implementation-owned backup contract. Tokens remain local and opaque: SALMONpy does not
 copy, pickle, transmit or interpret them. `capture()` must be read-only.
 `rollback(token)` must restore all numerical state, clocks, caches, failure flags
 and side effects necessary for retry. `release(token)` only retires backup
@@ -29,10 +29,10 @@ except StepRecoveryError as error:
 For MPI pass `context=parallel_context` on every participating rank. All ranks in
 a solver group must declare the same target key order and release availability.
 Different groups may have different target counts. Callbacks may communicate
-inside their solver group, never through the host leaders communicator. Both
+inside their solver group, never through the calling program leaders communicator. Both
 the operation and callbacks must return quiescently on all ranks: this is not
 recovery from deadlock, MPI/process termination, allocation exhaustion or a
-native STOP. A declaration cannot certify hidden mutable state or external I/O.
+solver STOP. A declaration cannot certify hidden mutable state or external I/O.
 
 Admission completes before capture; every capture slot is agreed before starting
 the next. If the operation fails, all captured targets roll back in reverse local
@@ -71,10 +71,10 @@ failure after field update and an LD failure preserve every checked state;
 Admission, partial capture, rollback and cleanup failure cases are included.
 These are synthetic interface checks, not a physical-material prediction.
 
-Audited aggregate native E/H/TDDFT/fast-PR HSE protection now connects through the
+Audited aggregate solver E/H/TDDFT/fast-PR HSE protection now connects through the
 separate versioned contract used by `native_steps.native_step_targets`. See
 [NATIVE_STEPPING.en.md](NATIVE_STEPPING.en.md). This light/custom example itself
-does not validate native output protection; individual recovery/checkpoint
+does not validate solver output protection; individual recovery/checkpoint
 capabilities still do not imply whole-step atomicity. Backup cost depends on the
-backend and budgets remain advisory. Imports do not initialize MPI, load native
+calculation implementation and budgets remain advisory. Imports do not initialize MPI, load solver
 libraries, compile or download anything.

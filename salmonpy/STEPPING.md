@@ -1,10 +1,10 @@
-# 明示したバックエンド契約によるステップ保護
+# 明示した計算処理仕様によるステップ保護
 
-[English](STEPPING.en.md) · Topic: `protected_step` · Paired revision: `2026-11-17.1`
+[English](STEPPING.en.md)
 
-`salmonpy.stepping` は、ホストが明示した複数の状態を一つの操作として保護します。
-`StepTarget(key, owner, capture, rollback, release=None)` でバックエンド側の完全な
-退避・復元契約を指定します。トークンは各ランク内に保持し、SALMONpyはコピー・直列化・
+`salmonpy.stepping` は、呼び出し元プログラムが明示した複数の状態を一つの操作として保護します。
+`StepTarget(key, owner, capture, rollback, release=None)` で計算処理側の完全な
+退避・復元仕様を指定します。トークンは各ランク内に保持し、SALMONpyはコピー・直列化・
 MPI転送・内容解釈をしません。`capture()` は状態を変更しません。
 `rollback(token)` は、数値状態だけでなく時計・キャッシュ・失敗フラグ・再試行に必要な
 副作用も戻します。`release(token)` は退避資源だけを解放します。
@@ -16,7 +16,7 @@ MPI転送・内容解釈をしません。`capture()` は状態を変更しま�
 ```python
 from salmonpy.stepping import StepTarget, StepRecoveryError, guarded_step
 
-# 自作バックエンドが完全な巻戻しを保証するメソッドを明示します。
+# 自作の計算コードが完全な巻戻しを保証するメソッドを明示します。
 target = StepTarget("material", state, state.capture, state.rollback, state.release)
 try:
     result = guarded_step(lambda: state.step(A), [target])
@@ -28,9 +28,9 @@ except StepRecoveryError as error:
 
 MPIでは全参加ランクが `context=parallel_context` を渡します。同じ物質群内では
 対象のキー順とreleaseの有無を一致させます。群どうしの対象数は異なって構いません。
-コールバックは自群の通信だけを使い、ホストのleaders通信へ入りません。操作・
+コールバックは自群の通信だけを使い、呼び出し元プログラムのleaders通信へ入りません。操作・
 コールバックが全ランクで通信を終えて戻ることが前提です。デッドロック、MPI／
-プロセス停止、メモリ枯渇、native STOPからの復帰ではありません。宣言だけで
+プロセス停止、メモリ枯渇、計算処理 STOPからの復帰ではありません。宣言だけで
 隠れた可変状態や外部I/Oの正しさが認証されることもありません。
 
 事前検査後、退避を一対象ずつ全群で合意します。操作の途中で失敗したら、成功した
@@ -62,8 +62,8 @@ Multiscale1D 1ランク、LD 1ランク、SBE 1ランク、自作モデル3ラ�
 ステップが通常実行と完全一致します。過去の伝播を再計算しません。事前拒否・一部退避
 失敗・復元失敗・解放失敗も検査します。合成模型による実装確認で、実材料の予測ではありません。
 
-native E/H／TDDFT／高速PR版HSEの監査済み全体保護は、別の版付き契約を持つ
+FDTDのE/H更新／TDDFT／高速PR版HSEの監査済み全体保護は、別の版付き仕様を持つ
 `native_steps.native_step_targets` で接続します。[NATIVE_STEPPING.md](NATIVE_STEPPING.md)
-を参照してください。この軽量／自作例自体はnative全体の出力保護の検証ではなく、個別の
-数値復帰・checkpoint能力から全体の原子性は推定しません。退避費用はバックエンドに依存し、
-予算は警告のみです。import時のMPI初期化・nativeロード・ビルド・ダウンロードはありません。
+を参照してください。この軽量／自作例自体は計算処理全体の出力保護の検証ではなく、個別の
+数値復帰・checkpoint能力から全体の原子性は推定しません。退避費用は計算処理に依存し、
+予算は警告のみです。import時のMPI初期化・計算処理ロード・ビルド・ダウンロードはありません。

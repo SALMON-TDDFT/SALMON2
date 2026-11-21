@@ -23,8 +23,8 @@ with PointRun({'p': rebuilt_configured_initial}, run_id='experiment-1') as run:
 
 The outer loader requires exact run_id, point_id, material_id/definition_digest
 and optional initial_state_id/digest. It rejects different points/runs before any
-backend restore. Reusing a run ID here means resuming that run, not creating a
-branch. Model objects may be newly constructed; native content/runtime/dt/capacity/
+calculation implementation restore. Reusing a run ID here means resuming that run, not creating a
+branch. Model objects may be newly constructed; solver content/runtime/dt/capacity/
 thread checks still apply. This is not a model factory or arbitrary restart converter.
 
 The envelope hashes the inner manifest; the existing loader verifies its arrays

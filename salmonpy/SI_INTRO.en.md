@@ -1,6 +1,6 @@
 # Si: from an installed wheel to charge current
 
-[日本語](SI_INTRO.md) · Topic: `si_intro` · Paired revision: `2026-11-14.2`
+[日本語](SI_INTRO.md)
 
 This starter calculates a real self-consistent Si ground state, then propagates
 it under a prescribed A/c pulse and checks the charge current against a fixed
@@ -70,7 +70,7 @@ prepared directory; do not erase failed outputs to make the command succeed.
 
 The calculation report is `new-si/result/report.json`. Read calculation and
 numerical-validation outcomes separately from optional resource measurements.
-A validation failure is a failure even when the native calculation completed.
+A validation failure is a failure even when the solver calculation completed.
 `result/gs/native/stdout.log` keeps the GS log; `result/rt` keeps the response
 archive. `result/current.csv` and `result/current.npz` contain time, A/c and j.
 CSV columns are `time_au, Ac_x_au, Ac_y_au, Ac_z_au, j_x_au, j_y_au, j_z_au`. The current is **physical charge-current density j**, in atomic
@@ -100,7 +100,7 @@ separate grid, k-point, state-count, time-step, duration and pulse checks.
 commit `3322d0561c0cad5180679136b3eddbe8b909487c`; its SHA256 is
 `8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c`.
 The upstream Apache-2.0 license is retained as `LICENSE.txt`. This legacy KY file
-has no embedded generator-XC metadata; its provenance is the pinned PZ Si
+has no in-process generator-XC metadata; its provenance is the pinned PZ Si
 example, not an inferred metadata certification. GS→RT uses the same saved
 physical input and pseudopotential. The fixed starter is not an arbitrary-GS
 compatibility validator.

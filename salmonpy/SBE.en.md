@@ -1,6 +1,6 @@
-# SBE state ownership and persistent native handles
+# SBE state ownership and persistent solver handles
 
-[日本語](SBE.md) · Topic: `sbe` · Paired revision: `2026-11-14.1`
+[日本語](SBE.md)
 
 Keep using SBEInitialState/new_state/step(A). A is Ac=A/c; public current is charge
 current density j. matter_current retains SALMON matter current J=−j. Initial
@@ -21,7 +21,7 @@ Model matrices, weights, band differences and occupations are prepared once per
 initial model and shared by its independent states. Each state owns density,
 previous A and current. A normal step sends A3 and receives J3; model matrices no
 longer copy each call. density/snapshot explicitly export the dense matrix.
-The existing velocity-gauge kernels, arithmetic order and outer-k OpenMP directives
+The existing velocity-gauge calculation routines, arithmetic order and outer-k OpenMP directives
 are unchanged. This does not newly enable OpenMP in wheel builds.
 
 ## Loading and numerical method
@@ -50,31 +50,31 @@ current with scalar IEEE predicates, then swap accepted buffers. Numerical
 rejection preserves density,A,current and clock. Snapshot restore validates
 before committing; existing same-model/fixed-dt/time-origin compatibility remains.
 
-close releases the native state and is idempotent. Closed states reject step,
+close releases the calculation state and is idempotent. Closed states reject step,
 snapshot,restore and density export; the last clock/current remain readable.
 Use context managers or explicit close. GC provides supplemental cleanup for
-existing callers; live states keep their native model alive. Native model cache
+existing callers; live states keep their solver model alive. solver model cache
 lifetime follows the Python initial model.
 
 Used initial models remain data-only for asdict,pickle and deepcopy. Process-local
 handles are excluded and rebuilt at the destination. This is not a contract to
 pickle evolving states or opaque snapshot tokens for restart.
 
-Models/states are not thread-shareable; native registry calls are serialized.
+Models/states are not thread-shareable; solver registry calls are serialized.
 Existing bind_material point-MPI distribution remains available.
 
 ## Memory and measurements
 
 For N=nbands²*nkpoints, two complex128 densities consume32N bytes per state:
-accepted data plus rollback workspace. One native read-only model copy is held
+accepted data plus rollback workspace. One solver read-only model copy is held
 in addition to Python initial arrays, approximately104N+16*nbands*nkpoints+
-8*nkpoints bytes. Structs,small vectors,kernel workspaces and snapshot temporaries
+8*nkpoints bytes. Structs,small vectors,calculation routine workspaces and snapshot temporaries
 are excluded.
 
 Resident memory need not decrease: many idle states retain extra trial buffers.
 Check both copy costs and memory budget. There is no arbitrary machine-wide cap;
 integer size overflow and explicit allocate failures are rejected. Automatic
-workspace allocation failure inside unchanged kernels is not guaranteed recoverable.
+workspace allocation failure inside unchanged calculation routines is not guaranteed recoverable.
 
 Manufactured600step,3repeat isolated-process cases reduced modeled explicit copies
 by about9×, with measured speedups around1.02–1.03×. Current/density traces were
@@ -85,10 +85,10 @@ These tests establish neither material physics nor large-system performance.
 
 ## Building and scope
 
-Matching wheels contain the new native kernel; import never builds it. Source
+Matching wheels contain the new compiled calculation routine; import never builds it. Source
 checkouts with old binaries require an explicit rebuild and never silently fall
 back to stateless stepping. To preserve an existing fixed binary, build/install
 separately and use tools/test_source_sbe_handles.py LIBRARY for validation.
-LD handle migration, multiple native TDDFT contexts and a public SBE ABI1 plugin
+LD handle migration, multiple TDDFT called directly from Python contexts and a public SBE ABI1 plugin
 remain separate work. Internal sp_sbe_* symbols implement the Python adapter,
 not the public material ABI1 query table.

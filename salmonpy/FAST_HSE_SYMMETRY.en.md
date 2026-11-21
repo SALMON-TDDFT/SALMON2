@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.10`
+[日本語](FAST_HSE_SYMMETRY.md)
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -13,20 +13,20 @@ the fast-PR algorithm.
 | Fast-PR exchange core | Independent symmetry maps/phase caches/FFT owners; tested scalar periodic CPU, full q, one/two internal k ranks |
 | Symmetry/orbit/ACE comparison | Reduced4 k representatives vs independently enumerated full8 k points; C2z and mirror-x groups, different cells/omega/sources |
 | Internal Fortran TDDFT | Explicit opt-in, one initialization/process/internal-k1/2, Taylor/PT-CN including learned modes; direct/staged resume tested |
-| Python/native-C/FDTD | Explicit new-protocol allow_symmetry opt-in; groups1/2 Taylor/PT-CN, mixed tests; default remains denied |
+| Python, C and FDTD interfaces | Explicit new-protocol allow_symmetry opt-in; groups1/2 Taylor/PT-CN, mixed tests; default remains denied |
 | Checkpoint | Internal exchange V2 and explicit internal TDDFT direct/staged resume tested; bounded public protected mixed resume tested |
 | Symmetry internal MPI k2 | Explicit new capability; full/reduced comparison and direct resume verified |
 
 ## Independent exchange owners
 
 The internal `exx_bind_system` core can now admit symmetry within the bounded
-one/two-k-rank profile. Each system retains its own k-point configuration and each
+one/two-k-rank configuration. Each system retains its own k-point configuration and each
 HSE owner retains its own symmetry map, phases and FFT resources. The full-grid
 check uses that system's ngrid, primitive cell and spacing, without selecting from
 shared num_rgrid. Dimension/count mismatch or an unsupported owner layout rejects
 before refresh/action mutation when using the declared rt_status entry. Other
-invalid symmetry operations/atoms/weights may still terminate native execution.
-The admission result is not a general numerical-failure recovery guarantee.
+invalid symmetry operations/atoms/weights may still terminate solver execution.
+The input checking result is not a general numerical-failure recovery guarantee.
 The core admits Taylor/ACE with off/strict/learned factors and PT-CN with off/learned factors. New combinations require the history capability described below; full-action remains factor-off test-only.
 
 Create a fresh owner when changing cell/material/group settings; mutating live
@@ -40,7 +40,7 @@ rejection and close/reopen. Full-action and ACE, ordinary star expansion and fas
 orbit reuse pass OMP1/2 with one/two MPI processes. MPI processes use different model values and call schedules; outputs are checked
 for finiteness as well as agreement. These are small exchange-core
 regressions, not a converged material result or reduced-k TDDFT validation.
-The native probe is packaged under
+The solver probe is packaged under
 `_runtime_source/tests/native/test_hse_symmetry_resources.f90`; compilation is
 explicit and requires matching audited fast-PR modules/library.
 
@@ -59,16 +59,16 @@ The TDDFT adapter invokes the owner check before numerical backup/propagation
 and agrees guard failure collectively. Tests cover independent C2z/mirror-x
 owners, a rotated cell, tiny/huge fields, invalid values, stale configuration
 and closed owners. This checks the field/map boundary, not all symmetry data
-or native initialization. Default worker/native-C opening and coupled-checkpoint prohibitions
+or solver initialization. Default opening a calculation process or the C interface and coupled-checkpoint prohibitions
 remain unless the explicit public opt-in below is selected; this is not unrestricted support. The explicit
-native probe is `_runtime_source/tests/native/test_hse_symmetry_field.f90`.
+solver probe is `_runtime_source/tests/native/test_hse_symmetry_field.f90`.
 
 ## Internal symmetry checkpoint
 
 The existing internal `hse_checkpoint_write/read/capture/install` now support a
 value-only symmetry map/cache for the admitted scalar CPU/full-q/internal-k1/2
 exchange core. Non-reduced owners still write V1 byte-for-byte. Symmetric owners
-write same-binary V2: retained map, kernel identity, source/ACE/history values and
+write same-binary V2: retained map, calculation routine identity, source/ACE/history values and
 optional complete phase cache. The caller authenticates the archive and model;
 this raw stream is not a standalone portable interchange format.
 
@@ -79,12 +79,12 @@ before installation; validate-only and staged reads leave the live state intact.
 A truncated stream, differing map/phase partition or malformed cache rejects.
 Installation moves value arrays only, leaving live FFT/C/MPI owners untouched.
 
-The native probe `_runtime_source/tests/native/test_hse_symmetry_checkpoint.f90`
+The solver probe `_runtime_source/tests/native/test_hse_symmetry_checkpoint.f90`
 checks full/ACE, star/orbits, cache on/off, OMP1/2 and MPI1/2 processes using
 independent COMM_SELF cores. Restored action/energy and subsequent refresh/action
 checkpoint bytes match continuous core execution, including reopening an owner.
 This is exchange-core persistence; the separate internal TDDFT tests are described below.
-Ordinary/default Python/native-C init stays symmetry-denied; the explicit opt-in is described below. Current learned/PT-CN symmetry, internal-k MPI and ordinary mixed failure/resume coverage are described below.
+Ordinary/default initialization through Python or C stays symmetry-denied; the explicit opt-in is described below. Current learned/PT-CN symmetry, internal-k MPI and ordinary mixed failure/resume coverage are described below.
 
 ## Explicit internal TDDFT validation
 
@@ -104,9 +104,9 @@ contexts or controlled recovery from malformed initialization assets.
 The actual-A owner check returns internal status34 for a broken field little
 group, before backup or propagation. An internal caller can correct A and retry.
 The new public protocol below now declares this status; do not infer it for old libraries.
-The ordinary init/serial worker remain denied; the separate public opt-in enables the bounded profile.
+The ordinary init/serial worker remain denied; the separate public opt-in enables the bounded configuration.
 
-The native `test_hse_symmetry_tddft.f90` probe and companion
+The solver `test_hse_symmetry_tddft.f90` probe and companion
 `prepare_fast_hse_symmetry_fixture.py` / `test_fast_hse_symmetry_tddft.py` tools are
 packaged under `_runtime_source/tests/native` and `_runtime_source/tools`.
 Compile explicitly against matching MPI fast-PR modules/library, then run the
@@ -125,9 +125,9 @@ Use `NativeFastHSEBackend(build_record, work_root, allow_symmetry=True)`.
 The default False selects existing `sp_fast_hse_init`. True requires
 `sp_fast_hse_init_symmetry` and `sp_fast_hse_symmetry_protocol()==1`; the new init
 has the same `(const char *path, double dt, int capacity, double J[3])` arguments.
-The opt-in is included in backend identity, admits one/two internal k ranks, and never
+The opt-in is included in calculation implementation identity, admits one/two internal k ranks, and never
 changes the supplied operation matrices. Missing/unknown protocols reject before
-acquiring a native lifetime. Learned/PT-CN symmetry requires the history capability; full-action remains test-only.
+acquiring a solver initialization. Learned/PT-CN symmetry requires the history capability; full-action remains test-only.
 
 Only unanimous finite status34 plus the specific protocol becomes a Python
 `InputError` preserving the accepted state. Correct A before retrying. A reduced
@@ -197,8 +197,8 @@ warning-only memory budgets and paused molecular work remain unchanged.
 ## Reduced-k internal MPI (two ranks)
 
 Two internal ranks additionally require `sp_fast_hse_symmetry_kmpi_protocol()==1`.
-Old libraries reject before acquiring a native lifetime. The scalar periodic
-CPU/full-q profile is unchanged. Each rank owns contiguous
+Old libraries reject before acquiring a solver initialization. The scalar periodic
+CPU/full-q configuration is unchanged. Each rank owns contiguous
 representatives and their star phases. Empty ownership, real-space/orbital
 partitioning remains outside this validation; local representative histories are covered below.
 
@@ -226,9 +226,9 @@ uses `--mode deny-old-k2` against an old build only. Earlier COMM_SELF tests rem
 historical evidence; these numerical checks do not certify physical convergence.
 
 
-## Symmetry-file admission before initialization
+## Symmetry-file input checking before initialization
 
-Python checks `sym.dat` before loading native code, acquiring a lifetime or
+Python checks `sym.dat` before loading solver code, acquiring a lifetime or
 creating a work copy. The canonical format has three records per operation and
 four finite real values per record. D exponents, commas, `2*0` repeats and inline
 `!` comments are supported. No rewriting or missing-value substitution occurs.
@@ -236,13 +236,13 @@ The Fortran disabled-axis filter is applied before checking retained signed
 permutations, identity, duplicates modulo lattice translations and group closure.
 
 A malformed file on one rank produces collective `InputError` for the entire
-solver group. No native lifetime has been acquired: repair the original input,
+solver group. No solver initialization has been acquired: repair the original input,
 construct a new material provider and retry. Editing an already prepared
 provider's inputs is still rejected by existing hash checks.
-The geometry admission below checks cells, atomic/species mapping and grids.
+The geometry input checking below checks cells, atomic/species mapping and grids.
 Generated k-stars, PP references/plain KY and supported legacy GS structural
 checks are also available. Physical GS identity, all non-KY contents and general
-native STOP recovery remain outside this scope.
+solver STOP recovery remain outside this scope.
 
 Add `--admission-fault truncated`, `nonfinite` or `nonclosed` to the preceding
 save command to corrupt only the last rank of each group and verify rejection,
@@ -251,15 +251,15 @@ repair and subsequent start. Normal input/numerical formulas remain unchanged.
 Axis flags must contain one to three lowercase `y`/`n` characters; unsupported forms are rejected rather than silently normalized.
 
 
-## Cell, atom and grid admission
+## Cell, atom and grid input checking
 
 For periodic fast-PR input with or without symmetry, `NativeFastHSEBackend.create_state`
-checks effective geometry before native loading/lifetime/work-copy creation.
+checks effective geometry before solver loading/lifetime/work-copy creation.
 No ASE/f90nml dependency is added. Every solver rank must enter the collective
 call. Repair rejected source input, construct a new provider and retry.
 
-- Cells follow native priorities: al, diagonal al_vec1..3, num_rgrid*dl, and detect off-axis vectors. Finite positive lengths/volume and a consistent inverse are required. The corrected native core also admits non-axis-aligned, permuted and left-handed nonsingular cells.
-- Grid counts/spacing and native integer bounds are checked. Resolution follows native int((length+1e-10)/spacing), including its spacing-to-cell tolerance; no ceiling, repair or input rewriting.
+- Cells follow solver priorities: al, diagonal al_vec1..3, num_rgrid*dl, and detect off-axis vectors. Finite positive lengths/volume and a consistent inverse are required. The corrected solver core also admits non-axis-aligned, permuted and left-handed nonsingular cells.
+- Grid counts/spacing and solver integer bounds are checked. Resolution follows solver int((length+1e-10)/spacing), including its spacing-to-cell tolerance; no ceiling, repair or input rewriting.
 - One explicit inline or bundle-local Cartesian/reduced atom source is required. Counts, finite coordinates and species IDs1..nelem are checked. The existing fast-PR adapter remains au-only.
 - With symmetry, check Cartesian cell isometries, integer grid maps (corner residual/index bounds, no full-grid allocation) and unique species-preserving atom permutations.
 
@@ -272,7 +272,7 @@ Use `--admission-fault cell|cell-metric|cell-singular|atoms|grid|grid-translatio
 probe to corrupt one rank of each group and check collective rejection without
 lifetime acquisition, repair and normal start. Current/energy traces and direct
 resume remain unchanged. Supported k/PP/legacy-GS structural checks do not
-authenticate physical GS identity, every PP format, all native initialization
+authenticate physical GS identity, every PP format, all solver initialization
 paths or physical convergence.
 
 Old binaries hit ACE initialization STOP on axis-permuted fixtures. The corrected
@@ -281,7 +281,7 @@ Primitive axes and orbital records are not reordered.
 
 ## General cells and x/y/circular polarization
 
-The external field is a Cartesian three-vector A/c. Attached-host, zero-impulse
+The external field is a Cartesian three-vector A/c. Attached-calling program, zero-impulse
 `tddft_response` initializes at A=0 and checks the actual vector at every step.
 Ordinary batch initialization keeps its previous checks. No fixed z polarization,
 field projection, tiny-component removal or automatic symmetry change is imposed.
@@ -298,11 +298,11 @@ incompatible with that reduced model is refused before updating, preserving the
 accepted state. Use a matching full-k initial state when no suitable group exists;
 arbitrary GS data are not automatically converted and groups are not changed mid-run.
 
-General cells use native column-vector lengths for grid resolution and the full
+General cells use solver column-vector lengths for grid resolution and the full
 cell matrix for phases, k maps and Cartesian rotations. General-cell symmetry
 requires `sp_fast_hse_general_cell_protocol()==1`; retained groups not preserving
 z additionally require `sp_fast_hse_symmetry_field_protocol()==1`. Missing protocols
-reject before native lifetime acquisition. Old full-k and ordinary z-preserving
+reject before solver initialization acquisition. Old full-k and ordinary z-preserving
 diagonal-cell paths do not require unnecessary new protocols.
 
 Rotated orthogonal, left-handed, xy-sheared and z-permuted cells are compared using
@@ -314,7 +314,7 @@ regressions do not certify real-material convergence.
 python tools/test_fast_hse_general_cell_mpi.py \
   NEW_BUILD FULL_K_BUNDLE REDUCED_K_BUNDLE NEW_OUTPUT --old-build OLD_BUILD
 # Optional --roundoff-reference-build ADMISSION_REFERENCE compares nonbinary
-# diagonal lengths against old kernels with only their admission rejection fixed.
+# diagonal lengths against old calculation routines with only their admission rejection fixed.
 ```
 
 Resume still requires the same binary/model/MPI partition; checkpoint encoding
@@ -330,7 +330,7 @@ Taylor does not require this additional capability.
 
 Taylor uses its existing `exx_factor_exact_interval` teacher cadence. Learned
 PT-CN requires **`exx_factor_exact_interval=1` and `yn_predictor_corrector='n'`**,
-as in the existing native method. Parameters/methods are not automatically changed.
+as in the existing solver method. Parameters/methods are not automatically changed.
 Choose them before creating a state.
 
 Histories belong to rank-local representatives. Existing numeric payloads retain
@@ -355,4 +355,4 @@ continuous trajectory bit-for-bit.
 For the ordinary FDTD mixed sample, supply matching reduced/full-k bundles with
 the same propagator and learning conditions. No mid-run method switching occurs.
 
-Optional phase-cache presence is restored as optimization state; a freshly initialized owner need not already have that allocation. Saved cache ranges are checked against trusted kernel MPI phase ownership before allocation. Static map, shape, finiteness and truncation validation remains active.
+Optional phase-cache presence is restored as optimization state; a freshly initialized owner need not already have that allocation. Saved cache ranges are checked against trusted calculation routine MPI phase ownership before allocation. Static map, shape, finiteness and truncation validation remains active.

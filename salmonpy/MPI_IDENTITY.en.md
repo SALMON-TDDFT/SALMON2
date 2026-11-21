@@ -2,7 +2,7 @@
 
 This opt-in layer connects the serial point-run record to the existing two-level
 MPI response service. It does not change integer transport IDs, rank allocation,
-A/c-to-charge-current updates, reduction, or the field solver. Native backend
+A/c-to-charge-current updates, reduction, or the field solver. solver calculation implementation
 capabilities and restrictions still apply. There is no new MPI initialization on import.
 
 All context ranks pass identical `point_record` and `point_map` to
@@ -10,7 +10,7 @@ All context ranks pass identical `point_record` and `point_map` to
 `CoupledStepper.from_multiscale(..., point_record=record, point_map=mapping)`.
 The record uses `salmonpy.point-run/1` (see [POINT_RUNS.en.md](POINT_RUNS.en.md));
 it can be built as plain data or obtained from `PointRun.record()` without creating
-serial states. Choose run_id on the host and share it before session construction;
+serial states. Choose run_id on the calling program and share it before session construction;
 do not independently generate UUIDs on every rank.
 
 ```python
@@ -34,14 +34,14 @@ must validate their source bytes and model compatibility. The cache key in
 MaterialBinding is separate from material_id. A shared binding/cache key cannot
 refer to different material or initial identities.
 
-Providers and backends receive immutable `SolverContext.point_records`, keyed by
+Providers and calculation implementations receive immutable `SolverContext.point_records`, keyed by
 integer transport point for points in their own group. Each value includes run_id,
 point_id, material_id/definition_digest and optional initial_state_id/digest.
 Their existing point_id callback argument remains an integer. Without metadata,
 point_records and `session.identity_record()` are None, preserving legacy usage.
 With metadata, identity_record returns a detached mapping containing point_run and
 mpi_point_map (transport point, user point, group name and world ranks). No new
-state wrapper is inserted around collective native states.
+state wrapper is inserted around collective calculation states.
 
 ## Collective output
 
@@ -62,7 +62,7 @@ Arrays must follow plan.point_ids order. Preserve timestamps explicitly; the wri
 does not infer them. Reserved metadata keys: point_run, point_axes, mpi_point_map.
 Read with `open_point_arrays`; it checks array hashes, point axes, user IDs and
 transport/group ownership consistency. It does not restore MPI state or restart a
-solver. All ranks must call operations in the same order. Process death and native
+solver. All ranks must call operations in the same order. Process death and solver
 MPI abort remain unrecoverable. Use a bounded launcher/job timeout. A normal output
 failure does not advance/invalidate the numerical session; retry with a fresh path.
 The output directory is never overwritten. Metadata authenticity still requires

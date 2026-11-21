@@ -2,7 +2,7 @@
 
 `bind_recorded_material(model, key=...)` reuses the existing endpoint-A adapter
 while deriving its identity from `model.record()`. Supported examples are configured
-SBE models and user Python models with explicit backend/new_state/timing contracts.
+SBE models and user Python models with explicit calculation implementation/new_state/timing contracts.
 It does not run conformance tests or initialize MPI. Prepared models are borrowed:
 close all response sessions before closing a model.
 
@@ -22,7 +22,7 @@ All ranks use the same run ID/map, and must follow the collective lifetime rules
 in [MPI_IDENTITY.en.md](MPI_IDENTITY.en.md). Integer transport order is sorted;
 user IDs are preserved verbatim. Reuse one binding object for all points sharing
 its cache key. Each point still creates its own mutable state. Each material group
-must have exactly one MPI rank; this does not parallelize a serial kernel internally.
+must have exactly one MPI rank; this does not parallelize a serial calculation routine internally.
 
 `record()` follows the [PointRun identity contract](POINT_RUNS.en.md): material ID
 and definition SHA256, optionally both initial-state ID and digest. The binding
@@ -44,7 +44,7 @@ Use the explicit LDMaterialProvider/LDResponseBackend route where that particula
 conversion is intended. TDDFT, including a ConfiguredMaterial wrapper around it,
 is rejected here: use TDDFTMaterialProvider/TDDFTResponseBackend with the verified
 managed runtime. A factory bridging configured TDDFT to that provider is still pending.
-Collective native TDDFT and restart identity are outside this helper's scope.
+Collective TDDFT called directly from Python and restart identity are outside this helper's scope.
 
 ```sh
 mpiexec -n 3 python -m salmonpy.examples.mpi_recorded_material /new/output
@@ -53,7 +53,7 @@ mpiexec -n 3 python -m salmonpy.examples.mpi_recorded_material /new/sbe-output \
 ```
 
 The first example uses a synthetic user model; the second selects a configured
-SBE model and needs the installed native SBE wheel. Both compare MPI current with
+SBE model and needs the installed solver SBE wheel. Both compare MPI current with
 the direct serial response and read saved identities back. No online data access
 or compilation occurs. Exact equality is a regression observation, not a claim of
 physical convergence or cross-platform bitwise equality.

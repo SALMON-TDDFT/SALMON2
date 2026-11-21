@@ -1,17 +1,17 @@
 # Standard TDDFT Python shared models
 
-[日本語](SHARED_TDDFT.md) · Topic: `shared_standard_tddft` · Revision: `2026-11-18.1`
+[日本語](SHARED_TDDFT.md)
 
 `NativeTDDFTBackend.open_model(initial, dt, context)` returns a
 `NativeTDDFTModel`. One model reads an immutable GS/input/PP bundle once and owns
-one work copy and one native attachment. `model.new_state(point_id)` creates an
+one work copy and one solver attachment. `model.new_state(point_id)` creates an
 independent electronic state from the original GS. States own wavefunctions,
 density/XC, A/current/time, output streams and restore/protection payloads.
-A point ID labels a state; it is not a native handle or a material definition.
+A point ID labels a state; it is not a solver handle or a material definition.
 
 Use an explicitly built/verified runtime with standard handle/model protocol1.
 Imports do not build, download, initialize MPI or fetch inputs. Reusing an
-unchanged validated runtime checks its recorded SHA256. The host owns MPI and
+unchanged validated runtime checks its recorded SHA256. The calling program owns MPI and
 calls all subgroup operations collectively on the main thread. Keep the input
 bundle/work files unchanged, with work_root outside the initial bundle.
 
@@ -47,15 +47,15 @@ finally:
 
 `checkpoint_root` must exist; save refuses an existing file. Direct load requires
 a fresh state, matching binary/inputs/dt/capacity/MPI partition and authenticated
-files. Standalone native files are host-managed, not portable archives; use the
+files. Standalone solver files are calling program-managed, not portable archives; use the
 normal mixed sample's aggregate checkpoint for provenance checks. Closing the
 model prevents new states but lets live states finish. Close every state and model
-explicitly before host MPI finalization; closing one sibling leaves others live.
+explicitly before MPI managed by the calling program finalization; closing one sibling leaves others live.
 An open idle model can create another state. This default API retains one model
 lifetime per process. Use the [explicit registry](TDDFT_REGISTRY.en.md) for
 sequential switching between different-input models; concurrent threads are unsupported.
 
-The supported profile is periodic, full-k (no symmetry reduction), unpolarized,
+The supported configuration is periodic, full-k (no symmetry reduction), unpolarized,
 fixed-ion PZ, TB-mBJ (automatic/fixed c), Libxc-PZ or Libxc-PBE, transverse
 middlepoint propagation. **dt, capacity, initial A=0, decomposition and immutable
 material input are shared.** Different materials require different MPI groups.
@@ -63,7 +63,7 @@ x/y/z and rotating A are accepted. A is Cartesian A/c, dt atomic time, and Pytho
 returns charge-current density j in atomic units. The handle result already has
 that sign; do not negate it again. RT text columns retain SALMON conventions.
 Only per-owner RT/current and energy streams are supported here; optional global
-analysis streams require the existing separate-state route. Native handle and
+analysis streams require the existing separate-state route. solver handle and
 legacy initialization must not be mixed in one process. Initialization, allocation,
 I/O and MPI failures do not gain a general recovery guarantee.
 
@@ -71,7 +71,7 @@ I/O and MPI failures do not gain a general recovery guarantee.
 
 Opt in to session ownership with `shared_model=True` and set
 `assemble_native_layers(..., points_per_group={"si-tddft": 2})`. The material
-binding's backend is this standard backend; `ranks_per_point["si-tddft"]` is the
+binding's calculation implementation is this standard calculation implementation; `ranks_per_point["si-tddft"]` is the
 size of each shared material group and must equal the decomposition product.
 The planner keeps point IDs, layer order/thickness and LD regions unchanged;
 it groups compatible electronic points instead of removing points. Default
@@ -99,7 +99,7 @@ Use `--direct-save-at 63` and a fresh invocation's `--direct-resume CHECKPOINT`
 with the same topology to save/restore field, LD, SBE and every TDDFT point without
 history replay. Protected restoration stages all owners before publication and
 retains original states on a handled staging failure. Each TDDFT state's current
-metadata is validated before native staging. Numeric restart does not merge old
+metadata is validated before solver staging. Numeric restart does not merge old
 text streams. See [coupled](COUPLED.en.md) and [distributed execution](DISTRIBUTED.en.md).
 
 ## Reproducible implementation checks
@@ -114,8 +114,8 @@ Local checks cover PZ, Libxc-PZ/PBE and automatic/fixed TB-mBJ at MPI1, orbital2
 and spatial2. The ordinary LD/SBE/two-TDDFT mixture compares independent/shared
 execution and direct resume, including a late rank-local restore failure/retry.
 These small existing fixtures verify ownership and numerical parity, not
-material convergence. No new GS data is collected and no Fortran kernels change.
-See [native C contract](STANDARD_HANDLES.en.md) for lower-level entry points.
+material convergence. No new GS data is collected and no Fortran calculation routines change.
+See [solver C contract](STANDARD_HANDLES.en.md) for lower-level entry points.
 
 ## Different material inputs: current boundary and remaining work
 
@@ -147,9 +147,9 @@ Paths are relative to the catalog, or absolute local paths. Prepare complete
 GS/PP/input bundles on a login/management machine and transfer them before a job;
 no internet, downloads or compilation are required by the loader. Default input
 is `rt.inp`, decomposition is `[1,1,1,1,1]`, width is1. Width1 uses a separate
-legacy state; width>1 explicitly uses the shared profile above. Decomposition is
+legacy state; width>1 explicitly uses the shared configuration above. Decomposition is
 (k, orbital, x, y, z); its product sets ranks per material group. Different IDs
-never share a native model, even if their input bytes happen to match. All groups
+never share a solver model, even if their input bytes happen to match. All groups
 use the coupling dt; this does not introduce subcycling.
 
 Layer `material_id` selects one catalog ID. The provided
@@ -171,7 +171,7 @@ built-in `si-tddft` or HSE ID. It is not read for custom IDs. A catalog entry fo
 conditions. Per-material input hashes, initial-state identity, MPI plan and memory
 advice use each actual bundle. `sbe-point`, `hse-point`, `drude`, `lorentz` remain
 reserved built-ins. A shared catalog can include unused declarations. Unknown
-fields, duplicate keys and invalid decomposition reject before native setup;
+fields, duplicate keys and invalid decomposition reject before solver setup;
 resource estimates stay advisory. The existing aggregate direct save/resume
 and protected failure/retry work across all material groups.
 
@@ -190,7 +190,7 @@ multi-element physical accuracy or convergence.
 
 ## Model-owned initialization input (2026-11-18)
 
-The standard native runtime now owns227 initialization values in `s_model_inputs`:
+The standard solver runtime now owns227 initialization values in `s_model_inputs`:
 cell/grid/k points, PP/XC references and coefficients, electron/occupation/mixing,
 propagation/dt/capacity/parallel settings, output choices, input units and atom
 coordinates/species/names. Allocatable inputs are deep copies; cloning or changing
@@ -198,16 +198,16 @@ the legacy parser arrays cannot change the captured model. An uncaptured record
 cannot be activated. Unit conversion tables are reconstructed from stored unit
 selectors; already converted physical inputs are not converted again.
 
-A native `rt_model` owns this record and initial A. `open_initial_state(owner,...)`
+A solver `rt_model` owns this record and initial A. `open_initial_state(owner,...)`
 receives its owner explicitly, installs a synchronous compatibility view for the
-existing initialization kernels and assigns the context a borrowed model pointer.
+existing initialization calculation routines and assigns the context a borrowed model pointer.
 Sibling states do not own/deallocate that model; an idle open model can still
 create states from the original inputs. Numerical wavefunctions, live MPI/Libxc
 owners and RT checkpoint payloads are not copied into this input record.
 
 The owned-input record, explicit initialization boundary, parser workspaces and
 defaults now support explicit registration/selection and Python model handles.
-The default API profile, numerical order and restart format remain unchanged;
+The default API configuration, numerical order and restart format remain unchanged;
 the registry adds a separate ABI. See the registry guide above.
 
 Developer validation uses `tools/test_model_input_ownership.py SOURCE NEW_OUTPUT
@@ -223,7 +223,7 @@ separately; a local GNU build is not a Fujitsu compilation certificate.
 ## Model-owned parser workspace and defaults (2026-11-18)
 
 `inputoutput.read_input(path, parser)` accepts an `s_input_parser` owned by each
-standard native model. It owns namelist status, coordinate-block flags, scratch
+standard solver model. It owns namelist status, coordinate-block flags, scratch
 connections, a fresh `defaults` record and final `values`. The original default
 assignment order/formulas and physical conversion order are retained. Defaults are
 created after that input's unit selection; preceding atom arrays and coordinate
@@ -250,11 +250,11 @@ policy is unchanged; general parser I/O/MPI failure recovery is not added.
 
 Developer test `tools/test_parser_ownership.py BUILD_JSON NEW_OUTPUT --fc mpifort
 --mpiexec mpiexec --ranks 2` uses the actual Fortran parser, with matching compiler
-module files from the build directory in the receipt. It checks A→B→A, reused
+module files from the build directory in the validation record. It checks A→B→A, reused
 workspace, different units/atom counts/Cartesian-external-reduced-absent sources,
 omitted XC/k/pulse/mixing defaults, two interleaved scratch sources and closed
 connections. Diagnostic logs match fresh-process legacy parsing exactly; existing
 named temporary-file sentinels remain unchanged. Repeat at MPI1/2. No GS data is
-needed. Native old/new XC/MPI/direct/mixed comparisons verify numerical parity.
+needed. solver old/new XC/MPI/direct/mixed comparisons verify numerical parity.
 
-With standard TDDFT timer protocol1, `state.timing_seconds` returns rank-local completed total, initialization, density and Hartree intervals in seconds. Each handle owns its timer bank; parked intervals and host/sibling work are excluded. The total excludes an unfinished running interval and may be zero while a state is live. Query collectively on the material communicator. Diagnostics are not checkpoint payloads and numerical restore does not erase spent work. Older runtimes retain normal calculations but this optional query needs an explicitly built matching runtime. This describes the standard handle capability; the separate standard singleton capability is documented in COUPLED.en.md. Threaded concurrency remains unsupported.
+With standard TDDFT timer protocol1, `state.timing_seconds` returns rank-local completed total, initialization, density and Hartree intervals in seconds. Each handle owns its timer bank; parked intervals and calling program/sibling work are excluded. The total excludes an unfinished running interval and may be zero while a state is live. Query collectively on the material communicator. Diagnostics are not checkpoint payloads and numerical restore does not erase spent work. Older runtimes retain normal calculations but this optional query needs an explicitly built matching runtime. This describes the standard handle capability; the separate standard singleton capability is documented in COUPLED.en.md. Threaded concurrency remains unsupported.

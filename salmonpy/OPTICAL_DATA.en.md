@@ -3,7 +3,7 @@
 This is a small pinned numerical subset of the RefractiveIndex.INFO database,
 explicitly distributed under CC0. Listing/loading is offline: no download,
 refit, compilation, MPI initialization or SALMON run. Unit and n/k conversions
-use the bundled Fortran kernel.
+use the bundled Fortran calculation routine.
 
 ```python
 from salmonpy.optical_materials import list_materials, load_material
@@ -33,7 +33,7 @@ resonance-position errors. The selected SciPy fits satisfy their local optimizer
 termination criteria. This is not a guarantee of a global optimum or physical accuracy.
 Keep film, temperature, orientation and doping conditions in view.
 
-The initial metal/Si subset retains66 trials:22 native,22 cold-start SciPy and22 SciPy trials including
+The initial metal/Si subset retains66 trials:22 solver,22 cold-start SciPy and22 SciPy trials including
 retained coefficients as a seed. Each pole-count record keeps the other trials in
 alternative_trials; selection minimizes the weighted fitting objective. Defaults use
 the smallest count with global RMS at most5%, recommended_dt*omega_max at least0.01,
@@ -123,5 +123,5 @@ FDTD projects the compressed isotropic tensor exactly to the existing coefficien
 retaining arithmetic and update order. The A-endpoint LD adapter accepts the same
 configuration but returns dispersive-pole current only; the field owns the instantaneous
 background. Scalar APIs remain compatible. The all-modes direction does not mean
-all solvers support general anisotropy: principal-axis diagonal native FDTD propagation is supported; off-diagonal field updates, automatic rotations and general tensor fitting are not implemented; standalone/MPI tensor material response is available.
+all solvers support general anisotropy: principal-axis diagonal FDTD called directly from Python propagation is supported; off-diagonal field updates, automatic rotations and general tensor fitting are not implemented; standalone/MPI tensor material response is available.
 No supplied component is silently dropped.

@@ -1,0 +1,9 @@
+# Legacy EM restart-reader I/O recovery
+
+Prior directory work committed/pushed as06bf7cea. Readers require collective io_status without a compatibility fallback. Read-only open/read/close are checked. Shared status gates data broadcasts;local failures agree;remap metadata/status use one header replacing three broadcasts,with allocation/payload gates. Batch rejects before consuming failed values. No ordinary-step communication changes. Failed buffers/partial initialization remain invalid;this is not whole-model atomic restoration.
+
+Source/final wheel each pass94 GNU Mac MPI1/2 cases:missing,truncated,invalid-text,directory errors;caller MPI/unit600;poisoned-buffer repaired retries;read-only archives;normal1↔2 remaps. Existing1D–5D ownership controls pass. Actual LD+FDTD64→128 resumes and1↔2 repartitions match continuous raw states;normal outputs match the prior runtime. Observation values are unchanged,with only existing copied-row trailing-space removal. Same-path failed repartition exposed metadata being overwritten before load completion;publication is now deferred until all required old data is read. Both successful and failed same-path1↔2 cases are verified;failed input sets retain identical contents. Subsequent checkpoint saves remain non-atomic across files.
+
+Both679-test suites pass(one optional skip),as do four native scalar/tensor MPI2 protected save/restore regressions and the tracked-source-only export build. Source/object prohibition checks remain enabled. No GS collected;no heavy CI manually dispatched. Close-only,physical OOM,multi-node,Fujitsu,and arbitrary corruption are not certified.
+
+Evidence: calc2026/salmonpy-restart-read-recovery-20261122/summary.json and runtime-release/build.json. Current reader changes are uncommitted. Remaining R3 work is selected init/helper I/O and auxiliary buffers;R4 ABI stability follows before group3.

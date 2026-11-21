@@ -1,6 +1,6 @@
 # 構造と最大格子間隔の指定
 
-[English](STRUCTURE.en.md) · Topic: `structure_grid` · Paired revision: `2026-11-15.1`
+[English](STRUCTURE.en.md)
 
 `salmonpy.structure` に `StructureInput`、`GridSelection`、`grid_from_spacing` を用意しました。
 ASEは構造読込・コピー時だけ必要な任意依存です。通信・計算起動、繰り返し、セル標準化、
@@ -29,7 +29,7 @@ ASE/書式やOSの例外は伝播し、別形式への自動切替・単位の�
 `atoms`は読込後のセル・原子位置・種・ASE設定のコピーです。ローダーはDFT適合を認定せず、
 電荷・磁性・非周期系に関する既存DFTの制限は維持します。
 
-## 格子の契約
+## 格子の仕様
 
 希望する最大幅をスカラーまたは3成分で、`angstrom`／`bohr`の単位付きで指定します。
 セルの入力単位は常にÅです。Bohr換算はSALMONの0.52917721067 Åを使います。
@@ -49,7 +49,7 @@ ASE/書式やOSの例外は伝播し、別形式への自動切替・単位の�
 `salmonpy.ase.dft_from_atoms` と `tddft_from_atoms` で、`grid=(...)`の代わりに
 `grid_spacing=...` と `grid_spacing_unit=...`を指定できます。点数と幅の両方、両方なし、
 幅なしの単位指定は拒否します。従来の点数指定の挙動・幾何の対応範囲は変えません。
-`states`、`kmesh`、擬ポテンシャル、XCは別途指定し、収束やランタイム対応を推測しません。
+`states`、`kmesh`、擬ポテンシャル、XCは別途指定し、収束や計算プログラム対応を推測しません。
 DFTモデルは採用点数を保存するので、詳細レポートが必要なら作成前に格子ヘルパーを使います。
 `SalmonCalculator`へ幅指定キーワードを追加したわけではなく、そちらにはヘルパーの点数を渡します。
 
