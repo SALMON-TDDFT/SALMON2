@@ -39,3 +39,13 @@ Do not add real-material physical-observable reproduction, convergence campaigns
 measured optical tables or GS/TDDFT physics calculations to required CI. Keep
 those as separately requested validation tools; any retained heavy workflow is
 manual-only. This does not waive source/object eigensolver audits.
+
+
+MPI communication policy (project lead, 2026-11-21): minimize application-wide
+collectives. Use them for necessary setup, consistent failure decisions and
+explicit final aggregation; do not add per-point/per-load global diagnostics.
+Prefer owning solver groups and point-owner routing. Coalesce compatible status
+and data agreements rather than removing finite checks, required physical
+reductions or native rollback/retry guarantees. Final reports belong on the
+reporting rank unless the caller explicitly needs replicated results. Avoid
+barriers or extra MPI-health reductions when an existing operation proves liveness.

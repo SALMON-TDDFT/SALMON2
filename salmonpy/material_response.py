@@ -180,6 +180,11 @@ class ResponseSession:
                 if mode=='leader_only' and len(owner.ranks)!=1: raise InputError('leader-only backends require one rank per group')
                 sizes=_supported_group_sizes(b.backend,len(owner.ranks),b.key)
                 descriptors.append((p,b.key,b.provider.identity,b.backend.identity,mode,reduction,float(dt),sizes))
+            rows={p:i for i,p in enumerate(context.plan.point_ids)}
+            self._local_rows=np.asarray([rows[p] for p in context.group.point_ids],dtype=np.intp)
+            self._transport_rows=np.asarray([rows[p] for g in context.plan.groups for p in g.point_ids],dtype=np.intp)
+            self._return_rows=np.argsort(self._transport_rows)
+            self._transport_counts=[3*len(g.point_ids) for g in context.plan.groups]
         except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self._agree(error)
         # Metadata agreement catches mismatched backend selection before callbacks.
@@ -372,6 +377,9 @@ class ResponseSession:
                 'logical_field_value_bytes_per_step': (len(c.plan.point_ids)*3*8 if self._field_contracts is None
                     else sum(len(v.units) for v in self._field_contracts.values())*3*8),
                 'field_metadata_bytes_counted': False,
+                'input_routing': 'owner-only Scatterv/scatter; subgroup broadcast only for owned points',
+                'received_A_rows_by_group': {g.name:len(g.point_ids) for g in c.plan.groups},
+                'response_A_history_scope': 'field leader: global; material ranks: owned rows; other rows unspecified',
                 'logical_j_bytes_per_step': len(c.plan.point_ids)*3*8,
                 'ranks': [row for group in groups for row in group]}
 
@@ -383,43 +391,57 @@ class ResponseSession:
         """
         from mpi4py import MPI
         c=self.context;error=None
+        send=None;field_values=None;local_values=None
         try:
             if self.closed or self.failed or c.closed: raise InputError('session is not usable')
             if field_packets != (self._field_contracts is not None):
                 raise InputError('use step_fields with declared field contracts, otherwise step(A)')
             if field_packets:
                 values=self._pack_fields(A)
-            elif c.group.role=='field' and c.is_leader:
-                values=np.array(A,dtype=np.float64,order='C',copy=True)
-                if values.shape!=self._A.shape or not np.isfinite(values).all(): raise InputError('finite A array of shape (points,3) required')
+                if c.group.role=='field' and c.is_leader:
+                    send=[{p:values[p] for p in group.point_ids} for group in c.plan.groups]
             else:
-                if A is not None: raise InputError('only field leader supplies A')
-                values=np.empty_like(self._A)
+                local_values=np.empty((len(c.group.point_ids),3),dtype=np.float64)
+                if c.group.role=='field' and c.is_leader:
+                    field_values=np.array(A,dtype=np.float64,order='C',copy=True)
+                    if field_values.shape!=self._A.shape or not np.isfinite(field_values).all():
+                        raise InputError('finite A array of shape (points,3) required')
+                    send=np.ascontiguousarray(field_values[self._transport_rows])
+                elif A is not None:
+                    raise InputError('only field leader supplies A')
         except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self._agree(error)
         started = self._measurements.start()
         if field_packets:
-            if c.is_leader: values=c.leaders.bcast(values,root=c.field_group)
-            values=c.solver_comm.bcast(values,root=0)
+            values=c.leaders.scatter(send,root=c.field_group) if c.is_leader else None
+            if c.group.point_ids:
+                if c.solver_comm.size>1:values=c.solver_comm.bcast(values,root=0)
+            else:
+                values={}
             from .field_input import FieldPacket, FieldValue
             error=None
             try:
+                if not isinstance(values,dict) or set(values)!=set(c.group.point_ids):
+                    raise InputError('received packet IDs differ from the owning group')
                 values={p:FieldPacket(**{q:FieldValue(**v) for q,v in packet.items()})
                         for p,packet in values.items()}
-                for p,contract in self._field_contracts.items():
-                    contract.validate(values[p],step_index=self.step_index+1)
+                for p in c.group.point_ids:
+                    self._field_contracts[p].validate(values[p],step_index=self.step_index+1)
             except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             self._agree(error)
         else:
-            if c.is_leader: c.leaders.Bcast(values,root=c.field_group)
-            c.solver_comm.Bcast(values,root=0)
+            if c.is_leader:
+                c.leaders.Scatterv([send,self._transport_counts,MPI.DOUBLE] if c.group.role=='field' else None,
+                                   local_values,root=c.field_group)
+            if c.group.point_ids and c.solver_comm.size>1:
+                c.solver_comm.Bcast(local_values,root=0)
         self._measurements.stop('A_distribution', started)
         started = self._measurements.start()
         currents=np.zeros((len(c.group.point_ids),3));error=None
         for i,point in enumerate(c.group.point_ids):
-            k=c.plan.point_ids.index(point);b=self.bindings[point]
+            b=self.bindings[point]
             try:
-                raw = self._adapters[point].step_fields(values[point]) if field_packets else self._adapters[point].step(values[k].copy())
+                raw = self._adapters[point].step_fields(values[point]) if field_packets else self._adapters[point].step(local_values[i].copy())
                 j=np.array(raw,dtype=np.float64,order="C",copy=True)
                 if j.shape!=(3,) or not np.isfinite(j).all(): raise InputError('backend must return finite physical current density (3,)')
             except Exception as exc: error=f'{type(exc).__name__}: {exc}'
@@ -438,15 +460,17 @@ class ResponseSession:
         started = self._measurements.start()
         result=None
         if c.is_leader:
-            counts=[len(g.point_ids)*3 for g in c.plan.groups]
+            counts=self._transport_counts
             packed=np.empty(sum(counts),dtype=np.float64) if c.group.role=='field' else None
             c.leaders.Gatherv(currents.ravel(),[packed,counts,MPI.DOUBLE] if packed is not None else None,root=c.field_group)
             if packed is not None:
-                order=[p for g in c.plan.groups for p in g.point_ids]
-                result=np.array([packed.reshape(-1,3)[order.index(p)] for p in c.plan.point_ids])
+                result=np.ascontiguousarray(packed.reshape(-1,3)[self._return_rows])
         if c.group.role=='field': result=c.solver_comm.bcast(result,root=0)
         self._measurements.stop('j_collection', started)
-        if not field_packets: self._A=values
+        if not field_packets:
+            # Keep the checkpoint's global-indexed shape, not replicated drives.
+            if c.group.role=='field' and c.is_leader:self._A=field_values
+            elif c.group.point_ids:self._A[self._local_rows]=local_values
         self.step_index+=1
         return result
 
@@ -509,16 +533,15 @@ class LDMaterialProvider:
     def __init__(self,model):
         import hashlib,json
         from dataclasses import asdict
-        from .ld import LorentzDrude
-        if not isinstance(model,LorentzDrude): raise InputTypeError('LorentzDrude model required')
+        from .ld import LorentzDrude,LDModelConfig,LDTensorModelConfig
+        if isinstance(model,(LDModelConfig,LDTensorModelConfig)):model=LorentzDrude.from_config(model)
+        if not isinstance(model,LorentzDrude): raise InputTypeError('LorentzDrude model or LD tensor config required')
         self._config=model.config
         self.identity='salmonpy.ld/'+hashlib.sha256(json.dumps(asdict(self._config),sort_keys=True).encode()).hexdigest()
 
     def prepare(self,context):
         from .ld import LorentzDrude
-        c=self._config
-        return LorentzDrude(plasma_frequency=c.plasma_frequency,strength=c.strength,
-                            resonance=c.resonance,damping=c.damping,epsilon_infinity=c.epsilon_infinity)
+        return LorentzDrude.from_config(self._config)
 
 
 class LDResponseBackend:
@@ -561,7 +584,7 @@ class TDDFTMaterialProvider:
     not invoke DFT: supply an existing GS bundle. Close the provider after sessions.
     Each macro point's worker copies the snapshot and owns its evolution history.
     """
-    def __init__(self,directory,input_file,*,runtime,max_steps=1000,threads=1,timeout=300.):
+    def __init__(self,directory,input_file,*,runtime,max_steps=1000,threads=1,timeout=300.,runtime_validation=None):
         from pathlib import Path
         import hashlib,json
         from .runtime import load_runtime
@@ -569,7 +592,8 @@ class TDDFTMaterialProvider:
         from .ld import _positive
         from .tddft import _digest
         self._runtime=Path(runtime).expanduser().resolve()
-        self._executable=load_runtime(self._runtime,required=['tddft','single-rank'])
+        self._executable=load_runtime(self._runtime,required=['tddft','single-rank'],
+            **({} if runtime_validation is None else {'validation':runtime_validation}))
         self._directory=Path(directory).expanduser().resolve()
         self._input=Path(input_file)
         if self._input.is_absolute() or '..' in self._input.parts: raise InputError('relative bundle input required')
@@ -622,12 +646,16 @@ class TDDFTResponseBackend:
     execution='leader_only'
     reduction='leader'
 
+    def __init__(self,*,runtime_validation=None):
+        self._runtime_validation=runtime_validation
+
     def create_state(self,initial,point_id,dt,context):
         from .tddft import TDDFTInitialState
         from .runtime import load_runtime
         if not isinstance(initial,TDDFTPreparedState) or not isinstance(initial.initial,TDDFTInitialState):
             raise InputTypeError('TDDFTPreparedState with managed serial runtime required')
-        verified=load_runtime(initial.runtime,required=['tddft','single-rank'])
+        verified=load_runtime(initial.runtime,required=['tddft','single-rank'],
+            **({} if self._runtime_validation is None else {'validation':self._runtime_validation}))
         if verified.sha256!=initial.initial.executable.sha256:
             raise InputError('initial-state executable differs from verified serial runtime')
         from dataclasses import replace

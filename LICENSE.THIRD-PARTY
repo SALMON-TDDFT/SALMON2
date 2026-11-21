@@ -32,3 +32,16 @@ Bundled full solver snapshots: see runtime/sources/standard/LICENSE.THIRD-PARTY
 and runtime/sources/hse-fast-reference/LICENSE.THIRD-PARTY, including their
 ACKNOWLEDGEMENTS and file-specific license headers. These notices are retained
 in installed source resources and in explicitly packaged solver runtimes.
+
+Optical numerical reference data
+-------------------------------
+The curated numerical subset in salmonpy/optical_data/raw is from the
+refractiveindex.info-database, distributed under CC0 1.0 Universal by its
+maintainer. Its unmodified CC0 text is salmonpy/optical_data/CC0-1.0.txt.
+Pinned source commit, original file paths/URLs, SHA256 and original experimental
+citations are in salmonpy/optical_data/catalog.json. Derived passive LD candidates
+are labeled separately from the original measurements. Original journal articles,
+figures and website content are not included. This data dedication does not
+change the license of SALMONpy code or the original publications.
+Database citation: M. N. Polyanskiy, Scientific Data 11, 94 (2024),
+https://doi.org/10.1038/s41597-023-02898-2.

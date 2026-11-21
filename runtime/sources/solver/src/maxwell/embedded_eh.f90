@@ -212,7 +212,7 @@ end function
     ! Only the documented early parameter failures are retryable. Unhandled
     ! later numerical/I/O/allocation failures still consume this lifetime.
     used=.true.
-    call eh_init(state%fs,state%fe,state%ld,admission,grid_ready)
+    call eh_init(state%fs,state%fe,state%ld,admission,grid_ready,excluded_response_points=indices)
     call comm_get_max(admission,nproc_group_global)
     if(admission/=0)then
       ! Release communication caches before the child communicator they borrow.
@@ -368,6 +368,7 @@ end function
       valid=.true.
       select case(stage)
       case(20)
+        if(state%fe%tensor_failed)valid=.false.
         call accumulate_finite(state%fe%ex_y,valid)
         call accumulate_finite(state%fe%ex_z,valid)
         call accumulate_finite(state%fe%ey_x,valid)
@@ -563,6 +564,7 @@ end function
   end function sp_eh_checkpoint
 
   subroutine eh_checkpoint_stream(unit,loading,fe,ld,current,step,ios)
+    use salmon_global,only:dt_em
     integer,intent(in) :: unit
     logical,intent(in) :: loading
     type(ls_fdtd_eh),intent(inout) :: fe
@@ -571,26 +573,84 @@ end function
     integer,intent(inout) :: step
     integer,intent(out) :: ios
     character(24),parameter :: signature='SALMONPY_EH_CHECKPOINT_1'
-    character(24) :: magic
+    character(24) :: magic,expected_magic
+    real(8),allocatable::tensor_context(:,:,:,:)
+    real(8)::tensor_options(6)
+    real(8),allocatable::tensor_rates(:,:,:)
+    integer::q,axis
     integer :: topology(18),expected(18),capacity,tail,ld_meta(3),iteration(3)
     integer,allocatable :: points(:,:)
     real(8) :: maxima(2)
     logical :: obs
     ios=0
+    expected_magic=signature
+    if(fe%tensor_enabled)expected_magic='SALMONPY_EH_TENSOR_CP_1'
+    if(fe%subpixel_enabled)expected_magic='SALMONPY_EH_SUBPIXEL_CP1'
     expected=[state%fs%lg%is,state%fs%lg%ie,state%fs%mg%is,state%fs%mg%ie, &
               state%fs%mg%is_array,state%fs%mg%ie_array]
     if(loading)then
       read(unit,iostat=ios)magic,topology,capacity,step,ld_meta,obs
       if(ios/=0)return
-      if(magic/=signature.or.any(topology/=expected).or.capacity/=state%capacity.or. &
+      if(magic/=expected_magic.or.any(topology/=expected).or.capacity/=state%capacity.or. &
          step<0.or.step>capacity.or.any(ld_meta/=[merge(1,0,ld%enabled),ld%num_ld,ld%max_pole_num_ld]).or. &
          (obs.neqv.fe%flag_obs))then
         ios=1;return
       endif
     else
-      write(unit,iostat=ios)signature,expected,state%capacity,step, &
+      write(unit,iostat=ios)expected_magic,expected,state%capacity,step, &
         [merge(1,0,ld%enabled),ld%num_ld,ld%max_pole_num_ld],fe%flag_obs
       if(ios/=0)return
+    endif
+    if(fe%tensor_enabled)then
+      tensor_context=fe%tensor_raw
+      call checkpoint_r4(unit,loading,tensor_context,ios)
+      if(ios/=0)return
+      if(any(tensor_context/=fe%tensor_raw))then
+        ios=1;return
+      endif
+      tensor_context=real(fe%tensor_owner,8)
+      call checkpoint_r4(unit,loading,tensor_context,ios)
+      if(ios/=0)return
+      if(any(tensor_context/=real(fe%tensor_owner,8)))then
+        ios=1;return
+      endif
+      do q=0,ubound(fe%tensor_weight,5)
+        tensor_context=fe%tensor_weight(:,:,:,:,q)
+        call checkpoint_r4(unit,loading,tensor_context,ios)
+        if(ios/=0)return
+        if(any(tensor_context/=fe%tensor_weight(:,:,:,:,q)))then
+          ios=1;return
+        endif
+      enddo
+      if(fe%subpixel_enabled)then
+        do q=0,ubound(fe%subpixel_corr,6)
+          do axis=1,3
+            tensor_context=fe%subpixel_corr(:,axis,:,:,:,q)
+            call checkpoint_r4(unit,loading,tensor_context,ios)
+            if(ios/=0)return
+            if(any(tensor_context/=fe%subpixel_corr(:,axis,:,:,:,q)))then
+              ios=1;return
+            endif
+          enddo
+        enddo
+      endif
+      tensor_rates=fe%tensor_rates
+      call checkpoint_r3(unit,loading,tensor_rates,ios)
+      if(ios/=0)return
+      if(any(tensor_rates/=fe%tensor_rates))then
+        ios=1;return
+      endif
+      tensor_options=[fe%tensor_rtol,real(fe%tensor_maxiter,8),dt_em,state%fs%hgs]
+      if(loading)then
+        read(unit,iostat=ios)tensor_options
+        if(ios/=0)return
+        if(any(tensor_options/=[fe%tensor_rtol,real(fe%tensor_maxiter,8),dt_em,state%fs%hgs]))then
+          ios=1;return
+        endif
+      else
+        write(unit,iostat=ios)tensor_options
+        if(ios/=0)return
+      endif
     endif
     points=state%points
     call checkpoint_i2(unit,loading,points,ios)

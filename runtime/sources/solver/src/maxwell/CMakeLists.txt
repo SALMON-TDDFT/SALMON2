@@ -1,5 +1,6 @@
 set(SOURCES
     common_maxwell.f90
+    subpixel_smoothing.f90
     lorentz_drude.f90
     fdtd_eh_kernel.f90
     fdtd_eh.f90

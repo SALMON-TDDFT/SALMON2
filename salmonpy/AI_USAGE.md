@@ -970,3 +970,29 @@ FDTDとHSE履歴検査のIEEE問い合わせはスカラーに限定し全要素
 R1対応native FDTD closeはpending復元候補とstep_savedを解放する。途中終了で完走時解析を強制しない。任意のsp_eh_resourcesはfield/step_saved/pendingの3確保フラグのみで総メモリ・MPI解放の保証ではない。R2のMPI所有権対応と混同しない。
 
 R2 native FDTDはMPI子groupをfield所有にしcache終了後に回収する。sp_eh_mpi_resourcesはlive/slots/field_ownedの3値で、slots残存をリークと判定しない。親接続を外す前のlive数と別所有者の保持、detach後の0を検証する。既存sp_eh_resourcesの3確保フラグとは別。分割・更新順・数値checkpoint・一場寿命制約は同じで、一般MPI障害復帰や複数場同時実行と説明しない。
+
+相反テンソルLDはTensorLorentzDrudeを使う。強度は(poles,3,3)の実対称正半定値、背景は(3,3)の実対称正定値。方向未知は従来どおり独立1成分の等方モデル。単独応答・MPI材料入口・process-local snapshot/restoreは対応。native FDTDは主軸が格子に沿う対角テンソルに対応し、非対角電場更新は未接続。input_textとinput_assetsの組を保持し、scalarへ縮約して通してはいけない。permittivity_tensorで成分を明示し、A端点のJは分散極だけ、背景行列は場側が所有する。非相反応答・自動回転・一般テンソルフィット・新しいディスク再開形式までは実装済みと説明しない。
+
+波長板サンプルfdtd_waveplateは--runを省くとプレビューのみで計算を開始しない。人工的な無損失板の検証であり、実酸化物の材料データや実験的精度保証と説明しない。carrierのStokes診断はFortran、比較は真空中平板のFresnel・多重反射込み。
+
+相反非対角のnative E/H FDTDはFDTD_MATERIALS.md/enの入口を使います。Yee補間と連立E更新、分散J→P→Q、直接チェックポイントに接続済みです。等方／対角と分けて資産を生成し、古いランタイムへ渡さないでください。tensor_maxiter到達は警告、非有限試行は状態保持して再試行です。回転波長板はexamples.fdtd_waveplateの--angle-degreesを指定し、既定はプレビューのみです。別のA-only場への異方性背景や反対称磁気光学まで対応したと解釈しないでください。
+
+
+## 全体通信を最小限にする
+
+ジョブ全体のcollectiveは初期化、必要な異常合意、明示的な最終集約に絞ります。
+物質点ごと・ランタイム読み込みごとの全体通信を追加しません。担当グループと
+点所有者への受け渡しを優先し、診断結果は原則として代表ランクだけへ集めます。
+既存の通信が生存を確認できる場合、追加のBarrierや生存確認allreduceを入れません。
+同じ段階の状態・データ検査を一つにまとめても、有限性検査、物理的に必要な総和、
+異常時の一貫した拒否、保存／復元・再試行の保証は維持します。
+
+検証専用mpi_runtime_receiptは初期bcast一回と最後のroot gather一回で終了します。
+ランタイムの各再利用はMPI通信をしません。NativeEHField.advanceのPython側検査は
+担当場グループ内で六回から二回へ統合しています。native内部の通信はこの回数に
+含めません。ResponseSessionのAは所有点分だけをScattervで配り、場パケットも担当点の
+辞書だけをscatterします。担当点が無い場グループと単一ランク群への追加配布は
+省きます。Jは所有点分を代表へ回収し、場グループには必要な全点Jを返します。
+物質群のprivateなresponse._Aは担当行だけが現在値です。全点の履歴には場の代表が
+保存した出力を使い、物質群の非担当行を全点データとして扱わないでください。
+残る外側の異常合意やnative場内部の空間所有通信は別途検証が必要です。

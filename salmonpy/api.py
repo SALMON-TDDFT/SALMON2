@@ -7,8 +7,9 @@ private names and incidental imports are not public APIs.
 from types import MappingProxyType
 
 __all__ = ['PUBLIC_API', 'native_contract']
-PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spectrum', 'spectrum', 'OpticalSpectrum',
- 'optical_conductivity', 'dielectric_function', 'optical_linearity', 'optical_sum_rule'),
+PUBLIC_API = MappingProxyType({'salmonpy.subpixel': ('SubpixelSmoothing','effective_material'), 'salmonpy.optical_materials': ('OpticalMaterial','list_materials','load_material','wavelength_to_frequency'),
+ 'salmonpy.analysis': ('Table', 'read_table', 'Spectrum', 'spectrum', 'OpticalSpectrum',
+ 'OpticalSensitivity', 'KCurrentContributions', 'optical_sensitivity', 'k_current_contributions', 'LongWavelengthCorrection', 'long_wavelength_correction', 'optical_conductivity', 'dielectric_function', 'dielectric_tensor', 'waveplate_diagnostic', 'optical_linearity', 'optical_sum_rule'),
  'salmonpy.api': ('PUBLIC_API', 'native_contract'),
  'salmonpy.doctor': ('diagnose', 'probe_native_protocols'),
  'salmonpy.convergence': ('plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan','run_current_grid_scan'),
@@ -74,7 +75,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
  'salmonpy.gs_native': ('GammaRestartConverter', 'SerialRestartConverter'),
  'salmonpy.gs_archive': ('GroundStateArchive', 'save_ground_state'),
  'salmonpy.geometry': ('vector', 'Grid', 'Shape', 'Geometry'),
- 'salmonpy.ld': ('LDModelConfig', 'LDStateConfig', 'Response', 'LorentzDrude', 'LDState'),
+ 'salmonpy.ld': ('LDModelConfig', 'LDTensorModelConfig', 'LDStateConfig', 'Response', 'LorentzDrude', 'TensorLorentzDrude', 'LDState', 'FitReport', 'fit_lorentz_drude', 'fit_lorentz_drude_tensor'),
  'salmonpy.material_response': ('SolverContext',
                                 'MaterialBinding',
                                 'packetize_A_binding',
@@ -99,7 +100,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
                       'read_decomposed_current',
                       'OutputArchive',
                       'save_arrays'),
- 'salmonpy.runtime': ('RuntimeUnavailable',
+ 'salmonpy.runtime': ('RuntimeUnavailable', 'RuntimeValidation', 'prepare_runtime_job',
                       'host_platform',
                       'inspect_runtime',
                       'load_runtime',

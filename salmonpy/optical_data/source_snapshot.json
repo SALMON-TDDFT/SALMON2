@@ -1,0 +1,51 @@
+{
+  "schema": "salmonpy.optical-source-snapshot/1",
+  "repository": "https://github.com/polyanskiy/refractiveindex.info-database",
+  "commit": "e6d15e364f70de1cad8a96a20f75689f2fba8b21",
+  "license": "CC0-1.0",
+  "license_url": "https://github.com/polyanskiy/refractiveindex.info-database/blob/e6d15e364f70de1cad8a96a20f75689f2fba8b21/LICENSE",
+  "files": [
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/LICENSE",
+      "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673",
+      "bytes": 6555
+    },
+    {
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/README.md",
+      "sha256": "0b7fdc29744a97fb573a63fefb38d23ef23b002df07837ae16cd98d82a82fc94",
+      "bytes": 5520
+    },
+    {
+      "path": "database/data/main/Au/nk/Johnson.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/Au/nk/Johnson.yml",
+      "sha256": "9f4bdab6bd49f7c6a1c48b5fb5482c7448caf4b6de39594a34ecd66dcf592774",
+      "bytes": 1707
+    },
+    {
+      "path": "database/data/main/Ag/nk/Johnson.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/Ag/nk/Johnson.yml",
+      "sha256": "8c79d5e2529e4d3a51e1502b42f2e96e63b3cb49e1036c66b86eb9dbdd0c65a5",
+      "bytes": 1707
+    },
+    {
+      "path": "database/data/main/Cu/nk/Johnson.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/Cu/nk/Johnson.yml",
+      "sha256": "265ef243207866361daff0544b5d11fe7142bb2ec79681913546d4334f81a009",
+      "bytes": 1707
+    },
+    {
+      "path": "database/data/main/Al/nk/McPeak.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/Al/nk/McPeak.yml",
+      "sha256": "4cc03719aeee3f9c9ea2ecd78affeb3212fbd19a60988d228b59d4f78245a7ec",
+      "bytes": 11604
+    },
+    {
+      "path": "database/data/main/Si/nk/Aspnes.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/Si/nk/Aspnes.yml",
+      "sha256": "766489862d0d4dc6011e9f078e556a4a24fe79622bec0b1f1a80b297c84ce00d",
+      "bytes": 1824
+    }
+  ]
+}

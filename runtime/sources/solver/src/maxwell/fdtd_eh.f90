@@ -18,9 +18,20 @@ module fdtd_eh
   use filesystem,only:resolve_path
   use lorentz_drude, only: s_ld_state, ld_allocate, ld_coefficients, ld_store_old, ld_update, ld_finalize
   use fdtd_eh_kernel, only: eh_fd
+  use subpixel_smoothing,only:s_subpixel_profile,read_subpixel_profile,allocate_subpixel_profile, &
+    subpixel_at,subpixel_bulk,subpixel_spd_bound
   implicit none
   
   type ls_fdtd_eh
+    logical :: tensor_enabled=.false.,tensor_failed=.false.,subpixel_enabled=.false.
+    real(8)::subpixel_reference=0d0
+    real(8),allocatable::subpixel_corr(:,:,:,:,:,:)
+    logical,allocatable::subpixel_cross(:)
+    real(8) :: tensor_rtol=1d-10
+    integer :: tensor_maxiter=200
+    real(8),allocatable :: tensor_raw(:,:,:,:),tensor_corr(:,:,:,:),tensor_rates(:,:,:)
+    real(8),allocatable :: tensor_weight(:,:,:,:,:),tensor_diag(:,:,:,:)
+    integer,allocatable :: tensor_owner(:,:,:,:)
     logical             :: flag_pml        !pml  option: work for a_bc = 'pml'
     logical             :: flag_lr         !LR   option: work for ae_shape1 = 'impulse'or ae_shape2 = 'impulse'
     logical             :: flag_obs        !obs. option: work for obs_num_em > 0
@@ -171,7 +182,8 @@ contains
   
   !===========================================================================================
   != initialize eh-FDTD ======================================================================
-  subroutine eh_init(fs,fe,ld,status,grid_ready)
+  subroutine eh_init(fs,fe,ld,status,grid_ready,excluded_response_points)
+    use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
     use salmon_global,   only: al_em,dl_em,num_rgrid_em,at_em,dt_em,nt_em,boundary_em,yn_periodic,         &
                                base_directory,media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,   &
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,                              &
@@ -191,7 +203,7 @@ contains
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au,unit_system,&
                                uenergy_to_au,ulength_to_au,ucharge_to_au
     use parallelization, only: nproc_id_global,nproc_group_global,nproc_size_global
-    use communication,   only: comm_is_root,comm_bcast,comm_summation,comm_sync_all
+    use communication,   only: comm_is_root,comm_bcast,comm_summation,comm_sync_all,comm_get_max,comm_get_min
     use structures,      only: s_fdtd_system
     use filesystem,      only: create_directory,directory_exists
     use misc_routines,   only: get_wtime
@@ -207,6 +219,7 @@ contains
     type(ls_fdtd_eh),   intent(inout) :: fe
     ! Optional native early-return contract. Later I/O/allocation stages retain
     ! their existing behavior; callers without status keep standalone diagnostics.
+    integer,optional,intent(in)::excluded_response_points(:,:)
     integer,optional,intent(out) :: status
     logical,optional,intent(out) :: grid_ready
     integer             :: nsg_p          !yn_restart='y': nproc_size_global used in the previous calc.
@@ -223,6 +236,10 @@ contains
     real(8)             :: dt_cfl,elapsed_time,tmp_min,tmp_max,tmp_x1,tmp_x2,tmp_y1,tmp_y2,tmp_z1,tmp_z2
     real(8),allocatable :: tmp_c0_ld(:,:),tmp_c1_ld(:,:),tmp_c2_ld(:,:),tmp_c3_ld(:,:)
     real(8),allocatable :: tmp_c4_ld(  :),tmp_c5_ld(  :)
+    real(8),allocatable :: diagonal_eps(:,:),diagonal_f(:,:,:)
+    real(8),allocatable :: diagonal_c2(:,:,:),diagonal_c4(:,:),diagonal_c5(:,:)
+    type(s_subpixel_profile)::subpixel_profile
+    integer :: diagonal_status,diagonal_axis,diagonal_media
     character(1)        :: dir
     character(2)        :: plane_name
     character(16)       :: tmp_name1,tmp_name2
@@ -241,7 +258,7 @@ contains
     ld%num_ld=0
     do ii=0,media_num
       select case(media_type(ii))
-      case('lorentz-drude')
+      case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
         ld%num_ld=ld%num_ld+1
       end select
     end do
@@ -396,6 +413,36 @@ contains
     dt_cfl=1.0d0/( &
            cspeed_au*sqrt( (1.0d0/fs%hgs(1))**2.0d0+(1.0d0/fs%hgs(2))**2.0d0+(1.0d0/fs%hgs(3))**2.0d0 ) )
     
+    ! Explicit diagonal tensor records are read once into init-owned buffers.
+    if(any(media_type(0:media_num)=='ld-diagonal'))then
+      call eh_read_diagonal(diagonal_status)
+      if(diagonal_status/=0)then
+        if(present(status))then
+          status=1110;return
+        endif
+        call stop_em('Invalid or missing salmonpy-ld-diagonal.dat tensor input.')
+      endif
+      if(comm_is_root(nproc_id_global))write(*,'(A)')'SALMONPY_FDTD_LD_DIAGONAL_V1'
+    endif
+    if(any(media_type(0:media_num)=='ld-tensor'))then
+      call eh_read_tensor(diagonal_status)
+      if(diagonal_status/=0)then
+        if(present(status))then
+          status=1110;return
+        endif
+        call stop_em('Invalid or missing salmonpy-ld-tensor.dat input.')
+      endif
+      if(comm_is_root(nproc_id_global))write(*,'(A)')'SALMONPY_FDTD_LD_TENSOR_V1'
+    endif
+    if(any(media_type(0:media_num)=='ld-subpixel'))then
+      call eh_read_subpixel(diagonal_status)
+      if(diagonal_status/=0)then
+        if(present(status))then
+          status=1113;return
+        endif
+        call stop_em('Invalid or missing salmonpy-subpixel.dat profile.')
+      endif
+    endif
     ! Keep vacuum/PML in the bound; faster positive backgrounds tighten it.
     do ii=0,media_num
       if(epsilon_em(ii)>0d0.and.mu_em(ii)>0d0)then
@@ -405,6 +452,15 @@ contains
       endif
     enddo
 
+    if(allocated(diagonal_eps))then
+      do ii=0,media_num
+        if(media_type(ii)/='ld-diagonal'.and.media_type(ii)/='ld-tensor')cycle
+        do ij=1,3
+          if(diagonal_eps(ij,ii)<1d0)dt_cfl=min(dt_cfl,sqrt(diagonal_eps(ij,ii))/( &
+            cspeed_au*sqrt(sum((1d0/fs%hgs)**2))))
+        enddo
+      enddo
+    endif
     !check and set at_em, dt_em, and nt_em
     if(comm_is_root(nproc_id_global)) write(*,*)
     if(comm_is_root(nproc_id_global)) write(*,*) "**************************"
@@ -710,7 +766,7 @@ contains
       ld%media_ld(:)=0;
       do ii=0,media_num
         select case(media_type(ii))
-        case('lorentz-drude')
+        case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
           ld%media_ld(icount_ld) = ii
           icount_ld              = icount_ld+1
           if(ld%max_pole_num_ld<pole_num_ld(ii)) ld%max_pole_num_ld=pole_num_ld(ii)
@@ -735,6 +791,40 @@ contains
       tmp_c4_ld(  :) = 0.0d0; tmp_c5_ld(  :) = 0.0d0;
       call ld_coefficients(ld%media_ld,pole_num_ld,gamma_ld,omega_ld,f_ld,omega_p_ld,dt_em,pi, &
                            tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld,epsilon_em)
+      if(allocated(diagonal_eps))then
+        allocate(diagonal_c2(ld%max_pole_num_ld,ld%num_ld,3), &
+          diagonal_c4(ld%num_ld,3),diagonal_c5(ld%num_ld,3))
+        diagonal_c2=0d0;diagonal_c4=0d0;diagonal_c5=0d0
+        diagonal_status=0
+        do diagonal_axis=1,3
+          do diagonal_media=1,ld%num_ld
+            ii=ld%media_ld(diagonal_media)
+            do ij=1,pole_num_ld(ii)
+              diagonal_c2(ij,diagonal_media,diagonal_axis)=diagonal_f(diagonal_axis,ii,ij) &
+                *omega_p_ld(ii)**2*dt_em/(8d0*pi*tmp_c0_ld(ij,diagonal_media))
+              if(.not.ieee_is_finite(diagonal_c2(ij,diagonal_media,diagonal_axis)))diagonal_status=1
+              diagonal_c4(diagonal_media,diagonal_axis)=diagonal_c4(diagonal_media,diagonal_axis) &
+                +diagonal_c2(ij,diagonal_media,diagonal_axis)
+              diagonal_c5(diagonal_media,diagonal_axis)=diagonal_c5(diagonal_media,diagonal_axis) &
+                +diagonal_c2(ij,diagonal_media,diagonal_axis)
+            enddo
+            diagonal_c4(diagonal_media,diagonal_axis)=diagonal_eps(diagonal_axis,ii) &
+              +2d0*pi*dt_em*diagonal_c4(diagonal_media,diagonal_axis)
+            diagonal_c5(diagonal_media,diagonal_axis)=diagonal_eps(diagonal_axis,ii) &
+              -2d0*pi*dt_em*diagonal_c5(diagonal_media,diagonal_axis)
+            if(.not.ieee_is_finite(diagonal_c4(diagonal_media,diagonal_axis)))diagonal_status=1
+            if(.not.ieee_is_finite(diagonal_c5(diagonal_media,diagonal_axis)))diagonal_status=1
+            if(diagonal_c4(diagonal_media,diagonal_axis)<=0d0)diagonal_status=1
+          enddo
+        enddo
+        call comm_bcast(diagonal_status,nproc_group_global)
+        if(diagonal_status/=0)then
+          if(present(status))then
+            status=1111;return
+          endif
+          call stop_em('Nonfinite diagonal LD update coefficients.')
+        endif
+      endif
       ! LD owns its allocations and zero initialization, including halo values.
       call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array)
     end if
@@ -749,6 +839,7 @@ contains
       call eh_coeff
     end do
     call eh_coeff_h_geometry
+
     if(comm_is_root(nproc_id_global)) write(*,'(A)') 'SALMONPY_FDTD_INTERFACE_V2'
     
     !*** check TTM On/Off, and initialization *****************************************************************!
@@ -780,7 +871,7 @@ contains
         call eh_check_media_type(fe%rep(ii),fe%rmu(ii),fe%sig(ii),media_type(ii),tmp_name1)
         write(*,'(A,A)')         ' media_type  =  ', trim(tmp_name1)
         select case(media_type(ii))
-        case('lorentz-drude')
+        case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
           write(*,'(A,I6)')      ' pole_num_ld = ', pole_num_ld(ii)
           write(*,'(A,ES12.5)')  ' omega_p_ld  = ', omega_p_ld(ii)*uenergy_from_au
           do ij=1,pole_num_ld(ii)
@@ -1477,6 +1568,25 @@ contains
       end if
     end select
     
+    if(subpixel_profile%nm>0)then
+      call eh_subpixel_coefficients(diagonal_status)
+      if(diagonal_status/=0)then
+        if(present(status))then
+          status=1114;return
+        endif
+        call stop_em('Invalid subpixel material update coefficients.')
+      endif
+    else
+      if(fe%tensor_enabled)call eh_tensor_weights
+    endif
+    if(fe%tensor_enabled)then
+      if(any(bloch_k_em/=0d0))then
+        if(present(status))then
+          status=1112;return
+        endif
+        call stop_em('Nonzero Bloch phase with off-diagonal tensor is not implemented.')
+      endif
+    endif
     !*** prepare linear response ******************************************************************************!
     if(fe%flag_lr) then
       !check condition
@@ -1493,7 +1603,7 @@ contains
           end select
         else
           select case(media_type(ii))
-          case('lorentz-drude')
+          case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
             continue
           case default
             flag_stop = .true.
@@ -1529,6 +1639,9 @@ contains
         tmp_z2 = 0.0d0
       end if
       
+      if(fe%subpixel_enabled)then
+        call eh_subpixel_impulse
+      else
       !set initial current density
       if(ld%enabled) then
         do ii = 1,ld%num_ld
@@ -1539,10 +1652,10 @@ contains
           ! Only the edge's owning LD material contributes to this pole.
           if(ld%c1_jx_ld(ix,iy,iz,ij)>0.0d0.and.fs%imedia(ix,iy,iz)==ld%media_ld(ii)) then
             ld%rjx_ld(ix,iy,iz,ij)   = ld%rjx_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                      -(eh_axis_strength(1,ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_x1
             ld%rjx_ld(ix,iy,iz,ij)   = ld%rjx_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                      -(eh_axis_strength(1,ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_x2
             ld%rjx_fdtd_ld(ix,iy,iz) = ld%rjx_fdtd_ld(ix,iy,iz)                                          &
                                       +0.5d0*( (1.0d0+ld%c1_jx_ld(ix,iy,iz,ij)) * ld%rjx_ld(ix,iy,iz,ij) &
@@ -1551,10 +1664,10 @@ contains
           ! Only the edge's owning LD material contributes to this pole.
           if(ld%c1_jy_ld(ix,iy,iz,ij)>0.0d0.and.fs%imedia(ix,iy,iz)==ld%media_ld(ii)) then
             ld%rjy_ld(ix,iy,iz,ij)   = ld%rjy_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                      -(eh_axis_strength(2,ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_y1
             ld%rjy_ld(ix,iy,iz,ij)   = ld%rjy_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                      -(eh_axis_strength(2,ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_y2
             ld%rjy_fdtd_ld(ix,iy,iz) = ld%rjy_fdtd_ld(ix,iy,iz)                                          &
                                       +0.5d0*( (1.0d0+ld%c1_jy_ld(ix,iy,iz,ij)) * ld%rjy_ld(ix,iy,iz,ij) &
@@ -1563,10 +1676,10 @@ contains
           ! Only the edge's owning LD material contributes to this pole.
           if(ld%c1_jz_ld(ix,iy,iz,ij)>0.0d0.and.fs%imedia(ix,iy,iz)==ld%media_ld(ii)) then
             ld%rjz_ld(ix,iy,iz,ij)   = ld%rjz_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                      -(eh_axis_strength(3,ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_z1
             ld%rjz_ld(ix,iy,iz,ij)   = ld%rjz_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                      -(eh_axis_strength(3,ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_z2
             ld%rjz_fdtd_ld(ix,iy,iz) = ld%rjz_fdtd_ld(ix,iy,iz)                                          &
                                       +0.5d0*( (1.0d0+ld%c1_jz_ld(ix,iy,iz,ij)) * ld%rjz_ld(ix,iy,iz,ij) &
@@ -1579,6 +1692,9 @@ contains
         end do
       end if
       
+      if(fe%tensor_enabled)call eh_tensor_impulse
+
+      endif
       !initialize and allocate
       allocate(fe%time_lr(nt_em))
       fe%time_lr(:)=0.0d0
@@ -2526,6 +2642,595 @@ contains
     
     !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ set fdtd coefficient ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_read_diagonal(ierr)
+      integer,intent(out)::ierr
+      integer::unit,ios,nrecord,version,record,imedia,np,q,axis
+      character(64)::magic
+      logical::seen(0:200)
+      allocate(diagonal_eps(3,0:media_num),diagonal_f(3,0:media_num,100))
+      do axis=1,3
+        diagonal_eps(axis,:)=epsilon_em(0:media_num)
+        diagonal_f(axis,:,:)=f_ld(0:media_num,:)
+      enddo
+      ierr=0;seen=.false.
+      if(comm_is_root(nproc_id_global))then
+        open(newunit=unit,file=resolve_path('salmonpy-ld-diagonal.dat'),status='old',action='read',iostat=ios)
+        if(ios/=0)then
+          ierr=1
+        else
+          read(unit,*,iostat=ios)magic,version
+          if(ios==0)then
+            if(magic/='SALMONPY_LD_DIAGONAL'.or.version/=1)ios=1
+          endif
+          if(ios==0)read(unit,*,iostat=ios)nrecord
+          if(ios==0)then
+            if(nrecord/=count(media_type(0:media_num)=='ld-diagonal'))ios=1
+          endif
+          if(ios==0)then
+            do record=1,nrecord
+              read(unit,*,iostat=ios)imedia,np
+              if(ios/=0)exit
+              if(imedia<1.or.imedia>media_num.or.np<1.or.np>100)then
+                ios=1;exit
+              endif
+              if(seen(imedia).or.media_type(imedia)/='ld-diagonal'.or.np/=pole_num_ld(imedia))then
+                ios=1;exit
+              endif
+              seen(imedia)=.true.
+              read(unit,*,iostat=ios)diagonal_eps(:,imedia)
+              if(ios/=0)exit
+              do q=1,np
+                read(unit,*,iostat=ios)diagonal_f(:,imedia,q)
+                if(ios/=0)exit
+              enddo
+              if(ios/=0)exit
+            enddo
+          endif
+          if(ios/=0)ierr=1
+          close(unit)
+        endif
+      endif
+      call comm_bcast(ierr,nproc_group_global)
+      if(ierr/=0)return
+      call comm_bcast(diagonal_eps,nproc_group_global)
+      call comm_bcast(diagonal_f,nproc_group_global)
+      do imedia=0,media_num
+        if(media_type(imedia)/='ld-diagonal')cycle
+        do axis=1,3
+          if(.not.ieee_is_finite(diagonal_eps(axis,imedia)))ierr=1
+          if(diagonal_eps(axis,imedia)<=0d0)ierr=1
+          do q=1,pole_num_ld(imedia)
+            if(.not.ieee_is_finite(diagonal_f(axis,imedia,q)))ierr=1
+            if(diagonal_f(axis,imedia,q)<0d0)ierr=1
+          enddo
+        enddo
+      enddo
+    end subroutine
+
+    subroutine eh_read_subpixel(ierr)
+      integer,intent(out)::ierr
+      integer::dims(3)
+      ierr=0
+      if(comm_is_root(nproc_id_global)) &
+        call read_subpixel_profile(resolve_path('salmonpy-subpixel.dat'),subpixel_profile,ierr)
+      call comm_bcast(ierr,nproc_group_global)
+      if(ierr/=0)return
+      if(comm_is_root(nproc_id_global))dims=[subpixel_profile%nm,subpixel_profile%ns,subpixel_profile%nq]
+      call comm_bcast(dims,nproc_group_global)
+      if(.not.comm_is_root(nproc_id_global))then
+        subpixel_profile%nm=dims(1);subpixel_profile%ns=dims(2);subpixel_profile%nq=dims(3)
+        call allocate_subpixel_profile(subpixel_profile)
+      endif
+      if(dims(1)/=media_num)ierr=1
+      call comm_bcast(subpixel_profile%omega,nproc_group_global)
+      call comm_bcast(subpixel_profile%rtol,nproc_group_global)
+      call comm_bcast(subpixel_profile%maxiter,nproc_group_global)
+      call comm_bcast(subpixel_profile%background,nproc_group_global)
+      call comm_bcast(subpixel_profile%strength,nproc_group_global)
+      call comm_bcast(subpixel_profile%resonance,nproc_group_global)
+      call comm_bcast(subpixel_profile%damping,nproc_group_global)
+      call comm_bcast(subpixel_profile%owner,nproc_group_global)
+      call comm_bcast(subpixel_profile%ld_phase,nproc_group_global)
+      call comm_bcast(subpixel_profile%shape_size,nproc_group_global)
+      call comm_bcast(subpixel_profile%center,nproc_group_global)
+      call comm_bcast(subpixel_profile%kind,nproc_group_global)
+      call comm_bcast(subpixel_profile%material,nproc_group_global)
+      if(.not.any(subpixel_profile%ld_phase/=0))then
+        if(comm_is_root(nproc_id_global))write(*,'(A)') &
+          'WARNING: no LD phase specified; reference subpixel smoothing not applied.'
+        subpixel_profile%nm=0
+      endif
+    end subroutine
+
+    subroutine eh_subpixel_coefficients(ierr)
+      integer,intent(out)::ierr
+      real(8),allocatable::effective_f(:,:,:),c0(:),c1(:),c3(:)
+      real(8)::background(3,3),point(3),matrix(3,3),m4(3),m5(3),drive,err,maxerr,bytes,global_error(1)
+      integer::lo(3),hi(3),nq,ix,iy,iz,axis,q,a,b,flag,have_cross,m,next(3),active_lo(3),active_hi(3),cell_index(3)
+      real(8)::counts(3),total_counts(3),local_bounds(2),global_bounds(2),dt_bound
+      integer::unit,ios,close_status
+      logical::live
+      logical,allocatable::excluded(:,:,:)
+      integer::p,ox,oy,oz,site(3),index(3),excluded_count
+      ierr=0;counts=0;maxerr=0d0;local_bounds=1d0
+      lo=fs%mg%is_array;hi=fs%mg%ie_array;nq=subpixel_profile%nq
+      allocate(excluded(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+      excluded=.false.;excluded_count=0
+      if(present(excluded_response_points))then
+        excluded_count=size(excluded_response_points,2)
+        do p=1,excluded_count
+          site=fs%lg%is+excluded_response_points(:,p)
+          do oz=-1,1
+          do oy=-1,1
+          do ox=-1,1
+            index=site+[ox,oy,oz]
+            if(all(index>=lo).and.all(index<=hi))excluded(index(1),index(2),index(3))=.true.
+          enddo
+          enddo
+          enddo
+        enddo
+      endif
+      ! A box spanning a periodic direction represents a continuous extrusion.
+      do q=1,subpixel_profile%ns
+        if(subpixel_profile%kind(q)/=1)cycle
+        do axis=1,3
+          if(fs%a_bc(axis,1)/='periodic'.or.fs%a_bc(axis,2)/='periodic')cycle
+          if(subpixel_profile%shape_size(axis,q)>=fs%rlsize(axis)) &
+            subpixel_profile%shape_size(axis,q)=8d0*fs%rlsize(axis)+2d0*abs(subpixel_profile%center(axis,q))
+        enddo
+      enddo
+      if(allocated(fe%tensor_raw))deallocate(fe%tensor_raw)
+      if(allocated(fe%tensor_corr))deallocate(fe%tensor_corr)
+      if(allocated(fe%tensor_rates))deallocate(fe%tensor_rates)
+      allocate(fe%tensor_raw(3,3,0:subpixel_profile%nm+nq,0:0),fe%tensor_corr(3,3,0:nq,0:1), &
+        fe%tensor_rates(3,nq,0:0),fe%tensor_weight(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),0:nq), &
+        fe%tensor_diag(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+        fe%tensor_owner(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+        fe%subpixel_corr(3,3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),0:nq),fe%subpixel_cross(0:nq))
+      fe%tensor_raw=0d0;fe%tensor_corr=0d0;fe%tensor_weight=0d0
+      fe%tensor_diag=1d0;fe%tensor_owner=0;fe%subpixel_corr=0d0
+      fe%subpixel_enabled=.true.;fe%tensor_enabled=.true.;fe%subpixel_reference=subpixel_profile%omega
+      fe%tensor_rtol=subpixel_profile%rtol;fe%tensor_maxiter=subpixel_profile%maxiter
+      do m=0,subpixel_profile%nm
+        fe%tensor_raw(:,:,m,0)=subpixel_profile%background(:,:,m)
+      enddo
+      do q=1,nq
+        fe%tensor_raw(:,:,subpixel_profile%nm+q,0)=subpixel_profile%strength(:,:,q)
+        fe%tensor_rates(:,q,0)=[1d0,subpixel_profile%resonance(q),subpixel_profile%damping(q)]
+      enddo
+      ! Every oscillator slot has one rate pair across the whole domain.
+      ! This keeps the existing ADE recurrence compatible with its tensor drive.
+      call ld_finalize(ld)
+      ld%enabled=.true.;ld%num_ld=1;ld%max_pole_num_ld=nq
+      allocate(ld%media_ld(1));ld%media_ld(1)=min(1,subpixel_profile%nm)
+      bytes=real(product(int(hi-lo+1,8)),8)*8d0*real(30*nq+12,8)
+      if(comm_is_root(nproc_id_global))then
+        write(*,'(A)')'SALMONPY_SUBPIXEL_REFERENCE_V2'
+        write(*,'(A,ES16.8,A,I0,A,ES16.8)')'Subpixel reference omega=',subpixel_profile%omega, &
+          '; global oscillator slots=',nq,'; approximate local coefficient/state bytes=',bytes
+      endif
+      call ld_allocate(ld,lo,hi)
+      allocate(effective_f(3,3,nq),c0(nq),c1(nq),c3(nq))
+      do q=1,nq
+        c0(q)=1d0+subpixel_profile%damping(q)*dt_em/2d0+(subpixel_profile%resonance(q)*dt_em)**2/4d0
+        c1(q)=(1d0-subpixel_profile%damping(q)*dt_em/2d0 &
+          -(subpixel_profile%resonance(q)*dt_em)**2/4d0)/c0(q)
+        c3(q)=subpixel_profile%resonance(q)**2*dt_em/c0(q)
+        if(.not.ieee_is_finite(c0(q)).or.c0(q)<=0d0)ierr=1
+        if(.not.ieee_is_finite(c1(q)).or..not.ieee_is_finite(c3(q)))ierr=1
+      enddo
+      call comm_get_max(ierr,nproc_group_global)
+      if(ierr/=0)return
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        cell_index=[ix,iy,iz]
+        point=[fe%coo(ix,1),fe%coo(iy,2),fe%coo(iz,3)]
+        if(excluded(ix,iy,iz))then
+          call subpixel_bulk(subpixel_profile,fs%imedia(ix,iy,iz),background,effective_f)
+          flag=5;err=0d0
+        else
+          call subpixel_at(subpixel_profile,point,fs%hgs,background,effective_f,flag,err)
+        endif
+        call count_sample(flag,counts)
+        maxerr=max(maxerr,err)
+        do q=0,nq
+          matrix=background
+          if(q>0)matrix=effective_f(:,:,q)
+          do b=1,3
+            do a=1,3
+              if(a==b.or.matrix(a,a)==0d0.or.matrix(b,b)==0d0)cycle
+              fe%subpixel_corr(a,b,ix,iy,iz,q)=.5d0*(matrix(a,b)+matrix(b,a))/sqrt(matrix(a,a))/sqrt(matrix(b,b))
+            enddo
+          enddo
+        enddo
+        matrix=fe%subpixel_corr(:,:,ix,iy,iz,0)
+        do a=1,3
+          matrix(a,a)=1d0
+        enddo
+        local_bounds(1)=min(local_bounds(1),subpixel_spd_bound(matrix))
+        do axis=1,3
+          select case(axis)
+          case(1)
+            active_lo=max(fe%iex_y_is,fe%iex_z_is);active_hi=min(fe%iex_y_ie,fe%iex_z_ie)
+          case(2)
+            active_lo=max(fe%iey_z_is,fe%iey_x_is);active_hi=min(fe%iey_z_ie,fe%iey_x_ie)
+          case(3)
+            active_lo=max(fe%iez_x_is,fe%iez_y_is);active_hi=min(fe%iez_x_ie,fe%iez_y_ie)
+          end select
+          live=all([ix,iy,iz]>=active_lo).and.all([ix,iy,iz]<=active_hi)
+          do a=1,3
+            if(fs%a_bc(a,1)=='pml'.and.cell_index(a)<fs%lg%is(a)+9)live=.false.
+            if(fs%a_bc(a,2)=='pml'.and.cell_index(a)>fs%lg%ie(a)-9)live=.false.
+          enddo
+          if(.not.live)cycle
+          point=[fe%coo(ix,1),fe%coo(iy,2),fe%coo(iz,3)];point(axis)=point(axis)+.5d0*fs%hgs(axis)
+          if(excluded(ix,iy,iz))then
+            flag=5;err=0d0
+          else
+            call subpixel_at(subpixel_profile,point,fs%hgs,background,effective_f,flag,err)
+          endif
+          if(flag>=2)then
+            m=fs%imedia(ix,iy,iz);next=[ix,iy,iz];next(axis)=next(axis)+1
+            if(fs%imedia(next(1),next(2),next(3))==0)m=0
+            call subpixel_bulk(subpixel_profile,m,background,effective_f)
+          endif
+          call count_sample(flag,counts);maxerr=max(maxerr,err)
+          fe%tensor_owner(axis,ix,iy,iz)=1
+          fe%tensor_weight(axis,ix,iy,iz,0)=sqrt(background(axis,axis))
+          local_bounds(2)=min(local_bounds(2),background(axis,axis))
+          m4(axis)=0d0
+          do q=1,nq
+            drive=effective_f(axis,axis,q)*dt_em/(8d0*pi*c0(q))
+            if(.not.ieee_is_finite(drive).or.drive<0d0)then
+              ierr=1;cycle
+            endif
+            fe%tensor_weight(axis,ix,iy,iz,q)=sqrt(drive);m4(axis)=m4(axis)+drive
+            select case(axis)
+            case(1)
+              ld%c1_jx_ld(ix,iy,iz,q)=c1(q);ld%c2_jx_ld(ix,iy,iz,q)=drive;ld%c3_jx_ld(ix,iy,iz,q)=c3(q)
+            case(2)
+              ld%c1_jy_ld(ix,iy,iz,q)=c1(q);ld%c2_jy_ld(ix,iy,iz,q)=drive;ld%c3_jy_ld(ix,iy,iz,q)=c3(q)
+            case(3)
+              ld%c1_jz_ld(ix,iy,iz,q)=c1(q);ld%c2_jz_ld(ix,iy,iz,q)=drive;ld%c3_jz_ld(ix,iy,iz,q)=c3(q)
+            end select
+          enddo
+          m5(axis)=background(axis,axis)-2d0*pi*dt_em*m4(axis)
+          m4(axis)=background(axis,axis)+2d0*pi*dt_em*m4(axis)
+          fe%tensor_diag(axis,ix,iy,iz)=m4(axis)
+          if(.not.ieee_is_finite(m4(axis)).or.m4(axis)<=0d0)ierr=1
+          if(.not.ieee_is_finite(m5(axis)))ierr=1
+          select case(axis)
+          case(1)
+            fe%c1_ex_y(ix,iy,iz)=m5(axis)/m4(axis);fe%c1_ex_z(ix,iy,iz)=m5(axis)/m4(axis)
+            fe%c2_ex_y(ix,iy,iz)=cspeed_au*dt_em/m4(axis)/fs%hgs(2)
+            fe%c2_ex_z(ix,iy,iz)=-cspeed_au*dt_em/m4(axis)/fs%hgs(3)
+            fe%c2_jx(ix,iy,iz)=-4d0*pi*dt_em/m4(axis)
+          case(2)
+            fe%c1_ey_z(ix,iy,iz)=m5(axis)/m4(axis);fe%c1_ey_x(ix,iy,iz)=m5(axis)/m4(axis)
+            fe%c2_ey_z(ix,iy,iz)=cspeed_au*dt_em/m4(axis)/fs%hgs(3)
+            fe%c2_ey_x(ix,iy,iz)=-cspeed_au*dt_em/m4(axis)/fs%hgs(1)
+            fe%c2_jy(ix,iy,iz)=-4d0*pi*dt_em/m4(axis)
+          case(3)
+            fe%c1_ez_x(ix,iy,iz)=m5(axis)/m4(axis);fe%c1_ez_y(ix,iy,iz)=m5(axis)/m4(axis)
+            fe%c2_ez_x(ix,iy,iz)=cspeed_au*dt_em/m4(axis)/fs%hgs(1)
+            fe%c2_ez_y(ix,iy,iz)=-cspeed_au*dt_em/m4(axis)/fs%hgs(2)
+            fe%c2_jz(ix,iy,iz)=-4d0*pi*dt_em/m4(axis)
+          end select
+        enddo
+      enddo
+      enddo
+      enddo
+      call comm_get_max(ierr,nproc_group_global)
+      if(ierr/=0)return
+      do q=0,nq
+        have_cross=merge(1,0,any(fe%subpixel_corr(:,:,:,:,:,q)/=0d0))
+        call comm_get_max(have_cross,nproc_group_global)
+        fe%subpixel_cross(q)=have_cross/=0
+      enddo
+      call comm_summation(counts,total_counts,3,nproc_group_global)
+      call comm_get_max([maxerr],global_error,1,nproc_group_global)
+      maxerr=global_error(1)
+      call comm_get_min(local_bounds,global_bounds,2,nproc_group_global)
+      dt_bound=sqrt(max(0d0,product(global_bounds)))/(cspeed_au*sqrt(sum((1d0/fs%hgs)**2)))
+      if(comm_is_root(nproc_id_global))then
+        if(dt_bound<=0d0)then
+          write(*,'(A)')'WARNING: subpixel background CFL bound unavailable; evolution continues.'
+        else if(dt_em>=dt_bound)then
+          write(*,'(A,ES16.8)')'WARNING: dt exceeds conservative subpixel background bound; continuing. bound=',dt_bound
+        endif
+        if(total_counts(2)>0)write(*,'(A,I0)') &
+          'WARNING: subpixel corners/multiple interfaces use unsmoothed coefficients; samples=',int(total_counts(2),8)
+        if(total_counts(3)>0)write(*,'(A,I0)') &
+          'WARNING: singular reference uses unsmoothed coefficients; samples=',int(total_counts(3),8)
+        open(newunit=unit,file=resolve_path('salmonpy-subpixel-summary.json'),status='replace',action='write',iostat=ios)
+        if(ios==0)then
+          if(ios==0)write(unit,'(A)',iostat=ios)'{'
+          if(ios==0)write(unit,'(A,ES24.16E3,A)',iostat=ios)' "reference_omega": ',subpixel_profile%omega,','
+          if(ios==0)write(unit,'(A,I0,A)',iostat=ios)' "global_poles": ',nq,','
+          if(ios==0)write(unit,'(A,ES24.16E3,A)',iostat=ios)' "conservative_dt_bound": ',dt_bound,','
+          if(ios==0)write(unit,'(A,I0,A)',iostat=ios)' "excluded_response_points": ',excluded_count,','
+          if(ios==0)write(unit,'(A,I0,A)',iostat=ios)' "mixed_samples": ',int(total_counts(1),8),','
+          if(ios==0)write(unit,'(A,I0,A)',iostat=ios)' "geometry_fallback_samples": ',int(total_counts(2),8),','
+          if(ios==0)write(unit,'(A,I0,A)',iostat=ios)' "reference_fallback_samples": ',int(total_counts(3),8),','
+          if(ios==0)write(unit,'(A,ES24.16E3)',iostat=ios)' "reference_match_max_abs_error": ',maxerr
+          if(ios==0)write(unit,'(A)',iostat=ios)'}'
+          close(unit,iostat=close_status)
+          if(ios/=0.or.close_status/=0) &
+            write(*,'(A)')'WARNING: subpixel summary write incomplete; evolution continues.'
+        else
+          write(*,'(A)')'WARNING: subpixel summary could not be written; evolution continues.'
+        endif
+      endif
+    end subroutine
+
+    subroutine count_sample(flag,counts)
+      integer,intent(in)::flag
+      real(8),intent(inout)::counts(3)
+      if(flag==1)counts(1)=counts(1)+1
+      if(flag==2.or.flag==3)counts(2)=counts(2)+1
+      if(flag==4)counts(3)=counts(3)+1
+    end subroutine
+
+    subroutine eh_subpixel_impulse
+      real(8),allocatable::kick(:,:,:,:),off(:,:,:,:)
+      real(8)::factor,omega,gamma,value(3)
+      integer::lo(3),hi(3),q,ix,iy,iz
+      lo=fs%mg%is_array;hi=fs%mg%ie_array
+      allocate(kick(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),off(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+      kick(1,:,:,:)=tmp_x1+tmp_x2;kick(2,:,:,:)=tmp_y1+tmp_y2;kick(3,:,:,:)=tmp_z1+tmp_z2
+      do q=1,ld%max_pole_num_ld
+        call eh_tensor_off(fs,fe,q,kick,off)
+        omega=fe%tensor_rates(2,q,0);gamma=fe%tensor_rates(3,q,0)
+        factor=-2d0*(1d0+gamma*dt_em/2d0+(omega*dt_em)**2/4d0)/dt_em
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
+          value=factor*(fe%tensor_weight(:,ix,iy,iz,q)**2*kick(:,ix,iy,iz)+off(:,ix,iy,iz))
+          ld%rjx_ld(ix,iy,iz,q)=value(1);ld%rjy_ld(ix,iy,iz,q)=value(2);ld%rjz_ld(ix,iy,iz,q)=value(3)
+          ld%rjx_fdtd_ld(ix,iy,iz)=ld%rjx_fdtd_ld(ix,iy,iz)+.5d0*(1d0+ld%c1_jx_ld(ix,iy,iz,q))*value(1)
+          ld%rjy_fdtd_ld(ix,iy,iz)=ld%rjy_fdtd_ld(ix,iy,iz)+.5d0*(1d0+ld%c1_jy_ld(ix,iy,iz,q))*value(2)
+          ld%rjz_fdtd_ld(ix,iy,iz)=ld%rjz_fdtd_ld(ix,iy,iz)+.5d0*(1d0+ld%c1_jz_ld(ix,iy,iz,q))*value(3)
+        enddo
+        enddo
+        enddo
+      enddo
+    end subroutine
+
+    subroutine eh_read_tensor(ierr)
+      integer,intent(out)::ierr
+      integer::unit,ios,nrecord,version,record,m,np,q,a,b,maxp
+      real(8)::mat(3,3),inverse(3,3),scale,tol,det,minor,bound
+      logical::seen(0:200)
+      character(64)::magic
+      maxp=maxval(pole_num_ld(0:media_num))
+      ierr=0;seen=.false.
+      if(maxp<1.or.maxp>100)then
+        ierr=1;return
+      endif
+      if(.not.allocated(diagonal_eps))then
+        allocate(diagonal_eps(3,0:media_num),diagonal_f(3,0:media_num,100))
+        do a=1,3
+          diagonal_eps(a,:)=epsilon_em(0:media_num)
+          diagonal_f(a,:,:)=f_ld(0:media_num,:)
+        enddo
+      endif
+      allocate(fe%tensor_raw(3,3,0:maxp,0:media_num),fe%tensor_corr(3,3,0:maxp,0:media_num))
+      allocate(fe%tensor_rates(3,maxp,0:media_num))
+      fe%tensor_rates=0d0
+      do m=0,media_num
+        do q=1,min(maxp,pole_num_ld(m))
+          fe%tensor_rates(:,q,m)=[omega_p_ld(m),omega_ld(m,q),gamma_ld(m,q)]
+        enddo
+      enddo
+      fe%tensor_raw=0d0;fe%tensor_corr=0d0
+      if(comm_is_root(nproc_id_global))then
+        open(newunit=unit,file=resolve_path('salmonpy-ld-tensor.dat'),status='old',action='read',iostat=ios)
+        if(ios==0)then
+          read(unit,*,iostat=ios)magic,version
+          if(ios==0)then
+            if(magic/='SALMONPY_LD_TENSOR'.or.version/=1)ios=1
+          endif
+          if(ios==0)read(unit,*,iostat=ios)nrecord
+          if(ios==0)then
+            if(nrecord/=count(media_type(0:media_num)=='ld-tensor'))ios=1
+          endif
+          if(ios==0)read(unit,*,iostat=ios)fe%tensor_rtol,fe%tensor_maxiter
+          if(ios==0)then
+            do record=1,nrecord
+              read(unit,*,iostat=ios)m,np
+              if(ios/=0)exit
+              if(m<1.or.m>media_num.or.np<1.or.np>maxp)then
+                ios=1;exit
+              endif
+              if(seen(m).or.media_type(m)/='ld-tensor'.or.np/=pole_num_ld(m))then
+                ios=1;exit
+              endif
+              seen(m)=.true.
+              do q=0,np
+                read(unit,*,iostat=ios)fe%tensor_raw(:,:,q,m)
+                if(ios/=0)exit
+              enddo
+              if(ios/=0)exit
+            enddo
+          endif
+          close(unit)
+        endif
+        if(ios/=0)ierr=1
+      endif
+      call comm_bcast(ierr,nproc_group_global)
+      if(ierr/=0)return
+      call comm_bcast(fe%tensor_raw,nproc_group_global)
+      call comm_bcast(fe%tensor_rtol,nproc_group_global)
+      call comm_bcast(fe%tensor_maxiter,nproc_group_global)
+      if(.not.ieee_is_finite(fe%tensor_rtol))ierr=1
+      if(fe%tensor_rtol<=0d0.or.fe%tensor_rtol>=1d0.or.fe%tensor_maxiter<1)ierr=1
+      tol=64d0*epsilon(1d0)
+      do m=1,media_num
+        if(media_type(m)/='ld-tensor')cycle
+        do q=0,pole_num_ld(m)
+          do b=1,3
+            do a=1,3
+              if(.not.ieee_is_finite(fe%tensor_raw(a,b,q,m)))ierr=1
+            enddo
+          enddo
+          if(ierr/=0)return
+          scale=maxval(abs(fe%tensor_raw(:,:,q,m)))
+          if(scale==0d0)then
+            if(q==0)ierr=1
+            cycle
+          endif
+          mat=fe%tensor_raw(:,:,q,m)/scale
+          do a=1,3
+            if(mat(a,a)<0d0)ierr=1
+            if(q==0.and.mat(a,a)<=0d0)ierr=1
+            do b=1,3
+              if(abs(mat(a,b)-mat(b,a))>tol)ierr=1
+              if(mat(a,a)==0d0.and.mat(a,b)/=0d0)ierr=1
+            enddo
+          enddo
+          do a=1,2
+            do b=a+1,3
+              minor=mat(a,a)*mat(b,b)-mat(a,b)*mat(b,a)
+              if(minor < -tol)ierr=1
+            enddo
+          enddo
+          det=mat(1,1)*(mat(2,2)*mat(3,3)-mat(2,3)*mat(3,2)) &
+             -mat(1,2)*(mat(2,1)*mat(3,3)-mat(2,3)*mat(3,1)) &
+             +mat(1,3)*(mat(2,1)*mat(3,2)-mat(2,2)*mat(3,1))
+          if(det < -tol)ierr=1
+          if(q==0.and.det<=0d0)ierr=1
+          if(ierr/=0)return
+          do a=1,3
+            do b=1,3
+              if(a==b.or.mat(a,a)==0d0.or.mat(b,b)==0d0)cycle
+              fe%tensor_corr(a,b,q,m)=.5d0*(mat(a,b)+mat(b,a))/sqrt(mat(a,a))/sqrt(mat(b,b))
+            enddo
+          enddo
+          if(q==0)then
+            diagonal_eps(:,m)=[fe%tensor_raw(1,1,q,m),fe%tensor_raw(2,2,q,m),fe%tensor_raw(3,3,q,m)]
+            inverse(1,:)=[mat(2,2)*mat(3,3)-mat(2,3)*mat(3,2), &
+              mat(1,3)*mat(3,2)-mat(1,2)*mat(3,3),mat(1,2)*mat(2,3)-mat(1,3)*mat(2,2)]
+            inverse(2,:)=[mat(2,3)*mat(3,1)-mat(2,1)*mat(3,3), &
+              mat(1,1)*mat(3,3)-mat(1,3)*mat(3,1),mat(1,3)*mat(2,1)-mat(1,1)*mat(2,3)]
+            inverse(3,:)=[mat(2,1)*mat(3,2)-mat(2,2)*mat(3,1), &
+              mat(1,2)*mat(3,1)-mat(1,1)*mat(3,2),mat(1,1)*mat(2,2)-mat(1,2)*mat(2,1)]
+            bound=scale*det/maxval(sum(abs(inverse),dim=2))
+            if(.not.ieee_is_finite(bound).or.bound<=0d0)then
+              ierr=1;return
+            endif
+            dt_cfl=min(dt_cfl,sqrt(bound)/(cspeed_au*sqrt(sum((1d0/fs%hgs)**2))))
+          else
+            diagonal_f(:,m,q)=[fe%tensor_raw(1,1,q,m),fe%tensor_raw(2,2,q,m),fe%tensor_raw(3,3,q,m)]
+          endif
+        enddo
+      enddo
+      fe%tensor_enabled=ierr==0
+    end subroutine eh_read_tensor
+
+    subroutine eh_tensor_impulse
+      real(8),allocatable::kick(:,:,:,:),cross(:,:,:,:)
+      real(8)::delta(3),factor
+      integer::lo(3),hi(3),q,m,ix,iy,iz,k,a
+      lo=fs%mg%is_array;hi=fs%mg%ie_array
+      allocate(kick(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+        cross(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+      kick(1,:,:,:)=tmp_x1+tmp_x2;kick(2,:,:,:)=tmp_y1+tmp_y2;kick(3,:,:,:)=tmp_z1+tmp_z2
+      do q=1,ld%max_pole_num_ld
+        call eh_tensor_off(fs,fe,q,kick,cross)
+        do iz=fs%mg%is(3),fs%mg%ie(3)
+        do iy=fs%mg%is(2),fs%mg%ie(2)
+        do ix=fs%mg%is(1),fs%mg%ie(1)
+          delta=0d0
+          do a=1,3
+            m=fe%tensor_owner(a,ix,iy,iz)
+            if(m==0)cycle
+            do k=1,ld%num_ld
+              if(ld%media_ld(k)==m)exit
+            enddo
+            if(q>pole_num_ld(m))cycle
+            factor=-2d0*tmp_c0_ld(q,k)/dt_em
+            delta(a)=factor*cross(a,ix,iy,iz)
+          enddo
+          if(ld%c1_jx_ld(ix,iy,iz,q)>0d0)then
+            ld%rjx_ld(ix,iy,iz,q)=ld%rjx_ld(ix,iy,iz,q)+delta(1)
+            ld%rjx_fdtd_ld(ix,iy,iz)=ld%rjx_fdtd_ld(ix,iy,iz)+.5d0*(1d0+ld%c1_jx_ld(ix,iy,iz,q))*delta(1)
+          endif
+          if(ld%c1_jy_ld(ix,iy,iz,q)>0d0)then
+            ld%rjy_ld(ix,iy,iz,q)=ld%rjy_ld(ix,iy,iz,q)+delta(2)
+            ld%rjy_fdtd_ld(ix,iy,iz)=ld%rjy_fdtd_ld(ix,iy,iz)+.5d0*(1d0+ld%c1_jy_ld(ix,iy,iz,q))*delta(2)
+          endif
+          if(ld%c1_jz_ld(ix,iy,iz,q)>0d0)then
+            ld%rjz_ld(ix,iy,iz,q)=ld%rjz_ld(ix,iy,iz,q)+delta(3)
+            ld%rjz_fdtd_ld(ix,iy,iz)=ld%rjz_fdtd_ld(ix,iy,iz)+.5d0*(1d0+ld%c1_jz_ld(ix,iy,iz,q))*delta(3)
+          endif
+        enddo
+        enddo
+        enddo
+      enddo
+    end subroutine eh_tensor_impulse
+
+    subroutine eh_tensor_weights
+      integer::lo(3),hi(3),ix,iy,iz,a,m,q,next(3),pmax,active_lo(3),active_hi(3)
+      lo=fs%mg%is_array;hi=fs%mg%ie_array;pmax=ubound(fe%tensor_raw,3)
+      allocate(fe%tensor_weight(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),0:pmax), &
+        fe%tensor_diag(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+        fe%tensor_owner(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+      fe%tensor_weight=0d0;fe%tensor_diag=1d0;fe%tensor_owner=0
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        if(fe%c2_jx(ix,iy,iz)/=0d0)fe%tensor_diag(1,ix,iy,iz)=-4d0*pi*dt_em/fe%c2_jx(ix,iy,iz)
+        if(fe%c2_jy(ix,iy,iz)/=0d0)fe%tensor_diag(2,ix,iy,iz)=-4d0*pi*dt_em/fe%c2_jy(ix,iy,iz)
+        if(fe%c2_jz(ix,iy,iz)/=0d0)fe%tensor_diag(3,ix,iy,iz)=-4d0*pi*dt_em/fe%c2_jz(ix,iy,iz)
+        m=fs%imedia(ix,iy,iz)
+        if(media_type(m)/='ld-tensor')cycle
+        do a=1,3
+          select case(a)
+          case(1)
+            active_lo=max(fe%iex_y_is,fe%iex_z_is);active_hi=min(fe%iex_y_ie,fe%iex_z_ie)
+          case(2)
+            active_lo=max(fe%iey_z_is,fe%iey_x_is);active_hi=min(fe%iey_z_ie,fe%iey_x_ie)
+          case(3)
+            active_lo=max(fe%iez_x_is,fe%iez_y_is);active_hi=min(fe%iez_x_ie,fe%iez_y_ie)
+          end select
+          if(any([ix,iy,iz]<active_lo).or.any([ix,iy,iz]>active_hi))then
+            select case(a)
+            case(1)
+              ld%c1_jx_ld(ix,iy,iz,:)=0d0;ld%c2_jx_ld(ix,iy,iz,:)=0d0;ld%c3_jx_ld(ix,iy,iz,:)=0d0
+            case(2)
+              ld%c1_jy_ld(ix,iy,iz,:)=0d0;ld%c2_jy_ld(ix,iy,iz,:)=0d0;ld%c3_jy_ld(ix,iy,iz,:)=0d0
+            case(3)
+              ld%c1_jz_ld(ix,iy,iz,:)=0d0;ld%c2_jz_ld(ix,iy,iz,:)=0d0;ld%c3_jz_ld(ix,iy,iz,:)=0d0
+            end select
+            cycle
+          endif
+          next=[ix,iy,iz];next(a)=next(a)+1
+          if(fs%imedia(next(1),next(2),next(3))==0)cycle
+          fe%tensor_owner(a,ix,iy,iz)=m
+          fe%tensor_weight(a,ix,iy,iz,0)=sqrt(fe%tensor_raw(a,a,0,m))
+          do q=1,pole_num_ld(m)
+            select case(a)
+            case(1)
+              fe%tensor_weight(a,ix,iy,iz,q)=sqrt(ld%c2_jx_ld(ix,iy,iz,q))
+            case(2)
+              fe%tensor_weight(a,ix,iy,iz,q)=sqrt(ld%c2_jy_ld(ix,iy,iz,q))
+            case(3)
+              fe%tensor_weight(a,ix,iy,iz,q)=sqrt(ld%c2_jz_ld(ix,iy,iz,q))
+            end select
+          enddo
+        enddo
+      enddo
+      enddo
+      enddo
+    end subroutine eh_tensor_weights
+
+    real(8) function eh_axis_strength(axis,imedia,pole) result(value)
+      integer,intent(in)::axis,imedia,pole
+      value=f_ld(imedia,pole)
+      if((media_type(imedia)=='ld-diagonal'.or.media_type(imedia)=='ld-tensor'))value=diagonal_f(axis,imedia,pole)
+    end function
+
     subroutine eh_coeff
       implicit none
       real(8)  :: c1_e,c2_e_x,c2_e_y,c2_e_z,c2_j,c1_h,c2_h_x,c2_h_y,c2_h_z
@@ -2534,7 +3239,7 @@ contains
       select case(media_type(ii))
       case('pec')
         c1_e=0.0d0; c2_e_x=0.0d0; c2_e_y=0.0d0; c2_e_z=0.0d0; c2_j=0.0d0;
-      case('lorentz-drude')
+      case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
         c1_e   = tmp_c5_ld(icount_ld) / tmp_c4_ld(icount_ld)
         c2_e_x = cspeed_au*dt_em      / tmp_c4_ld(icount_ld) / fs%hgs(1)
         c2_e_y = cspeed_au*dt_em      / tmp_c4_ld(icount_ld) / fs%hgs(2)
@@ -2607,6 +3312,13 @@ contains
         do ix=fs%mg%is(1),fs%mg%ie(1)
           if(fs%imedia(ix,iy,iz)==ii) then
             !------ ex and jx --------------------------------------------------!
+            if((media_type(ii)=='ld-diagonal'.or.media_type(ii)=='ld-tensor'))then
+              c1_e=diagonal_c5(icount_ld,1)/diagonal_c4(icount_ld,1)
+              c2_e_x=cspeed_au*dt_em/diagonal_c4(icount_ld,1)/fs%hgs(1)
+              c2_e_y=cspeed_au*dt_em/diagonal_c4(icount_ld,1)/fs%hgs(2)
+              c2_e_z=cspeed_au*dt_em/diagonal_c4(icount_ld,1)/fs%hgs(3)
+              c2_j=4d0*pi*dt_em/diagonal_c4(icount_ld,1)
+            endif
             ! Geometric staircase ownership: lower-coordinate cell, never ID priority.
             ! A vacuum endpoint retains the legacy single-material boundary.
             if(fs%imedia(ix+1,iy,iz)/=0) then
@@ -2614,16 +3326,25 @@ contains
               fe%c1_ex_z(ix,iy,iz) =  c1_e; fe%c2_ex_z(ix,iy,iz) = -c2_e_z;
               fe%c2_jx(ix,iy,iz)   = -c2_j;
               select case(media_type(ii))
-              case('lorentz-drude')
+              case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
                 do ij=1,pole_num_ld(ii)
                   ld%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
                   ld%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
+                  if((media_type(ii)=='ld-diagonal'.or.media_type(ii)=='ld-tensor')) &
+                    ld%c2_jx_ld(ix,iy,iz,ij)=diagonal_c2(ij,icount_ld,1)
                   ld%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
                 end do
               end select
             end if
             
             !------ ey and jy --------------------------------------------------!
+            if((media_type(ii)=='ld-diagonal'.or.media_type(ii)=='ld-tensor'))then
+              c1_e=diagonal_c5(icount_ld,2)/diagonal_c4(icount_ld,2)
+              c2_e_x=cspeed_au*dt_em/diagonal_c4(icount_ld,2)/fs%hgs(1)
+              c2_e_y=cspeed_au*dt_em/diagonal_c4(icount_ld,2)/fs%hgs(2)
+              c2_e_z=cspeed_au*dt_em/diagonal_c4(icount_ld,2)/fs%hgs(3)
+              c2_j=4d0*pi*dt_em/diagonal_c4(icount_ld,2)
+            endif
             ! Geometric staircase ownership: lower-coordinate cell, never ID priority.
             ! A vacuum endpoint retains the legacy single-material boundary.
             if(fs%imedia(ix,iy+1,iz)/=0) then
@@ -2631,16 +3352,25 @@ contains
               fe%c1_ey_x(ix,iy,iz) =  c1_e; fe%c2_ey_x(ix,iy,iz) = -c2_e_x;
               fe%c2_jy(ix,iy,iz)   = -c2_j;
               select case(media_type(ii))
-              case('lorentz-drude')
+              case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
                 do ij=1,pole_num_ld(ii)
                   ld%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
                   ld%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
+                  if((media_type(ii)=='ld-diagonal'.or.media_type(ii)=='ld-tensor')) &
+                    ld%c2_jy_ld(ix,iy,iz,ij)=diagonal_c2(ij,icount_ld,2)
                   ld%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
                 end do
               end select
             end if
             
             !------ ez and jz --------------------------------------------------!
+            if((media_type(ii)=='ld-diagonal'.or.media_type(ii)=='ld-tensor'))then
+              c1_e=diagonal_c5(icount_ld,3)/diagonal_c4(icount_ld,3)
+              c2_e_x=cspeed_au*dt_em/diagonal_c4(icount_ld,3)/fs%hgs(1)
+              c2_e_y=cspeed_au*dt_em/diagonal_c4(icount_ld,3)/fs%hgs(2)
+              c2_e_z=cspeed_au*dt_em/diagonal_c4(icount_ld,3)/fs%hgs(3)
+              c2_j=4d0*pi*dt_em/diagonal_c4(icount_ld,3)
+            endif
             ! Geometric staircase ownership: lower-coordinate cell, never ID priority.
             ! A vacuum endpoint retains the legacy single-material boundary.
             if(fs%imedia(ix,iy,iz+1)/=0) then
@@ -2648,10 +3378,12 @@ contains
               fe%c1_ez_y(ix,iy,iz) =  c1_e; fe%c2_ez_y(ix,iy,iz) = -c2_e_y;
               fe%c2_jz(ix,iy,iz)   = -c2_j;
               select case(media_type(ii))
-              case('lorentz-drude')
+              case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
                 do ij=1,pole_num_ld(ii)
                   ld%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
                   ld%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
+                  if((media_type(ii)=='ld-diagonal'.or.media_type(ii)=='ld-tensor')) &
+                    ld%c2_jz_ld(ix,iy,iz,ij)=diagonal_c2(ij,icount_ld,3)
                   ld%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
                 end do
               end select
@@ -2665,7 +3397,7 @@ contains
       
       !update LD counter
       select case(media_type(ii))
-      case('lorentz-drude')
+      case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
         icount_ld=icount_ld+1
       end select
       
@@ -3115,7 +3847,73 @@ contains
   
   !===========================================================================================
   != calculate eh-FDTD =======================================================================
+  ! Adjoint paired edge->node and node->edge means. Projection is by material
+  ! ownership, never by numeric material-ID priority. This leaves diagonal paths exact.
+  subroutine eh_tensor_off(fs,fe,pole,v,out)
+    use structures,only:s_fdtd_system
+    use sendrecv_grid,only:update_overlap_real8
+    implicit none
+    type(s_fdtd_system),intent(inout)::fs
+    type(ls_fdtd_eh),intent(in)::fe
+    integer,intent(in)::pole
+    real(8),intent(in)::v(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
+      fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
+    real(8),intent(out)::out(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
+      fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
+    real(8),allocatable::edge(:,:,:,:),node(:,:,:,:)
+    real(8)::mean(3)
+    integer::lo(3),hi(3),m,a,ix,iy,iz,next(3),nmodes
+    lo=fs%mg%is_array;hi=fs%mg%ie_array;out=0d0
+    if(fe%subpixel_enabled)then
+      if(.not.fe%subpixel_cross(pole))return
+    endif
+    allocate(edge(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+      node(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+    nmodes=ubound(fe%tensor_corr,4)
+    if(fe%subpixel_enabled)nmodes=1
+    do m=1,nmodes
+      if(.not.fe%subpixel_enabled)then
+        if(all(fe%tensor_corr(:,:,pole,m)==0d0))cycle
+      endif
+      edge=0d0;node=0d0
+      where(fe%tensor_owner==m)edge=fe%tensor_weight(:,:,:,:,pole)*v
+      do a=1,3
+        call update_overlap_real8(fs%srg_ng,fs%mg,edge(a,:,:,:))
+      enddo
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        mean=[.5d0*(edge(1,ix,iy,iz)+edge(1,ix-1,iy,iz)), &
+              .5d0*(edge(2,ix,iy,iz)+edge(2,ix,iy-1,iz)), &
+              .5d0*(edge(3,ix,iy,iz)+edge(3,ix,iy,iz-1))]
+        if(fe%subpixel_enabled)then
+          node(:,ix,iy,iz)=matmul(fe%subpixel_corr(:,:,ix,iy,iz,pole),mean)
+        else
+          node(:,ix,iy,iz)=matmul(fe%tensor_corr(:,:,pole,m),mean)
+        endif
+      enddo
+      enddo
+      enddo
+      do a=1,3
+        call update_overlap_real8(fs%srg_ng,fs%mg,node(a,:,:,:))
+      enddo
+      do iz=fs%mg%is(3),fs%mg%ie(3)
+      do iy=fs%mg%is(2),fs%mg%ie(2)
+      do ix=fs%mg%is(1),fs%mg%ie(1)
+        do a=1,3
+          if(fe%tensor_owner(a,ix,iy,iz)/=m)cycle
+          next=[ix,iy,iz];next(a)=next(a)+1
+          out(a,ix,iy,iz)=out(a,ix,iy,iz)+.5d0*fe%tensor_weight(a,ix,iy,iz,pole) &
+            *(node(a,ix,iy,iz)+node(a,next(1),next(2),next(3)))
+        enddo
+      enddo
+      enddo
+      enddo
+    enddo
+  end subroutine eh_tensor_off
+
   subroutine eh_calc(fs,fe,ld,external_current,step_guard)
+    use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
     use salmon_global,   only: dt_em,obs_num_em,obs_samp_em,yn_obs_plane_em,yn_obs_plane_integral_em,&
                                base_directory,nt_em,yn_periodic,ek_dir1,t1_t2,t1_start,              &
                                E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,       &
@@ -3126,7 +3924,7 @@ contains
     use communication,   only: comm_is_root,comm_summation
     use structures,      only: s_fdtd_system
     use misc_routines,   only: get_wtime
-    use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
+    use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em,stop_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     implicit none
     type(s_ld_state), intent(inout) :: ld
@@ -3155,6 +3953,12 @@ contains
     real(8)             :: dV, tmp(4)
     real(8), parameter  :: hartree_kelvin_relationship = 3.1577502480407d5 ! [K] (+/- 6.1e-07)
     
+    real(8),allocatable::tensor_drive(:,:,:,:,:)
+    if(fe%tensor_enabled)then
+      allocate(tensor_drive(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
+        fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3),ld%max_pole_num_ld))
+      tensor_drive=0d0
+    endif
     !time-iteration
     do iter=fe%iter_sta,fe%iter_end
       !update iter_now
@@ -3195,14 +3999,28 @@ contains
         if(any(external_current/=0d0)) call eh_add_curr(external_current(1,:,:,:), &
           external_current(2,:,:,:),external_current(3,:,:,:))
       end if
+      if(fe%tensor_enabled)then
+        call eh_tensor_solve
+        if(fe%tensor_failed)then
+          if(present(step_guard))then
+            if(.not.step_guard(20))return
+          endif
+          call stop_em('Nonfinite or non-positive tensor electric-field solve.')
+        endif
+      endif
       call eh_sendrecv(fs,fe,'e')
       if(present(step_guard))then
         if(.not.step_guard(20))return
       endif
       
       !update lorentz-drude
+      if(fe%tensor_enabled)then
+        call ld_update(ld,fs%mg%is_array,fs%mg%ie_array,fs%mg%is,fs%mg%ie,dt_em, &
+          fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y,tensor_drive)
+      else
       if(ld%enabled) call ld_update(ld,fs%mg%is_array,fs%mg%ie_array,fs%mg%is,fs%mg%ie,dt_em, &
         fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y)
+      endif
       
       if(present(step_guard))then
         if(.not.step_guard(21))return
@@ -3698,6 +4516,91 @@ contains
     
     return
   contains
+    subroutine eh_tensor_solve
+      real(8),allocatable::pred(:,:,:,:),old(:,:,:,:),b(:,:,:,:),x(:,:,:,:),res(:,:,:,:)
+      real(8),allocatable::z(:,:,:,:),direction(:,:,:,:),ad(:,:,:,:),temp(:,:,:,:)
+      real(8)::rho,next_rho,den,alpha,beta,normb,normr
+      integer::lo(3),hi(3),q,k
+      lo=fs%mg%is_array;hi=fs%mg%ie_array
+      allocate(pred(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+      pred(1,:,:,:)=fe%ex_y+fe%ex_z
+      pred(2,:,:,:)=fe%ey_z+fe%ey_x
+      pred(3,:,:,:)=fe%ez_x+fe%ez_y
+      old=pred
+      old(1,:,:,:)=ld%ex_old_ld;old(2,:,:,:)=ld%ey_old_ld;old(3,:,:,:)=ld%ez_old_ld
+      b=fe%tensor_diag*pred;x=pred;res=pred;z=pred;direction=pred;ad=pred;temp=pred
+      call eh_tensor_off(fs,fe,0,old,temp)
+      b=b+temp
+      do q=1,ld%max_pole_num_ld
+        call eh_tensor_off(fs,fe,q,old,temp)
+        b=b-2d0*acos(-1d0)*dt_em*temp
+      enddo
+      call tensor_product(x,ad)
+      res=b-ad;z=res/fe%tensor_diag;direction=z
+      rho=tensor_dot(res,z);normb=sqrt(tensor_dot(b,b))
+      fe%tensor_failed=.false.
+      do k=1,fe%tensor_maxiter
+        normr=sqrt(tensor_dot(res,res))
+        if(.not.ieee_is_finite(normr).or..not.ieee_is_finite(rho).or..not.ieee_is_finite(normb))then
+          fe%tensor_failed=.true.;exit
+        endif
+        if(normr<=fe%tensor_rtol*normb)exit
+        call tensor_product(direction,ad)
+        den=tensor_dot(direction,ad)
+        if(.not.ieee_is_finite(den).or.den<=0d0.or.rho<=0d0)then
+          fe%tensor_failed=.true.;exit
+        endif
+        alpha=rho/den;x=x+alpha*direction;res=res-alpha*ad
+        z=res/fe%tensor_diag;next_rho=tensor_dot(res,z)
+        beta=next_rho/rho;direction=z+beta*direction;rho=next_rho
+      enddo
+      if(.not.fe%tensor_failed)then
+        normr=sqrt(tensor_dot(res,res))
+        if(normr>fe%tensor_rtol*normb.and.comm_is_root(nproc_id_global)) &
+          write(*,'(A,I0,A,ES12.4)')'WARNING: tensor E solver budget at step ',iter, &
+          '; relative residual=',normr/max(normb,tiny(1d0))
+        fe%ex_y=fe%ex_y+.5d0*(x(1,:,:,:)-pred(1,:,:,:))
+        fe%ex_z=fe%ex_z+.5d0*(x(1,:,:,:)-pred(1,:,:,:))
+        fe%ey_z=fe%ey_z+.5d0*(x(2,:,:,:)-pred(2,:,:,:))
+        fe%ey_x=fe%ey_x+.5d0*(x(2,:,:,:)-pred(2,:,:,:))
+        fe%ez_x=fe%ez_x+.5d0*(x(3,:,:,:)-pred(3,:,:,:))
+        fe%ez_y=fe%ez_y+.5d0*(x(3,:,:,:)-pred(3,:,:,:))
+        old=old+x
+        do q=1,ld%max_pole_num_ld
+          call eh_tensor_off(fs,fe,q,old,temp)
+          tensor_drive(:,:,:,:,q)=temp
+        enddo
+      endif
+    end subroutine eh_tensor_solve
+
+    subroutine tensor_product(v,out)
+      real(8),intent(in)::v(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
+        fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
+      real(8),intent(out)::out(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
+        fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
+      real(8),allocatable::temp(:,:,:,:)
+      integer::q
+      allocate(temp,mold=v)
+      call eh_tensor_off(fs,fe,0,v,temp)
+      out=fe%tensor_diag*v+temp
+      do q=1,ld%max_pole_num_ld
+        call eh_tensor_off(fs,fe,q,v,temp)
+        out=out+2d0*acos(-1d0)*dt_em*temp
+      enddo
+    end subroutine tensor_product
+
+    real(8) function tensor_dot(a,b)result(value)
+      real(8),intent(in)::a(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
+        fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
+      real(8),intent(in)::b(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
+        fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
+      real(8)::local
+      local=sum(a(:,fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3)) &
+               *b(:,fs%mg%is(1):fs%mg%ie(1),fs%mg%is(2):fs%mg%ie(2),fs%mg%is(3):fs%mg%ie(3)))
+      call comm_summation(local,value,nproc_group_global)
+    end function tensor_dot
+
+
     
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ store old variables +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -4491,7 +5394,7 @@ contains
     use salmon_global,   only: dt_em,unit_system,yn_periodic,e_impulse,sysname,                          &
                                nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,                   &
                                obs_plane_ene_em,yn_obs_plane_em,ase_num_em,ase_ene_min_em,ase_wav_min_em,&
-                               art_num_em,art_ene_min_em,art_wav_min_em,ek_dir1
+                               art_num_em,art_ene_min_em,art_wav_min_em,ek_dir1,media_type
     use inputoutput,     only: utime_from_au,ulength_from_au,uenergy_from_au
     use parallelization, only: nproc_id_global,nproc_group_global
     use communication,   only: comm_is_root,comm_summation
@@ -4522,7 +5425,7 @@ contains
     
     !*** output linear response(matter dipole pm and current jm are outputted: pm = -dip and jm = -curr) ******!
     if(fe%flag_lr) then
-      if(any(fe%rep/=1d0))then
+      if(any(fe%rep/=1d0).or.any(media_type=='ld-diagonal').or.any(media_type=='ld-tensor').or.fe%subpixel_enabled)then
         ! Keep the valid pole-current initial condition and raw trajectory.
         ! The legacy optical normalization omits instantaneous polarization.
         if(comm_is_root(nproc_id_global))then

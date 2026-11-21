@@ -233,3 +233,19 @@ epsilon = dielectric_function(sigma)
 `optical_linearity(reference, candidate, rtol=...)` は利用者が渡した異なる振幅の伝導率を共通の有効周波数で比較し、相対RMSを返します。材料・偏光・駆動形状の一致は利用者が確認してください。電流が全てゼロなら相対誤差を定義せず判定も未定義とします。`optical_sum_rule(sigma, expected_weight=..., normalization="...")` は有効な隣接周波数間のRe sigmaを台形積分します。正周波数の全電子系では期待値pi*n/2が基準ですが、擬ポテンシャル・非局所電流・不足バンドに応じた基準は利用者が指定します。欠損帯域を補外せず、物理精度の合格証明にはしません。追加のSCF/TDDFT計算やダウンロードは起動しません。
 
 合成データのサンプル: `python -m salmonpy.examples.optical_response`。実材料の収束済み光学定数の例ではありません。
+
+制約付きLDフィット: `python -m salmonpy.examples.ld_fit --poles 1 2 3`。合成データで極数ごとの残差・精度判定・刻みの目安と来歴を比較します。
+
+実験光学定数の一覧: `python -m salmonpy.examples.optical_materials`。CC0元データ・出典・測定条件と候補係数をオフラインで読みます。
+
+`python -m salmonpy.examples.ld_response --anisotropic`: 合成相反テンソルLDの非対角応答。FDTD伝播例ではありません。
+
+`fdtd_waveplate`: 四分の一／半波長板の合成FDTD例。既定はプレビューのみ、--runで明示開始。FDTD_MATERIALS.md参照。
+
+界面平滑化を試す場合は `fdtd_waveplate` の `--subpixel` を任意指定します。中心周波数に合わせるLD専用近似です。既定は無効で、SBE・TDDFTには適用しません。まず表示のみで確認し、計算には `--run` を明示してください。
+
+保存済み軌跡の時間長・窓依存とk点電流寄与は `optical_postprocess`。表示が既定で、`--run` は後処理だけを実行します。ソルバーを起動しません。OPTICAL_TRAJECTORIES.mdを参照してください。
+
+`mpi_runtime_receipt` はジョブ内の検証I/Oだけを測るサンプルです。表示が既定で、`--run` でもSALMON計算を開始しません。RUNTIME.mdを参照してください。
+
+混在MPIのA／場パケットは担当点だけへ配ります。Jの場への返却順は同じです。通信の情報はcommunication_reportで確認できます。

@@ -127,8 +127,8 @@ summed over poles. They are not the auxiliary FDTD quantity Q.
 
 `permittivity(omega)` evaluates the continuous model with exp(-i omega t):
 `epsilon_infinity + sum(f*wp**2 / (w0**2 - omega**2 - i*gamma*omega))`.
-The instantaneous background epsilon_infinity defaults to 1; anisotropy, active media, fitting,
-and unit conversion are not included. An exact real-axis pole raises ValueError.
+The instantaneous background epsilon_infinity defaults to 1; anisotropy, active media and unit conversion are not included.
+Constrained fitting is available through fit_lorentz_drude; see LD.en.md. An exact real-axis pole raises ValueError.
 Finite-step time propagation approximates this continuous response; reduce dt to
 check temporal convergence. A single state must not be shared between threads.
 

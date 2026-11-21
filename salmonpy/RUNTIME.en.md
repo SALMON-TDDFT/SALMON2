@@ -655,3 +655,123 @@ of the lightweight LD/SBE wheel. Explicit source builds prefer an installed FFTW
 HSE builder downloads/builds pinned FFTW3.3.10. Offline systems must provision it
 beforehand and confirm `HSE: using installed FFTW` in the configure log. Import
 never performs this build/download. Ordinary USE_HSE=OFF does not need HSE FFTW.
+
+
+## Explicit single-job validation receipts
+
+A managed runtime may be fully validated once per job and then reused explicitly:
+
+```python
+import secrets
+from salmonpy.runtime import prepare_runtime_job, load_runtime
+validation = prepare_runtime_job(
+    "managed-runtime", "new-job-validation.json",
+    job_id="CURRENT_JOB_ID", job_token=secrets.token_urlsafe(32),
+    required=["tddft", "single-rank"],
+)
+engine = load_runtime("managed-runtime", required=["tddft", "single-rank"], validation=validation)
+print(engine.runtime_validation_report)  # Never contains the secret token.
+```
+
+Neither call starts SALMON, MPI, a download or a build. Run the preparation once
+within the job, not once per point. The receipt is a NEW file outside the runtime;
+existing receipts are never overwritten. Do not write outputs inside a managed
+runtime. Keep its files immutable during the job. Omit validation= to retain full
+verification on every load; no global/environment cache is activated.
+
+The job leader generates a fresh secret for this allocation and distributes the
+RuntimeValidation context to workers through the caller-owned communication
+channel (for example comm.bcast). The receipt binds the resolved runtime path,
+manifest, file/directory metadata and job ID using HMAC-SHA256. It does NOT store
+the secret; repr(validation) also hides it. Do not serialize the context into
+material/input/checkpoint JSON, print its fields or put the token on a command
+line. The secret's lifetime is one job; generate a new one for a later allocation.
+Job IDs are explicit caller-supplied current allocation IDs; SALMONpy does not
+infer every scheduler. There is no arbitrary wall-clock expiry that blocks long
+jobs. This is a local job trust mechanism, not a publisher signature or proof of
+scientific correctness. Use trusted runtime catalogs/build records as before.
+
+On reuse, executable bytes are ALWAYS hashed against recorded SHA256. The small
+runtime manifest is hashed, the proof signature is checked, and recorded file /
+directory fingerprints are checked before/after reuse. Auxiliary libraries/data
+are not read for hashing, and the directory tree is not scanned again. These
+metadata guards are not protection against a hostile same-user process or a
+filesystem that returns stale/coarse metadata. They still cost O(number of
+members) stat operations. If the executable dominates bundle size, savings are
+correspondingly limited; this does not eliminate mandatory executable I/O.
+
+Changed/unavailable proof, wrong job/token, moved bundle or changed metadata
+warns and falls back to ordinary COMPLETE verification. An unchanged valid
+calculation can continue; a corrupt actual bundle still fails its normal checks.
+No automatic receipt rewrite. Required features and binary-bound NLCC force
+validation keep their original checks. Creation still verifies every bundle byte.
+The fast metadata path is currently POSIX-only; other systems keep full validation
+with a warning. Shared-filesystem metadata consistency and cross-node identities
+must be validated at the site. Local Mac evidence is not a multi-node guarantee.
+
+For process-isolated TDDFT, pass runtime_validation=validation explicitly to BOTH
+TDDFTMaterialProvider(...) and TDDFTResponseBackend(...). The job context is not
+part of physical material identity or electronic state. Configured catalog
+providers which do not expose this option still use full verification. Embedded
+build.json / native library loaders are not accelerated by this bundle receipt.
+Custom backends need not participate and are never rejected for lacking a receipt.
+
+```sh
+# Preview only: no MPI initialization, file creation or calculation
+python -m salmonpy.examples.mpi_runtime_receipt RUNTIME NEW_RECEIPT --job-id CURRENT_JOB_ID
+# Example caller-owned MPI launch, inside allocated resources. No SALMON run.
+mpiexec -n 4 python -m salmonpy.examples.mpi_runtime_receipt RUNTIME NEW_RECEIPT --job-id CURRENT_JOB_ID --loads 3 --report NEW_REPORT.json --run
+```
+
+Use the SITE launcher and allocation size; the sample does not start mpiexec or
+nest a launcher. Rank0 performs the complete verification and broadcasts only
+inside the job. Every rank loads through the explicit context; the report records
+bytes hashed, snapshot stat checks, tree walks, elapsed time and caller MPI health,
+without the token. A successful report never starts a physical calculation.
+No receipt is required for pre-submission validation or user-defined modules.
+
+Local synthetic benchmark (18 files, approximately58MiB including a2MiB DATA-ONLY
+nonexecuted stand-in): reuse hashes2MiB of executable payload plus the small
+manifest instead of58MiB payload, with no tree scan. Four local MPI ranks with
+three loads each preserve caller MPI. This fixture is not a solver runtime to
+execute. No FEFS/multi-node scaling, GPU or physical-observable claim is made.
+
+
+## Minimize outer collectives
+
+Application-wide communication is limited to necessary setup, consistent failure
+agreement and explicitly requested final aggregation. Runtime receipt reuse is
+rank-local. The validation-only mpi_runtime_receipt example uses one setup bcast
+and one final gather to rank0, without allgather, health allreduce or Barrier.
+The final gather itself shows caller MPI remains usable; reports are not copied
+to every rank. The script terminates after reporting and never starts a solver.
+
+NativeEHField.advance coalesces its Python wrapper's subgroup checks from six
+collectives to two: (local input error, current values), then (native status,
+finite E, finite candidate A, integration error). Every member sees the same
+records and decides identically. No reduction of native physical communication
+is claimed. Signed-zero equality, before-entry rejection, recoverable native
+rollback and commit-after-agreement are preserved. No numerical update changes.
+
+Keep model-internal physical sums/halos and required failure decisions.
+ResponseSession now scatters A rows only to their owning material leader, then
+broadcasts those rows only within that material group. Field groups receive no
+response-service input payload; singleton groups need no subgroup broadcast.
+Field packets are similarly scattered as per-owner dictionaries, preserving
+values, units, positions and clocks. J already gathers local owner contributions;
+its return to field ranks and the callback/native update order are unchanged.
+
+Root need not be first in plan order; point IDs and owning groups may interleave
+and own different counts. Cached routing indexes restore global J order without
+repeated per-step point searches. communication_report records received_A_rows_by_group;
+logical_A_bytes_per_step is the logical dataset size, not measured network traffic.
+No new world collective is added. Existing error/finite agreements are retained.
+
+For checkpoint compatibility response._A retains a global-indexed shape: only
+owned rows are current on material ranks, and only the field leader retains full
+response-service A history. Nonowned/private rows are placeholders, not replicated
+output. Use field-leader point archives for global observations. Old checkpoints
+with full rows remain readable. Native field A/E and physical state data are not
+replaced by placeholders. Remaining outer agreements and field-internal spatial
+J ownership require separate validation; full solver communication is not claimed
+optimal.

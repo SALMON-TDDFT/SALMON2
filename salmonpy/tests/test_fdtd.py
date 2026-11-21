@@ -105,6 +105,10 @@ class FDTDTests(unittest.TestCase):
         with self.assertWarnsRegex(RuntimeWarning,'raw data continue'):
             kicked=replace(base,materials=(cfg,))
         self.assertIsInstance(kicked.source,Impulse)
+        with self.assertWarnsRegex(RuntimeWarning,'calibrated'):
+            extrapolated=replace(calc,materials=(replace(cfg,valid_frequency_range=(.1,.3)),))
+        self.assertEqual(extrapolated.materials[0].valid_frequency_range,(.1,.3))
+
 
         self.assertIn('epsilon_em(1) = 2.25',calc.input_text())
         # Slower matter cannot loosen the vacuum/PML timestep limit.
@@ -182,3 +186,57 @@ class FDTDTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'MPI'):
                     engine.run(self.calculation(),Path(tmp)/'run')
                 run.assert_not_called()
+
+
+    def test_single_component_ld_tensor_uses_same_eh_input(self):
+        from dataclasses import replace
+        from salmonpy.ld import LDTensorModelConfig
+        original=self.calculation()
+        scalar=original.materials[0]
+        tensor=scalar.tensor_config
+        self.assertIsInstance(tensor,LDTensorModelConfig)
+        self.assertEqual(tensor.independent_components,1)
+        self.assertEqual(tensor.representation,'isotropic_diagonal')
+        with self.assertRaises(AttributeError):tensor.representation='full'
+        converted=replace(original,materials=(tensor,))
+        self.assertEqual(original.input_text(),converted.input_text())
+        self.assertEqual(converted.tensor_materials,(tensor,))
+        self.assertEqual(original.tensor_materials,(tensor,))
+        from salmonpy.material_response import LDMaterialProvider
+        standard=LorentzDrude.from_config(scalar)
+        converted_model=LorentzDrude.from_config(tensor)
+        provider=LDMaterialProvider(tensor)
+        self.assertEqual(provider.identity,LDMaterialProvider(standard).identity)
+        fields=np.array([[0.,0.,0.],[.01,.02,.03],[.02,0.,-.01]])
+        first=standard.respond(fields,dt=.001)
+        second=converted_model.respond(fields,dt=.001)
+        np.testing.assert_array_equal(first.polarization,second.polarization)
+        np.testing.assert_array_equal(first.current,second.current)
+
+
+    def test_diagonal_tensor_asset_and_explicit_capability(self):
+        from dataclasses import replace
+        from salmonpy.ld import TensorLorentzDrude
+        base=self.calculation()
+        model=TensorLorentzDrude(plasma_frequency=.5,strength=[np.diag([.1,.2,.3])],resonance=[.4],damping=[.03],epsilon_infinity=np.diag([2.,3.,4.]))
+        with self.assertWarns(RuntimeWarning):calculation=replace(base,materials=(model,))
+        text=calculation.input_text()
+        self.assertIn("media_type(1) = 'ld-diagonal'",text)
+        assets=calculation.input_assets()
+        self.assertEqual(set(assets),{'salmonpy-ld-diagonal.dat'})
+        self.assertIn(hashlib.sha256(assets['salmonpy-ld-diagonal.dat'].encode()).hexdigest(),text)
+        self.assertEqual(base.input_assets(),{})
+        with tempfile.TemporaryDirectory() as directory:
+            exe=Path(directory)/'old';exe.write_bytes(b'not an anisotropic runtime')
+            runner=SalmonExecutable(exe,hashlib.sha256(exe.read_bytes()).hexdigest())
+            target=Path(directory)/'not-created'
+            with self.assertRaisesRegex(ValueError,'diagonal'):
+                runner.run(calculation,target)
+            self.assertFalse(target.exists())
+        offdiag=TensorLorentzDrude(plasma_frequency=1.,strength=[[[.2,.05,0.],[.05,.3,0.],[0.,0.,.4]]],resonance=[.4],damping=[.03])
+        full=replace(base,materials=(offdiag,))
+        self.assertIn('ld-tensor',full.input_text())
+        self.assertIn('salmonpy-ld-tensor.dat',full.input_assets())
+        self.assertIn('SALMONPY_LD_TENSOR 1',full.input_assets()['salmonpy-ld-tensor.dat'])
+        for settings in ({'tensor_rtol':1.},{'tensor_rtol':float('nan')},{'tensor_maxiter':0}):
+            with self.assertRaises(ValueError):replace(full,**settings)

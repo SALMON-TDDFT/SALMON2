@@ -78,6 +78,9 @@ integer(c_int) function sp_ld_permittivity(n,m,wp,eps,f,w,g,omega,result) bind(C
     value=cmplx(eps,0d0,kind=c_double)
     do q=1,n
       if(f(q)==0d0.or.wp==0d0)cycle
+      ! Do not infer exact poles from rounded differences of squares: an FMA
+      ! can leave a nonzero residual even when the two input frequencies match.
+      if(abs(omega(k))==w(q).and.(g(q)==0d0.or.omega(k)==0d0))return
       denominator=cmplx(w(q)*w(q)-omega(k)*omega(k),-g(q)*omega(k),kind=c_double)
       if(denominator==cmplx(0d0,0d0,kind=c_double))return
       if(.not.ieee_is_finite(real(denominator,kind=c_double)))return

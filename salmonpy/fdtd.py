@@ -11,10 +11,11 @@ import os
 import re
 import subprocess
 import numpy as np
-from .ld import LorentzDrude, LDModelConfig, _positive
+from .ld import LorentzDrude, LDModelConfig, LDTensorModelConfig, _positive
 from .geometry import Geometry, vector
 from .analysis import read_table
 from .fields import AcosPulse
+from .subpixel import SubpixelSmoothing, _material_data, _profile_asset, _is_ld_material
 
 
 def _integer(v,name):
@@ -99,35 +100,70 @@ class FDTD:
     observations: tuple=((0.,0.,0.),)
     observation_stride: int=1
     name: str='fdtd'
+    tensor_rtol: float=1e-10
+    tensor_maxiter: int=200
+    smoothing: SubpixelSmoothing | None=None
 
     def __post_init__(self):
         if not isinstance(self.geometry,Geometry): raise InputTypeError('geometry must be Geometry')
         if not isinstance(self.boundaries,Boundaries): raise InputTypeError('boundaries must be Boundaries')
         if not isinstance(self.source,(Impulse,PlaneWave)): raise InputTypeError('source must be Impulse or PlaneWave')
         materials=tuple(m.config if isinstance(m,LorentzDrude) else m for m in self.materials)
-        if len(materials)>200 or any(not isinstance(m,(Dielectric,LDModelConfig)) for m in materials):
-            raise InputError('up to 200 Dielectric or LD materials required')
+        materials=tuple(m.component if isinstance(m,LDTensorModelConfig) and m.component is not None else m for m in materials)
+        if len(materials)>200 or any(not isinstance(m,(Dielectric,LDModelConfig,LDTensorModelConfig)) for m in materials):
+            raise InputError('up to200 Dielectric, LD or reciprocal tensor materials required')
+        for m in materials:
+            if isinstance(m,LDTensorModelConfig):
+                if len(m.strength)>100:raise InputError('at most100 LD poles supported by SALMON')
         # Revalidate configs constructed directly rather than obtained from material.config.
         for m in materials:
             if isinstance(m,LDModelConfig):
                 LorentzDrude(plasma_frequency=m.plasma_frequency,strength=m.strength,
-                             resonance=m.resonance,damping=m.damping,epsilon_infinity=m.epsilon_infinity)
+                             resonance=m.resonance,damping=m.damping,epsilon_infinity=m.epsilon_infinity,valid_frequency_range=m.valid_frequency_range)
                 if len(m.strength)>100: raise InputError('at most 100 LD poles supported by SALMON')
         materials=tuple(LorentzDrude(plasma_frequency=m.plasma_frequency,strength=m.strength,
-                                    resonance=m.resonance,damping=m.damping,epsilon_infinity=m.epsilon_infinity).config
+                                    resonance=m.resonance,damping=m.damping,epsilon_infinity=m.epsilon_infinity,valid_frequency_range=m.valid_frequency_range).config
                         if isinstance(m,LDModelConfig) else m for m in materials)
         object.__setattr__(self,'materials',materials)
+        if self.smoothing is not None:
+            if not isinstance(self.smoothing,SubpixelSmoothing):raise InputTypeError('smoothing must be SubpixelSmoothing or None')
+            carrier=self.source.pulse.omega if isinstance(self.source,PlaneWave) else None
+            import warnings
+            try:
+                if not any(_is_ld_material(material) for material in materials):
+                    raise InputError('this mode is enabled only for explicitly specified LD materials')
+                for material in materials:_material_data(material)
+            except InputError as exc:
+                warnings.warn('subpixel smoothing not applied; retaining original material coefficients: '+str(exc),RuntimeWarning,stacklevel=2)
+            else:
+                self.smoothing.resolve(carrier)
+                if any(len(_material_data(material)[2]) for material in materials):
+                    warnings.warn('dispersive subpixel coefficients match only reference_omega; inspect response away from that frequency',RuntimeWarning,stacklevel=2)
+        for m in materials:
+            band=m.valid_frequency_range if isinstance(m,(LDModelConfig,LDTensorModelConfig)) else None
+            if band is not None:
+                import warnings
+                if isinstance(self.source,Impulse):
+                    warnings.warn('broadband impulse extends beyond the calibrated LD band; extrapolation is unvalidated',RuntimeWarning,stacklevel=2)
+                elif not band[0]<=self.source.pulse.omega<=band[1]:
+                    warnings.warn('source carrier lies outside the calibrated LD band; extrapolation is unvalidated',RuntimeWarning,stacklevel=2)
+                else:
+                    warnings.warn('source carrier is in the calibrated LD band; finite-pulse spectral tails are not certified. Supply an E spectrum to check_excitation.',RuntimeWarning,stacklevel=2)
+
         if isinstance(self.source,Impulse) and any(isinstance(m,Dielectric) for m in materials):
             raise InputError('SALMON impulse excitation requires LD materials; use PlaneWave for dielectrics')
-        if isinstance(self.source,Impulse) and any(isinstance(m,LDModelConfig) and m.epsilon_infinity!=1.0 for m in materials):
+        if isinstance(self.source,Impulse) and any(((isinstance(m,LDModelConfig) and m.epsilon_infinity!=1.0) or isinstance(m,LDTensorModelConfig)) for m in materials):
             import warnings
             warnings.warn('Non-unit LD background: impulse remains a dispersive-pole current kick. Time evolution and raw data continue, but legacy normalized optical spectra are omitted; use PlaneWave for optical response.',RuntimeWarning,stacklevel=2)
+        object.__setattr__(self,'tensor_rtol',_positive(self.tensor_rtol,'tensor_rtol'))
+        object.__setattr__(self,'tensor_maxiter',_integer(self.tensor_maxiter,'tensor_maxiter'))
+        if self.tensor_rtol>=1:raise InputError('tensor_rtol must be less than one')
         dt=_positive(self.dt,'dt');object.__setattr__(self,'dt',dt)
         for key in ('steps','observation_stride'):
             object.__setattr__(self,key,_integer(getattr(self,key),key))
         if self.observation_stride>self.steps: raise InputError('observation_stride exceeds steps')
         cfl=1/(137.035999084*np.sqrt(sum(1/d**2 for d in self.geometry.grid.spacing)))
-        fastest=min([1.0]+[m.epsilon_infinity if isinstance(m,LDModelConfig) else m.epsilon*m.mu for m in materials])
+        fastest=min([1.0]+[m.epsilon_infinity if isinstance(m,LDModelConfig) else (1/np.max(np.sum(np.abs(np.linalg.inv(m.epsilon_infinity)),axis=1)) if m.representation=='reciprocal_tensor' else min(m.epsilon_infinity[i][i] for i in range(3))) if isinstance(m,LDTensorModelConfig) else m.epsilon*m.mu for m in materials])
         cfl*=np.sqrt(fastest)
         if dt>=cfl: raise InputError(f'dt must be below whole-domain CFL limit {cfl:.17g} a.u.')
         if any(s.material>len(materials) for s in self.geometry.shapes):
@@ -154,8 +190,48 @@ class FDTD:
     @property
     def config(self): return self
 
+    @property
+    def tensor_materials(self):
+        """LD tensor records; isotropic one-component compression is exact.
+
+        Dielectric compatibility records are retained. Native E/H consumes
+        diagonal and reciprocal off-diagonal records without dropping entries.
+        """
+        return tuple(m.tensor_config if isinstance(m,LDModelConfig) else m for m in self.materials)
+
+    @property
+    def smoothing_reference(self):
+        if self.smoothing is None or not any(_is_ld_material(m) for m in self.materials):return None
+        try:
+            for material in self.materials:_material_data(material)
+        except InputError:return None
+        return self.smoothing.resolve(self.source.pulse.omega if isinstance(self.source,PlaneWave) else None)
+
+    def input_assets(self):
+        """Explicit native tensor records; no compilation or downloads."""
+        reference=self.smoothing_reference
+        if reference is not None:
+            return {'salmonpy-subpixel.dat':_profile_asset(self.materials,self.geometry,reference,self.tensor_rtol,self.tensor_maxiter)}
+        assets={}
+        for full in (False,True):
+            entries=[(i,m) for i,m in enumerate(self.materials,1)
+                     if isinstance(m,LDTensorModelConfig) and (m.representation=='reciprocal_tensor')==full]
+            if not entries:continue
+            rows=[('SALMONPY_LD_TENSOR 1' if full else 'SALMONPY_LD_DIAGONAL 1'),str(len(entries))]
+            if full:rows.append(_number(self.tensor_rtol)+' '+str(self.tensor_maxiter))
+            for index,m in entries:
+                rows.append(f'{index} {len(m.strength)}')
+                if full:
+                    rows.append(_vector(v for row in m.epsilon_infinity for v in row))
+                    rows.extend(_vector(v for row in pole for v in row) for pole in m.strength)
+                else:
+                    rows.append(_vector(m.epsilon_infinity[i][i] for i in range(3)))
+                    rows.extend(_vector(pole[i][i] for i in range(3)) for pole in m.strength)
+            assets['salmonpy-ld-tensor.dat' if full else 'salmonpy-ld-diagonal.dat']='\n'.join(rows)+'\n'
+        return assets
+
     def input_text(self):
-        """Generate a complete, inspectable SALMON namelist in atomic units."""
+        """Generate an inspectable namelist; tensor materials also need input_assets()."""
         g=self.geometry.grid
         if isinstance(self.source,Impulse):
             emfield="&emfield\n ae_shape1 = 'impulse'\n e_impulse = "+_number(self.source.amplitude)+ '\n epdir_re1 = '+_vector(self.source.polarization)+'\n/'
@@ -183,21 +259,31 @@ class FDTD:
             kind='rectangular-cylinder' if s.kind=='box' else 'ellipsoid'
             lines.extend([f" typ_s({i}) = '{kind}'",f' id_s({i}) = {s.material}',
                           f' inf_s({i},1:3) = '+_vector(s.size),f' ori_s({i},:) = '+_vector(s.center)])
-        for i,m in enumerate(self.materials,1):
+        for i,tensor in enumerate(self.tensor_materials,1):
+            m=tensor.component if isinstance(tensor,LDTensorModelConfig) and tensor.component is not None else tensor
+            if isinstance(m,Dielectric) and self.smoothing_reference is not None:
+                m=LDModelConfig(0.,(0.,),(0.,),(0.,),epsilon_infinity=m.epsilon)
             if isinstance(m,Dielectric):
                 lines.extend([f" media_type({i}) = 'vacuum'",f' epsilon_em({i}) = '+_number(m.epsilon),
                               f' mu_em({i}) = '+_number(m.mu),f' sigma_em({i}) = '+_number(m.conductivity)])
             else:
                 n=len(m.strength)
-                lines.extend([f" media_type({i}) = 'lorentz-drude'",f' pole_num_ld({i}) = {n}',
+                kind=('ld-tensor' if m.representation=='reciprocal_tensor' else 'ld-diagonal') if isinstance(m,LDTensorModelConfig) else 'lorentz-drude'
+                if self.smoothing_reference is not None:kind='ld-subpixel'
+                strength=[pole[0][0] for pole in m.strength] if isinstance(m,LDTensorModelConfig) else m.strength
+                background=m.epsilon_infinity[0][0] if isinstance(m,LDTensorModelConfig) else m.epsilon_infinity
+                lines.extend([f" media_type({i}) = '{kind}'",f' pole_num_ld({i}) = {n}',
                               f' omega_p_ld({i}) = '+_number(m.plasma_frequency),
-                              f' f_ld({i},1:{n}) = '+_vector(m.strength),
+                              f' f_ld({i},1:{n}) = '+_vector(strength),
                               f' omega_ld({i},1:{n}) = '+_vector(m.resonance),
                               f' gamma_ld({i},1:{n}) = '+_vector(m.damping)])
-                if m.epsilon_infinity!=1.0:
-                    lines.append(f' epsilon_em({i}) = '+_number(m.epsilon_infinity))
+                if background!=1.0:
+                    lines.append(f' epsilon_em({i}) = '+_number(background))
         for i,p in enumerate(self.observations,1): lines.append(f' obs_loc_em({i},:) = '+_vector(p))
-        return '\n\n'.join(parts+['\n'.join(lines+['/'])])+'\n'
+        result='\n\n'.join(parts+['\n'.join(lines+['/'])])+'\n'
+        for name,text in self.input_assets().items():
+            result+='! '+name+' SHA256='+hashlib.sha256(text.encode()).hexdigest()+'\n'
+        return result
 
 
 @dataclass(frozen=True,slots=True)
@@ -261,6 +347,12 @@ class SalmonExecutable:
     sha256: str
     mpi_enabled: bool=False
     _nlcc_force_xc: tuple = field(default=(), init=False, repr=False, compare=False)
+    _runtime_validation_stats: tuple = field(default=(), init=False, repr=False, compare=False)
+
+    @property
+    def runtime_validation_report(self):
+        """Local I/O verification report; no job token or scientific claims."""
+        return dict(self._runtime_validation_stats)
 
     @property
     def nlcc_force_xc(self):
@@ -273,10 +365,10 @@ class SalmonExecutable:
         if not re.fullmatch(r'[0-9a-f]{64}',self.sha256): raise InputError('expected lowercase SHA256')
 
     @classmethod
-    def from_runtime(cls,directory,*,required=(),host=None):
+    def from_runtime(cls,directory,*,required=(),host=None,validation=None):
         """Delegate bundle integrity/capability checks to runtime.load_runtime."""
         from .runtime import load_runtime
-        return load_runtime(directory,required=required,host=host)
+        return load_runtime(directory,required=required,host=host,validation=validation)
 
     @classmethod
     def from_mpi_build(cls,build_record):
@@ -295,8 +387,16 @@ class SalmonExecutable:
     def run(self,calculation,directory,*,timeout=300.,threads=1,mpi=None):
         if not isinstance(calculation,FDTD): raise InputTypeError('calculation must be FDTD')
         timeout=_positive(timeout,'timeout');threads=_integer(threads,'threads')
-        if hashlib.sha256(self.path.read_bytes()).hexdigest()!=self.sha256:
+        executable_bytes=self.path.read_bytes()
+        if hashlib.sha256(executable_bytes).hexdigest()!=self.sha256:
             raise InputError('executable SHA256 does not match the validated binary')
+        assets=calculation.input_assets()
+        if 'salmonpy-ld-diagonal.dat' in assets and b'SALMONPY_FDTD_LD_DIAGONAL_V1' not in executable_bytes:
+            raise InputError('runtime lacks diagonal tensor LD support; explicitly build or obtain a matching runtime')
+        if 'salmonpy-ld-tensor.dat' in assets and b'SALMONPY_FDTD_LD_TENSOR_V1' not in executable_bytes:
+            raise InputError('native runtime lacks off-diagonal tensor FDTD capability; explicitly rebuild it')
+        if 'salmonpy-subpixel.dat' in assets and b'SALMONPY_SUBPIXEL_REFERENCE_V2' not in executable_bytes:
+            raise InputError('native runtime lacks reference-frequency subpixel module; explicitly rebuild it')
         if mpi is not None:
             if not isinstance(mpi,FDTDMPI): raise InputTypeError('mpi must be FDTDMPI')
             if not self.mpi_enabled: raise InputError('MPI requires an audited MPI-enabled executable; use from_mpi_build')
@@ -314,10 +414,13 @@ class SalmonExecutable:
         except FileExistsError as exc:
             raise FileExistsError(exc.errno,'Output directory already exists. Choose a new directory.',str(directory)) from exc
         (directory/'inputfile').write_text(inp)
+        for name,text in assets.items():(directory/name).write_bytes(text.encode('utf-8'))
         record=dict(config=asdict(calculation),units='atomic_gaussian',executable=str(self.path),
                     executable_sha256=self.sha256,input_sha256=hashlib.sha256(inp.encode()).hexdigest(),
                     threads=threads,timeout=timeout,status='started',command=command,
-                    mpi=None if mpi is None else asdict(mpi),mpi_ranks=1 if mpi is None else mpi.ranks)
+                    mpi=None if mpi is None else asdict(mpi),mpi_ranks=1 if mpi is None else mpi.ranks,
+                    ld_tensor_materials=[None if not isinstance(t,LDTensorModelConfig) else dict(representation=t.representation,independent_components=t.independent_components,axes=t.axes,parameters=asdict(t)) for t in calculation.tensor_materials],
+                    input_asset_sha256={name:hashlib.sha256(text.encode()).hexdigest() for name,text in assets.items()})
         manifest=directory/'salmonpy-run.json'
         manifest.write_text(json.dumps(record,indent=2))
         try:

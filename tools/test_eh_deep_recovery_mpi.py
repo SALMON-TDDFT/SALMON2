@@ -1,7 +1,9 @@
 """Native E/H group numerical retry: BUILD NEW_OUTPUT [--baseline|--faults].
 
 Use 1/2 ranks, --split for two independent two-rank groups, OMP/BLAS1 and
-external timeout. Fault hooks must be compiled separately, never in production.
+external timeout. --tensor exercises reciprocal off-diagonal LD using the same
+recovery/close suite; use --baseline --resume-midpoint on a production build.
+Fault hooks must be compiled separately, never in production.
 """
 import ctypes as c
 import json
@@ -14,13 +16,14 @@ from salmonpy.coupled import NativeEHField
 from salmonpy.fdtd import FDTD,PlaneWave
 from salmonpy.fields import AcosPulse
 from salmonpy.geometry import Grid,Geometry,Shape
-from salmonpy.ld import LorentzDrude
+from salmonpy.ld import LorentzDrude,TensorLorentzDrude
 from salmonpy.errors import NumericalError
 
 
 def main():
     build,destination=sys.argv[1:3]
     split='--split' in sys.argv;faults='--faults' in sys.argv
+    tensor='--tensor' in sys.argv
     epsilon=float(sys.argv[sys.argv.index('--epsilon-infinity')+1]) if '--epsilon-infinity' in sys.argv else 1.0
     resume_midpoint='--resume-midpoint' in sys.argv
     if resume_midpoint and not '--baseline' in sys.argv:raise ValueError('resume-midpoint uses baseline mode')
@@ -70,6 +73,14 @@ def main():
     grid=Grid((40,40,40),(2.,2.,2.));dt=.003;steps=32
     ld=(LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[0.],damping=[2.],epsilon_infinity=epsilon),
         LorentzDrude(plasma_frequency=15.,strength=[.7,.3],resonance=[25.,35.],damping=[2.,3.],epsilon_infinity=1.0 if epsilon==1.0 else epsilon+.75))
+    if tensor:
+        cs,sn=np.cos(.4),np.sin(.4)
+        rotation=np.array([[cs,-sn,0.],[sn,cs,0.],[0.,0.,1.]])
+        ld=tuple(TensorLorentzDrude(plasma_frequency=m.config.plasma_frequency,
+            strength=[rotation@np.diag([f,1.1*f,1.2*f])@rotation.T for f in m.config.strength],
+            resonance=m.config.resonance,damping=m.config.damping,
+            epsilon_infinity=rotation@np.diag([m.config.epsilon_infinity,1.2*m.config.epsilon_infinity,1.4*m.config.epsilon_infinity])@rotation.T)
+            for m in ld)
     geometry=Geometry(grid,(Shape('box',(2.,4.,4.),(7.,1.,1.),material=1),Shape('box',(2.,4.,4.),(9.,1.,1.),material=2)))
     calc=FDTD(geometry,ld,dt,steps,source=PlaneWave(AcosPulse(.001,20.,.15),0,-16.),observations=((1.,1.,1.),),observation_stride=stride)
     admission_cases=[];geometry_mpi=[]
@@ -334,7 +345,7 @@ def main():
     assert Path.cwd()==anchor
     if guard:guard.stop()
     if comm.rank==0:
-        (out/'validation.json').write_text(json.dumps(dict(status='passed',epsilon_infinity=[epsilon,1.0 if epsilon==1.0 else epsilon+.75],checkpoint_restore_without_reinitialization=resume_midpoint,validation_continuation_repeated_steps=2 if resume_midpoint else 0,new_runtime_no_chdir=no_chdir,admission_cases=admission_cases,geometry_mpi=geometry_mpi,cases=cases,ranks=comm.size,steps=stop,capacity=steps,replayed_steps=0,allocation_before_close=allocation_before,allocation_after_close=allocation_after,mpi_before=mpi_before,mpi_initialized=mpi_initialized,mpi_after_native_close=mpi_after_native,mpi_after_detach=mpi_after_detach,other_owner_preserved=bool(host_mpi)),indent=2)+'\n')
+        (out/'validation.json').write_text(json.dumps(dict(status='passed',reciprocal_tensor=tensor,epsilon_infinity=[m.config.epsilon_infinity for m in ld],checkpoint_restore_without_reinitialization=resume_midpoint,validation_continuation_repeated_steps=2 if resume_midpoint else 0,new_runtime_no_chdir=no_chdir,admission_cases=admission_cases,geometry_mpi=geometry_mpi,cases=cases,ranks=comm.size,steps=stop,capacity=steps,replayed_steps=0,allocation_before_close=allocation_before,allocation_after_close=allocation_after,mpi_before=mpi_before,mpi_initialized=mpi_initialized,mpi_after_native_close=mpi_after_native,mpi_after_detach=mpi_after_detach,other_owner_preserved=bool(host_mpi)),indent=2)+'\n')
         print('E/H deep recovery PASS',cases)
 
 

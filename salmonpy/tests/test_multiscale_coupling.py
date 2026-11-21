@@ -176,3 +176,54 @@ class FDTDCommonClockTests(unittest.TestCase):
     def test_equal_dt_does_not_hide_wrong_half_step(self):
         with self.assertRaisesRegex(ValueError, 'point 4:.*offset'):
             self.check(self.records(second_clock='1/2'))
+
+
+    def test_native_advance_fuses_collectives_without_losing_admission_or_retry(self):
+        from salmonpy.coupled import NativeEHField
+        from salmonpy.errors import InputError, NumericalError
+        def make(code=0, remote=None, electric=None):
+            calls=[]
+            def gather(value):
+                calls.append(value)
+                return [value, remote(value,len(calls)) if remote else value]
+            f=object.__new__(NativeEHField)
+            f.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=gather))
+            f.closed=f.failed=False;f.step_index=0;f.capacity=10
+            f.A=np.zeros((1,3));f.E=np.zeros((1,3));f.dt=.1;f.point_ids=(7,);f.manifest={}
+            f.lib=SimpleNamespace(sp_eh_step=lambda *args:None,sp_eh_recovery_protocol=lambda:1)
+            entered=[]
+            def native(fn,*args):
+                entered.append(True);args[-1][:]=[.2,.4,.6] if electric is None else electric
+                return code
+            f._call=native
+            return f,calls,entered
+        field,calls,entered=make();before=field.A.copy()
+        actual=field.advance(np.zeros((1,3)))
+        np.testing.assert_array_equal(actual,before-field.dt*field.E)
+        self.assertEqual(len(calls),2)
+        self.assertEqual(field.step_index,1)
+        field,calls,entered=make(remote=lambda value,n: (None,[[-0.,0.,-0.]]) if n==1 else value)
+        field.advance(np.zeros((1,3)))
+        self.assertEqual(len(calls),2)
+        def mismatch(value,n):
+            return (None,[[1.,0.,0.]]) if n==1 else value
+        field,calls,entered=make(remote=mismatch)
+        with self.assertRaisesRegex(InputError,'currents differ'):field.advance(np.zeros((1,3)))
+        self.assertFalse(entered);self.assertFalse(field.failed)
+        self.assertEqual(len(calls),1)
+        field,calls,entered=make(code=20);before=field.A.copy()
+        from unittest.mock import patch
+        with patch('salmonpy.coupled.np.errstate',wraps=np.errstate) as arithmetic:
+            with self.assertRaises(NumericalError):field.advance(np.zeros((1,3)))
+            arithmetic.assert_not_called()
+        np.testing.assert_array_equal(field.A,before)
+        self.assertFalse(field.failed);self.assertEqual(field.step_index,0)
+        self.assertEqual(len(calls),2)
+        def bad_remote(value,n):
+            return (0,False,False,None) if n==2 else value
+        field,calls,entered=make(remote=bad_remote)
+        with self.assertRaisesRegex(InputError,'native field advance failed'):field.advance(np.zeros((1,3)))
+        self.assertTrue(field.failed);self.assertEqual(field.step_index,0)
+        field,calls,entered=make(electric=[1e308,0.,0.]);field.dt=2.
+        with self.assertRaisesRegex(InputError,'nonfinite integrated A'):field.advance(np.zeros((1,3)))
+        self.assertTrue(field.failed);self.assertEqual(field.step_index,0)

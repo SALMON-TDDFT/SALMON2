@@ -85,3 +85,158 @@ class UtilityTests(unittest.TestCase):
         rule=optical_sum_rule(broad,expected_weight=2*broad.omega[-1],normalization='synthetic constant sigma=2')
         self.assertAlmostEqual(rule['captured_fraction'],1.)
         self.assertFalse(rule['certified'])
+
+
+class TensorOpticalTests(unittest.TestCase):
+    def test_mixed_drives_tensor_and_rank_deficiency(self):
+        from salmonpy.analysis import dielectric_tensor
+        t=np.arange(128)*.1
+        drive=np.array([[1,.2,.1],[.1,1,.2],[.3,.1,1.]])
+        sigma=np.array([[.3,.05,0],[.05,.4,.02],[0,.02,.5]])
+        e=np.zeros((3,len(t),3));e[:,0,:]=drive.T
+        j=np.einsum('ij,rtj->rti',sigma,e)
+        args=dict(current_convention='charge',field_kind='total',units='atomic_gaussian',window='none')
+        out=dielectric_tensor(t,j,e,**args)
+        expected=np.eye(3)[None]+4j*np.pi*sigma[None]/out.omega[1:,None,None]
+        np.testing.assert_allclose(out.values[1:],expected,rtol=1e-13,atol=1e-13)
+        self.assertFalse(out.valid[0].any())
+        self.assertFalse(out.values.flags.writeable)
+        bad=e.copy();bad[2]=bad[1]
+        result=dielectric_tensor(t,j,bad,**args)
+        self.assertFalse(result.valid.any())
+        self.assertTrue(np.isnan(result.values).all())
+        for invalid in (e[:2], np.full_like(e,np.nan)):
+            with self.assertRaises(ValueError):dielectric_tensor(t,j,invalid,**args)
+
+
+class WaveplateRotationTests(unittest.TestCase):
+    def test_rotated_analytic_phasors(self):
+        from salmonpy.analysis import waveplate_diagnostic
+        omega=1.;length=432.;indices=(1.5,2.)
+        transmission=[]
+        for n in indices:
+            phase=np.exp(1j*n*omega*length/137.035999084)
+            transmission.append(4*n*phase/((n+1)**2-(n-1)**2*phase**2))
+        t=np.linspace(0,20*np.pi,4001)
+        principal=np.zeros((len(t),3))
+        principal[:,:2]=np.real(np.exp(-1j*t[:,None])*np.array(transmission)[None,:])
+        reference=None
+        for angle in (0.,np.pi/6):
+            cs,sn=np.cos(angle),np.sin(angle)
+            rotation=np.array([[cs,-sn,0],[sn,cs,0],[0,0,1.]])
+            result=waveplate_diagnostic(t,principal@rotation.T,omega=omega,indices=indices,
+                        thickness=length,units='atomic_gaussian',angle=angle)
+            self.assertLess(result['stokes_error_norm'],1e-13)
+            if reference is None:reference=result
+            else:self.assertAlmostEqual(result['stokes_normalized'][2],reference['stokes_normalized'][2],places=13)
+
+
+class LongWavelengthTests(unittest.TestCase):
+    def test_a4_scalar_correction_and_explicit_absorptive_extension(self):
+        from salmonpy.analysis import OpticalSpectrum, long_wavelength_correction
+        w=np.linspace(0.,1.,101)
+        true_eps=5.+2*w*w+1j*.1*w
+        true_sigma=-1j*w*(true_eps-1)/(4*np.pi)
+        data=true_sigma.copy();bad=(w>0)&(w<.2)
+        data[bad]+=.01+1j*.02/(w[bad]+.01)
+        cfg=dict(observable='optical_conductivity',units='atomic_gaussian',sign='exp(+i omega t)',current_convention='charge',field_kind='total')
+        source=OpticalSpectrum(w,data,np.ones(w.shape,dtype=bool),cfg)
+        args=dict(fit_range=(.3,.6),cutoff=.2,system='gapped_insulator',units='atomic_gaussian')
+        result=long_wavelength_correction(source,**args)
+        np.testing.assert_allclose(result.dielectric.values[bad].real,true_eps[bad].real,atol=1e-12)
+        np.testing.assert_array_equal(result.conductivity.values.real,data.real)
+        np.testing.assert_array_equal(result.conductivity.values[w>=.2],data[w>=.2])
+        self.assertAlmostEqual(result.report['components'][0]['static_dielectric_real'],5.,places=12)
+        self.assertFalse(result.dielectric.valid[0])
+        full=long_wavelength_correction(source,absorption='analytic',**args)
+        np.testing.assert_allclose(full.dielectric.values[w<.2],true_eps[w<.2],atol=1e-12)
+        self.assertTrue(full.dielectric.valid[0])
+        self.assertEqual(full.conductivity.values[0],0j)
+        self.assertFalse(full.dielectric.values.flags.writeable)
+        np.testing.assert_array_equal(source.values,data)
+        with self.assertRaises(ValueError):long_wavelength_correction(source,**dict(args,system='metal'))
+
+    def test_tensor_identity_masks_and_insufficient_fit(self):
+        from salmonpy.analysis import OpticalSpectrum,long_wavelength_correction
+        w=np.linspace(0.,1.,101)
+        data=np.zeros((len(w),3,3),complex)
+        for i in range(3):data[:,i,i]=i+2.+w*w+.02j*w
+        data[:,0,1]=data[:,1,0]=.2+.3*w*w
+        data[:,0,2]=complex(float('nan'),float('nan'))
+        valid=np.ones(data.shape,bool);valid[0]=False;valid[:,0,2]=False
+        original=data.copy()
+        cfg=dict(observable='dielectric_tensor',units='atomic_gaussian',sign='exp(+i omega t)')
+        source=OpticalSpectrum(w,data,valid,cfg)
+        with self.assertWarns(RuntimeWarning):
+            out=long_wavelength_correction(source,fit_range=(.3,.6),cutoff=.2,system='gapped_insulator',units='atomic_gaussian')
+        np.testing.assert_array_equal(out.dielectric.values[w>=.2],original[w>=.2])
+        self.assertFalse(out.dielectric.valid[:,0,2].any())
+        k=np.flatnonzero(w==.1)[0]
+        np.testing.assert_allclose(out.conductivity.values[k,0,1],-1j*.1*(.2+.3*.1**2)/(4*np.pi),atol=1e-14)
+        np.testing.assert_array_equal(source.values,original)
+        with self.assertWarns(RuntimeWarning):
+            unchanged=long_wavelength_correction(source,fit_range=(.301,.302),system='gapped_insulator',units='atomic_gaussian')
+        np.testing.assert_array_equal(unchanged.dielectric.values,source.values)
+
+
+class TrajectoryDiagnosticsTests(unittest.TestCase):
+    def test_prefix_windows_and_shared_frequency_transform(self):
+        from salmonpy.analysis import optical_sensitivity
+        t=.7+np.arange(64)*.1
+        e=np.zeros(64);e[0]=1.;j=2*e
+        args=dict(frequencies=[0.,.7,1.3],sample_counts=[32,64],windows=['none','cubic'],
+                  current_convention='charge',field_kind='total',units='atomic_gaussian')
+        out=optical_sensitivity(t,j,e,**args)
+        self.assertEqual(len(out.spectra),4)
+        for item in out.spectra:
+            np.testing.assert_allclose(item.values,2.,atol=1e-13)
+            self.assertFalse(item.values.flags.writeable)
+        self.assertEqual(out.reference_index,2)
+        self.assertFalse(out.report['certified'])
+        from salmonpy.analysis import optical_linearity
+        self.assertTrue(optical_linearity(out.spectra[0],out.spectra[0],rtol=0.)['accepted'])
+        tail=np.exp(-.3*(t-t[0]))
+        changed=optical_sensitivity(t,tail,e,**args)
+        for index,item in enumerate(changed.spectra):
+            count=args['sample_counts'][index//2]
+            u=np.linspace(0.,1.,count)
+            win=np.ones(count) if index%2==0 else 1.-3*u*u+2*u*u*u
+            expected=np.array([np.sum(win*tail[:count]*np.exp(1j*w*t[:count]))/np.exp(1j*w*t[0]) for w in args['frequencies']])
+            np.testing.assert_allclose(item.values,expected,rtol=3e-13,atol=3e-13)
+        self.assertGreater(changed.report['cases'][0]['relative_rms_difference'],.01)
+        aliased=optical_sensitivity(t,j,e,**dict(args,frequencies=[100.]))
+        self.assertFalse(aliased.spectra[0].valid.any())
+        with self.assertRaises(ValueError):optical_sensitivity(t[::-1],j,e,**args)
+        silent=optical_sensitivity(t,j,e,**dict(args,windows=['hann']))
+        self.assertFalse(silent.spectra[0].valid.any())
+        for bad in (float('nan'),float('inf')):
+            broken=j.copy();broken[5]=bad
+            with self.assertRaises(ValueError):optical_sensitivity(t,broken,e,**args)
+        with self.assertRaises(ValueError):optical_sensitivity(t,j,e,**dict(args,sample_counts=[65]))
+
+    def test_weighted_k_reduction_sign_cancellation_and_native_spectra(self):
+        from salmonpy.outputs import DecomposedCurrent
+        from salmonpy.analysis import k_current_contributions
+        t=np.arange(16)*.2
+        raw=np.zeros((16,3,3));raw[:,0,0]=2.;raw[:,1,0]=1.;raw[:,2,0]=-2.
+        source=DecomposedCurrent(np.arange(16),np.array([[3,1,1],[3,2,1],[7,1,1]]),raw,('a.u.',)*3,())
+        out=k_current_contributions(source,dt=.2,current_convention='charge',units='atomic_gaussian',
+                                    frequencies=[0.,1.],window='none',total_current=raw.sum(axis=1))
+        np.testing.assert_array_equal(out.k_ids,[3,7]);np.testing.assert_allclose(out.current[:,0,0],3.)
+        np.testing.assert_allclose(out.current[:,1,0],-2.);np.testing.assert_allclose(out.total[:,0],1.)
+        np.testing.assert_allclose(out.time,t);self.assertAlmostEqual(out.report['components'][0]['relative_rms_to_total'],3.)
+        self.assertEqual(out.report['total_current_comparison']['relative_rms_error'],0.)
+        expected=.2*np.exp(1j*t).sum()*3
+        self.assertAlmostEqual(out.spectrum.values[1,0,0].real,expected.real,places=12)
+        neg=k_current_contributions(source,dt=.2,current_convention='matter',units='atomic_gaussian')
+        np.testing.assert_array_equal(neg.total,-out.total)
+        self.assertFalse(out.current.flags.writeable);self.assertFalse(out.time.flags.writeable)
+        np.testing.assert_array_equal(source.current,raw)
+        for invalid in (float('nan'),float('inf')):
+            bad=raw.copy();bad[2,1,1]=invalid
+            bad_source=DecomposedCurrent(source.step,source.indices,bad,source.units,())
+            with self.assertRaises(ValueError):k_current_contributions(bad_source,dt=.2,current_convention='charge',units='atomic_gaussian')
+        huge_steps=DecomposedCurrent(np.arange(16,dtype=np.int64)+2**60,source.indices,raw,source.units,())
+        with self.assertRaises(ValueError):k_current_contributions(huge_steps,dt=.2,current_convention='charge',units='atomic_gaussian')
+        duplicate=DecomposedCurrent(source.step,np.array([[3,1,1],[3,1,1],[7,1,1]]),raw,source.units,())
+        with self.assertRaises(ValueError):k_current_contributions(duplicate,dt=.2,current_convention='charge',units='atomic_gaussian')

@@ -22,14 +22,15 @@ def _keys(parameters, required, optional=()):
 
 def _ld(parameters):
     from .ld import LorentzDrude
-    _keys(parameters, _LD_KEYS, {"epsilon_infinity"})
+    _keys(parameters, _LD_KEYS, {"epsilon_infinity","valid_frequency_range"})
     if parameters['units'] != 'atomic_gaussian':
         raise InputError('LD units must explicitly be atomic_gaussian')
     model = LorentzDrude(**{k: v for k, v in parameters.items() if k != 'units'})
     c = model.config
     return model, {'units': 'atomic_gaussian', 'plasma_frequency': c.plasma_frequency,
                    'strength': list(c.strength), 'resonance': list(c.resonance),
-                   'damping': list(c.damping), **({'epsilon_infinity':c.epsilon_infinity} if c.epsilon_infinity!=1.0 else {})}
+                   'damping': list(c.damping), **({'epsilon_infinity':c.epsilon_infinity} if c.epsilon_infinity!=1.0 else {}),
+                   **({'valid_frequency_range':list(c.valid_frequency_range)} if c.valid_frequency_range is not None else {})}
 
 
 def _hash(path):

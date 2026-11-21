@@ -31,3 +31,7 @@ legacy patch digests remain provenance, not current-source validation claims.
 
 Small-gradient WPBEh evaluation derives from Libxc 5.2.3 (M.A.L. Marques,
 MPL-2.0); see runtime/NOTICE.md and runtime/licenses/Libxc-MPL-2.0.txt.
+
+The numerical optical reference subset in salmonpy/optical_data is CC0-1.0 data
+from refractiveindex.info-database. Consult its retained license, pinned source
+inventory, original experimental citations and fit-quality records before reuse.

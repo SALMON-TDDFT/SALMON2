@@ -4,11 +4,14 @@ module ld_handles
   use iso_c_binding, only: c_int,c_int64_t,c_double
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use lorentz_drude, only: s_ld_state,ld_coefficients,ld_store_old,ld_update
+  use lorentz_drude_tensor,only:sp_ld_tensor_validate
   implicit none
   private
-  public :: sp_ld_create,sp_ld_advance,sp_ld_export,sp_ld_set,sp_ld_destroy
+  public :: sp_ld_create_tensor,sp_ld_create,sp_ld_advance,sp_ld_export,sp_ld_set,sp_ld_destroy
   type entry
     integer(c_int64_t) :: id=0
+    logical :: tensor=.false.
+    real(c_double),allocatable :: drive(:,:,:)
     integer :: n=0
     real(c_double) :: dt=0,field(3)=0
     type(s_ld_state) :: ld
@@ -200,6 +203,66 @@ contains
     s%id=next_id;next_id=next_id+1;s%next=>first;first=>s;id=s%id;status=0
   end function
 
+  integer(c_int) function sp_ld_create_tensor(n,dt,wp,f,w,g,eps,e,id) bind(C) result(status)
+    integer(c_int),value::n
+    real(c_double),value::dt,wp
+    real(c_double),intent(in)::f(3,3,n),w(n),g(n),eps(3,3),e(3)
+    integer(c_int64_t),intent(out)::id
+    real(c_double)::den,v
+    real(c_double),allocatable::zero_f(:)
+    integer::i,j,q,err,cleanup
+    type(entry),pointer::s
+    status=sp_ld_tensor_validate(n,wp,f,w,g,eps);id=0
+    if(status/=0)return
+    status=3
+    allocate(zero_f(n),stat=err)
+    if(err/=0)return
+    zero_f=0d0
+    status=sp_ld_create(n,dt,1d0,zero_f,w,g,e,id)
+    if(status/=0)return
+    s=>lookup(id)
+    allocate(s%drive(3,3,n),stat=err)
+    if(err/=0)then
+      cleanup=sp_ld_destroy(id);id=0;status=3;return
+    endif
+    status=4
+    do q=1,n
+      den=1d0+g(q)*dt/2d0+(w(q)*dt)**2/4d0
+      do j=1,3
+        do i=1,3
+          v=f(i,j,q)*wp**2*dt/(8d0*acos(-1d0)*den)
+          if(.not.ieee_is_finite(v))then
+            cleanup=sp_ld_destroy(id);id=0;return
+          endif
+          s%drive(i,j,q)=v
+        enddo
+      enddo
+    enddo
+    s%tensor=.true.;status=0
+  end function
+
+  subroutine tensor_update(s,old,e)
+    type(entry),intent(inout)::s
+    real(c_double),intent(in)::old(3),e(3)
+    real(c_double)::p(3,s%n),j(3,s%n),v(3),c1,c3
+    integer::q,i,k
+    call transfer_poles(s%ld,s%n,p,j,.false.)
+    do q=1,s%n
+      c1=s%ld%c1_jx_ld(1,1,1,q);c3=s%ld%c3_jx_ld(1,1,1,q)
+      do i=1,3
+        v(i)=c1*j(i,q)-c3*p(i,q)
+        do k=1,3
+          v(i)=v(i)+s%drive(i,k,q)*(old(k)+e(k))
+        enddo
+      enddo
+      do i=1,3
+        p(i,q)=p(i,q)+.5d0*s%dt*(v(i)+j(i,q))
+        j(i,q)=v(i)
+      enddo
+    enddo
+    call transfer_poles(s%ld,s%n,p,j,.true.)
+  end subroutine
+
   subroutine transfer_poles(ld,n,p,j,put)
     type(s_ld_state),intent(inout) :: ld
     integer,intent(in) :: n
@@ -266,7 +329,11 @@ contains
       x=old(1);y=old(2);z=old(3)
       call ld_store_old(s%ld,[1,1,1],[1,1,1],[1,1,1],[1,1,1],s%dt,x,zero,y,zero,z,zero)
       x=e(1,k);y=e(2,k);z=e(3,k)
-      call ld_update(s%ld,[1,1,1],[1,1,1],[1,1,1],[1,1,1],s%dt,x,zero,y,zero,z,zero)
+      if(s%tensor)then
+        call tensor_update(s,old,e(:,k))
+      else
+        call ld_update(s%ld,[1,1,1],[1,1,1],[1,1,1],[1,1,1],s%dt,x,zero,y,zero,z,zero)
+      endif
       call totals(s,p(:,k+1),j(:,k+1))
       old=e(:,k)
     end do

@@ -14,7 +14,7 @@ endforeach()
 add_custom_target(ld_audit ALL
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/native"
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/salmonpy")
-add_library(salmonpy_ld SHARED "${ROOT}/salmonpy/convergence_kernel.f90" "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90" "${ROOT}/salmonpy/ld_handles.f90"
+add_library(salmonpy_ld SHARED "${ROOT}/native/subpixel_smoothing.f90" "${ROOT}/native/lorentz_drude_tensor.f90" "${ROOT}/native/lorentz_drude_fit.f90" "${ROOT}/salmonpy/convergence_kernel.f90" "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90" "${ROOT}/salmonpy/ld_handles.f90"
   "${ROOT}/native/sbe_types.f90" "${ROOT}/native/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90" "${ROOT}/salmonpy/sbe_handles.f90")
 if(APPLE)
   target_link_libraries(salmonpy_ld PRIVATE "-framework Accelerate")
@@ -302,3 +302,16 @@ install(FILES "${ROOT}/tools/test_fdtd_periodic.py" DESTINATION salmonpy/_runtim
 install(FILES "${ROOT}/tests/native/test_fdtd_fresnel.c" DESTINATION salmonpy/_runtime_source/tests/native)
 
 install(FILES "${ROOT}/salmonpy/examples/pz_host_gs.inp" DESTINATION salmonpy/examples)
+
+# Pinned, explicitly CC0 optical measurements and derived candidate coefficients.
+install(FILES "${ROOT}/salmonpy/optical_materials.py"
+  "${ROOT}/salmonpy/OPTICAL_DATA.md" "${ROOT}/salmonpy/OPTICAL_DATA.en.md" DESTINATION salmonpy)
+install(DIRECTORY "${ROOT}/salmonpy/optical_data/" DESTINATION salmonpy/optical_data
+  FILES_MATCHING PATTERN "*.json" PATTERN "*.yml" PATTERN "*.txt" PATTERN "*.md" PATTERN "*.csv")
+install(FILES "${ROOT}/tools/fit_optical_materials.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/subpixel.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/OPTICAL_CORRECTION.md" "${ROOT}/salmonpy/OPTICAL_CORRECTION.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/OPTICAL_TRAJECTORIES.md" "${ROOT}/salmonpy/OPTICAL_TRAJECTORIES.en.md" DESTINATION salmonpy)

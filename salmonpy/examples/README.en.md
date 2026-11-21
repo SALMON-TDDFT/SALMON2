@@ -236,3 +236,19 @@ Neither diagnostic is a physical accuracy certificate or launches another run.
 
 Run `python -m salmonpy.examples.optical_response` for synthetic data, not a
 converged real-material optical calculation.
+
+Constrained LD fit: `python -m salmonpy.examples.ld_fit --poles 1 2 3`. Compare residuals, acceptance, timestep advice and provenance for explicitly selected pole counts on synthetic data.
+
+Offline measured optical data: `python -m salmonpy.examples.optical_materials`. Lists pinned CC0 measurements and loads stored coefficients without downloading/refitting.
+
+`python -m salmonpy.examples.ld_response --anisotropic`: synthetic reciprocal tensor material response, not native anisotropic FDTD propagation.
+
+`fdtd_waveplate`: quarter/half-wave synthetic FDTD; default preview only, --run starts computation. See FDTD_MATERIALS.en.md.
+
+For optional LD-only interface smoothing, add `--subpixel` to `fdtd_waveplate`. It matches the carrier locally; it does not transform SBE/TDDFT. Default is off. Preview first and explicitly pass `--run` inside allocated resources.
+
+`optical_postprocess` compares duration/windows and weighted k contributions on stored arrays. Preview is default; `--run` performs postprocessing only, never launches a solver. See OPTICAL_TRAJECTORIES.en.md.
+
+`mpi_runtime_receipt` measures explicit within-job validation I/O. Preview is default; even --run never launches SALMON. See RUNTIME.en.md.
+
+Mixed MPI sessions route A/field packets only to owning points; J return order is unchanged. See communication_report for the ownership layout.

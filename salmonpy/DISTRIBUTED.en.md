@@ -151,3 +151,43 @@ Before provider preparation, ResponseSession validates optional backend.supporte
 [Shared HSE multipoint placement and protected direct resume](SHARED_HSE.en.md#normal-mixed-mpi-sessions).
 
 For opt-in standard TDDFT shared models and multipoint groups, see [SHARED_TDDFT.en.md](SHARED_TDDFT.en.md).
+
+
+## Minimize outer collectives
+
+Application-wide communication is limited to necessary setup, consistent failure
+agreement and explicitly requested final aggregation. Runtime receipt reuse is
+rank-local. The validation-only mpi_runtime_receipt example uses one setup bcast
+and one final gather to rank0, without allgather, health allreduce or Barrier.
+The final gather itself shows caller MPI remains usable; reports are not copied
+to every rank. The script terminates after reporting and never starts a solver.
+
+NativeEHField.advance coalesces its Python wrapper's subgroup checks from six
+collectives to two: (local input error, current values), then (native status,
+finite E, finite candidate A, integration error). Every member sees the same
+records and decides identically. No reduction of native physical communication
+is claimed. Signed-zero equality, before-entry rejection, recoverable native
+rollback and commit-after-agreement are preserved. No numerical update changes.
+
+Keep model-internal physical sums/halos and required failure decisions.
+ResponseSession now scatters A rows only to their owning material leader, then
+broadcasts those rows only within that material group. Field groups receive no
+response-service input payload; singleton groups need no subgroup broadcast.
+Field packets are similarly scattered as per-owner dictionaries, preserving
+values, units, positions and clocks. J already gathers local owner contributions;
+its return to field ranks and the callback/native update order are unchanged.
+
+Root need not be first in plan order; point IDs and owning groups may interleave
+and own different counts. Cached routing indexes restore global J order without
+repeated per-step point searches. communication_report records received_A_rows_by_group;
+logical_A_bytes_per_step is the logical dataset size, not measured network traffic.
+No new world collective is added. Existing error/finite agreements are retained.
+
+For checkpoint compatibility response._A retains a global-indexed shape: only
+owned rows are current on material ranks, and only the field leader retains full
+response-service A history. Nonowned/private rows are placeholders, not replicated
+output. Use field-leader point archives for global observations. Old checkpoints
+with full rows remain readable. Native field A/E and physical state data are not
+replaced by placeholders. Remaining outer agreements and field-internal spatial
+J ownership require separate validation; full solver communication is not claimed
+optimal.

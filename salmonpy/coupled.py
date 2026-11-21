@@ -58,6 +58,7 @@ class NativeEHField:
             parallel=FDTDMPI(tuple(grid))
             if parallel.ranks!=comm.size:raise InputError('field decomposition must match group size')
             text=parallel.input_text(calculation)
+            assets=calculation.input_assets()
             self.point_ids=context.plan.point_ids
             if set(points)!=set(self.point_ids):raise InputError('one field index per material point required')
             indices=np.asarray([points[p] for p in self.point_ids])
@@ -78,6 +79,12 @@ class NativeEHField:
             _require_field_record(record)
             library=Path(record['library']);sha=record['sha256']
             if _digest(library)!=sha:raise InputError('native library checksum mismatch')
+            if 'salmonpy-ld-diagonal.dat' in assets and b'SALMONPY_FDTD_LD_DIAGONAL_V1' not in library.read_bytes():
+                raise InputError('native field library lacks diagonal tensor LD support; build a matching runtime')
+            if 'salmonpy-ld-tensor.dat' in assets and b'SALMONPY_FDTD_LD_TENSOR_V1' not in library.read_bytes():
+                raise InputError('native runtime lacks off-diagonal tensor FDTD capability; explicitly rebuild it')
+            if 'salmonpy-subpixel.dat' in assets and b'SALMONPY_SUBPIXEL_REFERENCE_V2' not in library.read_bytes():
+                raise InputError('native field lacks reference-frequency subpixel module; explicitly rebuild it')
             lib=c.CDLL(str(library))
             ints=np.ctypeslib.ndpointer(dtype=np.int32,ndim=2,flags='C_CONTIGUOUS')
             floats=np.ctypeslib.ndpointer(dtype=np.float64,ndim=2,flags='C_CONTIGUOUS')
@@ -95,11 +102,14 @@ class NativeEHField:
             try:
                 self.directory.mkdir(parents=True,exist_ok=False)
                 (self.directory/'inputfile').write_text(text)
+                for name,payload in assets.items():(self.directory/name).write_bytes(payload.encode('utf-8'))
             except Exception as exc:error=str(exc)
         _agree(comm,error)
         error=None
         try:
             if (self.directory/'inputfile').read_text()!=text:raise InputError('shared field directory required')
+            for name,payload in assets.items():
+                if (self.directory/name).read_text(encoding='utf-8')!=payload:raise InputError('shared diagonal tensor asset differs')
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         self.checkpoint_decomposition=tuple(grid)
@@ -207,11 +217,16 @@ class NativeEHField:
             J=np.array(J_previous,dtype=np.float64,order='C')
             if J.shape!=self.A.shape or not np.isfinite(J).all():raise InputError('finite point currents required')
             if self.step_index==0 and np.any(J):raise InputError('initial feedback current must be zero')
-        except Exception as exc:error=str(exc)
-        _agree(comm,error)
-        values=comm.allgather(J.tolist())
-        _agree(comm,'field currents differ across ranks' if any(v!=values[0] for v in values) else None)
-        E=np.empty_like(self.A)
+            E=np.empty_like(self.A)
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        # One admission exchange contains both local validity and exact values.
+        # Every member makes the same decision, including on remote failure.
+        checks=comm.allgather((error,None if error else J.tolist()))
+        errors=[item[0] for item in checks]
+        if any(errors):raise InputError(str(errors))
+        values=[item[1] for item in checks]
+        if any(v!=values[0] for v in values):
+            raise InputError('field currents differ across ranks')
         try:
             checked=getattr(self.lib,'sp_eh_step_checked',None)
             if checked is not None:
@@ -221,13 +236,26 @@ class NativeEHField:
                 code=self._call(checked,len(self.point_ids),J,self.A,E)
             else:
                 code=self._call(self.lib.sp_eh_step,len(self.point_ids),J,E)
-            outcomes=comm.allgather((int(code),bool(np.isfinite(E).all())))
-            if embedded._admission_rejected(self.lib,outcomes,allowed=(20,21,22,23),query_name='sp_eh_recovery_protocol'):
-                raise NumericalError('native field numerical state restored without replay; retry permitted: '+str(outcomes))
-            _agree(comm,'native field advance failed' if code or not np.isfinite(E).all() else None)
-            with np.errstate(over="ignore",invalid="ignore"):
-                updated_A=self.A-self.dt*E
-            _agree(comm,'nonfinite integrated A' if not np.isfinite(updated_A).all() else None)
+            # Compute a local candidate only; commit remains after group agreement.
+            finite_E=finite_A=False;integration_error=None;updated_A=None
+            try:
+                finite_E=bool(np.isfinite(E).all())
+                if code==0 and finite_E:
+                    with np.errstate(over="ignore",invalid="ignore"):
+                        updated_A=self.A-self.dt*E
+                    finite_A=bool(np.isfinite(updated_A).all())
+            except Exception as exc:
+                integration_error=f'{type(exc).__name__}: {exc}'
+            outcomes=comm.allgather((int(code),finite_E,finite_A,integration_error))
+            native_outcomes=[(status,valid_E) for status,valid_E,_,_ in outcomes]
+            if embedded._admission_rejected(self.lib,native_outcomes,allowed=(20,21,22,23),query_name='sp_eh_recovery_protocol'):
+                raise NumericalError('native field numerical state restored without replay; retry permitted: '+str(native_outcomes))
+            if any(status or not valid_E for status,valid_E,_,_ in outcomes):
+                raise InputError('native field advance failed')
+            errors=[error for _,_,_,error in outcomes if error]
+            if errors:raise InputError(errors[0])
+            if any(not valid_A for _,_,valid_A,_ in outcomes):
+                raise InputError('nonfinite integrated A')
         except NumericalError:
             raise
         except BaseException as exc:

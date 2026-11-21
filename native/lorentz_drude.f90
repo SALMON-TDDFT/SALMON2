@@ -161,7 +161,7 @@ contains
       
       return
     end subroutine ld_store_old
-    subroutine ld_update(ld,lo,hi,ista,iend,dt_em,ex_y,ex_z,ey_z,ey_x,ez_x,ez_y)
+    subroutine ld_update(ld,lo,hi,ista,iend,dt_em,ex_y,ex_z,ey_z,ey_x,ez_x,ez_y,cross_drive)
       implicit none
       integer, intent(in) :: lo(3),hi(3),ista(3),iend(3)
       type(s_ld_state), intent(inout) :: ld
@@ -172,6 +172,7 @@ contains
                             ey_x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
                             ez_x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
                             ez_y(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3))
+      real(8),optional,intent(in)::cross_drive(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld)
       integer :: ii,ix,iy,iz
       
       !initialize
@@ -206,6 +207,11 @@ contains
                                   +ld%c2_jz_ld(ix,iy,iz,ii)*( ez_x(ix,iy,iz)+ez_y(ix,iy,iz) &
                                                              +ld%ez_old_ld(ix,iy,iz) )            &
                                   -ld%c3_jz_ld(ix,iy,iz,ii)*ld%pz_ld(ix,iy,iz,ii)
+          if(present(cross_drive))then
+            ld%rjx_ld(ix,iy,iz,ii)=ld%rjx_ld(ix,iy,iz,ii)+cross_drive(1,ix,iy,iz,ii)
+            ld%rjy_ld(ix,iy,iz,ii)=ld%rjy_ld(ix,iy,iz,ii)+cross_drive(2,ix,iy,iz,ii)
+            ld%rjz_ld(ix,iy,iz,ii)=ld%rjz_ld(ix,iy,iz,ii)+cross_drive(3,ix,iy,iz,ii)
+          endif
           ld%px_ld(ix,iy,iz,ii)  = ld%px_ld(ix,iy,iz,ii) &
                                   +0.5d0*dt_em*( ld%rjx_ld(ix,iy,iz,ii) + ld%rjx_old_ld(ix,iy,iz,ii) )
           ld%py_ld(ix,iy,iz,ii)  = ld%py_ld(ix,iy,iz,ii) &

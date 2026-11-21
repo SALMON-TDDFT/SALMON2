@@ -79,6 +79,11 @@ class NLCCCapabilities(unittest.TestCase):
         meta['files']['validation.json']=hashlib.sha256((bundle/'validation.json').read_bytes()).hexdigest()
         (bundle/'runtime.json').write_text(json.dumps(meta))
         self.assertIn('libxc_pbe',runtime.load_runtime(bundle).nlcc_force_xc)
+        proof=runtime.prepare_runtime_job(bundle,self.root/'job-proof.json',job_id='nlcc-test',job_token='n'*64)
+        with patch.object(runtime,'_hash',wraps=runtime._hash) as hashes:
+            loaded=runtime.load_runtime(bundle,validation=proof)
+        self.assertIn('libxc_pbe',loaded.nlcc_force_xc)
+
     @unittest.skipUnless(importlib.util.find_spec('ase'),'optional ASE dependency')
     def test_validated_engine_can_supply_nlcc_forces_to_calculator(self):
         from ase import Atoms

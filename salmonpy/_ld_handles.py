@@ -55,11 +55,19 @@ class NativeState:
     def __init__(self,api,material,dt,field):
         self.api=api;self.n=len(material._f);self.handle=H(0)
         if not 1<=self.n<=(2**31-1)//3:raise InputError('unsupported LD pole count')
-        for a in (material._f,material._w,material._g):
-            if a.shape!=(self.n,) or a.dtype!=np.dtype(float) or not a.flags.c_contiguous:
-                raise InputError('LD material array layout changed after construction')
-        api.call('sp_ld_create',self.n,dt,material._wp,
-                 *(a.ctypes.data for a in (material._f,material._w,material._g,field)),c.byref(self.handle))
+        from .ld import TensorLorentzDrude
+        if isinstance(material,TensorLorentzDrude):
+            try:fn=api.library.sp_ld_create_tensor
+            except AttributeError as exc:raise RuntimeFailure('native tensor state ABI missing; explicitly rebuild') from exc
+            fn.argtypes=[c.c_int,c.c_double,c.c_double]+[c.c_void_p]*5+[c.POINTER(H)];fn.restype=c.c_int
+            api.call('sp_ld_create_tensor',self.n,dt,material._wp,
+                *(a.ctypes.data for a in (material._strength_matrix,material._w,material._g,material._epsilon_matrix,field)),c.byref(self.handle))
+        else:
+            for a in (material._f,material._w,material._g):
+                if a.shape!=(self.n,) or a.dtype!=np.dtype(float) or not a.flags.c_contiguous:
+                    raise InputError('LD material array layout changed after construction')
+            api.call('sp_ld_create',self.n,dt,material._wp,
+                     *(a.ctypes.data for a in (material._f,material._w,material._g,field)),c.byref(self.handle))
         try:self.finalizer=weakref.finalize(self,api.call,'sp_ld_destroy',int(self.handle.value))
         except BaseException as exc:
             try:api.call('sp_ld_destroy',int(self.handle.value))

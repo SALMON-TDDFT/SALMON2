@@ -223,3 +223,177 @@ class InputContractTests(unittest.TestCase):
             with self.subTest(dt=dt), self.assertRaises(ValueError): self.model().new_state(dt=dt)
 
 if __name__=='__main__':unittest.main()
+
+
+class LDFittingTests(unittest.TestCase):
+    def test_passive_fit_background_band_and_provenance(self):
+        from salmonpy.ld import fit_lorentz_drude
+        import tempfile,hashlib
+        from pathlib import Path
+        omega=np.linspace(.05,1.2,180)
+        target=LorentzDrude(plasma_frequency=1.,strength=[.03,.4],resonance=[0.,.8],damping=[.04,.07],epsilon_infinity=2.5)
+        epsilon=target.permittivity(omega);original=epsilon.copy()
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'synthetic.txt';source.write_text('synthetic reference only\n')
+            cfg,report=fit_lorentz_drude(omega,epsilon,poles=2,drude=True,units='atomic_gaussian',source_file=source,reference='synthetic Drude + Lorentz',rtol=.005)
+            self.assertTrue(report.accepted,report.as_dict())
+            self.assertLess(report.relative_rms_error,.005)
+            self.assertEqual(report.source_sha256,hashlib.sha256(source.read_bytes()).hexdigest())
+            self.assertEqual(report.reference,'synthetic Drude + Lorentz')
+            self.assertEqual(cfg.valid_frequency_range,(.05,1.2))
+            self.assertTrue(all(v>=0 for v in (*cfg.strength,*cfg.resonance,*cfg.damping)))
+            self.assertGreater(cfg.epsilon_infinity,0.)
+            fitted=LorentzDrude.from_config(cfg)
+            error=np.linalg.norm(fitted.permittivity(omega)-epsilon)/np.linalg.norm(epsilon)
+            self.assertLess(error,.005)
+            np.testing.assert_array_equal(epsilon,original)
+            with self.assertRaises(FrozenInstanceError):report.accepted=False
+            # n+i k -> epsilon conversion uses the same fitter and provenance.
+            refractive=np.sqrt(epsilon)
+            other,second=fit_lorentz_drude(omega,nk=np.column_stack((refractive.real,refractive.imag)),poles=2,drude=True,units='atomic_gaussian',initial=cfg,starts=1,rtol=.005)
+            self.assertTrue(second.accepted)
+            self.assertEqual(second.data_kind,'nk')
+            from salmonpy.analysis import OpticalSpectrum
+            mask=np.ones(len(omega),dtype=bool);mask[0]=False
+            observable=OpticalSpectrum(omega,epsilon,mask,{'observable':'dielectric_function',
+                'units':'atomic_gaussian','sign':'exp(+i omega t)','window':'none'})
+            _,optical_report=fit_lorentz_drude(observable,poles=2,drude=True,units='atomic_gaussian',initial=cfg,starts=1,rtol=.005)
+            self.assertTrue(optical_report.accepted)
+            self.assertEqual(optical_report.data_kind,'optical_spectrum')
+            self.assertEqual(optical_report.as_dict()['provenance']['excluded_masked_samples'],1)
+            # Finite DC data are valid for Lorentz-only fits with a fixed background.
+            dc_omega=np.linspace(0,1.2,50)
+            dc_model=LorentzDrude(plasma_frequency=1.,strength=[.4],resonance=[.8],damping=[.07],epsilon_infinity=2.5)
+            dc_config,dc_report=fit_lorentz_drude(dc_omega,dc_model.permittivity(dc_omega),poles=1,
+                units='atomic_gaussian',drude=False,epsilon_infinity=2.5,initial=dc_model,starts=1)
+            self.assertTrue(dc_report.accepted);self.assertFalse(dc_report.fitted_background)
+            self.assertEqual(dc_config.epsilon_infinity,2.5)
+
+
+            self.assertEqual(other.valid_frequency_range,cfg.valid_frequency_range)
+            from salmonpy.analysis import spectrum
+            time=np.arange(512)*.1
+            drive=spectrum(time,np.cos(2*np.pi*3*np.arange(512)/512),window='none')
+            self.assertTrue(fitted.check_excitation(drive)['within_band'])
+            impulse=np.zeros(512);impulse[0]=1
+            with self.assertWarnsRegex(RuntimeWarning,'calibrated'):
+                self.assertFalse(fitted.check_excitation(spectrum(time,impulse,window='none'))['within_band'])
+
+
+    def test_fit_failure_is_reported_without_active_coefficients(self):
+        from salmonpy.ld import fit_lorentz_drude
+        omega=np.linspace(.1,1.,50);epsilon=np.full(50,2.-1j)
+        with self.assertWarns(RuntimeWarning):
+            cfg,report=fit_lorentz_drude(omega,epsilon,poles=1,units='atomic_gaussian',max_iterations=1,starts=1,rtol=1e-8)
+        self.assertFalse(report.accepted)
+        if cfg is not None:self.assertTrue(all(v>=0 for v in (*cfg.strength,*cfg.resonance,*cfg.damping)))
+        with self.assertRaises(ValueError):fit_lorentz_drude(omega,epsilon,poles=1,units='SI')
+        with self.assertRaisesRegex(ValueError,'workspace'):
+            fit_lorentz_drude(omega,epsilon,poles=700_000_000,units='atomic_gaussian')
+        bad=epsilon.copy();bad[3]=np.nan
+        with self.assertRaises(ValueError):fit_lorentz_drude(omega,bad,poles=1,units='atomic_gaussian')
+
+
+class ScipyFitTests(unittest.TestCase):
+    def test_scipy_optional_native_objective(self):
+        try:
+            import scipy
+        except ImportError:
+            self.skipTest("optional scipy is not installed")
+        from salmonpy.ld import fit_lorentz_drude
+        import warnings
+        omega=np.linspace(.03,.4,90)
+        original=LorentzDrude(plasma_frequency=1.,strength=[.12,.08],resonance=[0.,.22],damping=[.025,.04],epsilon_infinity=2.)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            cfg,report=fit_lorentz_drude(omega,original.permittivity(omega),poles=2,units="atomic_gaussian",optimizer="scipy",starts=2,max_iterations=500)
+        self.assertTrue(report.accepted)
+        self.assertTrue(report.optimizer_converged)
+        self.assertLess(report.relative_rms_error,1e-6)
+        self.assertIn("scipy",report.as_dict()["algorithm"])
+        self.assertEqual(report.as_dict()["provenance"]["optimizer"]["version"],scipy.__version__)
+        np.testing.assert_allclose(LorentzDrude.from_config(cfg).permittivity(omega),original.permittivity(omega),rtol=1e-5,atol=1e-6)
+        with self.assertRaises(ValueError):
+            fit_lorentz_drude(omega,original.permittivity(omega),poles=2,units="atomic_gaussian",optimizer="unknown")
+        from unittest.mock import patch
+        from salmonpy.errors import RuntimeFailure
+        with patch.dict("sys.modules", {"scipy":None}):
+            with self.assertRaisesRegex(RuntimeFailure,"optional"):
+                fit_lorentz_drude(omega,original.permittivity(omega),poles=2,units="atomic_gaussian",optimizer="scipy")
+
+
+class AnisotropicLDTests(unittest.TestCase):
+    def test_rotated_response_and_owned_restore(self):
+        from salmonpy.ld import TensorLorentzDrude
+        rotation=np.array([[.6,-.8,0.],[.8,.6,0.],[0.,0.,1.]])
+        strength=rotation@np.diag([.1,.2,.3])@rotation.T
+        background=rotation@np.diag([2.,3.,4.])@rotation.T
+        tensor=TensorLorentzDrude(plasma_frequency=1.,strength=[strength],resonance=[.4],damping=[.03],epsilon_infinity=background)
+        w=np.linspace(.01,.8,40)
+        actual=tensor.permittivity_tensor(w)
+        expected=background[None,:,:]+strength[None,:,:]/(.4**2-w[:,None,None]**2-1j*.03*w[:,None,None])
+        np.testing.assert_allclose(actual,expected,rtol=2e-13,atol=1e-13)
+        self.assertLess(actual[0,0,1].real,0.)
+        with self.assertRaises(ValueError):actual.setflags(write=True)
+        time=np.arange(80)*.01
+        electric=np.column_stack((np.sin(time),np.cos(time),np.sin(2*time)))
+        local=electric@rotation
+        pp=np.empty_like(electric);jj=np.empty_like(electric)
+        for axis,f in enumerate([.1,.2,.3]):
+            scalar=LorentzDrude(plasma_frequency=1.,strength=[f],resonance=[.4],damping=[.03])
+            result=scalar.respond(local,dt=.01);pp[:,axis]=result.polarization[:,axis];jj[:,axis]=result.current[:,axis]
+        result=tensor.respond(electric,dt=.01)
+        np.testing.assert_allclose(result.polarization,pp@rotation.T,rtol=1e-12,atol=1e-14)
+        np.testing.assert_allclose(result.current,jj@rotation.T,rtol=1e-12,atol=1e-14)
+        np.testing.assert_allclose(tensor.displacement(electric,result.polarization),electric@background.T+4*np.pi*result.polarization,rtol=2e-14,atol=1e-14)
+        np.testing.assert_allclose(tensor.background_energy(electric,np.zeros_like(electric)),np.sum(electric*(electric@background.T),axis=1)/(8*np.pi),rtol=2e-14)
+        self.assertEqual(tensor.config.representation,'reciprocal_tensor')
+        self.assertEqual(LorentzDrude.from_config(tensor.config).config,tensor.config)
+        with tensor.new_state(dt=.01,initial_field=electric[0]) as state, tensor.new_state(dt=.01,initial_field=electric[0]) as independent:
+            for e in electric[1:30]:state.step(e)
+            saved=state.snapshot()
+            first=[state.step(e) for e in electric[30:]]
+            state.restore(saved)
+            second=[state.step(e) for e in electric[30:]]
+            np.testing.assert_array_equal(first,second)
+            self.assertEqual(independent.time,0.)
+            np.testing.assert_array_equal(independent.current,np.zeros(3))
+            before=state.snapshot()
+            with self.assertRaises(ValueError):state.step([float('inf'),0.,0.])
+            np.testing.assert_array_equal(state.current,second[-1][1])
+        with tensor.new_state(dt=.01) as state:
+            state.step([1e308,1e308,1e308])
+            previous=state.snapshot();previous_current=state.current.copy();previous_time=state.time
+            with self.assertRaises(NumericalError):state.step([1e308,1e308,1e308])
+            np.testing.assert_array_equal(state.current,previous_current)
+            self.assertEqual(state.time,previous_time)
+            retry=state.step([0.,0.,0.]);state.restore(previous)
+            np.testing.assert_array_equal(retry,state.step([0.,0.,0.]))
+        from salmonpy.material_response import LDMaterialProvider
+        self.assertEqual(LDMaterialProvider(tensor.config).prepare(None).config,tensor.config)
+
+    def test_anisotropic_input_rejection(self):
+        from salmonpy.ld import TensorLorentzDrude
+        options=dict(plasma_frequency=1.,strength=[np.diag([.1,.2,.3])],resonance=[.4],damping=[.03])
+        for bad in [np.diag([1.,-1.,1.]),np.array([[1.,.2,0.],[0.,1.,0.],[0.,0.,1.]]),np.full((3,3),float('nan'))]:
+            with self.assertRaises(ValueError):TensorLorentzDrude(**options,epsilon_infinity=bad)
+        with self.assertRaises(ValueError):TensorLorentzDrude(**dict(options,strength=[np.diag([.1,-.2,.3])]))
+        with self.assertRaises(ValueError):TensorLorentzDrude(**dict(options,damping=[-.1]))
+
+
+class TensorFitTests(unittest.TestCase):
+    def test_passive_non_diagonal_roundtrip(self):
+        try:import scipy
+        except ImportError:self.skipTest('optional SciPy unavailable')
+        from salmonpy.ld import TensorLorentzDrude,fit_lorentz_drude_tensor
+        f=np.array([[[.5,-.12,0],[-.12,.3,.02],[0,.02,.2]]])
+        background=np.diag([1.2,1.3,1.4])
+        model=TensorLorentzDrude(plasma_frequency=1.,strength=f,resonance=[.7],damping=[.08],epsilon_infinity=background)
+        initial=TensorLorentzDrude(plasma_frequency=1.,strength=f*.9,resonance=[.65],damping=[.1],epsilon_infinity=background)
+        w=np.linspace(.1,1.2,100);target=model.permittivity_tensor(w)
+        candidate,report=fit_lorentz_drude_tensor(w,target,initial=initial,units='atomic_gaussian',rtol=1e-6)
+        np.testing.assert_allclose(candidate.permittivity_tensor(w),target,rtol=1e-6,atol=1e-6)
+        self.assertTrue(report['accepted'])
+        self.assertTrue(report['optimizer_converged'])
+        self.assertGreaterEqual(np.linalg.eigvalsh(candidate.config.strength[0]).min(),-1e-14)
+        np.testing.assert_array_equal(initial.config.epsilon_infinity,background)

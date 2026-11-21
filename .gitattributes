@@ -8,3 +8,6 @@ native/*.f90 -text
 runtime/sources/** -text
 runtime/overrides/** -text
 runtime/source-trees/** -text
+
+# Original CC0 tables/licenses and generated catalog are byte-exact resources.
+salmonpy/optical_data/** -text

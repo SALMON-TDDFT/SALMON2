@@ -2940,7 +2940,7 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 - [x] Record the new feature request separately from the preceding bug/operations review. Physical reproduction/convergence is not required automated CI. NLCC/TDDFT/full-runtime campaigns are manual-only; retain automatic inventory, tracked-only build, packaging and GS-free host/API checks. No Actions dispatched.
 - [x] Transverse-periodic FDTD/Fresnel validation from the earlier review is already implemented and recorded; do not schedule its physical reproduction in CI.
 - [ ] New optical queue: public TB-mBJ interface -> conductivity/dielectric observable contracts -> linearity/sum-rule diagnostics -> epsilon_infinity in native LD -> constrained fitting/provenance -> time/window sensitivity, post-hoc k contribution and measured cost advice. See 2026-11-20-optical-observables-plan.md for dependencies and exclusions.
-- [ ] Subpixel smoothing is a separate design/validation phase after the periodic reference. Do not promise second-order convergence or a coefficient-only implementation before checking tensor/dispersive requirements. FEM/DG replacement, automatic nstate/k planners and copyrighted optical tables are excluded.
+- [x] Subpixel smoothing has completed its LD-only reference-frequency implementation and local synthetic validation (2026-11-21; details below). It was a separate design/validation phase after the periodic reference. Do not promise second-order convergence or a coefficient-only implementation before checking tensor/dispersive requirements. FEM/DG replacement, automatic nstate/k planners and copyrighted optical tables are excluded.
 
 - [x] 2026-11-20: public serial TB-mBJ DFT/cval, ASE structure bridge and material JSON; coefficient preserved through GS/TDDFT/archive and restart checks. Synthetic native XC probes agree bitwise with Libxc ON/OFF. No new GS collected; real-material precision and native parallel TB-mBJ SCF are not claimed. Optical observable work remains next.
 
@@ -2948,7 +2948,8 @@ Cartesian-force repair verification: actual-module identity/C2/skew probes sourc
 
 The external Linux review reports host-MPI evidence up to five ranks. Larger-scale correctness, site MPI compatibility and scaling remain unverified; an inherited SALMON kernel is not by itself proof for the embedded Python workflow. These are queued tasks, not newly validated capabilities. Finish the current serial TB-mBJ work first; prioritize job-scoped validation receipts before GPU work.
 
-- [ ] **Job-scoped runtime validation receipt (first HPC task):** inspect current runtime loading/reuse paths; perform one full bundle integrity validation per job, then let workers reuse an explicitly supplied receipt bound to the validated bundle identity and job ID/nonce. Define trust, lifetime, invalidation and changed-file handling before implementing. Do not silently bypass executable SHA256 or mandatory eigensolver build/link audits. Measure bytes read, metadata operations and startup time with many workers on a shared filesystem.
+- [x] **Job-scoped runtime validation receipt core:** explicit job/token-bound RuntimeValidation, one full preparation and authenticated metadata reuse, executable SHA256 retained, invalid proof/changed metadata warning with complete-verification fallback. Local POSIX MPI4/data-only58MiB evidence, byte/stat/walk/time measurements; see2026-11-21-job-runtime-receipts.md.
+- [ ] **Receipt site validation:** shared parallel-filesystem freshness/inode identity, multi-node/site MPI and higher-worker-count evidence remain unverified. No local-cache timing extrapolation to FEFS.
 - [ ] **HPC launch modes:** document and expose (a) preparation/analysis-only Python with the site's job script launching SALMON directly, and (b) a collectively called mpi4py/embedded path on caller-owned communicators. Keep nested launcher protection; removing the MPI-rank guard alone is not a solution. Preserve caller MPI after detach. Support site-specific argument construction rather than assuming every launcher accepts `-n`.
 - [ ] **Multi-node and multi-rank evidence:** audit tool-only rank limits separately from product limitations; parameterize appropriate tests without promising unsupported layouts. Test k-point/orbital/spatial combinations, independent state ownership and checkpoint repartition on site MPI and multiple nodes. Record compiler/MPI/node layout, correctness and scaling separately. Large physical campaigns remain manual/site jobs, not required GitHub CI.
 - [ ] **Observation I/O at scale:** measure output volume and file count versus ranks, points and stride; design optional aggregation/buffering or sharded output while preserving observation metadata and existing small-run interfaces. Do not assume byte volume alone measures filesystem cost.
@@ -2956,7 +2957,110 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
 - [ ] Reconcile this review with current code before implementation: its 05827a7e timing and rank observations are baseline evidence, not measurements of later changes. No multi-node or GPU validation is claimed on this Mac.
 
 - [x] 2026-11-20: single-polarization optical_conductivity/dielectric_function, explicit total-E/charge-current/Gaussian-AU contract, masked weak-drive/DC bins; native Fortran ratios and finite-band/linearity diagnostics on supplied data. Synthetic phase, sign, amplitude scaling and finite-band integral tests; no material accuracy certification or extra solver runs.
-- [ ] Next optical task: native LD epsilon_infinity, then constrained fitting/provenance, time/window/k post-processing, and subpixel design. HPC receipt work follows this optical queue per user steering.
+- [x] Native LD epsilon_infinity completed; fitting/provenance work is recorded below. HPC remains after the optical queue.
 
 - [x] 2026-11-20: LD epsilon_infinity (default1), native continuous permittivity/D/background-energy and FDTD coefficients; JSON/provider/config/checkpoint identity propagation. Preserve pole P/J and default update order. Non-unit-background legacy impulse spectra warn/omit without stopping evolution. Source synthetic and native MPI1/2 Fresnel/default parity/direct checkpoint checks passed; real-material certification is not claimed.
-- [ ] Next: constrained LD fitting/provenance, then time/window/k post-analysis, followed by subpixel design; HPC queue remains deferred until those optical items.
+- [x] Constrained LD fitting/provenance completed below; remaining optical work is duration/window/k post-analysis, then subpixel design. HPC remains deferred.
+
+- [x] 2026-11-20: native passive LD fitting, direct epsilon/nk/masked-optical inputs, explicit pole counts and deterministic starts, optional initial model/background, residual/optimizer separation, data/file SHA256 and literature reference, calibrated band and warning-only excitation checks. Synthetic tests cover fit accuracy, passive failures, source identity and input independence. Local optimization and finite-band calibration do not certify a global optimum or real materials.
+- [ ] Next optical work: duration/window sensitivity and post-hoc k contributions, then subpixel/interface design. HPC work remains later per user priority.
+
+- [x] 2026-11-20 user explicitly authorized acquiring/retaining legally redistributable experimental optical data and fitting a reusable list. This supersedes the earlier exclusion of bundled Johnson-Christy numerical data for the selected CC0 database subset only. Preserve original measurements, license, pinned commit, SHA256, DOI and conditions; no journal articles/figures. Five materials,22 retained candidates; choose defaults using residual and time-resolution screening, retain warnings and optimizer nonconvergence. All experimental refits stay explicit/local, not required CI.
+
+- [x] CC0 subset data library:5 sources,22 stored fit trials,4 screened defaults. Experimental comparison exposed Ag local weighted errors up to38.6% despite4.34% global RMS; mark needs_refinement, retain warning-only explicit reuse. Al stiff low-pole fits stay available but are not defaults. Preserve raw/license bytes across platforms with attributes.
+- [ ] Improve Ag local-shape fitting/optimizer termination before presenting it as a default; do not relax/hide screening to obtain a pass. All new experimental-data matching/refits remain explicit local tools, not required CI.
+
+## SciPy optical fitting (2026-11-20)
+- Implemented optional optimizer="scipy" and fit extra; native objective/seed/statistics, SciPy bounded TRF and derivative estimates. No import-time install or fallback.
+- Local CC0 study:44 SciPy trials plus22 retained native trials; selected SciPy fits locally terminated, Ag remains needs_refinement. Smallest screened defaults Au6/Cu6/Al4/Si6. Raw data preserved.
+- Source and sdist-to-wheel installed validation:649 tests passed (one optional skip) in each; final artifact/record checks follow. No experimental matching in required CI.
+
+## Optical oxides and tensor direction (2026-11-20)
+- Added pinned CC0 scalar n,k films SiO2/Al2O3/TiO2/Ta2O5/HfO2 and22 SciPy trials (88 retained total); preserved prior five-material fit records. No n-only zero-absorption substitution. TiO2 residual passes but optimization-budget warnings remain.
+- Common tensor representation in ALL modes supersedes3D-only scope. Implemented immutable measured/model(...,3,3), native isotropic embedding, compressed LDTensorModelConfig, FDTD/standalone/MPI-provider acceptance. Unknown directional response uses one independent scalar on the diagonal.
+- Source tests651 pass, one optional skip. Audited unchanged FDTD binary:scalar/tensor inputs and observations bitwise equal for xyz polarizations, MPI1/2 (six paired cases). Wheel validation follows.
+- REMAINING:independent diagonal axes/off-diagonal native propagation and fitting/rotations across modes; do not claim general anisotropy from isotropic tensors.
+
+## Reciprocal tensor material response (2026-11-20)
+- Implemented native PSD/SPD matrix validation, tensor epsilon, D/background energy and persistent coupled P/J updates. Isotropic kernel path retained. TensorLorentzDrude supports separate diagonal axes and reciprocal off-diagonal couplings; no automatic rotation or tensor fitting.
+- Direct process-local snapshots restore without replay; overflow rejection preserves accepted P/J/E and permits retry. Independent states do not interfere.
+- Local source suite653 tests passed, one optional skip. Actual MPI3 with two different tensor points:40 endpoint steps bitwise equal to independent native controls; caller MPI survives.
+- REMAINING: general anisotropic native FDTD field/coefficient update with Yee-grid interpolation and checkpoint/schema wiring across field modes. General tensors are rejected by existing native FDTD rather than projected away. Source-to-sdist-to-wheel installation verified:653 tests passed, one optional skip; wheel MPI3/two-point controls and direct snapshot continuation match. Previous isotropic kernel responses match bitwise in three500-step controls.
+
+## Native diagonal E/H and waveplates (2026-11-21)
+- Principal-axis diagonal tensors connected to native E/LD coefficients, preserving P/J/Q ordering and existing history arrays. Explicit ld-diagonal input asset, hash binding, matching-runtime check and both batch/host-MPI staging. No new process-global material arrays.
+- First prototype:old/new scalar, diagonal isotropic limit and MPI1/2 outputs bitwise equal. Dispersive distinct-axis controls match separate scalar native FDTD to below3e-18 absolute field difference.
+- Synthetic quarter/half-wave plates:normalized |S3|0.99669 and S2=-0.999697 respectively; Stokes-norm discrepancy vs Fresnel slab0.00305/0.00563 at spacing8. This is not real-material or complete convergence validation. Refinement verified:error0.000760 at spacing4 (4.01-fold reduction). Git-only739-file export/build and source/installed-wheel655-test suites passed (one optional skip each). Native MPI2 direct checkpoint A/E/H and RT outputs match continuous execution bitwise, invalid/missing assets return1110 collectively. Final record:salmonpy-diagonal-waveplate-record-20261121 in the canonical results store.
+- Native carrier/analytic Stokes diagnostic and explicit --run sample added. Off-diagonal Yee field coupling, automatic rotations and all-mode propagation coverage remain.
+
+## Three-drive tensor extraction/fitting (2026-11-21)
+- [x] Native matrix inversion of three independent J/E spectra; DC/weak/rank-deficient bins masked. Native PSD-factor tensor fitting with common poles, fixed initial SPD background, optional SciPy, input/model provenance, source and installed-wheel657-test suites passed (one optional skip). Synthetic negative off-diagonal roundtrip weighted RMS below1e-14. Updated paired LD guides, AI task and ld_fit --tensor example.
+- [x] Reciprocal off-diagonal native Yee coupling, dispersive cross-drive, model/geometry-bound checkpoints and rotated waveplate/MPI validation completed below. See2026-11-21-offdiagonal-fdtd-tensor-fit.md; real-material certification is separate.
+
+## Reciprocal off-diagonal native E/H completed (2026-11-21)
+- [x] Full symmetric SPD background and PSD shared-pole LD matrices on material-owned Yee edges; paired means and transpose means, implicit E PCG, pole J before original P/Q order; native numerical work. Old scalar and diagonal results remain bitwise equal.
+- [x] Finite iteration exhaustion warns/continues. MPI numerical rejection rolls back and permits retry. Checkpoint compares matrices/rates/edge ownership/weights/grid/dt/options before commit; late-file and model failures preserve all state. Material on only one MPI rank does not deadlock. Continuous and direct-restarted A/E/H and raw observations are bitwise equal; no replay.
+- [x] Synthetic rotated30deg quarter/half waveplates agree with Fresnel Stokes within0.00305/0.00563; refined quarter0.000760. Two-pole rotation errors below3e-15; all-pair3D axis covariance below2e-21. Installed synthetic three-drive epsilon->tensor-LD->FDTD passes. No new real-material TDDFT/GS claim.
+- [x] Source and wheel658 tests, one optional skip each; Git-only739-file audited build and wheel source parity; paired guides, AI JSON and existing waveplate/recovery examples updated. No remote CI started. Evidence and audited local runtime retained in canonical calc2026/salmonpy-offdiag-final-record-20261121.
+
+
+## LD-only interface preparation and optical A4 (2026-11-21)
+- [x] LD-only center-frequency subpixel material coefficient initialization;
+  native module/shared copies, compatible runtime/assets, response-point exclusion,
+  passive tensor lift and unchanged ADE order. Default disabled preserves legacy.
+  Fixed-time-step curved refinement, homogeneous/slab/MPI2 checkpoint evidence
+  recorded in2026-11-21-reference-subpixel-smoothing.md and canonical results.
+- [x] A4 observation-only correction in Fortran; independent raw/corrected
+  conductivity and dielectric spectra, masks, fit band/coefficients/assumptions.
+  Native solver/current feedback unaffected. Paired manuals and AI JSON updated.
+- [x] Duration/window/post-hoc k analysis implemented in the Fortran observation kernel (2026-11-21). HPC
+  validation receipts and launcher/site-scale work retain their earlier queue.
+
+
+## Stored optical trajectories (2026-11-21)
+- [x] Common-frequency prefix/window comparison and already weighted k-current
+  reduction with optional total-charge-current consistency check; no solver,
+  no new GS, no k scan or implicit extra weighting. Public analysis APIs,
+  paired guide/AI JSON and NPZ sample connected. Native sums and Fourier work.
+- [ ] Remaining operational queue: receipt site validation, HPC launcher
+  modes, multi-node evidence and observation-I/O/large-data memory advice.
+  Larger material-accuracy studies and Ag fit refinement remain separate.
+
+
+## Runtime validation I/O (2026-11-21)
+- [x] Optional per-job receipt with caller-owned secret/ID, immutable bundle
+  fingerprints and mandatory executable hash; no global cache, source/object
+  startup audit, solver launch, MPI initialization or automatic build.
+- [x] Passed explicit context through process TDDFT provider/backend; unchanged
+  material identities/current algorithm, existing NLCC capability checks preserved.
+  Default and unsupported metadata platforms retain full verification. Custom
+  backends and native build/library loaders are not forced into this mechanism.
+- [x] Local MPI4/three reuses per rank, unchanged executable checks, no tree walk,
+  safe fallback/corruption rejection and I/O measurements. Paired runtime guides,
+  AI JSON and preview-first validation-only MPI example updated.
+- [ ] Next core HPC task: site-launch argument construction/preparation-only
+  versus caller-owned MPI entrypoints. Receipt multi-node/FS proof stays separate.
+
+
+## Minimize outer communication (2026-11-21)
+- [x] Project policy recorded: no unnecessary world diagnostics/health barriers;
+  keep physical sums/halo exchange and consistent failure/retry guarantees.
+- [x] Receipt-only example setup bcast + root-only final gather; no replicated
+  allgather, health allreduce or barrier. Native E/H Python admission/result
+  agreements coalesced6->2 within the field group, native internals unchanged.
+- [x] Owner-only A/field-packet routing implemented (2026-11-21);
+  preserve physical timestep and mixed snapshot/retry semantics; reduce duplicate
+  outer agreements only when consistent failure ordering can be proven.
+
+
+## Owner-only response inputs (2026-11-21)
+- [x] Numeric A Scatterv/per-owner packet scatter, only local material subgroup
+  broadcasts, no data to empty field group or singleton rebroadcast. Cached
+  point/count/permutation mapping; root order/interleaved/different counts covered.
+- [x] J owner gather/order preserved. Global checkpoint array shape retained,
+  material A history updates owned rows only; old full-array checkpoints accepted.
+- [x] MPI6 custom routing, MPI4 LD and native field+LD+two SBE points, MPI3 packet
+  admission/failure, MPI6 protected mixed step and old/new direct restore checked.
+  No new GS or real-material TDDFT/HSE/multinode claim.
+- [ ] Remaining communication: outer error agreement scheduling and native field
+  spatial J ownership; preserve numerical recovery and caller/custom interfaces.
