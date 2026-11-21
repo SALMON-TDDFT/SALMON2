@@ -3156,4 +3156,24 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
 - [x] Native per-macro-point charge j dot total E work, separated E/H R/T and unwindowed fluences.
 - [x] FDTD budget with volumes/area/field storage/other outflow; warnings without stopping runnable solver.
 - [x] Uniform-port scope, reversible-storage accounting and no extra MPI communication documented in JP/EN/AI catalog.
-- [ ] Nonuniform 3D surface integration/automatic directional monitor collection remain outside this first uniform-port diagnostic.
+- [x] Nonuniform transverse-periodic plane area integration added via area_weights/surface_flux; native automatic plane collection remains separate.
+
+
+### 2026-11-21 Real coupled energy-budget validation
+
+- [x] Commit/push 58edd163; automatic lightweight LD workflow 44864514394 succeeded.
+- [x] Actual LD+E/H FDTD and vacuum control. Residual 0.0108%; half-spacing/dt 0.00270%.
+- [x] Reconstructed LD current verified against native saved final current (rtol1e-10/atol1e-18).
+- [x] Actual 2-point/8-rank TDDFT+Weyl FDTD, source GS reused unchanged. Delayed incidence residual 0.000711%.
+- [x] Prefilled-wave initial-energy accounting, finite coverage caveat and software/physical scope documented.
+- [x] Reusable source-only observation analysis tool and C reference; no physical runs added to CI.
+- Further precision search stopped at user's accepted accuracy.
+
+
+### 2026-11-21 Periodic transverse-plane energy
+
+- [x] Native local cross product before area integration in time and frequency.
+- [x] Existing R/T/budget and NPZ sample accept nonuniform planes; uniform path preserved.
+- [x] Analytic phased diffraction (mean E=0 but finite flux), patch additivity and finite checks.
+- [x] Real native lossless periodic grating: area-budget residual0.0107%; field means miss10.1% of incident energy.
+- [x] JP/EN/AI guidance distinguishes full plane integration from automatic collection and order separation.

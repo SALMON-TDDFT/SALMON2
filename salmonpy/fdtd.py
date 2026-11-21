@@ -514,6 +514,9 @@ def energy_balance(absorbed, volumes, ports, *, material_ids, transverse_area,
         raise InputError('one nonempty material ID per macro point required')
     if len(w) > 2**31-1: raise InputError('observation dimensions exceed native ABI')
     area = _positive(transverse_area,'transverse_area')
+    observed_area = ports.config.get('surface_area')
+    if observed_area is not None and not np.isclose(area,observed_area,rtol=1e-12,atol=0.):
+        raise InputError('transverse_area differs from the integrated port surface area')
     tolerance = _positive(rtol,'rtol',zero=True); absolute = _positive(atol,'atol',zero=True)
     # Scalar inputs are checked before ctypes sees them; numerical balance is native.
     delta = _array(field_energy_change,'field_energy_change')

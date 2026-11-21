@@ -361,7 +361,7 @@ energy change again when counting this work.
 E/H arrays, each (time,3), and returns R(omega), T(omega) and a validity mask.
 The normal points from incident to transmitted side. Ratios use complex Poynting
 flux, retaining polarization and impedance, not an E-only amplitude ratio.
-Scope: uniform equal-area plane ports. Separate wave fields with a reference run
+Without area_weights, scope is uniform equal-area plane ports. Separate wave fields with a reference run
 or a directional decomposition first; a total field is not a reflected field.
 Collocate Yee E/H in both space and time. Weak-drive bins remain invalid/NaN.
 
@@ -396,8 +396,91 @@ traces, residual fields and delayed emission can affect the budget. The default
 changing a solver. Zero incident energy and nonfinite diagnostic inputs are
 rejected. After restart, join traces without duplicate boundary samples and
 compare the same initial/final states. No added MPI communication or implicit
-solver execution. Nonuniform 3D surfaces/diffraction-order sums are not
-silently treated as uniform plane ports.
+solver execution. Nonuniform periodic planes use the area_weights entry below; arbitrary closed surfaces are not automatically collected.
 
 Stored-array example: `python -m salmonpy.examples.fdtd_energy INPUT.npz NEW_OUTPUT`.
 See its module docstring for NPZ keys/units. It never launches a solver.
+
+
+### Real coupled-run checks (2026-11-21)
+
+On Apple Silicon with an audited native executable, absolute budget residuals
+relative to incident energy were 0.0108% for native LD+E/H FDTD, 0.00270% for
+an already-running half-spacing/half-dt LD check, and 0.000711% for native
+TDDFT+Weyl FDTD. These verify coupling/observation accounting, not converged
+real-material optical properties. No further precision search was performed
+after the user's acceptance of this accuracy.
+
+The LD fixture is a transversely periodic uniform slab. Current was reconstructed
+from measured native E with the identical native LD kernel; final current matches
+native LD checkpoint data at rtol=1e-10, atol=1e-18. Raw Yee H was centered in
+space; the saved time-centered H was not averaged again in time. TDDFT used
+an existing GS in place, 2 macro points, 8 MPI ranks and dt=.003 au. E/H/j and
+field energy were read directly from native outputs; no new GS/wavefunction data
+were saved.
+
+The primary check delays incidence so the initial field is empty. A separate
+prefilled-wave check includes the initial field energy in the budget. Finite-time
+R/T can appear above one when incident traces are truncated; inspect initial
+fields and observation coverage rather than clipping the spectrum.
+
+Source-checkout reanalysis tool: `tools/analyze_fdtd_energy.py`. It only reads
+completed validation fixtures and explicitly builds/audits a small C reference;
+it does not launch SALMON or MPI. Wheel users can run `examples.fdtd_energy`
+on the exported NPZ observations. Real-material runs are not added to required CI.
+
+
+### Complete transverse-periodic planes, including diffraction
+
+Pass `area_weights=dA` to `reflection_transmission` for nonuniform planes.
+E/H have shape (time, Ny, Nz, 3); dA has shape (Ny,Nz) in bohr². Flattened
+(time, patches,3) arrays also work. Cover one complete transverse periodic cell
+and avoid double-counting a repeated endpoint. Compute local E cross H BEFORE
+summing areas: crossing mean E and mean H loses spatially phased diffraction.
+
+```python
+from salmonpy.analysis import surface_flux, reflection_transmission
+from salmonpy.fdtd import energy_balance
+
+# Each field: (N, Ny, Nz, 3), already collocated in space and time.
+# dA: (Ny,Nz); each entry dy*dz for a uniform grid.
+ports = reflection_transmission(time, E_inc, H_inc, E_ref, H_ref, E_tr, H_tr,
+    normal=(1, 0, 0), area_weights=dA, units='atomic_gaussian')
+area = ports.config['surface_area']
+check = energy_balance(point_work, point_volumes, ports,
+    material_ids=material_ids, transverse_area=area,
+    field_energy_change=delta_field_energy, units='atomic_gaussian')
+net = surface_flux(time, E_total, H_total,
+    normal=(1, 0, 0), area_weights=dA, units='atomic_gaussian')
+# net.power: signed total Hartree/atomic_time; net.energy: cumulative Hartree.
+# net.fluence: area-averaged Hartree/bohr².
+```
+
+R/T likewise sum area-weighted complex Poynting flux before taking ratios.
+All spatially resolved orders contribute, including oblique waves and modes
+whose mean field vanishes. Subtract reference E AND H to form a reflected field;
+never substitute an intensity difference. For oblique diffraction, use measured H,
+not normal cross E. Put planes clear of material/PML, with matching cell areas.
+Finite-time residual/near fields and weak drive can give unstable signed ratios:
+inspect masks, warnings, duration and plane positions; do not clip negative bins.
+
+With matched transverse periodicity, opposite lateral fluxes cancel over one
+cell. Front/back integrated flux, material work and field-storage change close
+the budget. Extra lateral sources/nonperiodic channels must be counted separately.
+No added MPI calls: disjoint patch power/energy add on the owning group. Do not
+average rank-local R/T; evaluate ratios over the whole cross section. Automatic
+closed-surface placement, order-resolved decomposition and spatial interpolation
+are not provided. Nor is a new automatic native plane collector: supply collocated
+arrays from native plane outputs or your own observations. The existing FDTD
+point-observation entry still has its 200-point limit.
+
+Fortran performs area/time integration. The legacy uniform-port path is unchanged.
+The budget checks transverse_area against the recorded plane area to prevent
+area double-counting. The stored-NPZ fdtd_energy example accepts area_weights.
+
+A real native transversely periodic lossless dielectric grating (z invariant)
+closed at about0.0107% of incident energy with32 transverse samples. Averaging
+fields first lost transmitted energy equivalent to about10.1% of incidence.
+Final stored field energy was included from native field checkpoint data. This
+is local observation/accounting verification, not general3D material accuracy
+or multi-node scaling certification.

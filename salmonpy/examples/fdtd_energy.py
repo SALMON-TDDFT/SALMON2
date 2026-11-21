@@ -5,9 +5,10 @@ NPZ keys (Gaussian AU, charge current j):
  time: (N,), macro_E/charge_j: (N,M,3), point_volumes: (M,),
  material_ids: (M,) Unicode strings, normal: (3,), area: scalar,
  field_energy_change/other_outgoing_energy: scalar Hartree,
- incident_E/incident_H/reflected_E/reflected_H/transmitted_E/transmitted_H: (N,3).
+ incident_E/incident_H/reflected_E/reflected_H/transmitted_E/transmitted_H: (N,3), or (N,*surface_shape,3) with
+ optional area_weights: surface_shape, in bohr**2 covering one transverse cell.
 All E/H and E/j must already be collocated, waves direction-separated, ports
-uniform and equal-area. Explicit field/other-energy values are required, never
+equal-area; surface arrays can be nonuniform. Explicit field/other-energy values are required, never
 inferred from missing data. Material work includes reversible storage.
 """
 import argparse
@@ -36,7 +37,8 @@ def main():
                                     units='atomic_gaussian',current_convention='charge',field_kind='total')
         ports=reflection_transmission(data['time'],*(data[name] for name in
             ('incident_E','incident_H','reflected_E','reflected_H','transmitted_E','transmitted_H')),
-            normal=data['normal'],units='atomic_gaussian',window=args.window)
+            normal=data['normal'],units='atomic_gaussian',window=args.window,
+            area_weights=data['area_weights'] if 'area_weights' in data else None)
         ids=data['material_ids']
         if ids.dtype.kind!='U':raise ValueError('material_ids must be Unicode strings')
         budget=energy_balance(work,data['point_volumes'],ports,material_ids=ids,

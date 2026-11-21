@@ -78,6 +78,74 @@ class UtilityTests(unittest.TestCase):
         self.assertFalse(np.any(empty.valid))
         self.assertTrue(np.isnan(empty.R).all())
 
+    def test_periodic_surface_flux_retains_diffraction_and_uniform_limit(self):
+        from salmonpy.analysis import reflection_transmission,surface_flux
+        from salmonpy.fdtd import energy_balance
+        t=np.arange(128)*.1;phase=2*np.pi*7*np.arange(128)/128
+        E=np.zeros((len(t),3));H=E.copy()
+        E[:,1]=np.cos(phase);E[:,2]=np.sin(phase)
+        H[:,1]=-E[:,2];H[:,2]=E[:,1]
+        zero=E*0
+        flat=reflection_transmission(t,E,H,zero,zero,E,H,normal=(1,0,0),units='atomic_gaussian')
+        weights=np.ones((4,2))
+        def expanded(a):return np.broadcast_to(a[:,None,None,:],(len(t),4,2,3)).copy()
+        surface=reflection_transmission(t,*map(expanded,(E,H,zero,zero,E,H)),normal=(1,0,0),
+                                        units='atomic_gaussian',area_weights=weights)
+        np.testing.assert_array_equal(flat.valid,surface.valid)
+        np.testing.assert_allclose(flat.R[flat.valid],surface.R[surface.valid],atol=1e-14)
+        np.testing.assert_allclose(flat.T[flat.valid],surface.T[surface.valid],atol=1e-14)
+        self.assertAlmostEqual(flat.incident_fluence,surface.incident_fluence,places=12)
+        self.assertEqual(surface.config['surface_area'],8.)
+        # A propagating +1 order with cos(theta)=.6. Its mean E/H vanish,
+        # while its normal power equals the circularly polarized incident wave.
+        yphase=2*np.pi*np.arange(8)/8
+        diffracted=np.zeros((len(t),8,3))
+        diffracted[:,:,2]=np.sqrt(2/.6)*np.cos(phase[:,None]-yphase[None,:])
+        magnetic=np.zeros_like(diffracted)
+        magnetic[:,:,0]=.8*diffracted[:,:,2]
+        magnetic[:,:,1]=-.6*diffracted[:,:,2]
+        inc=np.broadcast_to(E[:,None,:],diffracted.shape).copy()
+        hi=np.broadcast_to(H[:,None,:],diffracted.shape).copy()
+        w=np.full(8,1/8)
+        ports=reflection_transmission(t,inc,hi,inc*0,hi*0,diffracted,magnetic,
+            area_weights=w,normal=(1,0,0),units='atomic_gaussian')
+        self.assertAlmostEqual(ports.T[7],1.,places=13)
+        self.assertLess(np.max(np.abs(diffracted.mean(axis=1))),1e-14)
+        flux=surface_flux(t,diffracted,magnetic,area_weights=w,normal=(1,0,0),units='atomic_gaussian')
+        np.testing.assert_allclose(flux.power,137.035999084/(4*np.pi),rtol=1e-14)
+        report=energy_balance([0.],[1.],ports,material_ids=('lossless',),transverse_area=1.,
+            field_energy_change=0.,units='atomic_gaussian',rtol=1e-12)
+        self.assertTrue(report.within_tolerance)
+        for value in (flux.power,flux.energy,ports.T):
+            with self.assertRaises(ValueError):value.setflags(write=True)
+        with self.assertRaisesRegex(ValueError,'area'):
+            energy_balance([0.],[1.],ports,material_ids=('x',),transverse_area=2.,
+                field_energy_change=0.,units='atomic_gaussian')
+        # Surface integral is additive for rank-owned disjoint patches.
+        a=surface_flux(t,diffracted[:,:4],magnetic[:,:4],area_weights=w[:4],normal=(1,0,0),units='atomic_gaussian')
+        b=surface_flux(t,diffracted[:,4:],magnetic[:,4:],area_weights=w[4:],normal=(1,0,0),units='atomic_gaussian')
+        np.testing.assert_allclose(a.power+b.power,flux.power,rtol=1e-14)
+        np.testing.assert_allclose(a.energy+b.energy,flux.energy,rtol=1e-14)
+
+    def test_surface_weights_and_native_nonfinite_checks(self):
+        from salmonpy.analysis import surface_flux
+        t=np.array([0.,1.,2.]);E=np.zeros((3,2,3));H=E.copy()
+        E[:,:,2]=[1.,2.];H[:,:,1]=[-1.,-2.]
+        q=surface_flux(t,E,H,area_weights=[1.,3.],normal=(1,0,0),units='atomic_gaussian')
+        np.testing.assert_allclose(q.power,13*137.035999084/(4*np.pi),rtol=1e-14)
+        self.assertEqual(q.area,4.)
+        for weights in ([0.,0.],[-1.,2.],[1.,float('nan')]):
+            with self.assertRaises(ValueError):surface_flux(t,E,H,area_weights=weights,normal=(1,0,0),units='atomic_gaussian')
+        # Every native entry is checked, even on a zero-weight patch.
+        import ctypes as c
+        from salmonpy.analysis import _energy_native
+        fn=_energy_native('sp_surface_flux',[c.c_int]*2+[c.c_void_p]*8)
+        n=np.array([1.,0.,0.]);w=np.array([1.,0.]);power=np.empty(3);energy=np.empty(3);stats=np.empty(3)
+        for invalid in (float('nan'),float('inf')):
+            bad=E.copy();bad[1,1,2]=invalid
+            self.assertNotEqual(fn(3,2,t.ctypes.data,bad.ctypes.data,H.ctypes.data,n.ctypes.data,w.ctypes.data,
+                power.ctypes.data,energy.ctypes.data,stats.ctypes.data),0)
+
     def test_pulse_and_composition(self):
         pulse=AcosPulse(amplitude=.1,omega=2.,duration=4.,start=1.,polarization=(1,0,0))
         t=np.linspace(0,6,601);a=pulse.sample(t)

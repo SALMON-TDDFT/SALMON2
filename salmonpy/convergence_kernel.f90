@@ -646,4 +646,113 @@ contains
     accepted=merge(1,0,abs(residual)<=limit)
     sp_energy_balance=0
   end function
+
+  ! Local E cross H first, area integration second: no coherent field averaging.
+  integer(c_int) function surface_geometry(np,normal,weights,unit,area) result(status)
+    integer,intent(in)::np
+    real(c_double),intent(in)::normal(3),weights(np)
+    real(c_double),intent(out)::unit(3),area
+    real(c_double)::length
+    integer::k
+    status=4;area=0d0
+    if(np<1)return
+    do k=1,3
+      if(.not.ieee_is_finite(normal(k)))return
+    enddo
+    length=sqrt(dot_product(normal,normal))
+    if(.not.ieee_is_finite(length).or.length<=0d0)return
+    unit=normal/length
+    do k=1,np
+      if(.not.ieee_is_finite(weights(k)).or.weights(k)<0d0)return
+      area=area+weights(k)
+    enddo
+    if(.not.ieee_is_finite(area).or.area<=0d0)return
+    status=0
+  end function
+
+  integer(c_int) function sp_surface_flux(nt,np,time,e,h,normal,weights,power,energy,stats) bind(c)
+    integer(c_int),value::nt,np
+    real(c_double),intent(in)::time(nt),e(3,np,nt),h(3,np,nt),normal(3),weights(np)
+    real(c_double),intent(out)::power(nt),energy(nt),stats(3)
+    real(c_double)::unit(3),area,v(3),flux,dt
+    integer::t,p,k
+    sp_surface_flux=4;power=0d0;energy=0d0;stats=0d0
+    if(nt<2)return
+    if(surface_geometry(np,normal,weights,unit,area)/=0)return
+    do t=1,nt
+      if(.not.ieee_is_finite(time(t)))return
+      flux=0d0
+      do p=1,np
+        do k=1,3
+          if(.not.ieee_is_finite(e(k,p,t)).or..not.ieee_is_finite(h(k,p,t)))return
+        enddo
+        v=[e(2,p,t)*h(3,p,t)-e(3,p,t)*h(2,p,t), &
+           e(3,p,t)*h(1,p,t)-e(1,p,t)*h(3,p,t), &
+           e(1,p,t)*h(2,p,t)-e(2,p,t)*h(1,p,t)]
+        flux=flux+weights(p)*dot_product(v,unit)
+        if(.not.ieee_is_finite(flux))return
+      enddo
+      power(t)=137.035999084d0/(4d0*acos(-1d0))*flux
+      if(.not.ieee_is_finite(power(t)))return
+      if(t>1)then
+        dt=time(t)-time(t-1)
+        if(.not.ieee_is_finite(dt).or.dt<=0d0)return
+        energy(t)=energy(t-1)+dt*(.5d0*power(t-1)+.5d0*power(t))
+        if(.not.ieee_is_finite(energy(t)))return
+      endif
+    enddo
+    stats=[area,energy(nt),energy(nt)/area]
+    do k=1,3
+      if(.not.ieee_is_finite(stats(k)))return
+    enddo
+    sp_surface_flux=0
+  end function
+
+  integer(c_int) function sp_surface_port_spectra(n,np,ei,hi,er,hr,et,ht,normal,weights, &
+                                                 rtol,r,t,valid,area) bind(c)
+    integer(c_int),value::n,np
+    complex(c_double_complex),intent(in)::ei(3,np,n),hi(3,np,n),er(3,np,n),hr(3,np,n)
+    complex(c_double_complex),intent(in)::et(3,np,n),ht(3,np,n)
+    real(c_double),intent(in)::normal(3),weights(np)
+    real(c_double),value::rtol
+    real(c_double),intent(out)::r(n),t(n),area
+    integer(c_int),intent(out)::valid(n)
+    real(c_double)::unit(3),flux(n,3),v(3),peak
+    complex(c_double_complex)::a(3),b(3)
+    integer::i,p,k,port
+    sp_surface_port_spectra=4;valid=0
+    r=ieee_value(0d0,ieee_quiet_nan);t=r
+    if(n<1.or..not.ieee_is_finite(rtol))return
+    if(rtol<0d0.or.rtol>=1d0)return
+    if(surface_geometry(np,normal,weights,unit,area)/=0)return
+    flux=0d0
+    do i=1,n
+      do port=1,3
+        do p=1,np
+          select case(port)
+          case(1);a=ei(:,p,i);b=hi(:,p,i)
+          case(2);a=er(:,p,i);b=hr(:,p,i)
+          case(3);a=et(:,p,i);b=ht(:,p,i)
+          end select
+          do k=1,3
+            if(.not.ieee_is_finite(real(a(k))).or..not.ieee_is_finite(aimag(a(k))))return
+            if(.not.ieee_is_finite(real(b(k))).or..not.ieee_is_finite(aimag(b(k))))return
+          enddo
+          v=[real(a(2)*conjg(b(3))-a(3)*conjg(b(2))), &
+             real(a(3)*conjg(b(1))-a(1)*conjg(b(3))), &
+             real(a(1)*conjg(b(2))-a(2)*conjg(b(1)))]
+          flux(i,port)=flux(i,port)+weights(p)*dot_product(v,unit)
+          if(.not.ieee_is_finite(flux(i,port)))return
+        enddo
+      enddo
+    enddo
+    peak=maxval(flux(:,1))
+    do i=1,n
+      if(flux(i,1)<=0d0.or.flux(i,1)<=rtol*peak)cycle
+      r(i)=-flux(i,2)/flux(i,1);t(i)=flux(i,3)/flux(i,1)
+      if(.not.ieee_is_finite(r(i)).or..not.ieee_is_finite(t(i)))return
+      valid(i)=1
+    enddo
+    sp_surface_port_spectra=0
+  end function
 end module

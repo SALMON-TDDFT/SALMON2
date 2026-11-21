@@ -677,17 +677,22 @@ def absorbed_energy_density(time, electric_field, current, *, units, current_con
 
 def reflection_transmission(time, incident_E, incident_H, reflected_E, reflected_H,
                             transmitted_E, transmitted_H, *, normal, units,
-                            window='none', drive_rtol=1e-8):
+                            window='none', drive_rtol=1e-8, area_weights=None):
     """R=-Re(Er x Hr*)·n / Pi and T=Re(Et x Ht*)·n / Pi.
 
     Explicit direction-separated plane-port fields, shape (N,3), equal port area.
     n points from incident to transmitted side. Match E/H time and position first;
     never pass staggered Yee samples, total fields as reflected fields, or A/J.
-    Does not infer incident-wave subtraction or integrate a nonuniform surface.
+    Does not infer incident-wave subtraction. For nonuniform plane fields pass
+    area_weights matching the spatial axes of (time, ..., xyz) arrays. Local
+    flux is summed over the whole transverse cell before forming R/T.
     """
     import ctypes as c
     import warnings
     from .ld import _positive
+    if area_weights is not None:
+        return _surface_ports(time,(incident_E,incident_H,reflected_E,reflected_H,
+                              transmitted_E,transmitted_H),normal,area_weights,units,window,drive_rtol)
     if units != 'atomic_gaussian': raise InputError('require atomic_gaussian E/H units')
     threshold = _positive(drive_rtol,'drive_rtol',zero=True)
     if threshold >= 1: raise InputError('drive_rtol must be less than one')
@@ -720,4 +725,89 @@ def reflection_transmission(time, incident_E, incident_H, reflected_E, reflected
                   fluence_window='none',ratio_normalization='directional E cross conjugate(H)',
                   scope='equal-area uniform plane ports; complete time trace and separated incident/reflected waves required')
     return PortSpectrum(transforms[0].omega,_readonly(R),_readonly(T),np.frombuffer((valid!=0).tobytes(),dtype=np.bool_),
+                        fluences[0],-fluences[1],fluences[2],MappingProxyType(config))
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceFlux:
+    """Signed total power/energy crossing a complete sampled plane."""
+    time: np.ndarray
+    power: np.ndarray
+    energy: np.ndarray
+    area: float
+    fluence: float
+    config: object
+
+
+def _surface_geometry(time, E, H, normal, area_weights, units):
+    if units != 'atomic_gaussian': raise InputError('surface flux requires atomic_gaussian E/H')
+    t = np.ascontiguousarray(_times(time),dtype=np.float64)
+    e = _array(E,'surface E'); h = _array(H,'surface H')
+    weights = _array(area_weights,'area_weights')
+    n = np.ascontiguousarray(_array(normal,'normal'),dtype=np.float64)
+    if weights.ndim < 1 or weights.size < 1 or n.shape != (3,):
+        raise InputError('nonempty spatial area_weights and normal shape (3,) required')
+    expected = (len(t),)+weights.shape+(3,)
+    if e.shape != expected or h.shape != expected:
+        raise InputError('E/H must have shape (time, *area_weights.shape, 3)')
+    if max(len(t),weights.size) > 2**31-1: raise InputError('surface dimensions exceed native ABI')
+    return t,np.ascontiguousarray(e.reshape(len(t),weights.size,3)),np.ascontiguousarray(
+        h.reshape(len(t),weights.size,3)),np.ascontiguousarray(n),np.ascontiguousarray(weights.reshape(-1))
+
+
+def surface_flux(time, electric_field, magnetic_field, *, area_weights, normal, units):
+    """Native integral of c/(4pi) (E cross H) dot n over all area elements.
+
+    E/H shape (time, *spatial_shape, 3), weights shape spatial_shape in bohr².
+    Signed power is Hartree/atomic_time; cumulative energy is Hartree. Weights
+    may be zero, with positive total area. Do not duplicate a periodic endpoint.
+    Fields must be collocated; no direction separation or spatial phase average.
+    No MPI calls: each caller supplies its complete plane (or a local patch whose
+    signed power/energy must subsequently be summed by its owning group).
+    """
+    import ctypes as c
+    t,e,h,n,w = _surface_geometry(time,electric_field,magnetic_field,normal,area_weights,units)
+    power = np.empty(len(t)); energy = np.empty(len(t)); stats = np.empty(3)
+    fn = _energy_native('sp_surface_flux',[c.c_int,c.c_int]+[c.c_void_p]*8)
+    if fn(len(t),len(w),t.ctypes.data,e.ctypes.data,h.ctypes.data,n.ctypes.data,w.ctypes.data,
+          power.ctypes.data,energy.ctypes.data,stats.ctypes.data):
+        raise InputError('native surface flux requires nonnegative weights, positive area, finite fields/normal/arithmetic')
+    config = MappingProxyType(dict(units=units,normal=tuple(n),power_unit='hartree/atomic_time',
+        energy_unit='hartree',area_unit='bohr^2',integration='sum local Poynting flux times area; trapezoidal time integral',
+        time_window='none',samples=len(w),direction='signed along normal'))
+    return SurfaceFlux(_readonly(t),_readonly(power),_readonly(energy),float(stats[0]),float(stats[2]),config)
+
+
+def _surface_ports(time, arrays, normal, area_weights, units, window, drive_rtol):
+    import ctypes as c
+    import warnings
+    from .ld import _positive
+    threshold = _positive(drive_rtol,'drive_rtol',zero=True)
+    if threshold >= 1: raise InputError('drive_rtol must be less than one')
+    t,e,h,n,w = _surface_geometry(time,arrays[0],arrays[1],normal,area_weights,units)
+    expected = (len(t),)+np.shape(area_weights)+(3,)
+    fields = [e,h]
+    for value in arrays[2:]:
+        value = _array(value,'surface port')
+        if value.shape != expected: raise InputError('all surface ports must share the same spatial sampling')
+        fields.append(np.ascontiguousarray(value.reshape(len(t),len(w),3)))
+    transforms = [spectrum(t,a.reshape(len(t),-1),window=window) for a in fields]
+    values = [np.ascontiguousarray(a.values,dtype=np.complex128) for a in transforms]
+    size = len(transforms[0].omega)
+    R = np.empty(size); T = np.empty(size); mask = np.empty(size,dtype=np.int32); area = c.c_double()
+    fn = _energy_native('sp_surface_port_spectra',[c.c_int]*2+[c.c_void_p]*8+[c.c_double]+[c.c_void_p]*4)
+    if fn(size,len(w),*(a.ctypes.data for a in values),n.ctypes.data,w.ctypes.data,threshold,
+          R.ctypes.data,T.ctypes.data,mask.ctypes.data,c.byref(area)):
+        raise InputError('native surface spectra rejected geometry, fields or arithmetic')
+    fluences = [surface_flux(t,E,H,area_weights=w,normal=n,units=units).fluence
+                for E,H in zip(fields[::2],fields[1::2])]
+    if not np.any(mask): warnings.warn('Incident surface spectral flux is unresolved; R/T are invalid',UserWarning,stacklevel=2)
+    if np.any(R[mask!=0]<0) or np.any(T[mask!=0]<0):
+        warnings.warn('Negative surface R/T: inspect direction separation, time coverage and normal',UserWarning,stacklevel=2)
+    config = dict(transforms[0].config,observable='reflection_transmission',units=units,
+        drive_rtol=threshold,normal=tuple(n),fluence_unit='hartree/bohr^2',fluence_window='none',
+        surface_area=area.value,surface_samples=len(w),
+        ratio_normalization='sum area-weighted local E cross conjugate(H), then flux ratio',
+        scope='complete transversely periodic cell plane; separated wave fields; all resolved scattering/diffraction orders')
+    return PortSpectrum(transforms[0].omega,_readonly(R),_readonly(T),np.frombuffer((mask!=0).tobytes(),dtype=np.bool_),
                         fluences[0],-fluences[1],fluences[2],MappingProxyType(config))
