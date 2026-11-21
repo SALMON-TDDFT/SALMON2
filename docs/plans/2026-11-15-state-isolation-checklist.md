@@ -2,7 +2,7 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## Current actionable queue — 2026-11-20 (bounded resource inventory)
+## Current actionable queue — 2026-11-21 (resource inventory and operational follow-ups)
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
@@ -27,8 +27,14 @@ retains results. GS saving/reuse is the normal workflow. Collected GS validation
   completes with maximum relative electron loss4.22e-10. This is not an optical
   or general-grid convergence certificate. Existing12³→16³ current error18.83%
   does not pass5%;12³ SCF was unconverged, so that comparison is provisional.
-- [x] Latest source/installed641 tests:640pass,1skip. Fresh source/object audits,
-  sdist→wheel, installed examples, JP/EN/AI byte parity and guide sync verified.
+- [x] Latest completed communication verification: source/wheel668 tests, one
+  optional skip; status-bearing A/J transport, failure-only reporter Bcast,
+  MPI4/6 protected retry and direct resume, paired manuals/AI JSON verified.
+- [x] Optical duration/window/k diagnostics and reference-frequency LD-only
+  subpixel modules completed below; historical pending optical checkboxes are superseded.
+- [x] Operational FDTD input-only staging and site launcher argv verified below.
+- [ ] Remaining operational scope: DFT/TDDFT batch staging and site evidence.
+  Group5 R3/R4 and group3 remain open; groups1/2 stay deferred.
 
 ### User-directed execution order (2026-11-19)
 
@@ -2963,7 +2969,7 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
 - [x] Constrained LD fitting/provenance completed below; remaining optical work is duration/window/k post-analysis, then subpixel design. HPC remains deferred.
 
 - [x] 2026-11-20: native passive LD fitting, direct epsilon/nk/masked-optical inputs, explicit pole counts and deterministic starts, optional initial model/background, residual/optimizer separation, data/file SHA256 and literature reference, calibrated band and warning-only excitation checks. Synthetic tests cover fit accuracy, passive failures, source identity and input independence. Local optimization and finite-band calibration do not certify a global optimum or real materials.
-- [ ] Next optical work: duration/window sensitivity and post-hoc k contributions, then subpixel/interface design. HPC work remains later per user priority.
+- [x] Superseded/completed on2026-11-21: duration/window/k diagnostics and LD-only reference-frequency subpixel modules; see their dedicated plans.
 
 - [x] 2026-11-20 user explicitly authorized acquiring/retaining legally redistributable experimental optical data and fitting a reusable list. This supersedes the earlier exclusion of bundled Johnson-Christy numerical data for the selected CC0 database subset only. Preserve original measurements, license, pinned commit, SHA256, DOI and conditions; no journal articles/figures. Five materials,22 retained candidates; choose defaults using residual and time-resolution screening, retain warnings and optimizer nonconvergence. All experimental refits stay explicit/local, not required CI.
 
@@ -3104,3 +3110,17 @@ The external Linux review reports host-MPI evidence up to five ranks. Larger-sca
   Seventeen A/E/J comparisons bitwise equal; evidence in the status transport plan.
 - [x] Reported lightweight CI failure repaired in test-only commit8d5d90f5;
   run44852912505 passed. No manual platform/physics matrix dispatched.
+
+
+## HPC FDTD operational path (2026-11-21)
+- [x] prepare_fdtd writes only native input/assets plus prepared-not-run manifest;
+  no executable, subprocess, MPI initialization, compilation or submission.
+- [x] FDTDMPI.command/rank_arguments construct site argv without shell evaluation;
+  preserve default -n and existing nested-launch rejection.
+- [x] Explicit two-rank local launch with -np matches the old -n path: identical
+  input bytes and four native FDTD/LD .data files. No GS collected.
+- [x] Source/wheel669 tests (one optional skip), preparation-only installed CLI,
+  two-rank default/custom native launch and tensor sidecar parity verified.
+  Dedicated plan and canonical record retain the bounded evidence.
+- [ ] Remaining HPC scope: DFT/TDDFT preparation/launcher integration and real
+  site/multi-node evidence. General init/ABI/NLCC work remains in its own queue.

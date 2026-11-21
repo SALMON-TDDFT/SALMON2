@@ -137,3 +137,67 @@ scope, with unknown combinations reported as unverified rather than forbidden.
 Existing `preflight_inputs(..., registry=...)` is a separate explicitly trusted
 resolver-based material check; `--code` deliberately does not combine with
 `--resolve-builtins`, so arbitrary resolver code cannot run through this entry.
+
+
+## Preparation-only FDTD on a management node
+
+`prepare_fdtd(calculation, new_directory, mpi=None)` writes native inputfile and
+material assets to a new directory and stops. It needs no executable, creates no
+subprocess, initializes no MPI, builds nothing, runs no solver and submits no job.
+It returns a Path without an execution method; successful checks do not continue
+automatically into a calculation.
+
+```python
+from salmonpy.preparation import prepare_fdtd
+from salmonpy.fdtd import FDTDMPI
+from salmonpy.examples.prepare_fdtd import calculation  # small LD connection fixture
+
+folder = prepare_fdtd(calculation(), "fdtd-input", mpi=FDTDMPI((2, 1, 1)))
+# Stop here. Transfer, submission and execution are separate actions.
+```
+
+```sh
+python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-grid 2 1 1
+```
+
+`salmonpy-prepared-fdtd.json` records prepared-not-run status, decomposition, rank
+count and input hashes/sizes, without site-specific executable/launcher paths.
+Existing directories are never overwritten. This is a native SALMON input folder,
+not the prepare_inputs material archive; verify_inputs does not accept this
+format. It is not a physical convergence or runtime-compatibility certificate.
+
+Transfer the folder if required and explicitly launch a matching audited SALMON
+from the site's allocated batch job. Verify its recorded executable SHA256 at
+startup rather than repeating source/object audits. Run in the input directory
+and pass inputfile through stdin. For example, the launch portion of an allocated
+Slurm job might use `srun --ntasks=2 "$SALMON_EXECUTABLE" < inputfile > stdout.log 2>&1`.
+This is a site-specific illustration, not a management-node execution instruction
+or automatic submission. Set queues, accounts, limits and threads according to
+the site's rules in the job script.
+
+## Site-specific launcher arguments
+
+FDTDMPI defaults to rank_arguments=('-n','{ranks}'), preserving existing commands.
+command(executable) only returns argv; it neither launches nor checks a binary.
+
+```python
+from salmonpy.fdtd import FDTDMPI
+mpi = FDTDMPI((2, 1, 1), launcher=("site-launch",),
+              rank_arguments=("--tasks={ranks}",))
+argv = mpi.command("/site/salmon")  # preview only
+# ('site-launch', '--tasks=2', '/site/salmon')
+```
+
+Use rank_arguments=() to append no rank-count arguments when the site obtains
+counts from its allocation. The actual count must still match the input
+decomposition. No arbitrary launcher semantics are inferred or certified. Only
+{ranks} is substituted; other strings remain literal, without shell evaluation or
+environment expansion. For jsrun, configure resource sets and tasks per set
+consistently with MPI ranks according to site rules. Renaming the launcher alone
+does not necessarily configure a different site's execution model.
+
+SalmonExecutable.run remains the explicit child-process path from serial Python;
+nested-launch protection inside MPI ranks stays enabled. For Python itself as a
+caller-owned MPI application, use ParallelContext and native embedded components
+collectively as described in COUPLED.en.md. This addition does not unify the
+separate DFT/TDDFT batch paths.

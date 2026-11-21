@@ -254,3 +254,5 @@ For optional LD-only interface smoothing, add `--subpixel` to `fdtd_waveplate`. 
 Mixed MPI sessions route A/field packets only to owning points; J return order is unchanged. See communication_report for the ownership layout.
 
 With a matching spatial-current native runtime, mpi_mixed_native also routes J by field ownership. Only owned coupling-J rows are meaningful off the field leader; use leader output for full-point analysis. See COUPLED.en.md.
+
+Preparation only: `python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-grid 2 1 1` writes FDTD inputs and stops, without solver execution or submission. See PREPARATION.en.md.

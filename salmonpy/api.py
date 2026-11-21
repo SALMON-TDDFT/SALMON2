@@ -93,7 +93,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.subpixel': ('SubpixelSmoothing','effect
                       'Multiscale1D',
                       'CoupledResponse',
                       'couple'),
- 'salmonpy.preparation': ('prepare_inputs', 'verify_inputs', 'preflight_inputs', 'check_job'),
+ 'salmonpy.preparation': ('prepare_inputs', 'prepare_fdtd', 'verify_inputs', 'preflight_inputs', 'check_job'),
  'salmonpy.outputs': ('CubeGrid',
                       'read_cube',
                       'DecomposedCurrent',

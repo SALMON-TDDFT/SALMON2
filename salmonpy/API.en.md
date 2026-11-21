@@ -303,3 +303,6 @@ Neither diagnostic is a physical accuracy certificate or launches another run.
 
 Run `python -m salmonpy.examples.optical_response` for synthetic data, not a
 converged real-material optical calculation.
+
+
+Additive API: salmonpy.preparation.prepare_fdtd(calculation, directory, mpi=None) writes a new native FDTD input folder and returns its Path only. FDTDMPI.rank_arguments and command(executable) configure/preview argv, without execution. See PREPARATION.en.md.

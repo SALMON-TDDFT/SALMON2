@@ -297,6 +297,7 @@ class FDTDMPI:
     """Spatial decomposition of native FDTD; LD states stay on owning grid ranks."""
     grid: tuple
     launcher: tuple=('mpiexec',)
+    rank_arguments: tuple=('-n','{ranks}')
 
     def __post_init__(self):
         grid=tuple(self.grid)
@@ -306,12 +307,24 @@ class FDTDMPI:
         if isinstance(self.launcher,str) or not launcher or any(not isinstance(x,str) or not x or '\x00' in x for x in launcher):
             raise InputError('launcher must be a nonempty argument tuple')
         object.__setattr__(self,'launcher',launcher)
+        arguments=tuple(self.rank_arguments)
+        if isinstance(self.rank_arguments,str) or any(not isinstance(x,str) or not x or '\x00' in x for x in arguments):
+            raise InputError('rank_arguments must be an argument sequence (empty is allowed)')
+        object.__setattr__(self,'rank_arguments',arguments)
         if self.ranks>2**31-1: raise InputError('too many MPI ranks')
 
     @property
     def ranks(self):
         import math
         return math.prod(self.grid)
+
+    def command(self,executable):
+        """Return argv only; never launch, interpret a shell or inspect a binary."""
+        path=os.fspath(executable)
+        if not isinstance(path,str) or not path or '\x00' in path:
+            raise InputError('executable must be a nonempty text path')
+        arguments=tuple(token.replace('{ranks}',str(self.ranks)) for token in self.rank_arguments)
+        return (*self.launcher,*arguments,path)
 
     def input_text(self,calculation):
         if any(n//p<2 for n,p in zip(calculation.geometry.grid.counts,self.grid)):
@@ -408,7 +421,7 @@ class SalmonExecutable:
             if mpi_active or any(k in os.environ for k in ('OMPI_COMM_WORLD_RANK','PMI_RANK','PMIX_RANK','MPI_LOCALRANKID','SLURM_PROCID')):
                 raise InputError('launch FDTD MPI from a fresh serial Python process, not inside an MPI rank or initialized MPI')
         inp=calculation.input_text() if mpi is None else mpi.input_text(calculation)
-        command=[str(self.path)] if mpi is None else [*mpi.launcher,'-n',str(mpi.ranks),str(self.path)]
+        command=[str(self.path)] if mpi is None else list(mpi.command(self.path))
         directory=Path(directory).expanduser().resolve()
         try:directory.mkdir(parents=True,exist_ok=False)
         except FileExistsError as exc:

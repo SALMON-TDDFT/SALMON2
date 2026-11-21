@@ -224,3 +224,6 @@ python -m salmonpy.examples.fdtd_waveplate BUILD_JSON NEW_DIRECTORY --subpixel -
 このサンプルは極強度ゼロのLD背景を用い、形状と偏光を物質フィットの精度から
 分けて確認します。分散のある実験には実際の分散LDモデルを設定してください。
 既定のsmoothing=Noneでは従来の階段状配置を使用します。
+
+
+FDTD入力だけを保存して終える入口はprepare_fdtdです。既定ランク引数は従来どおりで、FDTDMPI.rank_argumentsとcommandでサイト固有のargvを組み立てられます。PREPARATION.mdを参照してください。runの二重MPI起動拒否は維持します。

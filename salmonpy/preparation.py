@@ -17,7 +17,7 @@ import unicodedata
 from .config import _copy_json, resolve_materials
 from .errors import InputError
 
-__all__ = ['prepare_inputs', 'verify_inputs', 'preflight_inputs', 'check_job']
+__all__ = ['prepare_inputs', 'prepare_fdtd', 'verify_inputs', 'preflight_inputs', 'check_job']
 _SCHEMA = 'salmonpy.input-bundle/1'
 _GENERATED = {'materials.json', 'resolved.json', 'manifest.json'}
 _DIGEST = re.compile(r'[0-9a-f]{64}\Z')
@@ -93,6 +93,50 @@ def _read(path):
         raise InputError(f'invalid input bundle manifest: {exc}') from exc
 
 
+def _publish_stage(stage,dest):
+    """Reserve a new destination; never delete a pre-existing directory."""
+    dest.mkdir(exist_ok=False)
+    try:
+        for child in stage.iterdir():child.rename(dest/child.name)
+    except BaseException:
+        shutil.rmtree(dest)
+        raise
+
+
+def prepare_fdtd(calculation,directory,*,mpi=None):
+    """Write native FDTD inputs only; return a NEW directory, never execute.
+
+    No executable is required or inspected. No subprocess, MPI initialization,
+    compilation, installation, job submission or automatic next step occurs.
+    Existing input-bundle verify_inputs is a different archive schema.
+    """
+    from .fdtd import FDTD,FDTDMPI
+    from .errors import InputTypeError
+    if not isinstance(calculation,FDTD):raise InputTypeError('calculation must be FDTD')
+    if mpi is not None and not isinstance(mpi,FDTDMPI):raise InputTypeError('mpi must be FDTDMPI')
+    dest=Path(directory).expanduser().absolute()
+    if dest.exists() or dest.is_symlink():raise FileExistsError(dest)
+    text=calculation.input_text() if mpi is None else mpi.input_text(calculation)
+    assets=calculation.input_assets()
+    manifest='salmonpy-prepared-fdtd.json'
+    if set(assets)&{'inputfile',manifest}:raise InputError('FDTD asset collides with a prepared input filename')
+    _names([*assets,'inputfile',manifest])
+    payloads={name:value.encode('utf-8') for name,value in assets.items()}
+    payloads['inputfile']=text.encode('utf-8')
+    dest.parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.salmonpy-fdtd-',dir=dest.parent) as temporary:
+        stage=Path(temporary)
+        for name,data in payloads.items():
+            target=stage/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+        _write(stage/manifest,{'schema':'salmonpy.prepared-fdtd/1','status':'prepared-not-run',
+            'input':'inputfile','ranks':1 if mpi is None else mpi.ranks,
+            'mpi_grid':None if mpi is None else list(mpi.grid),
+            'files':{name:{'sha256':hashlib.sha256(data).hexdigest(),'size':len(data)}
+                     for name,data in payloads.items()}})
+        _publish_stage(stage,dest)
+    return dest
+
+
 def prepare_inputs(data, directory, *, registry, base_directory, files, provenance=None):
     """Prepare a NEW local directory and return its absolute Path.
 
@@ -149,13 +193,7 @@ def prepare_inputs(data, directory, *, registry, base_directory, files, provenan
         _write(stage/'manifest.json', {'schema': _SCHEMA, 'files': entries})
         verify_inputs(stage)
         # mkdir reserves the new name; never overwrite even if another job won a race.
-        dest.mkdir(exist_ok=False)
-        try:
-            for child in stage.iterdir():
-                child.rename(dest/child.name)
-        except BaseException:
-            shutil.rmtree(dest)
-            raise
+        _publish_stage(stage,dest)
     return dest
 
 

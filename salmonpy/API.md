@@ -247,3 +247,6 @@ epsilon = dielectric_function(sigma)
 `optical_linearity(reference, candidate, rtol=...)` は利用者が渡した異なる振幅の伝導率を共通の有効周波数で比較し、相対RMSを返します。材料・偏光・駆動形状の一致は利用者が確認してください。電流が全てゼロなら相対誤差を定義せず判定も未定義とします。`optical_sum_rule(sigma, expected_weight=..., normalization="...")` は有効な隣接周波数間のRe sigmaを台形積分します。正周波数の全電子系では期待値pi*n/2が基準ですが、擬ポテンシャル・非局所電流・不足バンドに応じた基準は利用者が指定します。欠損帯域を補外せず、物理精度の合格証明にはしません。追加のSCF/TDDFT計算やダウンロードは起動しません。
 
 合成データのサンプル: `python -m salmonpy.examples.optical_response`。実材料の収束済み光学定数の例ではありません。
+
+
+追加入口: salmonpy.preparation.prepare_fdtd(calculation, directory, mpi=None)は新規のnative FDTD入力群を保存し、Pathを返すだけです。FDTDMPI.rank_argumentsとcommand(executable)はargvの構成・プレビュー用です。実行は自動で始まりません。詳細はPREPARATION.mdを参照してください。

@@ -112,3 +112,62 @@ python -m salmonpy.preparation input.json --code calculation.py --report check.j
 あらゆる組合せをこの検査器で覆うことは目指しません。今後の科学的検査は対応するスキーマ・バックエンドと範囲を明示し、
 未知の組合せは「禁止」ではなく「未確認」とします。既存の`preflight_inputs(..., registry=...)`は信頼する検証関数を明示実行する別の入口です。
 `--code`と`--resolve-builtins`は併用せず、この検査経路から任意の検証コードが動くことを避けます。
+
+
+## FDTDを準備だけで終了する（管理ノード向け）
+
+`prepare_fdtd(calculation, new_directory, mpi=None)`はnative形式のinputfileと
+材料ファイルを新しいディレクトリへ保存するだけです。実行ファイルは不要です。
+サブプロセス、MPI初期化、ビルド、計算、ジョブ投入は行いません。戻り値はPathで、
+実行メソッドはありません。検査に通った後も自動で計算へ進みません。
+
+```python
+from salmonpy.preparation import prepare_fdtd
+from salmonpy.fdtd import FDTDMPI
+from salmonpy.examples.prepare_fdtd import calculation  # 小さな接続確認用LD例
+
+folder = prepare_fdtd(calculation(), "fdtd-input", mpi=FDTDMPI((2, 1, 1)))
+# ここで終了。転送・投入・実行は別操作です。
+```
+
+```sh
+python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-grid 2 1 1
+```
+
+`salmonpy-prepared-fdtd.json`はstatus=prepared-not-run、MPI分割、ランク数、各入力の
+SHA256とサイズを記録します。ランチャーや実行ファイルの環境依存パスは保存しません。
+既存ディレクトリを上書きしません。これはSALMON用の入力ファイル群で、
+prepare_inputsの物質アーカイブとは別形式です。verify_inputsをこの形式へ適用する
+ものではありません。全入力の物理収束や、選んだランタイムとの互換性の保証でもありません。
+
+準備先を必要に応じて計算ノードへ転送し、施設のジョブスクリプトで、同じ機能を
+持つ監査済みSALMONを明示的に起動してください。実行時は記録済みの実行ファイル
+SHA256を照合し、ソース／オブジェクト監査を繰り返しません。計算先のディレクトリを
+作業場所にし、stdinへinputfileを渡します。例えばSlurmの割当内での起動部分は
+` srun --ntasks=2 "$SALMON_EXECUTABLE" < inputfile > stdout.log 2>&1 `です。
+これはサイト依存の例で、管理ノードで直接実行する指示や自動投入ではありません。
+キュー・課金先・時間・スレッド数などは施設の規則に従ってジョブスクリプトへ指定します。
+
+## サイト固有のランチャー引数
+
+FDTDMPIの既定rank_argumentsは('-n','{ranks}')で、従来の起動を維持します。
+command(executable)は引数タプルを返すだけで、実行・ファイル確認をしません。
+
+```python
+from salmonpy.fdtd import FDTDMPI
+mpi = FDTDMPI((2, 1, 1), launcher=("site-launch",),
+              rank_arguments=("--tasks={ranks}",))
+argv = mpi.command("/site/salmon")  # プレビューだけ
+# ('site-launch', '--tasks=2', '/site/salmon')
+```
+
+rank_arguments=()ならランク数の引数を追加しません。割当から数を決めるサイト向けで、
+実際の割当数は入力のMPI分割と一致させる必要があります。任意の引数を自動的に
+推測・検査する機能ではありません。{ranks}以外は文字列のままで、シェル解釈や
+環境変数展開を行いません。jsrunなどは、資源集合数・集合内タスク数とMPIランク数の
+対応をサイトに合わせて指定してください。単にsrunへ名前を変えれば済むとは限りません。
+
+SalmonExecutable.runは、直列Pythonが明示的に子プロセスを起動する従来入口です。
+MPIランク内の二重起動拒否は残しています。Python自体をMPIアプリにする場合は、
+COUPLED.mdのParallelContextとnative埋め込み部品を集合的に使ってください。
+DFT／TDDFTのバッチ投入経路をこの追加だけで共通化したとは扱わないでください。

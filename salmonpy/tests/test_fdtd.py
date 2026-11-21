@@ -123,6 +123,14 @@ class FDTDTests(unittest.TestCase):
         self.assertTrue(hasattr(f,'FDTDMPI'),'FDTD MPI launch configuration missing')
         mpi=f.FDTDMPI((1,2,2))
         self.assertEqual(mpi.ranks,4)
+        self.assertEqual(mpi.command('/site/salmon'),('mpiexec','-n','4','/site/salmon'))
+        site=f.FDTDMPI((1,2,2),launcher=('site-launch',),rank_arguments=('--tasks={ranks}',))
+        self.assertEqual(site.command('/site path/salmon'),('site-launch','--tasks=4','/site path/salmon'))
+        implicit=f.FDTDMPI((1,2,2),launcher=('allocation-launch',),rank_arguments=())
+        self.assertEqual(implicit.command('/site/salmon'),('allocation-launch','/site/salmon'))
+        for args in ('-n',('bad\x00arg',)):
+            with self.assertRaises(ValueError):f.FDTDMPI((1,1,1),rank_arguments=args)
+
         self.assertIn('nproc_rgrid = 1, 2, 2',mpi.input_text(self.calculation()))
         with self.assertRaises(ValueError): f.FDTDMPI((1,0,2))
         with self.assertRaises(ValueError): f.FDTDMPI((True,1,2))

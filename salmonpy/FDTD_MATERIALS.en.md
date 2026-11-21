@@ -263,3 +263,6 @@ The sample's zero-strength LD background is intentional: it tests interface
 geometry and polarization independently of fitted-material accuracy. Use an
 actual dispersive LD model for a dispersive experiment. Keep smoothing=None
 (default) for the unchanged staircase path.
+
+
+Use prepare_fdtd for input-only staging. FDTDMPI.rank_arguments and command support explicit site argv while preserving defaults and nested-launch rejection. See PREPARATION.en.md.

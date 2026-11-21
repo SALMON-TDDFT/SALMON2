@@ -167,6 +167,35 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaises(InputError): self.api.verify_inputs(dest)
 
 
+    def test_fdtd_preparation_is_input_only_and_keeps_native_bytes(self):
+        import os
+        from unittest.mock import patch
+        from salmonpy.fdtd import FDTD,FDTDMPI,SalmonExecutable
+        from salmonpy.geometry import Grid,Geometry,Shape
+        from salmonpy.ld import LorentzDrude
+        calculation=FDTD(Geometry(Grid((32,32,32),(2.,2.,2.)),(Shape('box',(4.,4.,4.)),)),
+            (LorentzDrude(plasma_frequency=.2,strength=[1.],resonance=[0.],damping=[.01]),),
+            dt=.003,steps=8,observations=((0.,0.,0.),))
+        mpi=FDTDMPI((2,1,1))
+        destination=self.root/'fdtd'
+        with patch.dict(os.environ,{'SLURM_PROCID':'0'}), \
+             patch('subprocess.run',side_effect=AssertionError('unexpected launch')), \
+             patch('subprocess.Popen',side_effect=AssertionError('unexpected process')), \
+             patch.object(SalmonExecutable,'run',side_effect=AssertionError('unexpected solver')):
+            prepared=self.api.prepare_fdtd(calculation,destination,mpi=mpi)
+        self.assertEqual(prepared,destination.absolute())
+        self.assertEqual((prepared/'inputfile').read_bytes(),mpi.input_text(calculation).encode())
+        for name,text in calculation.input_assets().items():self.assertEqual((prepared/name).read_bytes(),text.encode())
+        record=json.loads((prepared/'salmonpy-prepared-fdtd.json').read_text())
+        self.assertEqual(record['status'],'prepared-not-run')
+        self.assertEqual(record['mpi_grid'],[2,1,1]);self.assertEqual(record['ranks'],2)
+        self.assertNotIn('command',record)
+        for name,item in record['files'].items():
+            self.assertEqual(hashlib.sha256((prepared/name).read_bytes()).hexdigest(),item['sha256'])
+        self.assertFalse((prepared/'stdout.log').exists())
+        with self.assertRaises(FileExistsError):self.api.prepare_fdtd(calculation,prepared,mpi=mpi)
+
+
 class JobPreflightTests(unittest.TestCase):
     setUp = PreparationTests.setUp
     prepare = PreparationTests.prepare
