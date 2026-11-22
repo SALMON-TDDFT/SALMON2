@@ -1363,3 +1363,42 @@ PZ・Libxc-PZ・Libxc-PBEの局所微分と力、および2/4ランク×1/2ス�
 この記録は当該CPUバイナリ専用です。再ビルドした実行ファイルやGPUには
 転用せず、検証記録を明示的に指定して読み込みます。物理的な格子・k点収束を
 保証する記録ではありません。
+
+## アーカイブ・自作コードからの配列初期推定
+
+`salmonpy.gs_initial_guess.GSInitialGuess` を `session.run(..., initial_guess=seed)`
+へ渡せます。保持GSと同じく、波動関数・占有数だけをコピーして新しいSCFを
+開始します。密度・ポテンシャルは再計算し、混合履歴とHSE資源は引き継ぎません。
+
+```python
+from salmonpy.gs_initial_guess import GSInitialGuess
+# 元の構造・格子・XC・擬ポテンシャルを表すDFT modelを明示する。
+seed = GSInitialGuess.from_archive("existing-gs2", model=source_model)
+target = session.run(shifted_model, initial_guess=seed, steps=2)
+# 自作コードの配列も同じ入口へ。k点は逆格子の縮約座標。
+seed = GSInitialGuess.from_arrays(source_model, wavefunctions=u,
+    occupations=occupations, kpoints=kpoints, weights=weights)
+```
+
+uの順序は `u[k,band,z,y,x]`、単位はbohr^(-3/2)、周期部分です。
+占有数は `[k,band]`、k点は `[k,3]`、重みは `[k]` です。
+`from_arrays` は入力を所有コピーし、元配列の変更から独立します。
+GS/2読み出しは既存のハッシュ検査を利用します。別の格子やk点へ補間せず、
+中間GSファイルも作りません。アーカイブの元原子位置とsource_modelは一致が必要で、
+受け渡し先の原子位置は変更できます。汎関数・格子・電子数・バンド・セル・
+擬ポテンシャル等の既存の一致条件は維持します。
+
+大きなデータや自作バックエンドでは `from_provider(source_model,
+read_wavefunctions=reader, occupations=..., kpoints=..., weights=...)` を使います。
+readerは各MPIランク内で同期呼び出しされ、引数は1始まり・両端を含む
+`(x,y,z,xe,ye,ze,band,band_end,k,k_end)` です。その範囲のuだけを同じ順序の
+配列で返します。全ランクへの波動関数配信や全配列の集約は行いません。
+readerは呼び出し中に元データを書き換えず、必要範囲を読み出せる状態に保ちます。
+新SCFの初期化後はreaderや元データに依存せず、元バックエンドを解放できます。
+
+Fortran側が実際の担当範囲を指定し、有限性とk点・重みを検査します。
+実数Γ点状態に非ゼロの虚部を渡した場合は切り捨てず拒否します。
+reader例外や入力不一致は新しい候補の初期化を失敗させ、既存状態を変更しません。
+これは任意のMPI障害・プロセス終了・OSのメモリ不足からの復旧保証ではありません。
+この初期推定形式が扱えることと、対象ソルバーが全ての物理条件に対応することは
+別です。SCF未収束時の残差確認方針は変わりません。

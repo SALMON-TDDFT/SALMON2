@@ -24,7 +24,7 @@ use timer,only:s_timer_context,timer_context_swap,timer_context_get,timer_initia
  LOG_TOTAL,LOG_INIT_GS,LOG_GS_ITERATION,LOG_WRITE_GS_RESULTS
 use structures
 use salmonpy_model_inputs,only:s_model_inputs
-use salmonpy_gs_seed,only:s_gs_seed
+use salmonpy_gs_seed,only:s_gs_seed,s_array_guess,read_array_guess
 use sym_sub,only:s_hse_symmetry_workspace
 use sym_rho_sub,only:s_hse_density_workspace
 use sendrecv_grid,only:dealloc_cache
@@ -140,7 +140,7 @@ subroutine gs_input_config(value)
  value%max_iterations=nscf;value%threshold=threshold
  value%pre_scf_threshold=exx_pre_scf_threshold;value%pre_scf_steps=exx_pre_scf_steps
 end subroutine
-subroutine gs_run(ctx,status,config,import_only,disk_bootstrap,initial_guess)
+subroutine gs_run(ctx,status,config,import_only,disk_bootstrap,initial_guess,array_source)
 use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 use exx_functional,only:is_hybrid
 use math_constants, only: pi, zi
@@ -184,7 +184,10 @@ integer,intent(out)::status
 type(s_gs_run_config),optional,intent(in)::config
 type(s_gs_run_config)::selected
 logical,optional,intent(in)::import_only,disk_bootstrap
-type(s_gs_seed),optional,intent(inout)::initial_guess
+type(s_gs_seed),optional,target,intent(inout)::initial_guess
+ type(s_array_guess),optional,intent(in)::array_source
+ type(s_gs_seed),target::array_seed
+ type(s_gs_seed),pointer::selected_guess
 logical::reading_only
 #ifdef USE_HSE
  integer :: gs_hse_status
@@ -338,23 +341,38 @@ if(present(disk_bootstrap))then
  endif
 endif
 
-if(present(initial_guess))then
+nullify(selected_guess)
+if(present(initial_guess))selected_guess=>initial_guess
+if(present(array_source))then
+ call read_array_guess(array_source,ctx%system,ctx%lg,ctx%mg,ctx%info,ctx%spsi,array_seed,status)
+ call comm_get_max(status,nproc_group_global)
+ if(status/=0)then
+  call timer_end(LOG_INIT_GS)
+  call timer_end(LOG_TOTAL)
+#ifdef USE_MPI
+  if(ctx%mpi_child_owner>0)call comm_end_children(ctx%mpi_child_owner)
+#endif
+  return
+ endif
+ selected_guess=>array_seed
+endif
+if(associated(selected_guess))then
  status=0
- if(any(initial_guess%grid/=ctx%lg%num).or. &
-    any(initial_guess%core_start/=ctx%mg%is).or.any(initial_guess%core_end/=ctx%mg%ie))status=11
- if(any(initial_guess%decomposition/=[ctx%info%npk,ctx%info%nporbital,ctx%info%nprgrid]))status=11
- if(initial_guess%orbital_start/=ctx%info%io_s.or.initial_guess%orbital_end/=ctx%info%io_e)status=11
- if(initial_guess%k_start/=ctx%info%ik_s.or.initial_guess%k_end/=ctx%info%ik_e)status=11
- if(allocated(initial_guess%psi%rwf).neqv.allocated(ctx%spsi%rwf))status=11
- if(allocated(initial_guess%psi%zwf).neqv.allocated(ctx%spsi%zwf))status=11
+ if(any(selected_guess%grid/=ctx%lg%num).or. &
+    any(selected_guess%core_start/=ctx%mg%is).or.any(selected_guess%core_end/=ctx%mg%ie))status=11
+ if(any(selected_guess%decomposition/=[ctx%info%npk,ctx%info%nporbital,ctx%info%nprgrid]))status=11
+ if(selected_guess%orbital_start/=ctx%info%io_s.or.selected_guess%orbital_end/=ctx%info%io_e)status=11
+ if(selected_guess%k_start/=ctx%info%ik_s.or.selected_guess%k_end/=ctx%info%ik_e)status=11
+ if(allocated(selected_guess%psi%rwf).neqv.allocated(ctx%spsi%rwf))status=11
+ if(allocated(selected_guess%psi%zwf).neqv.allocated(ctx%spsi%zwf))status=11
  if(allocated(ctx%spsi%rwf))then
-  if(allocated(initial_guess%psi%rwf))then
-   if(any(shape(initial_guess%psi%rwf)/=shape(ctx%spsi%rwf)))status=11
+  if(allocated(selected_guess%psi%rwf))then
+   if(any(shape(selected_guess%psi%rwf)/=shape(ctx%spsi%rwf)))status=11
   endif
  endif
  if(allocated(ctx%spsi%zwf))then
-  if(allocated(initial_guess%psi%zwf))then
-   if(any(shape(initial_guess%psi%zwf)/=shape(ctx%spsi%zwf)))status=11
+  if(allocated(selected_guess%psi%zwf))then
+   if(any(shape(selected_guess%psi%zwf)/=shape(ctx%spsi%zwf)))status=11
   endif
  endif
  call comm_get_max(status,nproc_group_global)
@@ -375,12 +393,12 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           ctx%rho, ctx%rho_jm, ctx%rho_s, ctx%vh,ctx%v_local, ctx%vpsl, ctx%vxc,  &
                           ctx%spsi, ctx%shpsi, ctx%sttpsi,  &
                           ctx%pp, ctx%ppg, ctx%ppn,   &
-                          ctx%xc_func, ctx%mixing, initial_guess )
+                          ctx%xc_func, ctx%mixing, selected_guess )
 ! The destination now owns independent arrays; drop only the temporary value copy.
-if(present(initial_guess))then
- if(allocated(initial_guess%psi%rwf))deallocate(initial_guess%psi%rwf)
- if(allocated(initial_guess%psi%zwf))deallocate(initial_guess%psi%zwf)
- if(allocated(initial_guess%occupations))deallocate(initial_guess%occupations)
+if(associated(selected_guess))then
+ if(allocated(selected_guess%psi%rwf))deallocate(selected_guess%psi%rwf)
+ if(allocated(selected_guess%psi%zwf))deallocate(selected_guess%psi%zwf)
+ if(allocated(selected_guess%occupations))deallocate(selected_guess%occupations)
 endif
 
 
@@ -1175,7 +1193,24 @@ integer(c_int) function sp_gs_create_from_gs(path,source,steps,token) bind(C)
   sp_gs_create_from_gs=create_gs(path,token,.false.,steps,source)
  endif
 end function
-integer(c_int) function create_gs(path,token,reading_only,steps,guess_token)
+integer(c_int) function sp_gs_array_guess_protocol() bind(C)
+ sp_gs_array_guess_protocol=1
+end function
+integer(c_int) function sp_gs_create_from_arrays(path,steps,reader,cookie,token) bind(C)
+ character(c_char),intent(in)::path(*)
+ integer(c_int),value::steps
+ type(c_funptr),value::reader
+ type(c_ptr),value::cookie
+ integer(c_int64_t),intent(out)::token
+ type(s_array_guess)::source
+ source%reader=reader;source%cookie=cookie
+ if(steps==0)then
+  sp_gs_create_from_arrays=create_gs(path,token,.false.,array_source=source)
+ else
+  sp_gs_create_from_arrays=create_gs(path,token,.false.,steps,array_source=source)
+ endif
+end function
+integer(c_int) function create_gs(path,token,reading_only,steps,guess_token,array_source)
  use inputoutput,only:read_input,s_input_parser
  use salmon_global,only:yn_symmetry,calc_mode
  use plusU_global,only:read_Hubbard_parameters
@@ -1187,6 +1222,7 @@ integer(c_int) function create_gs(path,token,reading_only,steps,guess_token)
  logical,intent(in)::reading_only
  integer,optional,intent(in)::steps
  integer(c_int64_t),optional,intent(in)::guess_token
+ type(s_array_guess),optional,intent(in)::array_source
  type(s_gs_seed)::guess
  type(s_model_inputs)::guess_inputs
  character(c_char),intent(in)::path(*)
@@ -1263,7 +1299,9 @@ integer(c_int) function create_gs(path,token,reading_only,steps,guess_token)
  call timer_context_swap(host_timers)
  call timer_context_swap(candidate%timers)
  call timer_initialize
- if(present(guess_token))then
+ if(present(array_source))then
+  call gs_run(candidate,status,array_source=array_source)
+ else if(present(guess_token))then
   call gs_run(candidate,status,initial_guess=guess)
  else if(present(steps))then
   call gs_run(candidate,status,import_only=reading_only,disk_bootstrap=steps==0)

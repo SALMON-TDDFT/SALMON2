@@ -7,6 +7,41 @@ import unittest
 
 class NativeGSTests(unittest.TestCase):
 
+    def test_array_guess_owned_values_and_provider_tiles(self):
+        import numpy as np
+        from salmonpy.gs_initial_guess import GSInitialGuess
+        from salmonpy.dft import DFT,Pseudopotential
+        pp=Pseudopotential(14,2,'_rps.dat',b'synthetic')
+        model=DFT((14,),np.eye(3)*8,[[0,0,0]],(pp,),4,2,(8,8,8),(2,1,1))
+        waves=np.ones((2,2,8,8,8),complex)*(1+2j)
+        occ=np.ones((2,2))*2;points=np.array([[-.25,0,0],[.25,0,0]])
+        seed=GSInitialGuess.from_arrays(model,wavefunctions=waves,occupations=occ,kpoints=points,weights=[.5,.5])
+        waves[:]=0;occ[:]=0
+        bounds=(1,1,1,8,8,8,1,2,2,2)
+        np.testing.assert_array_equal(seed.read_wavefunctions(bounds),np.full((1,2,8,8,8),1+2j))
+        self.assertFalse(seed.occupations.flags.writeable)
+        with self.assertRaises(ValueError):seed.occupations.setflags(write=True)
+        provider=GSInitialGuess.from_provider(model,read_wavefunctions=seed.read_wavefunctions,
+            occupations=seed.occupations,kpoints=points,weights=[.5,.5])
+        np.testing.assert_array_equal(provider.read_wavefunctions(bounds),seed.read_wavefunctions(bounds))
+        import tempfile
+        from salmonpy.gs_archive import save_ground_state
+        with tempfile.TemporaryDirectory() as tmp:
+            archive=save_ground_state(Path(tmp)/'synthetic',wavefunctions=np.full((2,2,8,8,8),1+2j),
+                density=np.ones((8,8,8)),eigenvalues=np.zeros((2,2)),occupations=seed.occupations,
+                kpoints=points,weights=seed.weights,cell_bohr=model.cell,
+                fractional_positions=model.fractional_positions,atomic_numbers=model.numbers,
+                electrons=4,energy_hartree=-1,xc='pz',pseudopotentials=[dict(atomic_number=14,
+                filename='synthetic_rps.dat',sha256=pp.sha256,source='synthetic test only')])
+            imported=GSInitialGuess.from_archive(archive,model=model)
+            np.testing.assert_array_equal(imported.read_wavefunctions(bounds),seed.read_wavefunctions(bounds))
+            from dataclasses import replace
+            from salmonpy.errors import InputError
+            with self.assertRaises(InputError):GSInitialGuess.from_archive(archive,model=replace(model,electrons=2))
+        from salmonpy.api import native_contract
+        abi=native_contract('gs',route='single')['gs_operations']
+        self.assertEqual(abi['sp_gs_create_from_arrays']['arguments'],['string','int','buffer','buffer','int64*'])
+
     def test_closed_rank_cannot_skip_collective_close(self):
         import inspect
         from salmonpy.native_gs import NativeGSSession

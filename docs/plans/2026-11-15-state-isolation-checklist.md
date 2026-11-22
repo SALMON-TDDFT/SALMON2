@@ -2,18 +2,32 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## 現在の作業順（2026-11-22 照合）
+## 現在の状態（2026-11-22 commit/push照合）
 
-| 順序 | 残作業 | 範囲 |
+この節と末尾の最新検証記録を現在の状態として扱います。過去の日付の
+未完了チェックや「未コミット」は、その時点の記録であり、独立した残件として
+数えません。未完了の物理条件を、今回の局所的な検証だけで完了扱いにしません。
+
+| 状態 | 項目 | 確認した範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | NLCC・単位監査まで `5ee9b6c8` でcommit／push済み。初期推定の入力準備接続は未コミット |
-| 完了した範囲 | 主要LD初期化・時間更新の作業配列 | 入力・係数・格子配列と時間更新の明示的な大規模領域を対応。全ての小さな確保・画像用配列は対象にしない |
-| 完了した範囲 | 現行C/Fortranの主操作契約 | 共通・電子状態・FDTD・GSを整理し、GNU Macで検証。他環境・任意機能の証明は別枠。後方互換なし |
-| 完了した範囲 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBEの局所試験とMPI2/4、固定Si/PBE全体比較が合格。換算定数は変更なし。他物質・GPUの精度保証ではない |
+| 完了 | 実用上選定した異常復帰・操作契約 | 主なLD作業領域、入出力、電子状態・FDTD・GSの呼び出し契約。任意のOS/MPI障害や全ての小さな確保までの保証は対象外 |
+| 完了 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBE局所試験、MPI2/4、固定Si/PBE比較。今回のソース・バイナリ向け記録も更新。換算定数は変更なし |
+| 完了 | 初期推定の入力準備・保持GSからの受け渡し | 準備と実行を分離し、保持GSの波動関数・占有数を独立コピー。前回実装は8f3a7663までpush済み |
+| 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
+| 完了 | 最終パッケージ検証 | ソース版・wheel版とも680件実行、各1件任意スキップ。日英ガイド・AI JSON同期。実GSデータは保存せず、許可されたwheel試験の標準出力と検査記録をcalc2026へ保存 |
 
-再開読込処理と文書改善は `23cb1342` でpush済みです。今回のLD初期化と後方互換分岐削除も、source／wheel各679テスト（各1件スキップ）で検証済みです。MPI1／2のLD＋FDTD・直接保存復元は修正前とビット一致し、自作バックエンドの事前検査はMPI3で確認しました。HSEはビルド・C/Fortran照会・MPI1／2の明示所有を確認しましたが、今回の削除後に実材料のHSE計算を再実行したわけではありません。日英文書・AI JSONは同期済みで、最終文書/API16テストも通っています。
+### 残る作業と対象拡大
 
-多ノード・施設MPI、大規模I/O、追加保存形式、他環境、Agフィット改善は別枠です。高速HSEの電子数診断と実材料の格子収束調査は利用者指定で後回し、分子は保留、TTMは削除済みです。重いCIを追加で手動起動しません。
+1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
+2. **大規模化の計測**：マクロ点・ランク・観測間隔に対するメモリ、通信、ファイル数・I/O負荷の測定。集約・バッファ化は測定上の必要に応じて実装する。
+3. **他環境・配布の検証拡大**：重い計算ライブラリと初期推定経路について、Linux・Intel Mac等および施設環境での構築・配布・実行証拠を追加する。既存LD/SBE wheelの検証とは区別する。
+4. **Agのフィット改善**：局所的な形状誤差と最適化終了を改善し、現状のneeds_refinementを根拠なく解除しない。
+5. **追加対象の設計・検証**：追加保存形式、GPU、現在の独立状態経路で未検証の物理条件。必要性と対応範囲を決めて進め、全機能への包括的対応を主張しない。
+
+高速HSEの電子数診断と実材料の格子収束調査は利用者指定で後回し、
+分子は保留、TTMは削除済みです。格子/k点の暗黙の補間は追加しません。
+メモリ予算は警告とし、SCF未収束時は結果・残差を保持して確認を促す方針を維持します。
+重いCIを追加で手動起動せず、ソース・目録・配布物の必須整合性検査は省略しません。
 
 ## Current actionable queue — 2026-11-22 (resource inventory and operational follow-ups)
 
@@ -251,10 +265,7 @@ results/residual diagnostics and pauses the downstream workflow for user review
   were published as e3666160.
 - [x] LD coefficient scratch recovery was published as5f255105.
 - [x] Off-diagonal LD grid-coefficient allocation recovery published as46589f24.
-- [ ] Pending integration: tensor-update call-owned workspace recovery remains
-  uncommitted.
-  Commit/push when requested; retain required lightweight source/packaging checks
-  and do not dispatch optional heavy CI.
+- [x] Tensor-update workspace recovery was integrated in the recorded earlier commits. Retain required lightweight source/packaging checks; no optional heavy CI dispatch.
 - [x] Latest source/installed suites:679 executed,one optional skip,no failures.
   Paired current manuals and AI JSON synchronized. These latest local records
   do not supersede older MPI4/6, multi-platform or physical-convergence evidence.
@@ -262,8 +273,7 @@ results/residual diagnostics and pauses the downstream workflow for user review
   save changes consolidated for the requested2026-11-22 commit/push. Required
   source-integrity CI remains enabled; no optional heavy workflow is dispatched.
   Published commit:a7073552 to salmonpy/codex/salmonpy-state-inputs-recovery.
-- [ ] Remaining operational scope: initial-guess staging, site runtime/layout validation and multi-node evidence.
-  Group5 R3/R4 and group3 remain open; groups1/2 stay deferred.
+- [x] Initial-guess preparation/live/archive/custom-reader integration is completed below. Selected group5 R3/R4 and CPU group3 scopes are completed. Broader site/layout/multinode evidence remains in the current queue; groups1/2 stay deferred.
 
 ### Next work after this reconciliation
 
@@ -280,7 +290,7 @@ results/residual diagnostics and pauses the downstream workflow for user review
    verified. GS source/wheel SCF continuation/protected restore is completed.
    Optional diagnostics and wider profile/platform/site evidence remain separate;
    these tests are not a blanket stable ABI or arbitrary-failure guarantee.
-3. **Group3 — selected CPU scope completed, uncommitted:** maintained-runtime
+3. **Group3 — selected CPU scope completed:** maintained-runtime
    NLCC certification covers PZ/Libxc-PZ/PBE local variation/core-force tests,
    MPI2/4 ×OMP1/2, and the fixed Si/PBE application reference. Unit audit preserves
    every conversion constant and numerical result; unit_contract exposes existing
@@ -3999,3 +4009,20 @@ groups1/2 and molecular work deferred. No optional heavy CI dispatch.
 - [x] Advance the NLCC source identity only after these checks; existing source-inventory test now detects a stale capability identity. Identity mismatch reproduced before update; focused source/receipt tests pass afterward. Numerical formulas/constants/reference values unchanged. Daily CI checks identity/integrity only; no material calculation added.
 - [x] Final source/wheel679 tests each pass(one optional skip each). Installed wheel loads the byte-identical saved executable and current receipt; real NLCC UPF ASE force admission passes without another SCF. Evidence:canonical calc2026/salmonpy-gs-guess-nlcc-20261122/summary.json. Fixed Si SCF converged at72 iterations,residual7.60746e-12<threshold1e-11. No optional CI dispatch. Current changes remain uncommitted.
 - [ ] Archive/custom-backend initial guesses and broader site/platform/scale/GPU evidence remain separate; groups1/2 and molecules deferred.
+
+
+## 2026-11-22 — common archive/custom-reader initial guesses
+
+- [x] Previous retained-GS/NLCC work committed/pushed as8f3a7663;approved direct-array design recorded in67917b56(local).
+- [x] GSInitialGuess.from_arrays/from_archive/from_provider shares one synchronous rank-local C/Fortran reader contract. Explicit DFT source model and GS/2 conventions; immutable metadata/array copies, no inheritance or intermediate GS record files. Native bounds avoid guessed MPI mapping and mandatory full-state gather/broadcast. Existing setup agreement includes mode/metadata hashes, with no additional per-step communication.
+- [x] Fortran owns numerical copy/finite/kpoint/weight checks and fresh SCF density/potential/mixing/HSE initialization. No complex truncation for real Gamma. Existing retained-state route and cold results remain identical. Reader exceptions, NaN/Inf, sampling mismatch and MPI mode disagreement preserve live owners; retry matches controls. Allocated communicator-slot capacity is not confused with live-resource ownership.
+- [x] Source and installed-wheel680 tests each pass(one optional skip each);typed C declaration/link/query, tracked-only728-file inventory build and forbidden-eigensolver audits pass. PZ/HSE k2 MPI6, Gamma PZ MPI3 and Gamma HSE spatial MPI6 pass. Synthetic GS/2 route matches direct arrays; archive deletion/provider-buffer mutation after initialization do not change continuation. No real wavefunction/density/restart datasets saved. Wheel scalar outputs explicitly authorized; source/whole-app NLCC outputs deleted after temporary comparison.
+- [x] New-binary NLCC local/MPI/fixed Si reference checks pass;energy difference0,max force difference9.773e-16 Hartree/bohr. Capability source identity and binary-bound receipt refreshed only after validation. Paired guides and AI task/API catalog synchronized; new module packaged in wheel. Evidence:canonical calc2026/salmonpy-array-guess-20261122/summary.json. Implementation changes remain uncommitted;no optional heavy CI dispatched.
+- [ ] Remaining broader work: site/multinode/other-platform/scale evidence, optional formats/GPU and Ag fitting; no implicit grid/k interpolation or arbitrary solver-profile certification. Groups1/2 and molecules remain deferred.
+
+
+## 2026-11-22 — publication and queue reconciliation
+
+- [x] Retained-GS/NLCC implementation8f3a7663 already pushed to the independent SALMONpy branch.
+- [x] Approved design67917b56 and verified common archive/custom-reader implementation are included in this requested publication. Current queue at the top supersedes historical unchecked entries about initial guesses and pending selected R3/R4/CPU-NLCC integration.
+- [x] Final pre-commit checks: source inventory and receipt binding, initial-guess/public API/manual tests, guide synchronization and whitespace checks. Previously completed source/wheel680-test and MPI numerical records remain the numerical evidence; no redundant physical campaign or optional heavy CI dispatch.

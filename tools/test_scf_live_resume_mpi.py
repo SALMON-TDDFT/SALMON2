@@ -12,7 +12,7 @@ import numpy as np
 from mpi4py import MPI
 from salmonpy.dft import DFT,Pseudopotential,SCFSettings,SymmetryOperations
 from salmonpy.native_gs import NativeGSBackend
-from salmonpy.errors import InputError
+from salmonpy.errors import InputError,RuntimeFailure
 
 
 def main():
@@ -124,11 +124,90 @@ def main():
                 warm_model=replace(a,fractional_positions=positions)
                 warm_a=session.run(warm_model,scf=scf,material_id='warm-A',steps=2,initial_guess=state)
                 warm_b=session.run(warm_model,scf=scf,material_id='warm-B',steps=2,initial_guess=state)
+                from salmonpy.gs_initial_guess import GSInitialGuess
+                source_orbitals=state.array('orbitals');lower=source_orbitals.lower_indices
+                raw_orbitals=source_orbitals.values.copy()
+                occupation_values=state.array('occupations').values[:,:,0].T
+                mx,my,mz=a.kmesh
+                points=np.array([[(ix+.5)/mx-.5,(iy+.5)/my-.5,(iz+.5)/mz-.5]
+                    for iz in range(mz) for iy in range(my) for ix in range(mx)])
+                def read_tile(bounds):
+                    x,y,z,xe,ye,ze,o,oe,k,ke=bounds
+                    return raw_orbitals[x-lower[0]:xe-lower[0]+1,
+                        y-lower[1]:ye-lower[1]+1,z-lower[2]:ze-lower[2]+1,0,
+                        o-lower[4]:oe-lower[4]+1,k-lower[5]:ke-lower[5]+1,0].transpose(4,3,2,1,0)
+                seed=GSInitialGuess.from_provider(a,read_wavefunctions=read_tile,
+                    occupations=occupation_values,kpoints=points,weights=np.full(len(points),1./len(points)))
+                array_owner=session.run(warm_model,scf=scf,material_id='array-seed',steps=2,initial_guess=seed)
+                for q,value in frame(array_owner).items():np.testing.assert_array_equal(value,frame(warm_b)[q])
+                def failed_reader(bounds):
+                    if comm.rank==0:raise ValueError('injected custom reader failure')
+                    return read_tile(bounds)
+                bad=GSInitialGuess.from_provider(a,read_wavefunctions=failed_reader,
+                    occupations=occupation_values,kpoints=points,weights=seed.weights)
+                before=session.resources()
+                with np.testing.assert_raises(InputError):
+                    session.run(warm_model,scf=scf,steps=2,initial_guess=bad)
+                assert all(session.resources()[q]==before[q] for q in ('states','live_child_communicators'))
+                if comm.size>1:
+                    with np.testing.assert_raises(InputError):
+                        session.run(warm_model,scf=scf,steps=2,initial_guess=seed if comm.rank==0 else None)
+                assert all(session.resources()[q]==before[q] for q in ('states','live_child_communicators'))
+                for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+                # The receiving owner must never read its provider again.
+                saved_raw=raw_orbitals.copy()
+                for invalid in (float('nan'),float('inf')):
+                    raw_orbitals[:]=complex(invalid,0)
+                    with np.testing.assert_raises(RuntimeFailure):
+                        session.run(warm_model,scf=scf,steps=2,initial_guess=seed)
+                    assert all(session.resources()[q]==before[q] for q in ('states','live_child_communicators'))
+                raw_orbitals[:]=saved_raw
+                wrong_sampling=GSInitialGuess.from_provider(a,read_wavefunctions=read_tile,
+                    occupations=occupation_values,kpoints=points,weights=np.full(len(points),2./len(points)))
+                with np.testing.assert_raises(RuntimeFailure):
+                    session.run(warm_model,scf=scf,steps=2,initial_guess=wrong_sampling)
+                assert all(session.resources()[q]==before[q] for q in ('states','live_child_communicators'))
+                retry=session.run(warm_model,scf=scf,material_id='array-retry',steps=2,initial_guess=seed)
+                for q,value in frame(retry).items():np.testing.assert_array_equal(value,frame(warm_b)[q])
+                retry.close()
+                raw_orbitals[:]=complex(float('nan'),0)
+                array_owner.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
                 warm_cut=frame(warm_b)
                 for q,value in frame(warm_a).items():np.testing.assert_array_equal(value,warm_cut[q])
                 for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
                 warm_a.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
                 warm_future=frame(warm_a)
+                for q,value in frame(array_owner).items():np.testing.assert_array_equal(value,warm_future[q])
+                array_owner.close()
+                # Synthetic input estimate only: never serialize computed GS arrays.
+                import tempfile
+                from salmonpy.gs_archive import save_ground_state
+                synthetic=np.full((len(points),a.states,8,8,8),.04419417382415922+0j)
+                synthetic[:,1,4:,:,:]*=-1
+                references=[dict(atomic_number=p.atomic_number,filename='synthetic-input'+p.suffix,
+                    sha256=p.sha256,source='synthetic initial-estimate regression') for p in a.pseudopotentials]
+                temporary=tempfile.TemporaryDirectory(prefix='synthetic-array-guess-') if comm.rank==0 else None
+                synthetic_root=comm.bcast(temporary.name if temporary else None,root=0)
+                if comm.rank==0:
+                    save_ground_state(Path(synthetic_root)/'archive',wavefunctions=synthetic,
+                        density=np.zeros((8,8,8)),eigenvalues=np.zeros((len(points),a.states)),
+                        occupations=occupation_values,kpoints=points,weights=seed.weights,
+                        cell_bohr=a.cell,fractional_positions=a.fractional_positions,
+                        atomic_numbers=a.numbers,electrons=a.electrons,energy_hartree=0.,
+                        xc=a.xc,pseudopotentials=references)
+                # Existing input agreement synchronizes publication before readers.
+                _ready=comm.bcast(True,root=0)
+                portable=GSInitialGuess.from_archive(Path(synthetic_root)/'archive',model=a)
+                direct=GSInitialGuess.from_arrays(a,wavefunctions=synthetic,
+                    occupations=occupation_values,kpoints=points,weights=seed.weights)
+                portable_owner=session.run(warm_model,scf=scf,material_id='synthetic-archive',steps=2,initial_guess=portable)
+                direct_owner=session.run(warm_model,scf=scf,material_id='synthetic-array',steps=2,initial_guess=direct)
+                for q,value in frame(portable_owner).items():np.testing.assert_array_equal(value,frame(direct_owner)[q])
+                if temporary is not None:temporary.cleanup()
+                portable_owner.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                direct_owner.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                for q,value in frame(portable_owner).items():np.testing.assert_array_equal(value,frame(direct_owner)[q])
+                portable_owner.close();direct_owner.close()
                 for q,value in frame(warm_b).items():np.testing.assert_array_equal(value,warm_cut[q])
                 warm_b.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
                 for q,value in frame(warm_b).items():np.testing.assert_array_equal(value,warm_future[q])
@@ -308,7 +387,7 @@ def main():
         full_check=full_k_control(session)
         assert Path.cwd()==anchor
     if world.rank==0:
-        result={'status':'pass','initial_guess_direct':args.initial_guess,'seed_source_and_siblings_unchanged':args.initial_guess,
+        result={'status':'pass','initial_guess_direct':args.initial_guess,'custom_array_seed_exact':args.initial_guess,'synthetic_archive_array_seed_exact':args.initial_guess,'provider_failure_preserves_owners':args.initial_guess,'seed_source_and_siblings_unchanged':args.initial_guess,
                 'seed_target_continues_after_source_closed':args.initial_guess,'size':args.size,'split':args.split,'xc':args.xc,'initial_no_mix':args.initial_no_mix,
                 'continuous_arrays_exact':True,'new_runtime_host_chdir_forbidden':args.no_chdir,'state_owned_GS_timers_checked':args.timer_ownership,
                 'continuous_new_and_previous_exact':args.build.resolve()!=args.baseline.resolve() and (args.symmetry=='none' or values[2*args.size][2]),

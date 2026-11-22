@@ -24,6 +24,16 @@ int sp_gs_create(const char *filename,int64_t *token);
  * contents; Python authenticates model metadata. steps0 full SCF,positive budget.
  * Source token remains unchanged; target owns independent arrays/resources. */
 int sp_gs_guess_protocol(void);
+/* Synchronous rank-local reader: bounds[10] one-based inclusive x/y/z starts,
+ * ends, band start/end,k start/end; shape[5]=nx,ny,nz,global bands,kpoints.
+ * Fill complex128 waves[k,band,z,y,x], float64 occupations[k,band],
+ * reduced reciprocal points[k,3], weights[k]. No pointers retained.
+ * Caller authenticates declared model/pseudopotentials; Fortran validates
+ * extents, finite values and sampling, never truncates complex real-Gamma input.
+ */
+typedef int (*sp_gs_array_reader)(void*,const int64_t*,const int64_t*,void*,double*,double*,double*);
+int sp_gs_array_guess_protocol(void);
+int sp_gs_create_from_arrays(const char*,int,sp_gs_array_reader,void*,int64_t*);
 int sp_gs_create_from_gs(const char *filename,int64_t source,int steps,int64_t *token);
 /* Additive active-SCF1: CPU periodic nonsymmetric scalar PZ/Libxc-PZ/PBE, fast-PR HSE06.
  * HSE needs its explicit compute profile; Gamma orbital GS additionally requires sp_gs_hse_orbital_protocol()==1. Imports, symmetry,

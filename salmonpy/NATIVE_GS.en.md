@@ -1463,3 +1463,40 @@ was0 and maximum force difference9.773e-16 Hartree/bohr. No wavefunction, densit
 or restart datasets were retained. This evidence belongs only to that CPU binary;
 explicitly load its validation record and do not reuse it for rebuilt binaries
 or GPUs. It does not certify physical grid/k convergence.
+
+## Array initial guesses from archives and user code
+
+Pass `salmonpy.gs_initial_guess.GSInitialGuess` to
+`session.run(..., initial_guess=seed)`. Like a retained-GS guess, this copies only
+wavefunctions/occupations into a fresh SCF. Density/potentials are recomputed;
+mixing history and HSE resources start fresh.
+
+```python
+from salmonpy.gs_initial_guess import GSInitialGuess
+seed = GSInitialGuess.from_archive("existing-gs2", model=source_model)
+target = session.run(shifted_model, initial_guess=seed, steps=2)
+seed = GSInitialGuess.from_arrays(source_model, wavefunctions=u,
+    occupations=occupations, kpoints=kpoints, weights=weights)
+```
+
+Declare the source DFT model explicitly. u is the cell-periodic
+`u[k,band,z,y,x]` in bohr^(-3/2); occupations are `[k,band]`, reduced reciprocal
+kpoints `[k,3]`, weights `[k]`. `from_arrays` owns copied immutable buffers.
+GS/2 uses existing hash checks; no interpolation, conversion executable or
+intermediate GS files. Archive positions must match source_model; target atomic
+positions may differ. Other model/discretization compatibility checks remain.
+
+For large data/custom backends use `from_provider(source_model,
+read_wavefunctions=reader, occupations=..., kpoints=..., weights=...)`.
+The synchronous rank-local reader receives one-based inclusive bounds
+`(x,y,z,xe,ye,ze,band,band_end,k,k_end)` and returns only that u tile in the same
+axis order. No mandatory global wavefunction gather/broadcast occurs. Keep reader
+sources available and unchanged during initialization; after initialization the
+SCF owner no longer depends on reader/source lifetime. Metadata arrays are copied.
+
+Fortran supplies actual local bounds, checks finite values and k sampling/weights,
+and rejects nonzero imaginary components for real-Gamma states instead of
+truncating. Reader errors/mismatches fail the fresh candidate without changing
+existing owners. This does not guarantee recovery from arbitrary MPI/process/OS
+OOM failures. The data interface does not certify every solver physics profile;
+normal unconverged-SCF residual review remains required.

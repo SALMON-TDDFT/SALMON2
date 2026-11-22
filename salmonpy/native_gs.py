@@ -505,7 +505,7 @@ class NativeGSSession:
     def run(self,calculation,*,scf=None,material_id='material',steps=None,restart=None,repartition=False,compatible_runtime=False,allow_unconverged=False,initial_guess=None):
         from .dft import DFT,SCFSettings
         from .config import _identifier
-        self._live();error=None
+        self._live();error=None;array_guess=False;reader=None;reader_failures=[]
         try:
             if not getattr(self.backend,'_supports_compute',not getattr(self.backend,'_fast',False)):
                 raise InputError('this fast GS profile imports existing states; a declared compute-capable runtime is required')
@@ -541,14 +541,22 @@ class NativeGSSession:
                 raise InputError('repartition is an explicit boolean option requiring restart')
             if initial_guess is not None:
                 if restart is not None:raise InputError('initial_guess and exact SCF restart are distinct choices')
-                if not isinstance(initial_guess,NativeGSState):raise InputTypeError('initial_guess must be a retained NativeGSState')
-                if initial_guess.session is not self or initial_guess.closed:raise InputError('initial_guess must be live in this GS session')
-                if initial_guess.calculation is None:raise InputError('initial_guess requires explicit source model metadata')
-                if calculation._restart_signature()!=initial_guess.calculation._restart_signature():
+                from .gs_initial_guess import GSInitialGuess
+                array_guess=isinstance(initial_guess,GSInitialGuess)
+                if not array_guess and not isinstance(initial_guess,NativeGSState):raise InputTypeError('initial_guess requires NativeGSState or GSInitialGuess')
+                if not array_guess and (initial_guess.session is not self or initial_guess.closed):raise InputError('initial_guess must be live in this GS session')
+                source_model=initial_guess.model if array_guess else initial_guess.calculation
+                if source_model is None:raise InputError('initial_guess requires explicit source model metadata')
+                if calculation._restart_signature()!=source_model._restart_signature():
                     raise InputError('initial_guess requires matching physical model/layout; atomic positions may change')
                 from .api import _bind_gs_operations
-                _bind_gs_operations(self.lib,('sp_gs_guess_protocol','sp_gs_create_from_gs'))
-                if self.lib.sp_gs_guess_protocol()!=1:raise InputError('unsupported retained GS guess protocol')
+                if array_guess:
+                    _bind_gs_operations(self.lib,('sp_gs_array_guess_protocol','sp_gs_create_from_arrays'))
+                    if self.lib.sp_gs_array_guess_protocol()!=1:raise InputError('unsupported array guess protocol')
+                    reader,reader_failures=initial_guess._callback()
+                else:
+                    _bind_gs_operations(self.lib,('sp_gs_guess_protocol','sp_gs_create_from_gs'))
+                    if self.lib.sp_gs_guess_protocol()!=1:raise InputError('unsupported retained GS guess protocol')
             if restart is not None and steps is not None:
                 raise InputError('restart loads the saved boundary; call continue_scf separately')
             if restart is not None:
@@ -571,6 +579,11 @@ class NativeGSSession:
             text=text.replace('&system',f'&parallel\n nproc_k={k},nproc_ob={ob},nproc_rgrid={x},{y},{z}\n/\n&system',1)
             assets=calculation.input_assets
             descriptor=(material_id,text,tuple(p.sha256 for p in calculation.pseudopotentials))
+            if array_guess:
+                descriptor+=('array-guess',tuple(hashlib.sha256(value.tobytes()).hexdigest()
+                    for value in (initial_guess.occupations,initial_guess.kpoints,initial_guess.weights)))
+            elif initial_guess is not None:descriptor+=('retained-guess',initial_guess._token)
+            else:descriptor+=('no-guess',)
             if calculation.symmetry is not None:descriptor+=(calculation.symmetry.sha256,)
             if restart is not None:
                 restart,saved=_scf_disk_manifest(restart,self,text,assets,material_id,repartition=repartition,compatible_runtime=compatible_runtime)
@@ -602,7 +615,10 @@ class NativeGSSession:
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
         token=c.c_int64()
-        if initial_guess is not None:
+        if array_guess:
+            code=self._gs_call(work,self.lib.sp_gs_create_from_arrays,b'gs.inp',0 if steps is None else steps,c.cast(reader,c.c_void_p),None,c.byref(token))
+            _agree(self.comm,'; '.join(reader_failures) if reader_failures else None)
+        elif initial_guess is not None:
             code=self._gs_call(work,self.lib.sp_gs_create_from_gs,b'gs.inp',initial_guess._token,0 if steps is None else steps,c.byref(token))
         elif restart is not None:
             code=self._gs_call(work,self.lib.sp_gs_scf_bootstrap,b'gs.inp',c.byref(token))

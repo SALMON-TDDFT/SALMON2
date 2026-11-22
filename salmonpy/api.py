@@ -74,6 +74,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.subpixel': ('SubpixelSmoothing','effect
  'salmonpy.field_input': ('FieldValue', 'FieldPacket', 'FieldContract', 'FieldAdapter'),
  'salmonpy.fields': ('FieldSamples', 'AcosPulse', 'sample_pulses'),
  'salmonpy.gs_native': ('GammaRestartConverter', 'SerialRestartConverter'),
+ 'salmonpy.gs_initial_guess': ('GSInitialGuess',),
  'salmonpy.gs_archive': ('GroundStateArchive', 'save_ground_state'),
  'salmonpy.geometry': ('vector', 'Grid', 'Shape', 'Geometry'),
  'salmonpy.ld': ('LDModelConfig', 'LDTensorModelConfig', 'LDStateConfig', 'Response', 'LorentzDrude', 'TensorLorentzDrude', 'LDState', 'FitReport', 'fit_lorentz_drude', 'fit_lorentz_drude_tensor'),
@@ -363,6 +364,7 @@ _GS_SCF=('scf_protocol','start','continue','scf_info','scf_snapshot','scf_restor
 def _gs_operations():
     specs={
         'protocol':[], 'create':[('path','string'),('state','int64*')],
+        'array_guess_protocol':[], 'create_from_arrays':[('path','string'),('steps','int'),('reader','buffer'),('cookie','buffer'),('state','int64*')],
         'guess_protocol':[], 'create_from_gs':[('path','string'),('source','int64'),('steps','int'),('state','int64*')],
         'import':[('path','string'),('state','int64*')],
         'info':[('state','int64'),('stats','buffer'),('values','buffer')],
@@ -383,7 +385,7 @@ def _gs_operations():
         specs['scf_'+axis+'_repartition']=[('state','int64'),('directory','string'),('old_size','int'),('bounds','buffer')]
     result={}
     for name,parameters in specs.items():
-        local=name in ('protocol','guess_protocol','scf_protocol','resources','scf_format_signature')
+        local=name in ('protocol','guess_protocol','array_guess_protocol','scf_protocol','resources','scf_format_signature')
         entry={'arguments':[t for _,t in parameters], 'returns':'int',
                'parameters':[{'name':n,'type':t,'direction':'out' if n in ('stats','values','ndim','shape','lower','real','imag','counts','kinds','bytes') or t=='int64*' else 'in'} for n,t in parameters],
                'collective':'local' if local else 'solver group',
@@ -397,6 +399,7 @@ def _gs_operations():
                              'import':'read existing GS; no SCF or GS writes; convergence/forces unavailable',
                              'scf_bootstrap':'prepare static resources for restart, no initial orbitals/density/mixing or SCF iterations'}[name]
         if name=='create_from_gs':entry['effect']='copy wavefunctions/occupations by value; fresh density/mixing/HSE; steps0 full SCF,positive budget; same session/layout/model except positions; no source mutation or GS I/O'
+        if name=='create_from_arrays':entry['effect']='synchronous rank-local array reader into a fresh SCF owner; callback bounds/shape and complex128/float64 layout are in standard_gs.h; steps0 full SCF,positive budget; numerical finite/sampling validation in Fortran; caller authenticates declared model and owns reader through return; no pointers retained or intermediate GS files'
         if name=='info':entry['layout']='stats int32[4]: iterations/converged/atoms/bands; values float64[3]: Hartree energy/residual/tolerance; import uses unknown convergence and profile-specific absent values'
         if name=='array_info':entry['layout']='ndim int32; shape/lower int64[7]; quantity1 density,2 occupation,3 eigenvalue,4 force,5 orbitals,6 SCF history'
         if name=='read':entry['layout']='float64 real/imag arrays of length; Fortran order; use array_info first; local arrays can include halos'
