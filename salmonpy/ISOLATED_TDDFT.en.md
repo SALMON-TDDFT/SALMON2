@@ -16,7 +16,7 @@ with IsolatedTDDFTInitialState.from_salmon(
     with initial.new_state(dt=.02) as state:
         saved = state.snapshot()
         frame = state.step([0., 0., 1.e-5])
-        print(frame.time, frame.dipole, frame.electronic_change)
+        print(frame.time, frame.dipole, frame.electronic_change, frame.electron_number)
         state.restore(saved)
 ```
 
@@ -28,7 +28,7 @@ current. Initial E and time are zero. Spatial position defaults to (0,0,0) bohr
 and can be set with new_state(position=...); it labels the uniform field sample,
 not a translation/rotation of molecular coordinates.
 
-Runtime loading checks an explicit local validation record bounded to 64 KiB, its E1
+Runtime loading checks an explicit local validation record bounded to 64 KiB, its E2
 protocol/capabilities, successful comparison/isolation/replay evidence, and exact
 binary SHA256. It performs no download, compilation, MPI initialization or worker
 launch. validation records are local evidence, not cryptographic certification or a source
@@ -98,9 +98,10 @@ state.save_checkpoint('new-isolated-checkpoint')
 resumed.restore_checkpoint('new-isolated-checkpoint', max_bytes=16*1024*1024)
 ```
 
-`salmonpy.isolated-tddft-checkpoint/1` stores E0, dipoles0, dipoles, E_history
-and dipole_history in the strict uncompressed Zarr v3 subset. Dipole vectors have
-six components: electronic_change followed by total charge dipole, in e*bohr.
+`salmonpy.isolated-tddft-checkpoint/2` stores E0, observables0, observables, E_history
+and observable_history in the strict uncompressed Zarr v3 subset. Observation vectors
+have seven components: electronic_change3, total charge dipole3 (e*bohr), then measured
+electron number1.
 It is a replay record, not a wavefunction checkpoint or postprocessing archive.
 GS files and the validated runtime must be supplied separately. Initial file
 hashes, executable hash, dt, capacity, threads, position and package version must
@@ -113,3 +114,18 @@ The response sample accepts `--checkpoint NEW_DIRECTORY` to save its final state
 To continue later, recreate the same capacity/settings, restore, then supply the
 remaining E steps. A sample saved at its capacity can only replay up to that end;
 plan extra capacity in your own run when further propagation is required.
+
+
+### Measured electron number
+
+E2 exposes `frame.electron_number` and `state.electron_number`: the integral of
+occupied electron density, not an estimate from input nelec. Reuse the result
+already calculated by Fortran dipole observation; no additional global reduction.
+Replies contain seven values: electronic dipole change3, total charge dipole3,
+then electron number1. Arrays are read-only and the scalar must be finite.
+Evidence uses `salmonpy.isolated-worker-validation/2`; checkpoints use
+`salmonpy.isolated-tddft-checkpoint/2`. Observation arrays have six dipole columns
+followed by measured electron number. Old E1/checkpoints are rejected.
+Electron number participates in replay/restore comparisons. The molecular FDTD
+fixture diagnoses loss in Fortran with target1e-5; exceeding the target alone does
+not stop a calculation. Nonfinite values reject the trial.

@@ -15,7 +15,7 @@ with IsolatedTDDFTInitialState.from_salmon(
     with initial.new_state(dt=.02) as state:
         saved = state.snapshot()
         frame = state.step([0., 0., 1.e-5])
-        print(frame.time, frame.dipole, frame.electronic_change)
+        print(frame.time, frame.dipole, frame.electronic_change, frame.electron_number)
         state.restore(saved)
 ```
 
@@ -24,7 +24,7 @@ electronic_changeは計算処理の電子双極子変化です。配列は読取
 初期E・時刻はゼロです。new_state(position=...)は場を評価する位置（既定(0,0,0) bohr）を
 指定しますが、分子座標の移動・回転は行いません。
 
-計算プログラム読込みは64 KiB以下のローカル検証記録について、E1プロトコル・対応範囲・
+計算プログラム読込みは64 KiB以下のローカル検証記録について、E2プロトコル・対応範囲・
 比較／独立性／履歴再実行の成功記録と実行ファイルのSHA256を確認します。
 ダウンロード・コンパイル・MPI初期化・worker起動はしません。
 記録はローカル検証の証拠で、電子署名による認証やソース監査の代わりではありません。
@@ -87,9 +87,9 @@ state.save_checkpoint('new-isolated-checkpoint')
 resumed.restore_checkpoint('new-isolated-checkpoint', max_bytes=16*1024*1024)
 ```
 
-形式は `salmonpy.isolated-tddft-checkpoint/1`、非圧縮Zarr v3の限定形式です。
-E0・dipoles0・dipoles・E_history・dipole_historyを保存します。双極子6成分は
-前半がelectronic_change、後半が全電荷双極子、単位はe*bohrです。
+形式は `salmonpy.isolated-tddft-checkpoint/2`、非圧縮Zarr v3の限定形式です。
+E0・observables0・observables・E_history・observable_historyを保存します。観測配列は7成分で、
+先頭3成分がelectronic_change、次の3成分が全電荷双極子（単位e*bohr）、最後が実測電子数です。
 波動関数や後処理archiveではなく、受理済み履歴の再実行用記録です。
 GSと検証済みruntimeは別途必要です。初期ファイル・実行ファイルのハッシュ、dt、容量、
 スレッド数、位置、パッケージ版を照合します。初期モデルのオブジェクトは作り直せます。
@@ -100,3 +100,16 @@ RSS上限ではありません。省略時は設定容量から上限を計算�
 応答サンプルの `--checkpoint NEW_DIRECTORY` で最終状態も保存できます。
 容量いっぱいまで計算した記録はその終了点までの復元専用です。続きを計算する用途では、
 自分のコードで必要な総容量を最初に確保し、同じ容量で復元してください。
+
+
+### 実測電子数
+
+E2では `frame.electron_number` と `state.electron_number` が占有電子密度の積分値を
+返します。入力nelecからの推定ではありません。Fortranの既存双極子観測が計算した値を
+再利用するので、観測のための全体通信は増やしません。応答は双極子変化3成分、全電荷
+双極子3成分、電子数1成分の7値です。読取専用の配列と有限なスカラーとして返します。
+E2の検証記録は `salmonpy.isolated-worker-validation/2`、チェックポイントは
+`salmonpy.isolated-tddft-checkpoint/2`。観測配列の先頭6列は双極子、7列目は電子数です。
+旧E1・旧チェックポイントは受け付けません。電子数も履歴再生・復元の照合対象です。
+分子FDTD開発試験はFortranで電子数減少率を評価し、目安1e-5を診断結果へ記録します。
+目安の超過だけでは計算を止めません。値が非有限ならその試行を拒否します。

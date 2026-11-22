@@ -23,3 +23,15 @@ as field time minus dt. Require initially zero selected E, matching worker E0.
    from real TDDFT. No new GS data may be collected for this phase.
 5. Real isolated TDDFT/FDTD remains pending a validated E worker and existing GS.
    Quantum work/norm and total electromagnetic energy need separate evidence.
+
+## Follow-up: measured electron number
+
+Expose the actual occupied-density integral from Fortran with each isolated
+endpoint, including initial state. Use the existing calc_dip integration and
+Hvol; do not infer electron number from input or dipole. Move the unpublished
+isolated wire/evidence/checkpoint contract to revision2 with seven endpoint
+values (six dipole components plus measured electron number); reject old frames.
+Include this scalar in replay snapshots and compare it after rollback/retry.
+Numerical work stays Fortran. Reuse the authorized C2H2 GS; no new SCF campaign.
+Validate finite/NaN rejection, state independence and disk/memory replay, then
+actual C2H2 in the existing field fixture. Norm loss1e-5 is diagnostic, not a stop.

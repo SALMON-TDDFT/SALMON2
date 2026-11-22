@@ -216,3 +216,5 @@ connection. Child environments therefore omit OMPI/PMI/PMIX/PRTE data and rank
 identities. Parent MPI and scheduler allocation IDs remain untouched. This startup
 path is tested on this Mac/OpenMPI, not certified for all sites. A general public
 two-way TDDFT driver remains unavailable.
+
+E2 also records measured electron number and checks it during replay. Fortran diagnoses loss: C2H2/LD64-step maximum loss fraction about9.95e-15 versus target1e-5. Retry histories including electron number match continuous execution exactly. This short-run diagnostic is not optical convergence evidence.

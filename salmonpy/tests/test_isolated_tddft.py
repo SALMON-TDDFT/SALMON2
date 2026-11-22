@@ -19,16 +19,16 @@ for line in sys.stdin:
   n+=1;e=list(map(float,p[1:]));v=[.9*x+dt*e[k%3]+.001*n for k,x in enumerate(v)]
  elif p[0]=='CLOSE':break
  else:continue
- print('SALMONPY_TDDFT_E_V1',n,*v,flush=True)
+ print('SALMONPY_TDDFT_E_V2',n,*v,10.-n*1.e-8,flush=True)
 '''
 
 
 def receipt(binary):
-    return dict(schema='salmonpy.isolated-worker-validation/1',
+    return dict(schema='salmonpy.isolated-worker-validation/2',
                 executable_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
-                protocol='SALMONPY_TDDFT_E_V1',steps=20,interleaved_independence=True,
+                protocol='SALMONPY_TDDFT_E_V2',steps=20,interleaved_independence=True,
                 replay_continuation_max_abs_error=0.,repeat_max_abs_error=0.,reference_max_abs_error=0.,
-                capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole'])
+                capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number'])
 
 
 class IsolatedTDDFTTests(unittest.TestCase):
@@ -131,8 +131,8 @@ class IsolatedTDDFTTests(unittest.TestCase):
             a.save_checkpoint(checkpoint)
             expected=a.step([0.,0.,.007]).dipole
         manifest=json.loads((checkpoint/'manifest.json').read_text())
-        self.assertEqual(manifest['schema'],'salmonpy.isolated-tddft-checkpoint/1')
-        self.assertEqual(set(manifest['arrays']),{'E0','dipoles0','dipoles','E_history','dipole_history'})
+        self.assertEqual(manifest['schema'],'salmonpy.isolated-tddft-checkpoint/2')
+        self.assertEqual(set(manifest['arrays']),{'E0','observables0','observables','E_history','observable_history'})
         with IsolatedTDDFTInitialState.from_salmon(self.bundle,'rt.inp',runtime=self.runtime,max_steps=25) as rebuilt:
             with rebuilt.new_state(dt=.02) as b:
                 b.restore_checkpoint(checkpoint)
@@ -140,7 +140,7 @@ class IsolatedTDDFTTests(unittest.TestCase):
                 before=b.observables.dipole.copy();clock=b.time
                 with patch.object(b._engine,'_spawn',side_effect=AssertionError('must reject before spawn')):
                     with self.assertRaises(SnapshotError): b.restore_checkpoint(checkpoint,max_bytes=1)
-                    chunk=checkpoint/'dipoles/c/0';raw=chunk.read_bytes();chunk.write_bytes(b'x'+raw[1:])
+                    chunk=checkpoint/'observables/c/0';raw=chunk.read_bytes();chunk.write_bytes(b'x'+raw[1:])
                     with self.assertRaises(SnapshotError): b.restore_checkpoint(checkpoint)
                     chunk.write_bytes(raw)
                 np.testing.assert_array_equal(b.observables.dipole,before)
@@ -216,3 +216,23 @@ class IsolatedTDDFTTests(unittest.TestCase):
             if key.startswith(('OMPI_','PMIX_','PMI_','PRTE_')) or key in ('MPI_LOCALRANKID','SLURM_PROCID','SLURM_LOCALID'):
                 self.assertTrue(key not in env, key+' leaked into child MPI environment')
         self.assertEqual(env['SLURM_JOB_ID'],'retain-allocation')
+
+    def test_measured_electron_number_survives_replay(self):
+        a=self.state()
+        self.assertEqual(a.observables.electron_number,10.)
+        a.step([0.,0.,.01]);token=a.snapshot()
+        expected=a.observables.electron_number
+        a.step([0.,0.,.02]);a.restore(token)
+        self.assertEqual(a.observables.electron_number,expected)
+        self.assertEqual(a.electron_number,expected)
+
+        import queue
+        from salmonpy.errors import NumericalError
+        events=a._engine._events
+        try:
+            for bad in ('nan','inf','-inf'):
+                a._engine._events=queue.Queue()
+                a._engine._events.put('SALMONPY_TDDFT_E_V2 1 0 0 0 0 0 0 '+bad)
+                with self.assertRaises(NumericalError):a._engine._receive(1)
+        finally:a._engine._events=events
+        self.assertEqual(a.electron_number,expected)

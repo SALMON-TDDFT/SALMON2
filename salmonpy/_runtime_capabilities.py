@@ -10,7 +10,7 @@ from pathlib import Path
 from .errors import InputError
 
 NLCC_PATCH_SHA256 = 'a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8'
-NLCC_SOURCE_TREE_SHA256 = 'd8419ef56f116480129ba0d49e4369825ed1ce8ecb8f8dbd895f0f2083c3ef78'
+NLCC_SOURCE_TREE_SHA256 = 'ebc8986f18c05c564c1a07bfd18b4c35d811b9c720bfee548568b9a162295978'
 NLCC_XC = ('pz', 'libxc_pz', 'libxc_pbe')
 
 

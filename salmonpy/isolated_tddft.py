@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import numpy as np
-from .errors import InputError
+from .errors import InputError, NumericalError
 from .fdtd import SalmonExecutable
 from .field_input import FieldContract, FieldPacket, FieldValue, _real
 from .timing import TimeSpec, InputPort
@@ -12,7 +12,7 @@ from .tddft import TDDFTInitialState, TDDFTState, _digest
 
 __all__ = ['IsolatedRuntime','load_isolated_runtime','DipoleObservables',
            'IsolatedTDDFTInitialState','IsolatedTDDFTState']
-_CAPABILITIES = {'isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole'}
+_CAPABILITIES = {'isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number'}
 
 
 def _receipt(payload, executable):
@@ -26,8 +26,8 @@ def _receipt(payload, executable):
         return result
     try:
         data = json.loads(payload, object_pairs_hook=unique)
-        valid = (data['schema']=='salmonpy.isolated-worker-validation/1'
-                 and data['protocol']=='SALMONPY_TDDFT_E_V1'
+        valid = (data['schema']=='salmonpy.isolated-worker-validation/2'
+                 and data['protocol']=='SALMONPY_TDDFT_E_V2'
                  and data['executable_sha256']==executable.sha256
                  and type(data['steps']) is int and data['steps']>=20
                  and data['interleaved_independence'] is True
@@ -43,7 +43,7 @@ def _receipt(payload, executable):
 
 @dataclass(frozen=True, slots=True)
 class IsolatedRuntime:
-    """Locally validated E1 binary; a receipt is evidence, not a signature or audit."""
+    """Locally validated E2 binary; a receipt is evidence, not a signature or audit."""
     executable: SalmonExecutable
     validation: bytes = field(repr=False)
 
@@ -54,7 +54,7 @@ class IsolatedRuntime:
 
 
 def load_isolated_runtime(executable, validation):
-    """Verify local E1 validation JSON and exact executable hash; never build/download."""
+    """Verify local E2 validation JSON and exact executable hash; never build/download."""
     binary = Path(executable).expanduser().resolve(strict=True)
     path = Path(validation).expanduser()
     with path.open('rb') as stream:
@@ -67,19 +67,21 @@ class DipoleObservables:
     time: float
     electronic_change: object
     dipole: object
+    electron_number: float
 
     def __post_init__(self):
         object.__setattr__(self,'time',float(_real(self.time,(),'time')))
         object.__setattr__(self,'electronic_change',_real(self.electronic_change,(3,),'electronic dipole change'))
         object.__setattr__(self,'dipole',_real(self.dipole,(3,),'total charge dipole'))
+        object.__setattr__(self,'electron_number',float(_real(self.electron_number,(),'electron number')))
 
 
 class _EEngine(TDDFTState):
-    _worker_mode = 'E1'
-    _reply_prefix = 'SALMONPY_TDDFT_E_V1 '
+    _worker_mode = 'E2'
+    _reply_prefix = 'SALMONPY_TDDFT_E_V2 '
     _init_command = 'INIT_E'
     _step_command = 'STEP_E'
-    _reply_size = 6
+    _reply_size = 7
     _snapshot_kind = 'isolated-TDDFT-E-dipole-replay'
 
     def __init__(self,model,dt,position):
@@ -88,8 +90,14 @@ class _EEngine(TDDFTState):
 
     @property
     def current(self):
-        # Private transport hook: six raw observables, never exposed as current.
-        return _real(self._current,(6,),'dipole observables')
+        # Private transport hook: seven raw observables, never exposed as current.
+        return _real(self._current,(7,),'dipole/electron observables')
+
+    def _receive(self,index):
+        try:
+            return super()._receive(index)
+        except InputError as exc:
+            raise NumericalError('isolated worker returned nonfinite observables') from exc
 
     def _snapshot_settings(self):
         return _fingerprint((super()._snapshot_settings(),tuple(self._position)))
@@ -138,7 +146,10 @@ class IsolatedTDDFTState:
     @property
     def observables(self):
         values=self._engine.current
-        return DipoleObservables(self.time,values[:3],values[3:])
+        return DipoleObservables(self.time,values[:3],values[3:6],values[6])
+
+    @property
+    def electron_number(self): return self.observables.electron_number
 
     def step(self,E):
         E=_real(E,(3,),'E')

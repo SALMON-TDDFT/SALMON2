@@ -24,7 +24,7 @@ def run(executable, reference, directory):
     fields = data[:, 10:13] / (27.21138505 / 0.52917721067)
     contents = (reference / 'first/input.inp').read_text()
     env = dict(os.environ)
-    env.update(SALMONPY_TDDFT_WORKER='E1', OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
+    env.update(SALMONPY_TDDFT_WORKER='E2', OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
                MKL_NUM_THREADS='1', VECLIB_MAXIMUM_THREADS='1')
     trajectories = []
     for label in ('first', 'repeat'):
@@ -43,18 +43,18 @@ def run(executable, reference, directory):
                                 env=env, timeout=60)
         (folder / 'worker.log').write_text(result.stdout+result.stderr)
         lines = [line.split() for line in result.stdout.splitlines()
-                 if line.startswith('SALMONPY_TDDFT_E_V1 ')]
+                 if line.startswith('SALMONPY_TDDFT_E_V2 ')]
         if result.returncode or len(lines) != len(fields)+1:
             raise AssertionError(f'E-worker handshake/steps failed: {folder / "worker.log"}')
         assert [int(line[1]) for line in lines] == list(range(len(fields)+1))
         values = np.asarray([[float(v) for v in line[2:]] for line in lines])
-        assert values.shape == (len(fields)+1, 6)
+        assert values.shape == (len(fields)+1, 7)
         assert np.isfinite(values).all()
         trajectories.append(values)
     np.testing.assert_array_equal(*trajectories)
     # Worker returns electronic dipole change and total charge dipole, in e*bohr.
     expected = data[:, 13:19] / 0.52917721067
-    np.testing.assert_allclose(trajectories[0][1:], expected, rtol=1.e-6, atol=1.e-10)
+    np.testing.assert_allclose(trajectories[0][1:,:6], expected, rtol=1.e-6, atol=1.e-10)
     from isolated_worker_driver import IsolatedWorker
     from salmonpy.field_input import FieldAdapter, FieldContract, FieldPacket, FieldValue
     from salmonpy.timing import TimeSpec, InputPort
@@ -105,13 +105,13 @@ def run(executable, reference, directory):
             aa.step_fields(packet(E, n))
         continued = [aa.step_fields(packet(E, n)) for n, E in enumerate(fields[10:], 11)]
         np.testing.assert_array_equal(continued, trajectories[0][11:])
-    report = dict(schema='salmonpy.isolated-worker-validation/1',
-                  capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole'],
+    report = dict(schema='salmonpy.isolated-worker-validation/2',
+                  capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number'],
                   interleaved_independence=True, field_packet_missing_E_rejected=True,
                   replay_continuation_max_abs_error=0., executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
-                  protocol='SALMONPY_TDDFT_E_V1', steps=len(fields),
+                  protocol='SALMONPY_TDDFT_E_V2', steps=len(fields),
                   repeat_max_abs_error=0.,
-                  reference_max_abs_error=float(np.max(np.abs(trajectories[0][1:]-expected))))
+                  reference_max_abs_error=float(np.max(np.abs(trajectories[0][1:,:6]-expected))))
     np.savez(root / 'dipoles.npz', fields=fields, dt=dt, values=trajectories[0])
     (root / 'report.json').write_text(json.dumps(report, indent=2)+'\n')
     print(json.dumps(report, indent=2))

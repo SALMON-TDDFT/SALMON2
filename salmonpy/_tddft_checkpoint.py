@@ -22,9 +22,9 @@ NAMES = {'A0':'_A0', 'J0':'_J0', 'current':'_current',
 
 def _format(state):
     if state._snapshot_kind == 'isolated-TDDFT-E-dipole-replay':
-        return ('salmonpy.isolated-tddft-checkpoint/1',
-                {'E0':'_A0', 'dipoles0':'_J0', 'dipoles':'_current',
-                 'E_history':'_history', 'dipole_history':'_curr_history'}, 6)
+        return ('salmonpy.isolated-tddft-checkpoint/2',
+                {'E0':'_A0', 'observables0':'_J0', 'observables':'_current',
+                 'E_history':'_history', 'observable_history':'_curr_history'}, 7)
     return SCHEMA, NAMES, 3
 
 

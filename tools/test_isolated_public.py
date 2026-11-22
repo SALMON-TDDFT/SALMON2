@@ -24,18 +24,20 @@ def main():
                                               max_steps=25,threads=1,timeout=30) as model:
         with model.new_state(dt=dt) as a:
             with model.new_state(dt=dt) as b:
-                np.testing.assert_array_equal(a.observables.dipole,reference[0,3:])
+                np.testing.assert_array_equal(a.observables.dipole,reference[0,3:6])
                 for n,v in enumerate(E[:10],1):
                     before=b.observables.dipole.copy()
                     frame=a.step_fields(FieldPacket(E=FieldValue(v,time=n*dt,position=(0,0,0),unit='E:au')))
                     np.testing.assert_array_equal(b.observables.dipole,before)
-                    np.testing.assert_array_equal(frame.dipole,reference[n,3:])
+                    np.testing.assert_array_equal(frame.dipole,reference[n,3:6])
+                    np.testing.assert_equal(frame.electron_number,reference[n,6])
                     np.testing.assert_array_equal(b.step(v).dipole,frame.dipole)
             saved=a.snapshot()
             a.save_checkpoint(output/'checkpoint')
             expected=np.array([a.step(v).dipole for v in E[10:]])
             model.close()
             a.restore(saved)
+            np.testing.assert_equal(a.electron_number,reference[10,6])
             actual=np.array([a.step(v).dipole for v in E[10:]])
             np.testing.assert_array_equal(actual,expected)
             # Public step recovers accepted history after a lost child.
@@ -51,8 +53,10 @@ def main():
                                               max_steps=25,threads=1,timeout=30) as rebuilt:
         with rebuilt.new_state(dt=dt) as resumed:
             resumed.restore_checkpoint(output/'checkpoint')
+            np.testing.assert_equal(resumed.electron_number,reference[10,6])
             disk_actual=np.array([resumed.step(v).dipole for v in E[10:]])
             np.testing.assert_array_equal(disk_actual,expected)
+            np.testing.assert_equal(resumed.electron_number,reference[-1,6])
     np.savez(output/'continuation.npz',expected=expected,actual=actual,disk_actual=disk_actual)
     (output/'report.json').write_text(json.dumps(dict(public_loader=True,independent_states=True,
         disk_rebuilt_model=True,disk_continuation_max_abs_error=0.,

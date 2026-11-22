@@ -92,7 +92,7 @@ def isolated_loop(world, field, args):
             state=stack.enter_context(model.new_state(dt=args.dt,position=(-1.,1.,1.)))
             mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.])
             bridge=_IsolatedDipoleTrial(state,mapping)
-            ps=[state.observables.dipole.copy()];js=[];drives=[]
+            ps=[state.observables.dipole.copy()];js=[];drives=[];norms=[state.electron_number]
             fields=[[initial[0],initial[2],selected]]
         n=1
         rejected=False
@@ -130,21 +130,25 @@ def isolated_loop(world, field, args):
                 provided=bridge._drive.copy()
                 bridge.commit()
                 selected=_selected_molecular_field(accepted[0],accepted[2])
-                ps.append(state.observables.dipole.copy());js.append(current[0].copy())
+                ps.append(state.observables.dipole.copy());js.append(current[0].copy());norms.append(state.electron_number)
                 drives.append(provided);fields.append([accepted[0],accepted[2],selected])
             if backup is not None:backup.release(token)
             n+=1
         if world.rank==0:
             # Independent response to the accepted E trace, with no field trials.
             control=stack.enter_context(model.new_state(dt=args.dt,position=(-1.,1.,1.)))
-            for E,p in zip(drives,ps[1:]):
+            for E,p,Ne in zip(drives,ps[1:],norms[1:]):
                 np.testing.assert_array_equal(control.step(E).dipole,p)
-            np.savez(args.output/'history.npz',fields=fields,p=ps,j=js,drive=drives,
+                np.testing.assert_equal(control.electron_number,Ne)
+            np.savez(args.output/'history.npz',fields=fields,p=ps,j=js,drive=drives,electron_number=norms,
                 E_time=np.arange(1,args.steps+1)*args.dt,
                 p_time=np.arange(1,args.steps+1)*args.dt,
                 electronic_time=np.arange(args.steps)*args.dt,
                 j_time=(np.arange(len(js))+1.5)*args.dt)
+            from salmonpy.convergence import _norm_report
+            norm_report=_norm_report(norms,norms[0],0.,1.e-5)
             report=dict(mode='feedback',schedule='centered-trial-rollback',
+                norm_diagnostic=norm_report,norm_loss_target=1.e-5,
                 dt=args.dt,steps=args.steps,material_environment=args.environment,
                 library_sha256=field.manifest['library_sha256'],
                 isolated_executable_sha256=runtime.executable.sha256,

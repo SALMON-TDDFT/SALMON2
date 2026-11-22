@@ -14,11 +14,11 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 | 完了 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBE局所試験、MPI2/4、固定Si/PBE比較。今回のソース・バイナリ向け記録も更新。換算定数は変更なし |
 | 完了 | 初期推定の入力準備・保持GSからの受け渡し | 準備と実行を分離し、保持GSの波動関数・占有数を独立コピー。前回実装は8f3a7663までpush済み |
 | 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
-| 完了 | 最新パッケージ・分子接続検証 | ソース版・wheel版とも683件実行、各1件任意スキップ。日英・AI JSON同期。今回許可されたC2H2 GSを保存・再利用し、真空/LDの取消再試行を確認。末尾とisolated-fdtd検証記録を参照 |
+| 完了 | 最新パッケージ・分子接続検証 | ソース版・wheel版とも684件実行、各1件任意スキップ。日英・AI JSON同期。今回許可されたC2H2 GSを保存・再利用し、真空/LDの取消再試行を確認。末尾とisolated-fdtd検証記録を参照 |
 
 ### 残る作業と対象拡大
 
-**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消は履歴再生です。電子数・量子系の仕事量と全電磁エネルギー、一般利用向けドライバは残件です。以下はそれと区別する運用・対象拡大の残件です。
+**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消は履歴再生です。短時間の電子数保存は確認済みです。量子系の仕事量と全電磁エネルギー、一般利用向けドライバは残件です。以下はそれと区別する運用・対象拡大の残件です。
 
 1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
 2. **大規模化の計測**：マクロ点・ランク・観測間隔に対するメモリ、通信、ファイル数・I/O負荷の測定。集約・バッファ化は測定上の必要に応じて実装する。
@@ -35,7 +35,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
-Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Quantum work/norm, full field energy, physical convergence and a public driver remain separate. Memory budgets warn; SCF nonconvergence retains
+Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum work, full field energy, physical convergence and a public driver remain separate. Memory budgets warn; SCF nonconvergence retains
 results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
@@ -4097,3 +4097,25 @@ Evidence:canonical calc2026/salmonpy-molecular-centered-20261122/{summary.json,v
   Groups1/2 remain deferred. No approval implied for unrelated GS campaigns.
 
 - [x] Installed wheel683 tests pass(one optional skip); real vacuum/LD retry histories exactly equal source continuous runs. Evidence:docs/isolated-fdtd-validation-2026-11-22.md and canonical campaign records.
+
+## 2026-11-22 — isolated measured electron number
+
+- [x] Previous molecular feedback committed/pushed as b7657d4a. No manual heavy CI.
+- [x] E2 emits Fortran's already integrated occupied electron count with six dipole
+  values; no extra global reduction. Public scalar and frame observation, seven-value
+  replay snapshots, revision2 evidence/checkpoint schema. No old-format fallback.
+- [x] Authorized C2H2 GS reused: actual E2/reference dipole agreement unchanged;
+  memory/disk replay and independent states preserve measured electron number.
+  MPI4 LD/FDTD continuous vs reject30/restore/retry: all arrays bit-identical,
+  including electron count. Earlier E/p/j/time arrays unchanged. Relative electron
+  loss9.9476e-15<1e-5 diagnostic target. Do not stop solely for exceeding target.
+- [x] Git-only source build and source/object guards pass. New-source NLCC local XC
+  and core-force derivatives MPI1/2×OMP1/2 pass before source capability pin update;
+  no new GS or whole-application NLCC force certificate. Source/wheel684 tests each
+  pass(one optional skip). Paired guides/AI JSON updated. Follow-up uncommitted.
+- [ ] Molecular remaining: quantum work/full electromagnetic energy, physical
+  convergence and general reusable two-way workflow; broader sites/platforms.
+  Electronic restoration is still accepted-history replay. Groups1/2 deferred.
+
+Evidence: docs/isolated-electron-number-validation-2026-11-22.md and canonical
+C2H2 campaign's electron-number-summary.json (local OneDrive, cloud sync unconfirmed).
