@@ -22,7 +22,7 @@ def load_build(path, expected_source, mpi):
     record = json.loads(path.read_text())
     if record.get('status') != 'built-and-audited':
         raise ValueError('completed audited build required')
-    if record.get('build_configuration', {}).get('mpi_enabled') is not mpi:
+    if type(record.get('build_configuration', {}).get('mpi_enabled')) is not bool or (mpi is not None and record['build_configuration']['mpi_enabled'] is not mpi):
         raise ValueError('build MPI capability does not match role')
     for key in ('upstream_commit', 'patch_sha256') + (('source_tree_sha256',) if 'source_tree_sha256' in expected_source else ()):
         if record.get('source', {}).get(key) != expected_source[key]:
@@ -32,7 +32,10 @@ def load_build(path, expected_source, mpi):
         raise ValueError('unexpected runtime executable location')
     if hashlib.sha256(exe.read_bytes()).hexdigest() != record.get('sha256'):
         raise ValueError('runtime executable checksum mismatch')
-    return record, (path.parent/'source').resolve()
+    entries=[line.split('=',1)[1] for line in (exe.parent/'CMakeCache.txt').read_text().splitlines()
+             if line.startswith('CMAKE_HOME_DIRECTORY:INTERNAL=')]
+    if len(entries)!=1 or not Path(entries[0]).is_dir():raise ValueError('missing/invalid CMake source binding')
+    return record, Path(entries[0]).resolve()
 
 
 def validate_test(path, source, kind, expected_pairs, *, runtime_sha256, patch_sha256):
@@ -71,8 +74,8 @@ def validate_test(path, source, kind, expected_pairs, *, runtime_sha256, patch_s
         elif kind == 'core':
             if 'NLCC_CORE_FORCE_PASS' not in stdout:
                 raise ValueError('core-force test success marker missing')
-            cases = re.findall(r'^\s*CORE_FORCE_VARIATION\s+([123])\s+(\S+)\s*$', stdout, re.M)
-            if len(cases) != 3 or {c[0] for c in cases} != {'1', '2', '3'}:
+            cases = re.findall(r'^\s*CORE_FORCE_VARIATION\s+([1-6])\s+(\S+)\s*$', stdout, re.M)
+            if len(cases) != 6 or {c[0] for c in cases} != set(map(str,range(1,7))):
                 raise ValueError('core-force geometry coverage incomplete')
             for _, error in cases:
                 error = number(error)
@@ -81,13 +84,15 @@ def validate_test(path, source, kind, expected_pairs, *, runtime_sha256, patch_s
                 maxima.append(error)
         else:
             cases = re.findall(r'^\s*MPI_NLCC_FORCE_PASS\s+(\d+)\s+(\S+)\s+(\d+)\s*$', stdout, re.M)
-            if len(cases) != 1:
-                raise ValueError('MPI test success marker missing or duplicated')
-            ranks, error, rejected = cases[0]
-            error = number(error)
-            if int(ranks) != run['ranks'] or int(rejected) != run['ranks'] or not 0 <= error <= 1e-13:
-                raise ValueError('MPI replication or collective rejection failed')
-            maxima.append(error)
+            comparisons=re.findall(r'^\s*MPI_NLCC_FORCE_COMPARE\s+([12])\s+(\d+)\s+(\S+)\s*$',stdout,re.M)
+            if len(cases)!=2 or len(comparisons)!=2 or {v[0] for v in comparisons}!={'1','2'}:
+                raise ValueError('MPI test format coverage missing or duplicated')
+            for (ranks,error,rejected),(_,compared_ranks,compared_error) in zip(cases,comparisons):
+                error=number(error);compared_error=number(compared_error)
+                if (int(ranks)!=run['ranks'] or int(compared_ranks)!=run['ranks']
+                        or int(rejected)!=run['ranks'] or error!=compared_error or not 0<=error<=1e-13):
+                    raise ValueError('MPI replication or collective rejection failed')
+                maxima.append(error)
     return {'test': expected_test, 'test_executable_sha256': record['executable_sha256'],
             'cases': len(runs), 'rank_thread_pairs': [list(pair) for pair in sorted(pairs)],
             'record_sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest(),
@@ -101,14 +106,16 @@ def validate_native_records(serial_build_record, xc_record, core_record, *, sour
     Inputs are record paths and the current parsed runtime/source.json. This
     normalizes native evidence only; whole-app/runtime certification is separate.
     """
-    serial_build, serial_source = load_build(serial_build_record, source_spec, False)
+    serial_build, serial_source = load_build(serial_build_record, source_spec, None)
     bindings = dict(runtime_sha256=serial_build['sha256'], patch_sha256=source_spec['patch_sha256'])
     tests = {'xc': validate_test(xc_record, serial_source, 'xc', [(1, 1), (1, 2)], **bindings),
              'core': validate_test(core_record, serial_source, 'core', [(1, 1), (1, 2)], **bindings)}
     result = {'schema': 'salmonpy.nlcc-native-validation/1', 'status': 'passed',
               'scope': 'native consistency only; not physical convergence or runtime capability certification',
               'build_executable_sha256': serial_build['sha256'],
-              'source_patch_sha256': source_spec['patch_sha256'], 'tests': tests}
+              'source_patch_sha256': source_spec['patch_sha256'], 'source_tree_sha256':source_spec.get('source_tree_sha256'), 'tests': tests}
+    if serial_build['build_configuration']['mpi_enabled'] and mpi_record is None:
+        raise ValueError('MPI-linked base build requires MPI validation record')
     if (mpi_build_record is None) != (mpi_record is None):
         raise ValueError('MPI build and test records must be provided together')
     if mpi_build_record is not None:

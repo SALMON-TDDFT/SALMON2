@@ -815,3 +815,32 @@ ordered old-rank bounds. No unused feature is required and no new hard stop is
 added for valid/custom calculations. Optional timers/GS-to-RT bridges still use
 separate queries. `doctor --component gs --route single` checks only the common
 host descriptor and GS protocol, without starting SCF or certifying all operations.
+
+## Unit conventions and NLCC validation
+
+`unit_contract()` declares the current conventions without loading a solver:
+boundary quantities are atomic units; SALMON's retained eV input constant is
+27.21138505 eV/Hartree, geometry uses0.52917721067 angstrom/bohr, while Python
+energy presentation uses27.211386245988 eV/Hartree. The energy constants differ
+by4.3951750e-8 relatively (1.195988e-6 eV per Hartree). ASE forces retain the
+existing presentation-energy/geometry-length ratio. Do not silently replace
+input constants with display constants: that would alter interpreted inputs.
+The separate legacy +U constant27.2116 remains unchanged and is outside the
+current declared GS/TDDFT profile. This contract documents current behavior; it
+does not inspect or certify a custom solver's unit conventions.
+
+NLCC forces require binary-bound evidence from the maintained source tree. The
+current tree hash must match both runtime and receipt/native evidence; missing
+source identity or old receipts reject without fallback. Current prescribed
+tests cover6 core-force geometries and both MPI core-table formats, including
+2/4-rank ×1/2-thread replication and collective nonfinite rejection. An MPI-linked
+validated executable additionally requires matching MPI evidence. This is
+implementation validation, not all-material or GPU physical certification.
+
+The maintainer source-checkout tool `tools/validate_nlcc_runtime.py` accepts `--mpi-record` and an explicit completed
+`--application-record`, avoiding repeat DFT when the whole-application scalar
+comparison already exists for the exact binary/reference. Evidence alone is
+not publisher authentication: use trusted build/validation records. Uncertified
+executables do not gain NLCC forces. Current validation used the fixed Si PBE
+reference: energy difference0, maximum force difference9.773e-16 Hartree/bohr.
+No numerical formula/constants or reference values were changed.

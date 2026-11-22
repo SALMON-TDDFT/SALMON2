@@ -1530,3 +1530,17 @@ Candidate2/3/4 stage/publish/discard; disk0 save,disk2 stage read then candidate
 publish. Authenticate records and coordinate before publication. Keep default
 unconverged-SCF review; an explicit developer-fixture acceptance is not physical
 convergence. Never require unused optional capabilities or constrain user backends.
+
+## Units / maintained NLCC evidence
+
+Use `unit_contract()` before interpreting SALMON eV inputs versus Python energy
+presentation. Preserve existing constants; relative energy conversion difference
+is4.3951750e-8, not a reason for silently rewriting inputs. Geometry/ASE length
+uses SALMON's retained Bohr value. NLCC CPU unpolarized NC-UPF force evidence
+must match current executable/source-tree and completed whole-app reference;
+missing/old source identities reject. Check all6 core geometries and both MPI
+formats; MPI-linked validated builds need their own2/4-rank evidence. Completed
+application records may be reused explicitly for the exact binary/reference,
+never inferred for a different build. No material-convergence/GPU guarantee.
+
+NLCC certification scripts/tests are maintainer source-checkout tools requiring audited build objects; wheel users consume the completed validated runtime/receipt through load_validated_build or runtime bundles, without compiling or running those maintainer tests.

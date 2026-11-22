@@ -324,11 +324,10 @@ def load_runtime(directory, *, required=(), host=None, validation=None):
 
 
 def load_validated_build(build_record, validation_record):
-    """Load an audited serial build plus binary-bound NLCC validation.
+    """Load an audited build plus binary/source-bound NLCC validation.
 
     Records must come from trusted explicit build/validation commands. This does
-    not run a solver or promise material convergence. Ordinary executables and
-    old runtime bundles keep an empty NLCC capability.
+    not run a solver or promise material convergence. Uncertified executables keep an empty NLCC capability.
     """
     from .fdtd import SalmonExecutable
     from ._runtime_capabilities import validate_nlcc_receipt
@@ -336,15 +335,17 @@ def load_validated_build(build_record, validation_record):
     record = json.loads(path.read_text())
     exe = Path(record.get('executable','')).resolve()
     if (record.get('status') != 'built-and-audited' or exe != path.parent/'build/salmon'
-            or record.get('build_configuration',{}).get('mpi_enabled') is not False
+            or type(record.get('build_configuration',{}).get('mpi_enabled')) is not bool
             or not exe.is_file() or _hash(exe) != record.get('sha256')):
-        raise InputError('expected unchanged audited serial runtime build')
+        raise InputError('expected unchanged audited runtime build')
     receipt = json.loads(Path(validation_record).read_text())
     if receipt.get('build_executable_sha256') != record['sha256']:
         raise InputError('NLCC evidence belongs to another build')
     scope = validate_nlcc_receipt(receipt, executable_sha256=record['sha256'],
                                 source_patch_sha256=record.get('source',{}).get('patch_sha256'),
                                 source_tree_sha256=record.get('source',{}).get('source_tree_sha256'))
+    if record['build_configuration']['mpi_enabled'] and 'mpi' not in receipt['native_validation']['tests']:
+        raise InputError('MPI-linked NLCC runtime requires matching MPI force validation')
     engine = SalmonExecutable(exe,record['sha256'])
     object.__setattr__(engine,'_nlcc_force_xc',scope)
     return engine

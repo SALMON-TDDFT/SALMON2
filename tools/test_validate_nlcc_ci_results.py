@@ -21,8 +21,8 @@ class NLCCCIValidation(unittest.TestCase):
         result = {**self.base, 'test': tests[kind], 'runs': []}
         for ranks in ((2, 4) if kind == 'mpi' else (1,)):
             for threads in (1, 2):
-                if kind == 'mpi': stdout=f'MPI_NLCC_FORCE_PASS {ranks} 6e-17 {ranks}\n'
-                elif kind == 'core': stdout=''.join(f'CORE_FORCE_VARIATION {g} 6e-10\n' for g in (1,2,3))+'NLCC_CORE_FORCE_PASS\n'
+                if kind == 'mpi': stdout=''.join(f'MPI_NLCC_FORCE_COMPARE {fmt} {ranks} 6e-17\nMPI_NLCC_FORCE_PASS {ranks} 6e-17 {ranks}\n' for fmt in (1,2))
+                elif kind == 'core': stdout=''.join(f'CORE_FORCE_VARIATION {g} 6e-10\n' for g in range(1,7))+'NLCC_CORE_FORCE_PASS\n'
                 else: stdout=''.join(f'XC_VARIATION {f} {n} 1 1 0\n' for f in ('pz','libxc_pz','libxc_pbe') for n in (0,1))+'NLCC_XC_VARIATION_PASS\n'
                 result['runs'].append(dict(ranks=ranks, threads=threads, returncode=0, stdout=stdout))
         return result
@@ -42,11 +42,18 @@ class NLCCCIValidation(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'rank/thread'):self.check({**data,'runs':runs})
 
     def test_mpi_nan_and_noncollective_rejection(self):
-        for line in ('MPI_NLCC_FORCE_PASS 2 nan 2\n','MPI_NLCC_FORCE_PASS 2 0 1\n',''):
-            data=self.record();data['runs'][0]['stdout']=line
+        for mode in ('nan','rejected','missing'):
+            data=self.record();text=data['runs'][0]['stdout']
+            if mode=='nan':text=text.replace('6e-17','nan',1)
+            elif mode=='rejected':text=text.replace('MPI_NLCC_FORCE_PASS 2 6e-17 2','MPI_NLCC_FORCE_PASS 2 6e-17 1',1)
+            else:text=''
+            data['runs'][0]['stdout']=text
             with self.assertRaises(ValueError):self.check(data)
 
     def test_missing_xc_cases_or_fake_success(self):
+        core=self.record('core')
+        core['runs'][0]['stdout']=core['runs'][0]['stdout'].replace('CORE_FORCE_VARIATION 6 6e-10','CORE_FORCE_VARIATION 6 1.0')
+        with self.assertRaisesRegex(ValueError,'tolerance'):self.check(core,'core')
         data=self.record('xc');data['runs'][0]['stdout']='NLCC_XC_VARIATION_PASS\n'
         with self.assertRaisesRegex(ValueError,'coverage'):self.check(data,'xc')
         data=self.record('xc');data['runs'][0]['stdout']=data['runs'][0]['stdout'].replace('1 1 0','1 1 0.1',1)
@@ -57,7 +64,7 @@ class NLCCCIValidation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'binding'):self.check(data)
 
     def test_normalized_serial_evidence_and_optional_mpi_pair(self):
-        exe=self.root/'build/salmon';exe.parent.mkdir();exe.write_bytes(b'not executed fixture')
+        exe=self.root/'build/salmon';exe.parent.mkdir();(exe.parent/'CMakeCache.txt').write_text('CMAKE_HOME_DIRECTORY:INTERNAL='+str(self.source)+'\n');exe.write_bytes(b'not executed fixture')
         sha=hashlib.sha256(exe.read_bytes()).hexdigest()
         spec={'upstream_commit':'b'*40,'patch_sha256':'c'*64}
         build=self.root/'build.json'
@@ -75,7 +82,7 @@ class NLCCCIValidation(unittest.TestCase):
             validate_native_records(build,self.root/'xc.json',self.root/'core.json',source_spec=spec,mpi_build_record=build)
 
     def test_build_hash_revision_and_capability(self):
-        exe=self.root/'build/salmon';exe.parent.mkdir();exe.write_bytes(b'not executed fixture')
+        exe=self.root/'build/salmon';exe.parent.mkdir();(exe.parent/'CMakeCache.txt').write_text('CMAKE_HOME_DIRECTORY:INTERNAL='+str(self.source)+'\n');exe.write_bytes(b'not executed fixture')
         spec={'upstream_commit':'b'*40,'patch_sha256':'c'*64}
         data={'status':'built-and-audited','build_configuration':{'mpi_enabled':False},
               'source':spec,'executable':str(exe),'sha256':hashlib.sha256(exe.read_bytes()).hexdigest()}

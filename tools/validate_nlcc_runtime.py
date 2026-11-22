@@ -41,26 +41,30 @@ def whole_application(executable,potential,output):
 def certify_relocated(receipt,executable,potential,output):
     """Recheck relocated executable; preserve original object-test build binding."""
     receipt=copy.deepcopy(receipt)
-    validate_nlcc_receipt(receipt,executable_sha256=receipt['build_executable_sha256'],source_patch_sha256=receipt['source_patch_sha256'])
+    validate_nlcc_receipt(receipt,executable_sha256=receipt['build_executable_sha256'],source_patch_sha256=receipt['source_patch_sha256'],source_tree_sha256=receipt['source_tree_sha256'])
     receipt['pre_relocation_application_validation']=receipt['application_validation']
     receipt['application_validation']=whole_application(executable,potential,output)
     receipt['executable_sha256']=receipt['application_validation']['executable_sha256']
-    validate_nlcc_receipt(receipt,executable_sha256=receipt['executable_sha256'],source_patch_sha256=receipt['source_patch_sha256'])
+    validate_nlcc_receipt(receipt,executable_sha256=receipt['executable_sha256'],source_patch_sha256=receipt['source_patch_sha256'],source_tree_sha256=receipt['source_tree_sha256'])
     return receipt
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ('build_record','xc_record','core_record','potential','output'):p.add_argument(name,type=Path)
+    p.add_argument('--mpi-record',type=Path,help='Completed2/4-rank force evidence for this MPI-linked build')
+    p.add_argument('--application-record',type=Path,help='Explicit completed whole_application scalar comparison, bound to the same executable/reference')
     a=p.parse_args();spec=json.loads((Path(__file__).resolve().parents[1]/'runtime/source.json').read_text())
-    native=validate_native_records(a.build_record,a.xc_record,a.core_record,source_spec=spec)
+    native=validate_native_records(a.build_record,a.xc_record,a.core_record,source_spec=spec,
+        mpi_build_record=a.build_record if a.mpi_record else None,mpi_record=a.mpi_record)
     build=json.loads(a.build_record.read_text());a.output.mkdir(parents=True,exist_ok=False)
-    app=whole_application(build['executable'],a.potential,a.output/'application')
+    app=json.loads(a.application_record.read_text()) if a.application_record else whole_application(build['executable'],a.potential,a.output/'application')
     receipt=dict(schema='salmonpy.nlcc-forces/1',status='passed',executable_sha256=build['sha256'],
         build_executable_sha256=build['sha256'],source_patch_sha256=spec['patch_sha256'],
+        source_tree_sha256=spec['source_tree_sha256'],
         scope={'backend':'cpu','spin':'unpolarized','potential':'NC-UPF','xc':list(NLCC_XC)},
         native_validation=native,application_validation=app)
-    validate_nlcc_receipt(receipt,executable_sha256=build['sha256'],source_patch_sha256=spec['patch_sha256'])
+    validate_nlcc_receipt(receipt,executable_sha256=build['sha256'],source_patch_sha256=spec['patch_sha256'],source_tree_sha256=spec['source_tree_sha256'])
     write_json(a.output/'validation.json',receipt);print(json.dumps(receipt,indent=2))
 
 if __name__=='__main__':main()

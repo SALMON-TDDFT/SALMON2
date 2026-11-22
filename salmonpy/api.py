@@ -6,11 +6,11 @@ private names and incidental imports are not public APIs.
 """
 from types import MappingProxyType
 
-__all__ = ['PUBLIC_API', 'native_contract', 'query_host_abi']
+__all__ = ['PUBLIC_API', 'native_contract', 'query_host_abi', 'unit_contract']
 PUBLIC_API = MappingProxyType({'salmonpy.subpixel': ('SubpixelSmoothing','effective_material'), 'salmonpy.optical_materials': ('OpticalMaterial','list_materials','load_material','wavelength_to_frequency'),
  'salmonpy.analysis': ('SurfaceFlux', 'surface_flux', 'PortSpectrum', 'absorbed_energy_density', 'reflection_transmission', 'Table', 'read_table', 'Spectrum', 'spectrum', 'OpticalSpectrum',
  'OpticalSensitivity', 'KCurrentContributions', 'optical_sensitivity', 'k_current_contributions', 'LongWavelengthCorrection', 'long_wavelength_correction', 'optical_conductivity', 'dielectric_function', 'dielectric_tensor', 'waveplate_diagnostic', 'optical_linearity', 'optical_sum_rule'),
- 'salmonpy.api': ('PUBLIC_API', 'native_contract', 'query_host_abi'),
+ 'salmonpy.api': ('PUBLIC_API', 'native_contract', 'query_host_abi', 'unit_contract'),
  'salmonpy.doctor': ('diagnose', 'probe_native_protocols'),
  'salmonpy.convergence': ('plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan','run_current_grid_scan'),
  'salmonpy.gs_input': ('GSInputMetadata','describe_gs_input'),
@@ -509,3 +509,20 @@ def query_host_abi(library):
             'MPI_ownership':'host','thread_policy':'main thread, sequential',
             'directory_protocol_required':values[9],'initializes_MPI':False,
             'scope':'host descriptor only; operation/profile/runtime checks remain separate'}
+
+
+def unit_contract():
+    """Describe existing conversion conventions; never changes numeric inputs.
+
+    The legacy solver input constants and current Python presentation constants
+    deliberately remain distinct to preserve established input/results.
+    """
+    from .bands import HARTREE_EV
+    from .structure import _BOHR_ANGSTROM
+    return {'schema':'salmonpy.units/1',
+            'boundary':'atomic units; no implicit conversion',
+            'solver_input':{'hartree_eV':27.21138505,'origin':'salmon_global au_energy_ev; retained input convention'},
+            'geometry':{'bohr_angstrom':_BOHR_ANGSTROM,'origin':'SALMON geometry convention; shared by ASE adapter'},
+            'output':{'hartree_eV':HARTREE_EV,'origin':'phys_constants/CODATA energy presentation'},
+            'forces':'Hartree/bohr at boundary; ASE eV/angstrom uses output hartree_eV / geometry bohr_angstrom',
+            'scope':'declared current conventions, not inspection of a custom runtime or an automatic unit conversion'}

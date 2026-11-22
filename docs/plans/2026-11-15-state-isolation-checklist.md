@@ -6,10 +6,10 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | 電子状態の操作契約まで `ab987567` でcommit／push済み。FDTD操作契約は未コミット |
+| 先に整理 | 最新の検証済み変更のcommit／push | FDTD・GS操作契約まで `a2f0a9a4` でcommit／push済み。NLCC・単位監査の変更は未コミット |
 | 完了した範囲 | 主要LD初期化・時間更新の作業配列 | 入力・係数・格子配列と時間更新の明示的な大規模領域を対応。全ての小さな確保・画像用配列は対象にしない |
-| 1 | 現行C/Fortran呼び出し契約の確定 | 呼び出し規約の安定化と、残る操作・実行環境での確認。旧版との後方互換は対象外 |
-| 2 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
+| 完了した範囲 | 現行C/Fortranの主操作契約 | 共通・電子状態・FDTD・GSを整理し、GNU Macで検証。他環境・任意機能の証明は別枠。後方互換なし |
+| 完了した範囲 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBEの局所試験とMPI2/4、固定Si/PBE全体比較が合格。換算定数は変更なし。他物質・GPUの精度保証ではない |
 
 再開読込処理と文書改善は `23cb1342` でpush済みです。今回のLD初期化と後方互換分岐削除も、source／wheel各679テスト（各1件スキップ）で検証済みです。MPI1／2のLD＋FDTD・直接保存復元は修正前とビット一致し、自作バックエンドの事前検査はMPI3で確認しました。HSEはビルド・C/Fortran照会・MPI1／2の明示所有を確認しましたが、今回の削除後に実材料のHSE計算を再実行したわけではありません。日英文書・AI JSONは同期済みで、最終文書/API16テストも通っています。
 
@@ -275,15 +275,23 @@ results/residual diagnostics and pauses the downstream workflow for user review
    selected guarantee; revisit only for an identified practical need. Arbitrary
    OS OOM, trapped FP, broken MPI and process termination are not recoverable
    contracts. No restriction on valid/custom inputs or budget-based hard stop.
-2. **Group5 R4:** current common-host, electronic-state and FDTD operation contracts
-   are organized and locally verified. Next bounded implementation: GS operation
-   declarations/bindings. Optional diagnostics and wider profile/platform/site
-   evidence stay separate; do not require exhaustive certification to use valid
-   supported/custom calculations. Existing tests are not a blanket stable ABI claim.
-3. **Then group3:** maintained-runtime NLCC force capability certification and
-   legacy SALMON eV/Hartree versus Python CODATA audit; preserve existing results
-   until any numerical change is explicitly justified. New GS campaigns need
-   their applicable authorization.
+2. **Group5 R4 — selected current-operation scope completed:** common host,
+   electronic-state, FDTD and GS declarations/bindings are organized and locally
+   verified. GS source/wheel SCF continuation/protected restore is completed.
+   Optional diagnostics and wider profile/platform/site evidence remain separate;
+   these tests are not a blanket stable ABI or arbitrary-failure guarantee.
+3. **Group3 — selected CPU scope completed, uncommitted:** maintained-runtime
+   NLCC certification covers PZ/Libxc-PZ/PBE local variation/core-force tests,
+   MPI2/4 ×OMP1/2, and the fixed Si/PBE application reference. Unit audit preserves
+   every conversion constant and numerical result; unit_contract exposes existing
+   conventions. Source/wheel679 tests(one skip each) and evidence-reader7 pass.
+   Other materials/GPU physical accuracy is not certified by these checks.
+
+Next concrete housekeeping: commit/push the verified NLCC/unit changes. Next
+implementation candidate is generalized initial-guess staging/reuse. Site-MPI,
+other-platform and scale evidence require their respective environments; keep
+those distinct from missing local implementations. New GS campaigns require
+applicable authorization; previous output grants remain campaign-specific.
 
 Separate operational/extensions queue: generalized initial-guess staging;
 site-MPI/multi-node/receipt-filesystem evidence; scale and observation-IO cost;
@@ -3928,3 +3936,31 @@ as historical evidence;no broader future GS-saving permission is inferred.
 Summary/inventory:canonical calc2026 `salmonpy-gs-operation-contracts-20261122`.
 This short deliberately unconverged regression is not physical-convergence
 certification. FDTD/GS contracts remain uncommitted. Next:bounded NLCC/unit audit.
+
+
+## 2026-11-22 — maintained NLCC certification and unit audit
+
+- [x] Previous FDTD/GS contracts committed/pushed as `a2f0a9a4`.
+- [x] Current audited fast-PR source/executable:prescribed XC variation PZ/Libxc-PZ/PBE with/without core at OMP1/2,core-force6 geometries,and MPI2/4 ×OMP1/2 both core-table formats pass. Initial unsupported MPI1 selection preserved;same hash-verified helper rerun on prescribed2/4 ranks. No prohibited driver executed.
+- [x] Fixed Si8/PBE whole-application comparison authorized explicitly by user for this NLCC campaign:energy error0,maximum force error9.772998e-16 Hartree/bohr. Only input/energy-force-residual reports/log retained;wavefunction/density/restart datasets absent. This is implementation regression,not physical convergence.
+- [x] Fixed evidence reader bugs:core parser had silently ignored geometries4–6;MPI parser expected one success line instead of both current table formats. Tests reject a bad sixth geometry,missing formats,nonfinite errors and noncollective rejection.
+- [x] Updated certification to the actually validated maintained source tree. Require tree identity in build/receipt/native evidence;old/missing identity rejects. MPI-linked certified build additionally requires its own complete MPI-force proof. Current CMake source binding used;no assumed old serial-source directory. Completed binary/reference-bound application record may be reused explicitly,without SCF rerun. No automatic certification from a feature name.
+- [x] `unit_contract()` documents unchanged solver input27.21138505 eV/Hartree,Python energy output27.211386245988,geometry/ASE0.52917721067 angstrom/bohr. Relative energy convention difference4.3951750e-8;separate legacy+U27.2116 noted outside declared profile. No conversion constants,numerical formulas,reference data or input interpretation changed.
+- [x] Japanese/English API and AI JSON synchronized. Source679 tests pass(one optional skip);validation-tool7 tests pass. Final installed unit/capability checks recorded separately below/in summary.
+
+Record:canonical calc2026 `salmonpy-nlcc-current-audit-20261122`. Validated runtime
+and receipt copied byte-identically under validated-runtime for reuse;original
+build/test hashes retained. NLCC/unit changes uncommitted. Do not reopen every
+small allocator/optional operation as a blocker. Broader site-MPI/multinode,other
+platforms,scale/observation I/O,initial-guess staging,Ag fit and optional storage/
+GPU remain separate queue. Groups1/2 and molecules remain deferred;TTM deleted.
+
+
+NLCC/unit final installed verification:source/wheel679 each pass(one optional
+skip),evidence-reader7 tests pass. Final installed unit_contract AI search,
+byte-identical saved runtime+receipt loading and real-NLCC-UPF ASE forces
+admission pass without another SCF run. Source/installed API/runtime/capability/
+reference/manual files match. Current fixed Si SCF converged at72 iterations,
+residual7.60746e-12<threshold1e-11;this is not physical discretization convergence.
+Summary.json records exact SHA256 and limited CPU/XC scope. No new optional CI
+dispatched. Changes remain uncommitted.

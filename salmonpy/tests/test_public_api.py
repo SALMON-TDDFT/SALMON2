@@ -10,6 +10,19 @@ class PublicAPI(unittest.TestCase):
         import salmonpy
         from salmonpy.api import PUBLIC_API
         self.assertEqual(salmonpy.__version__, '0.1.0a7')
+        from salmonpy.api import unit_contract
+        units=unit_contract()
+        from salmonpy.bands import HARTREE_EV
+        from salmonpy.ase import BOHR_ANGSTROM
+        self.assertEqual(units['output']['hartree_eV'],HARTREE_EV)
+        self.assertEqual(units['geometry']['bohr_angstrom'],BOHR_ANGSTROM)
+        self.assertEqual(units['solver_input']['hartree_eV'],27.21138505)
+        self.assertEqual(units['boundary'],'atomic units; no implicit conversion')
+        from salmonpy.manual import search
+        self.assertTrue(any('salmonpy.api.unit_contract' in t['api'] for t in search('unit_contract')['tasks']))
+        units['output']['hartree_eV']=0
+        self.assertEqual(unit_contract()['output']['hartree_eV'],HARTREE_EV)
+
         for module, names in PUBLIC_API.items():
             if module == 'salmonpy.ase_calculator' and importlib.util.find_spec('ase') is None:
                 continue
