@@ -33,7 +33,7 @@ def main():
                          'E':np.vstack((np.zeros(3),E)),
                          'dipole':np.array([f.dipole for f in frames]),
                          'electronic_change':np.array([f.electronic_change for f in frames])},
-                metadata={'backend':'isolated-PZ-E1','gauge':'length',
+                metadata={'backend':'isolated-PZ-E3','gauge':'length',
                           'units':{'time':'atomic_time','E':'E:au','dipole':'e*bohr','electronic_change':'e*bohr'},
                           'executable_sha256':runtime.executable.sha256,
                           'convergence':'caller responsibility; not checked by this sample'})

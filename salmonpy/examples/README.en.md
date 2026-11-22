@@ -264,3 +264,7 @@ Electronic input preparation only: `python -m salmonpy.examples.prepare_electron
 `fdtd_periodic_slab --native-planes`: calculation object-local plane streams, automatic colocation and integrated flux; unmatched runtime warns without discarding the calculation.
 
 The mixed solver sample optionally accepts `--planes-x FRONT BACK --plane-stride 16`: transverse-periodic planes captured only after successfully completed steps, saved once as plane-series. Disabled by default.
+
+## Molecular feedback to FDTD
+
+`molecular_feedback.py` is a complete MPI example reusing an existing GS. Required calculation programs and invocation are documented in [Molecular/FDTD coupling](../DIPOLE_RADIATION.en.md). It does not implicitly run SCF or a build.

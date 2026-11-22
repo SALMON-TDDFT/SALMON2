@@ -20,6 +20,7 @@
 
 subroutine main_tddft
 use tddft_worker
+use salmonpy_step_output
 use dip, only: subdip,calc_dip
 use density_matrix, only: calc_current
 use hamiltonian, only: update_kvector_nonlocalpt
@@ -75,6 +76,26 @@ type(s_unfold) :: unfold
 real(8) :: worker_A(3),worker_current(3,2),worker_ne,worker_density_integral(4)
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
+
+! Live-worker numerical savepoint. No owning MPI, files or Libxc handles copied.
+type :: isolated_savepoint
+ type(s_orbital)::spsi_in,spsi_out,tpsi
+ type(s_scalar)::rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
+ type(s_scalar),allocatable::rho_s(:),V_local(:),Vxc(:)
+ type(s_rt)::rt
+ type(s_poisson)::poisson
+ type(s_dft_energy)::energy
+ type(s_xc_operator_payload)::xc
+ real(8)::fields(3,4),cval
+ integer::step
+end type
+type(isolated_savepoint),allocatable::worker_saved
+type(step_output_state)::worker_outputs
+integer::worker_operation,worker_status,worker_updates
+logical::worker_outputs_closed
+
+worker_updates=0
+worker_outputs_closed=.false.
 
 !check condition for using jellium model
 if(yn_jm=='y') call check_condition_jm
@@ -143,9 +164,22 @@ call print_header()
 call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
-TE : do itt=Mit+1,nt
+itt=Mit
+TE : do while(itt<nt.or.worker_E_requested())
   if(worker_requested()) then
-    if(.not.worker_next_A(worker_A)) exit TE
+    if(.not.worker_next_A(worker_A,worker_operation)) exit TE
+    if(worker_operation/=0)then
+      call isolated_state_control(worker_operation,worker_status)
+      call worker_state_reply(worker_operation,worker_status,itt,worker_updates)
+      cycle TE
+    endif
+    if(itt>=nt.or.worker_outputs_closed)then
+      call worker_state_reply(0,14,itt,worker_updates)
+      cycle TE
+    endif
+  endif
+  itt=itt+1
+  if(worker_requested())then
     if(worker_E_requested()) then
       rt%E_ext(:,itt)=worker_A
       rt%E_tot(:,itt)=worker_A
@@ -167,6 +201,7 @@ TE : do itt=Mit+1,nt
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
   end if
 
+  if(worker_E_requested())worker_updates=worker_updates+1
   if(worker_requested()) then
     if(worker_E_requested()) then
       ! subdip already integrated the occupied density at this endpoint.
@@ -274,6 +309,95 @@ call exx_unbind_system(system)
 call rt_state_clear(independent_hse)
 #endif
 contains
+
+subroutine isolated_state_control(operation,status)
+ integer,intent(in)::operation
+ integer,intent(out)::status
+ status=0
+ select case(operation)
+ case(1)
+  if(allocated(worker_saved))then
+   status=14;return
+  endif
+  if(yn_out_dns_rt/='n'.or.yn_out_dns_ac_je/='n'.or.yn_out_micro_je/='n'.or. &
+     yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n'.or.yn_out_current_decomposed/='n'.or.yn_out_rvf_rt/='n')then
+   status=15;return
+  endif
+  call step_output_capture(worker_outputs,ofl,status)
+  if(status/=0)return
+  allocate(worker_saved,stat=status)
+  if(status/=0)return
+    worker_saved%spsi_in=spsi_in
+    worker_saved%spsi_out=spsi_out
+    worker_saved%tpsi=tpsi
+    worker_saved%rho=rho
+    worker_saved%rho_jm=rho_jm
+    worker_saved%Vh=Vh
+    worker_saved%Vh_stock1=Vh_stock1
+    worker_saved%Vh_stock2=Vh_stock2
+    worker_saved%Vbox=Vbox
+    worker_saved%Vpsl=Vpsl
+    worker_saved%rho_s=rho_s
+    worker_saved%V_local=V_local
+    worker_saved%Vxc=Vxc
+    worker_saved%rt=rt
+    worker_saved%poisson=poisson
+    worker_saved%energy=energy
+  worker_saved%xc=system%xc_payload
+  worker_saved%cval=xc_func%cval
+  worker_saved%fields(:,1)=system%vec_Ac
+  worker_saved%fields(:,2)=system%vec_Ac_ext
+  worker_saved%fields(:,3)=system%vec_E
+  worker_saved%fields(:,4)=system%vec_E_ext
+  worker_saved%step=itt
+ case(2)
+  if(.not.allocated(worker_saved).or.worker_outputs_closed)then
+   status=14;return
+  endif
+  ! A partial close must suspend further writes until explicit reconnection.
+  worker_outputs_closed=.true.
+  call step_output_close(worker_outputs,status)
+  if(status/=0)return
+    spsi_in=worker_saved%spsi_in
+    spsi_out=worker_saved%spsi_out
+    tpsi=worker_saved%tpsi
+    rho=worker_saved%rho
+    rho_jm=worker_saved%rho_jm
+    Vh=worker_saved%Vh
+    Vh_stock1=worker_saved%Vh_stock1
+    Vh_stock2=worker_saved%Vh_stock2
+    Vbox=worker_saved%Vbox
+    Vpsl=worker_saved%Vpsl
+    rho_s=worker_saved%rho_s
+    V_local=worker_saved%V_local
+    Vxc=worker_saved%Vxc
+    rt=worker_saved%rt
+    poisson=worker_saved%poisson
+    energy=worker_saved%energy
+  system%xc_payload=worker_saved%xc
+  xc_func%cval=worker_saved%cval
+  system%vec_Ac=worker_saved%fields(:,1)
+  system%vec_Ac_ext=worker_saved%fields(:,2)
+  system%vec_E=worker_saved%fields(:,3)
+  system%vec_E_ext=worker_saved%fields(:,4)
+  itt=worker_saved%step
+  spsi_in%update_zwf_overlap=.true.
+  spsi_out%update_zwf_overlap=.true.
+  tpsi%update_zwf_overlap=.true.
+ case(3,4)
+  if(.not.allocated(worker_saved))then
+   status=14;return
+  endif
+  call step_output_reopen(worker_outputs,status,ofl)
+  if(status/=0)return
+  worker_outputs_closed=.false.
+  if(operation==3)deallocate(worker_saved)
+ case(5)
+  ! Read-only monotonic update counter; never part of restored numerical state.
+ case default
+  status=11
+ end select
+end subroutine
 
 subroutine print_header()
   use parallelization, only: nproc_id_global

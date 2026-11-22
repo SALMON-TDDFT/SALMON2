@@ -1,10 +1,10 @@
-"""One-way charge-dipole sources, in atomic units, for native E/H fields."""
+"""Charge-dipole sources and explicit molecular feedback, in atomic units, for caller-owned FDTD fields."""
 from dataclasses import dataclass
 import numpy as np
 from .errors import InputError, NumericalError, RuntimeFailure
 from .field_input import _real
 
-__all__ = ['DipoleMap', 'drive_native_dipoles', 'MolecularDrive', 'select_molecular_field']
+__all__ = ['DipoleMap', 'drive_native_dipoles', 'MolecularDrive', 'select_molecular_field', 'MolecularFrame', 'MolecularFeedback']
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -200,9 +200,9 @@ def _molecular_function(name,arguments):
     try:
         library=default_api().library;probe=library.sp_molecular_protocol
         probe.argtypes=[];probe.restype=c.c_int
-        if probe()!=1:raise RuntimeFailure('unsupported molecular development-kernel protocol')
+        if probe()!=1:raise RuntimeFailure('unsupported molecular kernel protocol')
         fn=getattr(library,name)
-    except AttributeError as exc:raise RuntimeFailure('matching molecular test kernel required; explicitly build/install it') from exc
+    except AttributeError as exc:raise RuntimeFailure('matching molecular kernel required; explicitly build/install it') from exc
     fn.argtypes=arguments;fn.restype=c.c_int
     return fn
 
@@ -275,7 +275,7 @@ class _IsolatedDipoleTrial:
     """Private single-molecule interval-E transaction for the FDTD fixture.
 
     The isolated worker owns its length-gauge integration and applied-E history.
-    Cancellation uses its supported replay restore, not direct electronic restore.
+    Cancellation uses its direct live savepoint and never starts a replay worker.
     Field backups and collective acceptance belong to the caller. No mutation of
     the molecule is allowed between propose and commit/cancel.
     """
@@ -303,7 +303,7 @@ class _IsolatedDipoleTrial:
         drive = _interval_field(self._left,right) if self.sampling=='midpoint' else right
         self._accepted_right = None
         old = self.state.observables.dipole
-        self._saved = self.state.snapshot()
+        self._saved = self.state.savepoint()
         self._drive = drive
         try:
             new = self.state.step(drive).dipole
@@ -326,6 +326,7 @@ class _IsolatedDipoleTrial:
     def commit(self):
         if self._saved is None or not self._validated:
             raise InputError('validate the accepted molecular endpoint before commit')
+        self.state.release_savepoint(self._saved)
         self._left = self._accepted_right
         self._accepted_right = None
         self._saved = None
@@ -335,8 +336,9 @@ class _IsolatedDipoleTrial:
     def cancel(self):
         if self._saved is None:
             raise InputError('no pending molecular trial')
-        # Keep the token if replay itself fails; the caller can retry restoration.
-        self.state.restore(self._saved)
+        # Keep the live token if restoration/release fails; never replay.
+        self.state.restore_savepoint(self._saved)
+        self.state.release_savepoint(self._saved)
         self._accepted_right = None
         self._saved = None
         self._drive = None
@@ -372,3 +374,225 @@ def _interval_field(left,right):
     status=fn(left.ctypes.data,right.ctypes.data,out.ctypes.data)
     if status:raise NumericalError('invalid interval field')
     return out
+
+@dataclass(frozen=True, slots=True, eq=False)
+class MolecularFrame:
+    """Accepted molecular/field samples on the reporting rank, in atomic units."""
+    field_step: int
+    field_time: float
+    molecule: object
+    total_E: object
+    own_E: object
+    selected_E: object
+    drive_E: object
+    current: object
+    field_energy: object = None
+
+    def __post_init__(self):
+        from .config import _copy_json, _freeze
+        for name in ('total_E','own_E','selected_E','drive_E'):
+            object.__setattr__(self,name,_real(getattr(self,name),(3,),name))
+        object.__setattr__(self,'current',_real(self.current,(1,3),'charge current'))
+        object.__setattr__(self,'field_energy',_freeze(_copy_json(self.field_energy)))
+
+    def record(self):
+        """Detached JSON-compatible accepted frame; no file I/O."""
+        from .config import _thaw
+        return dict(field_step=self.field_step,field_time=self.field_time,
+            electronic_time=self.molecule.time,dipole=self.molecule.dipole.tolist(),
+            electron_number=self.molecule.electron_number,internal_energy=self.molecule.internal_energy,
+            total_E=self.total_E.tolist(),own_E=self.own_E.tolist(),selected_E=self.selected_E.tolist(),
+            drive_E=self.drive_E.tolist(),current=self.current.tolist(),field_energy=_thaw(self.field_energy))
+
+
+class MolecularFeedback:
+    """Caller-owned single-molecule MPI feedback with own-vacuum subtraction.
+
+    Call collectively on comm. Supply a local field on every field-group rank,
+    None on bookkeeping ranks, and state only on total_root. Both roots must be
+    field-group leaders. The reference must be vacuum driven only by this dipole,
+    with no illumination; this physical declaration is the caller's responsibility.
+    All objects/MPI lifetimes remain caller-owned. Numerical operations are Fortran.
+    A recoverable rejected interval raises StepRecoveryError(original_preserved=True).
+    Electron restoration uses direct live savepoints. No automatic retry or I/O.
+    """
+    def __init__(self,comm,field,*,state=None,mapping,total_root,reference_root,policy,observer=None):
+        from .native_steps import _NativeBackup
+        error=None;descriptor=None;backup=None;footprint=None
+        try:
+            if policy!='environment_scattered_only':raise InputError('explicit environment_scattered_only policy required')
+            if (type(total_root) is not int or type(reference_root) is not int
+                    or total_root==reference_root or not 0<=total_root<comm.size
+                    or not 0<=reference_root<comm.size):raise InputError('distinct field leader ranks required')
+            if not isinstance(mapping,DipoleMap) or len(mapping.molecule_ids)!=1 or len(mapping.point_ids)!=1:
+                raise InputError('single molecule and single macro point required')
+            if (state is not None)!=(comm.rank==total_root):raise InputError('molecular state belongs only on total_root')
+            if state is not None and state.time!=0.:raise InputError('fresh molecular state required')
+            if field is not None:
+                if field.closed or field.failed or field.step_index!=0:raise InputError('fresh usable field required')
+                grid=field.calculation.geometry.grid
+                footprint=(tuple(grid.counts),tuple(grid.spacing),tuple(field.calculation.boundaries.faces),
+                    tuple(map(tuple,field.manifest['grid_indices'])),
+                    tuple(map(tuple,field.manifest['sample_positions_bohr'])),
+                    field.manifest['sample_map'],field.manifest['deposit_map'])
+                if tuple(field.point_ids)!=mapping.point_ids:raise InputError('field and dipole point IDs differ')
+                if not np.allclose(mapping.cell_volumes,field.manifest['cell_volume'],rtol=1e-14,atol=0.):
+                    raise InputError('mapping volumes differ from field cells')
+            elif observer is not None:raise InputError('energy observer requires its local field')
+            if observer is not None and observer.field is not field:raise InputError('observer belongs to another field')
+            if field is not None:
+                backup=_NativeBackup(field,field.context.solver_comm,'sp_eh_step_transaction',
+                    field.directory,('A','E','step_index','failed','closed'))
+            descriptor=dict(error=None,key=(total_root,reference_root,policy,mapping.molecule_ids,
+                mapping.point_ids,mapping.weights.tobytes(),mapping.cell_volumes.tobytes()),
+                field=field is not None,leader=field is not None and field.context.is_leader,
+                dt=None if field is None else field.dt,capacity=None if field is None else field.capacity,
+                state_dt=None if state is None else state.dt,observer=observer is not None,footprint=footprint)
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        records=comm.allgather(descriptor if error is None else dict(error=error))
+        if any(r['error'] for r in records):raise InputError('molecular feedback setup: '+str(records))
+        if any(r['key']!=records[0]['key'] for r in records):raise InputError('molecular feedback settings differ across ranks')
+        leaders=[i for i,r in enumerate(records) if r['leader']]
+        if sorted(leaders)!=sorted((total_root,reference_root)):raise InputError('roots must identify the two field leaders')
+        if any(r['footprint']!=records[total_root]['footprint'] for r in records if r['field']):
+            raise InputError('own-vacuum reference must use matching grid, boundaries and sampling/deposition footprint')
+        dt=records[total_root]['dt']
+        if len({r['observer'] for r in records if r['field']})!=1:
+            raise InputError('enable energy observation on both complete field groups or neither')
+        if any(r['dt']!=dt for r in records if r['field']) or records[total_root]['state_dt']!=dt:
+            raise InputError('molecular and field time steps must match')
+        self.comm=comm;self.field=field;self.state=state;self.mapping=mapping
+        self.total_root=total_root;self.reference_root=reference_root;self.dt=dt
+        self.capacity=min(r['capacity'] for r in records if r['field'])
+        self.observer=observer;self.started=False;self.failed=False;self.step_index=0
+        self._bridge=None;self._needs_rollback=False
+        self._backup=backup
+
+    def _capture(self):
+        self._needs_rollback=False
+        token=None;error=None
+        if self._backup is None:return token,error
+        try:
+            if self.field.step_index!=self.step_index:raise InputError('caller changed the field clock during feedback')
+            token=self._backup.capture()
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        # A leader-only append-journal failure must not let peers advance.
+        errors=self.field.context.solver_comm.allgather(error)
+        return token,next((e for e in errors if e),None)
+
+    def _packet(self,error=None,*,observe=False):
+        try:
+            energy=None if self.observer is None or not observe else self.observer.sample_step()
+            E=None if self.field is None else self.field.E[0].copy()
+        except Exception as exc:
+            error=type(exc).__name__+': '+str(exc);E=None;energy=None
+        return dict(error=error,E=E,energy=energy)
+
+    @staticmethod
+    def _errors(packets):
+        return tuple(p['error'] for p in packets if p['error'])
+
+    def _recover(self,token,errors):
+        from .stepping import StepRecoveryError
+        recovery=[]
+        if self._backup is not None and self._backup.active and self._needs_rollback:
+            try:self._backup.rollback(token)
+            except Exception as exc:recovery.append(str(exc))
+        if self._bridge is not None and self._bridge._saved is not None:
+            try:self._bridge.cancel()
+            except Exception as exc:recovery.append(str(exc))
+        if self._backup is not None:
+            try:self._backup.release(token)
+            except Exception as exc:recovery.append(str(exc))
+        if self.state is not None and not self.state.usable:
+            recovery.append('isolated worker is not usable; no replay recovery attempted')
+        # Recovery-only vote: successful steps retain the existing four exchanges.
+        failures=tuple(e for group in self.comm.allgather(recovery) for e in group)
+        self.failed=bool(failures)
+        raise StepRecoveryError('molecular feedback',errors,original_preserved=not failures,rollback_errors=failures)
+
+    def _frame(self,packets,drive,current):
+        total=packets[self.total_root];own=packets[self.reference_root]
+        return MolecularFrame(self.step_index+1,(self.step_index+1)*self.dt,self.state.observables,
+            total['E'],own['E'],_selected_molecular_field(total['E'],own['E']),drive,current,
+            [total['energy'],own['energy']])
+
+    def start(self):
+        """Collective zero-current hold; report the immutable first frame on total_root."""
+        if self.started or self.failed:raise InputError('start requires a fresh usable feedback session')
+        token,error=self._capture()
+        try:
+            if error is None and self.field is not None:
+                self._needs_rollback=True
+                self.field.advance(np.zeros((1,3)))
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        packets=self.comm.gather(self._packet(error,observe=error is None),root=self.total_root)
+        error=None;frame=None
+        if self.comm.rank==self.total_root:
+            try:
+                failures=self._errors(packets)
+                if failures:raise RuntimeFailure(str(failures))
+                selected=_selected_molecular_field(packets[self.total_root]['E'],packets[self.reference_root]['E'])
+                if np.any(selected):raise InputError('initial molecular E must be zero; increase source separation or delay')
+                self._bridge=_IsolatedDipoleTrial(self.state,self.mapping,initial_field=selected)
+                frame=self._frame(packets,np.zeros(3),np.zeros((1,3)))
+            except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        error=self.comm.bcast(error,root=self.total_root)
+        if error:self._recover(token,(error,))
+        if self._backup is not None:self._backup.release(token)
+        self.started=True;self.step_index=1
+        return frame
+
+    def step(self,*,validate=None):
+        """Collective accepted interval; optional root-only read-only frame validator.
+
+        A validator exception rejects the interval. Catch StepRecoveryError on
+        every rank and retry only if original_preserved is true. The callback
+        must not mutate states or perform collectives. No automatic retries.
+        """
+        if not self.started or self.failed or self.step_index>=self.capacity:
+            raise InputError('started usable feedback with remaining field capacity required')
+        token,error=self._capture()
+        try:
+            if error is None and self.field is not None:
+                self._needs_rollback=True
+                self.field.advance(np.zeros((1,3)))
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        packets=self.comm.gather(self._packet(error),root=self.total_root)
+        payload=None
+        if self.comm.rank==self.total_root:
+            try:
+                failures=self._errors(packets)
+                if failures:raise RuntimeFailure(str(failures))
+                if self.state.time!=(self.step_index-1)*self.dt:
+                    raise InputError('caller changed the molecular clock during feedback')
+                current=self._bridge.propose(packets[self.total_root]['E'],packets[self.reference_root]['E'])
+                payload=(None,current)
+            except Exception as exc:payload=(type(exc).__name__+': '+str(exc),None)
+        error,current=self.comm.bcast(payload,root=self.total_root)
+        if error:self._recover(token,(error,))
+        error=None
+        try:
+            if self._backup is not None:
+                self._backup.rollback(token);self._backup.release(token);token=None
+                token,error=self._capture()
+            if error is None and self.field is not None:
+                self._needs_rollback=True
+                self.field.advance(current)
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        packets=self.comm.gather(self._packet(error,observe=error is None),root=self.total_root)
+        error=None;frame=None
+        if self.comm.rank==self.total_root:
+            try:
+                failures=self._errors(packets)
+                if failures:raise RuntimeFailure(str(failures))
+                self._bridge.validate(packets[self.total_root]['E'],packets[self.reference_root]['E'])
+                frame=self._frame(packets,self._bridge._drive,current)
+                if validate is not None:validate(frame)
+                self._bridge.commit()
+            except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        error=self.comm.bcast(error,root=self.total_root)
+        if error:self._recover(token,(error,))
+        if self._backup is not None:self._backup.release(token)
+        self.step_index+=1
+        return frame

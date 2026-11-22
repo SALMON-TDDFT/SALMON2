@@ -110,8 +110,14 @@ def run(executable, reference, directory):
             aa.step_fields(packet(E, n))
         continued = [aa.step_fields(packet(E, n)) for n, E in enumerate(fields[10:], 11)]
         np.testing.assert_array_equal(continued, trajectories[0][11:])
-    report = dict(schema='salmonpy.isolated-worker-validation/3',
-                  capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness'],
+    run_savepoint(executable,reference,root/'savepoint-proof',saved_step=7)
+    proof=json.loads((root/'savepoint-proof/report.json').read_text())
+    report = dict(schema='salmonpy.isolated-worker-validation/4',
+                  savepoint_same_process=proof['same_process'],
+                  savepoint_extra_evolutions=proof['restore_additional_evolution_calls'],
+                  savepoint_stale_rejected=proof['stale_savepoint_rejected'],
+                  savepoint_continuation_max_abs_error=0.,
+                  capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint'],
                   interleaved_independence=True, field_packet_missing_E_rejected=True,
                   replay_continuation_max_abs_error=0., executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
                   protocol='SALMONPY_TDDFT_E_V3', steps=len(fields),
@@ -123,10 +129,63 @@ def run(executable, reference, directory):
     print(json.dumps(report, indent=2))
 
 
+def run_savepoint(executable,reference,directory,*,saved_step=7):
+    from isolated_worker_driver import IsolatedWorker
+    if type(saved_step) is not int or not 0<=saved_step<=20:raise ValueError("saved step must be in 0..20")
+    from salmonpy.field_input import FieldPacket,FieldValue
+    executable=Path(executable).resolve(strict=True);reference=Path(reference).resolve(strict=True)
+    root=Path(directory).resolve();root.mkdir(parents=True,exist_ok=False)
+    contents=(reference/'first/input.inp').read_text()
+    def prepare(name):
+        folder=root/name;folder.mkdir()
+        for name in ('C_rps.dat','H_rps.dat'):shutil.copy2(reference/'gs'/name,folder/name)
+        shutil.copytree(reference/'gs/data_for_restart',folder/'data_for_restart')
+        return folder
+    def step(worker,n):
+        samples=((.01,.003,.02),(.02,-.004,-.01),(-.01,.005,.006))
+        return worker.step_fields(FieldPacket(E=FieldValue(samples[(n-1)%3],time=n*.003,position=(0,0,0),unit='E:au')))
+    with IsolatedWorker(executable,prepare('direct'),contents,dt=.003,capacity=20) as a, \
+         IsolatedWorker(executable,prepare('control'),contents,dt=.003,capacity=20) as b:
+        original_pid=a._proc.pid
+        for n in range(1,saved_step+1):np.testing.assert_array_equal(step(a,n),step(b,n))
+        before=b.dipoles.copy();saved=a.capture()
+        assert saved['reply'][2:]==(saved_step,saved_step)
+        assert a.control('CAPTURE_E')[1]==14
+        expected=[step(a,n) for n in range(saved_step+1,21)]
+        reply,resumed=a.restore(saved)
+        assert reply[2:]==(saved_step,20) and resumed[2:]==(saved_step,20)
+        assert a._proc.pid==original_pid
+        np.testing.assert_array_equal(b.dipoles,before)
+        np.testing.assert_array_equal([step(a,n) for n in range(saved_step+1,21)],expected)
+        assert a.control('PROBE_E')[2:]==(20,40-saved_step)
+        a.restore(saved)
+        np.testing.assert_array_equal([step(a,n) for n in range(saved_step+1,21)],expected)
+        assert a.release()[2:]==(20,60-2*saved_step)
+        assert a.control('RESTORE_E')[1]==14
+        np.testing.assert_array_equal([step(b,n) for n in range(saved_step+1,21)],expected)
+        for name in ('C2H2_rt.data','C2H2_rt_energy.data'):
+            # Capture flushes both streams before comparing the completed files.
+            a.capture();b.capture()
+            try:a.restore(saved)
+            except ValueError:pass
+            else:raise AssertionError('released savepoint was accepted after reuse')
+            assert (root/'direct'/name).read_bytes()==(root/'control'/name).read_bytes(),name
+            a.release();b.release()
+    report=dict(schema='salmonpy.isolated-native-savepoint-validation/1',
+        executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
+        same_process=True,restore_additional_evolution_calls=0,continuation_bit_exact=True,stale_savepoint_rejected=True,
+        independent_state_unchanged=True,output_streams_bit_exact=True,
+        saved_step=saved_step,capacity=20,scope='single pending live-worker PZ memory savepoint; not public Python/disk checkpoint')
+    (root/'report.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('executable')
     parser.add_argument('reference')
     parser.add_argument('directory')
+    parser.add_argument('--savepoint',action='store_true')
+    parser.add_argument('--savepoint-step',type=int,default=7)
     args = parser.parse_args()
-    run(args.executable, args.reference, args.directory)
+    if args.savepoint:run_savepoint(args.executable,args.reference,args.directory,saved_step=args.savepoint_step)
+    else:run(args.executable,args.reference,args.directory)

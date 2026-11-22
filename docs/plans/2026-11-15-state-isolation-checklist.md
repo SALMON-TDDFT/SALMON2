@@ -14,11 +14,11 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 | 完了 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBE局所試験、MPI2/4、固定Si/PBE比較。今回のソース・バイナリ向け記録も更新。換算定数は変更なし |
 | 完了 | 初期推定の入力準備・保持GSからの受け渡し | 準備と実行を分離し、保持GSの波動関数・占有数を独立コピー。前回実装は8f3a7663までpush済み |
 | 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
-| 完了 | 最新パッケージ・分子接続検証 | ソース版・wheel版とも687件実行、各1件任意スキップ。日英・AI JSON同期。今回許可されたC2H2 GSを保存・再利用し、真空/LDの取消再試行を確認。末尾とisolated-fdtd検証記録を参照 |
+| 完了 | 最新パッケージ・分子接続検証 | 六面収支・x/y/z各2分割まで5d6892c7へpush済み。続く単一分子の公開結合APIは実装・検証済みで未コミット。公開保存点と直接取消まで接続。ソース・wheelとも690件実行、各1件任意スキップ。末尾の最新記録を参照 |
 
 ### 残る作業と対象拡大
 
-**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消は履歴再生です。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。全電磁エネルギーと一般利用向けドライバも残件です。以下はそれと区別する運用・対象拡大の残件です。
+**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消はワーカー内保存点から直接復元します。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。光源・吸収層を除いた内側の箱について、六面流束を含む場・等方LD・分子の離散エネルギー収支と実MPI2分割を確認済みです。単一分子用の一般利用向け入口はMolecularFeedbackとして実装済みです。プロセス終了後も使える直接ディスク保存／復元、テンソル・界面平滑化・任意の背景誘電率への観測拡張、広い物理条件での収束確認は残件です。以下はそれと区別する運用・対象拡大の残件です。
 
 1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
 2. **大規模化の計測**：マクロ点・ランク・観測間隔に対するメモリ、通信、ファイル数・I/O負荷の測定。集約・バッファ化は測定上の必要に応じて実装する。
@@ -35,7 +35,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
-Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum-work observation/comparison and selected-field midpoint timing are verified. Full field energy, physical convergence and a public driver remain separate. Memory budgets warn; SCF nonconvergence retains
+Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum-work observation/comparison and selected-field midpoint timing are verified. Six-face inner-box energy balance is verified for scalar LD, including real two-partition FDTD tests along x/y/z. Tensor/subpixel/arbitrary-background energy observation, physical convergence, and direct isolated-electron restoration without replay remain separate. A public single-molecule driver is implemented as MolecularFeedback; see the latest evidence below. Memory budgets warn; SCF nonconvergence retains
 results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
@@ -4178,3 +4178,45 @@ midpoint-work-summary.json. Follow-up still uncommitted; no manual heavy CI.
 - [ ] テンソル・界面平滑化・任意の背景誘電率への観測拡張。現状は警告して観測不可を返し、計算は継続可能。
 
 今回の実測は量子仕事の約0.70%の残差を残す短時間開発検証。通常の時刻中心化エネルギーの残差も保存し、離散保存量と区別する。一般利用の分子結合ドライバ・広い物理条件の検証は引き続き残件。
+
+## 2026-11-22 リスト照合（5d6892c7後）
+
+49707ce3・5d6892c7は独立SALMONpyへpush済み。古い節の「未コミット」「全エネルギー未着手」は、その時点の記録であり現時点の残件ではない。
+
+優先候補は、開発試験にある分子双方向結合を一般利用できる入口へ整理すること。現在の電子状態の取消は履歴再生なので、再計算なしの直接復元は別項目として残す。収支観測のテンソル・界面平滑化・任意の背景誘電率への拡張と、広い物理条件の収束確認も未完了。施設・多ノード、大規模化計測、他環境配布、Agフィット改善は上記キューのまま。GPU等は将来対象、利用者指定の高速HSE電子数診断・実材料格子収束は後回しを維持する。
+
+## 2026-11-22 単一分子の公開結合入口
+
+- [x] 既存dipole_sourceモジュールへMolecularFeedback/MolecularFrameを追加。呼出元が用意する二つの場・一つのE駆動分子状態・MPI・DipoleMapを接続。startの初期保持とstepの中点予測／取消／電流注入／受理を公開。
+- [x] 開発用MPIドライバの重複した結合ループを公開API呼出へ置換。数値処理は既存Fortranのまま。正常時の全体通信は従来の4回／区間、復元結果の全体合意は失敗時だけ。退避記録の代表ランク単独失敗は更新前の群内合意へ伝える。
+- [x] 既存C2H2／等方LD・MPI6：公開API連続、wheel取消再試行、代表ランク退避記録失敗後の再試行が、以前の全保存配列・六面記録と完全一致。完全サンプルの観測値・エネルギー鮮度も一致。
+- [x] 最終wheel・真空例・全体テストを照合。ソース・wheel各689件実行、各1件任意スキップ。真空の従来全配列、LDの従来全配列・六面記録、完全サンプルの観測・鮮度が完全一致。API・日英ガイド・AI JSON・サンプルのwheel収録バイトも一致。
+- [x] 本計算と自己真空参照の格子・境界・採取／電流配置を初期化時の既存合意で照合。不一致は更新前に拒否。
+
+一分子・一点・自己真空場差し引きの範囲。分子状態・場の生成終了とファイル保存は呼出元が担当し、SCF・ビルド・ダウンロード・再試行を暗黙に実行しない。電子状態の取消は履歴再生であり直接復元ではない。残件は直接復元、テンソル等の収支観測拡張、物理条件の収束、施設・多ノード・他環境、大規模化、Agフィット改善。
+
+公開結合入口の記録：docs/molecular-feedback-api-validation-2026-11-22.md、既存C2H2キャンペーンのpublic-feedback-release-summary.json。今回の変更は未コミット。追加の物理CIは起動していない。
+
+## 2026-11-22 孤立系ワーカー内の直接退避（第一段階）
+
+- [x] PZワーカーのmain_tddft所有の一状態退避を実装。波動関数両バッファ・密度・ポテンシャル履歴・Poisson・RT履歴・エネルギー・XC作業量・外場ベクトルと更新番号を直接コピー。新しいモジュール大域セレクタは追加しない。
+- [x] 初期0／奇数7／偶数8／容量20で直接復元。プロセスIDは同一、復元による時間発展追加0回。再試行後の9観測量と主要二出力が連続実行と完全一致。別ワーカーの状態は不変。二重退避／退避なし復元は状態を変更せずステータスを返す。
+- [x] Git追跡ファイルだけから準備・ビルドし、ソースと全アプリケーションオブジェクトの禁止ソルバー監査を通過。NLCC XC・力の局所MPI1/2検証後にソース識別子を更新。既存C2H2 GSを再利用し、新規SCFなし。
+- [x] 通常E3応答とバッチ基準の比較誤差は従来と同じ。Python公開API／FDTDの取消はこの段階では履歴再生のまま。
+- [ ] 公開Python snapshot／FDTD取消へ直接退避を接続する。
+- [ ] プロセス終了後にも使える直接ディスク保存／復元。
+
+本節はワーカー内メモリ退避の開発検証であり、公開APIの直接保存完了とは数えない。公開API互換動作・source/wheelの最終確認と記録は完了。ソース・wheel各689件実行、各1件任意スキップ。新ワーカーを使った既存のLD＋FDTD取消再試行も、以前の全保存配列・六面記録と完全一致。
+
+ワーカー内直接退避の確定記録：docs/isolated-savepoint-validation-2026-11-22.md と既存C2H2キャンペーンのnative-savepoint-final-summary.json。公開Python snapshot／FDTD取消への直接接続と耐久ディスク保存は未完了。今回の変更は未コミット。追加の物理CIは起動していない。
+
+## 2026-11-22 公開保存点と分子FDTDの直接取消
+
+- [x] IsolatedSavepointとsavepoint／restore_savepoint／release_savepointを公開。数値状態はFortran所有の保存点から直接コピーし、Pythonは出力位置と呼出契約を管理する。履歴再生のsnapshot／ディスク保存は別の明示APIであり、直接復元の代替として暗黙に呼ばない。
+- [x] MolecularFeedbackの取消を直接復元へ接続。正常時の外側通信は区間あたり4回を維持。releaseの失敗も既存の受理通知に載せる。
+- [x] C2H2＋LD、外側MPI6・場2分割。source連続／取消再試行と最終wheel取消再試行の全保存配列・六面記録が従来の連続実行と完全一致。同一PID、受理63更新、取消試行1更新、復元追加0更新。
+- [x] 一時的な出力巻戻し失敗後の明示的完了、古い／別状態の保存点拒否を確認。ワーカー終了時は再生せず利用不能・original_preserved=Falseを通知し、呼出元MPIは存続。プロセス消失からの状態保持は保証しない。
+- [x] ソース／最終wheel各690件、任意スキップ各1件。日英ガイド・AI JSON・サンプルの収録バイト一致。検証記録はdocs/isolated-python-savepoint-validation-2026-11-22.md。
+- [ ] 次段階：プロセス終了後も使える直接ディスク保存／復元。現在の履歴再生アーカイブとは区別する。
+
+既存の許可済みGSを再利用し、新規SCFなし。変更は未コミット。追加の物理CIは起動していない。

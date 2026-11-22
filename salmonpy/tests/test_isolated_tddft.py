@@ -10,13 +10,28 @@ import numpy as np
 from salmonpy.errors import InputError, SnapshotError, RuntimeFailure
 
 WORKER = '''import sys
-v=[0.]*6;n=0
+v=[0.]*6;n=0;updates=0;saved=None
+codes={'CAPTURE_E':1,'RESTORE_E':2,'RELEASE_E':3,'RESUME_E':4,'PROBE_E':5}
 for line in sys.stdin:
  p=line.split()
  if not p:continue
+ if p[0] in codes:
+  op=codes[p[0]];status=0
+  if op==1:
+   if saved is not None:status=14
+   else:saved=(n,list(v))
+  elif op==2:
+   if saved is None:status=14
+   else:n=saved[0];v=list(saved[1])
+  elif op==3:
+   if saved is None:status=14
+   else:saved=None
+  elif op==4 and saved is None:status=14
+  print('SALMONPY_E_STATE_V1',op,status,n,updates,flush=True)
+  continue
  if p[0]=='INIT_E':dt=float(p[1])
  elif p[0]=='STEP_E':
-  n+=1;e=list(map(float,p[1:]));v=[.9*x+dt*e[k%3]+.001*n for k,x in enumerate(v)]
+  n+=1;updates+=1;e=list(map(float,p[1:]));v=[.9*x+dt*e[k%3]+.001*n for k,x in enumerate(v)]
  elif p[0]=='CLOSE':break
  else:continue
  print('SALMONPY_TDDFT_E_V3',n,*v,10.-n*1.e-8,-1.+n*.01,1. if n!=2 else 0.,flush=True)
@@ -24,11 +39,13 @@ for line in sys.stdin:
 
 
 def receipt(binary):
-    return dict(schema='salmonpy.isolated-worker-validation/3',
+    return dict(schema='salmonpy.isolated-worker-validation/4',
                 executable_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                 protocol='SALMONPY_TDDFT_E_V3',steps=20,interleaved_independence=True,
+                savepoint_same_process=True,savepoint_extra_evolutions=0,savepoint_stale_rejected=True,
+                savepoint_continuation_max_abs_error=0.,
                 replay_continuation_max_abs_error=0.,repeat_max_abs_error=0.,reference_max_abs_error=0.,reference_energy_max_abs_error=0.,
-                capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness'])
+                capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint'])
 
 
 class IsolatedTDDFTTests(unittest.TestCase):
@@ -104,7 +121,10 @@ class IsolatedTDDFTTests(unittest.TestCase):
     def test_receipt_rejects_false_evidence_and_duplicate_keys(self):
         from salmonpy.isolated_tddft import load_isolated_runtime
         for key,value in [('steps',True),('interleaved_independence',False),
-                          ('reference_max_abs_error',float('nan')),('capabilities',[])]:
+                          ('reference_max_abs_error',float('nan')),('capabilities',[]),
+                          ('schema','salmonpy.isolated-worker-validation/3'),
+                          ('savepoint_extra_evolutions',1),('savepoint_same_process',False),
+                          ('savepoint_stale_rejected',False)]:
             data=receipt(self.binary);data[key]=value;self.validation.write_text(json.dumps(data))
             with self.subTest(key=key),self.assertRaises(InputError):
                 load_isolated_runtime(self.binary,self.validation)
@@ -268,3 +288,101 @@ class IsolatedTDDFTTests(unittest.TestCase):
         np.testing.assert_array_equal(a.observables.dipole,first)
         bridge.propose([5.,9.,13.],[1.,1.,1.]);bridge.validate([5.,9.,13.],[1.,1.,1.]);bridge.commit()
         np.testing.assert_array_equal(a.observables.dipole,expected)
+
+    def test_public_feedback_start_rejection_retry_and_caller_ownership(self):
+        from salmonpy.dipole_source import MolecularFeedback, DipoleMap
+        from salmonpy.stepping import StepRecoveryError
+        from types import SimpleNamespace
+        state=self.state()
+        class Comm:
+            rank=0;size=2;different_footprint=False
+            def allgather(self,value):
+                if isinstance(value,dict):
+                    other=dict(value,state_dt=None)
+                    if self.different_footprint:other['footprint']=('different',)
+                    return [value,other]
+                return [value,[]]
+            def gather(self,value,root=0):
+                # A source-free own-vacuum reference; no hidden physical solver.
+                return [value,dict(error=None,E=np.zeros(3),energy=None)]
+            def bcast(self,value,root=0):return value
+        class Backup:
+            fail=False
+            def __init__(self,*a):self.active=False
+            def capture(self):
+                self.active=True
+                if self.fail:raise OSError('leader journal unavailable')
+                return field.step_index
+            def rollback(self,token):field.step_index=token
+            def release(self,token):self.active=False
+        field=SimpleNamespace(dt=state.dt,step_index=0,capacity=20,closed=False,failed=False,
+            E=np.zeros((1,3)),point_ids=(10,),manifest={'cell_volume':8.,'grid_indices':[[19,20,20]],
+                'sample_positions_bohr':[[-1.,1.,1.]],'sample_map':'same-map','deposit_map':'same-deposit'},
+            calculation=SimpleNamespace(geometry=SimpleNamespace(grid=SimpleNamespace(counts=(40,40,40),spacing=(2.,2.,2.))),
+                boundaries=SimpleNamespace(faces=('pml',)*6)),directory=self.tmp.name,
+            context=SimpleNamespace(is_leader=True,solver_comm=SimpleNamespace(size=1,allgather=lambda value:[value])))
+        def advance(current):field.step_index+=1
+        field.advance=advance
+        mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.])
+        with patch('salmonpy.native_steps._NativeBackup',Backup):
+            comm=Comm();comm.different_footprint=True
+            with self.assertRaises(InputError):
+                MolecularFeedback(comm,field,state=state,mapping=mapping,total_root=0,
+                    reference_root=1,policy='environment_scattered_only')
+            self.assertEqual(field.step_index,0)
+            comm.different_footprint=False
+            session=MolecularFeedback(comm,field,state=state,mapping=mapping,total_root=0,
+                reference_root=1,policy='environment_scattered_only')
+            first=session.start();self.assertEqual(first.field_step,1)
+            before=state.observables.dipole.copy()
+            Backup.fail=True
+            with self.assertRaises(StepRecoveryError) as failed_capture:session.step()
+            self.assertTrue(failed_capture.exception.original_preserved)
+            self.assertEqual(field.step_index,1);self.assertEqual(state.time,0.)
+            Backup.fail=False
+            def reject(frame):raise ValueError('injected consumer rejection')
+            with self.assertRaises(StepRecoveryError) as cm:session.step(validate=reject)
+            self.assertTrue(cm.exception.original_preserved)
+            self.assertEqual(field.step_index,1);self.assertEqual(state.time,0.)
+            np.testing.assert_array_equal(state.observables.dipole,before)
+            result=session.step()
+            self.assertEqual(result.field_step,2)
+            self.assertEqual(result.molecule.time,state.dt)
+            with self.assertRaises(ValueError):result.selected_E[0]=1.
+            self.assertFalse(field.closed)
+            self.assertEqual(state.step([0,0,0]).time,2*state.dt)
+
+    def test_live_savepoint_same_process_no_replay_and_explicit_lifetime(self):
+        a,b=self.state(),self.state()
+        for E in ([.1,.2,0.],[.3,-.1,.2]):a.step(E)
+        token=a.savepoint();pid=a.worker_statistics()['pid']
+        saved=a.observables;other=b.observables.dipole.copy()
+        with self.assertRaises(SnapshotError):a.savepoint()
+        with self.assertRaises(SnapshotError):a.snapshot()
+        with self.assertRaises(SnapshotError):b.restore_savepoint(token)
+        expected=a.step([.2,.1,-.2])
+        updates=a.worker_statistics()['updates']
+        with patch.object(a._engine,'_spawn',side_effect=AssertionError('restore must not replay')):
+            with patch.object(token._journal,'restore',side_effect=OSError('journal temporarily unavailable')):
+                with self.assertRaises(OSError):a.restore_savepoint(token)
+            self.assertFalse(a.usable)
+            with self.assertRaises(RuntimeFailure):a.step([0.,0.,0.])
+            a.restore_savepoint(token)
+            self.assertEqual(a.worker_statistics()['updates'],updates)
+            self.assertEqual(a.worker_statistics()['pid'],pid)
+            self.assertEqual(a.time,saved.time)
+            np.testing.assert_array_equal(a.observables.dipole,saved.dipole)
+            np.testing.assert_array_equal(a.step([.2,.1,-.2]).dipole,expected.dipole)
+            a.restore_savepoint(token)
+        np.testing.assert_array_equal(b.observables.dipole,other)
+        a.release_savepoint(token)
+        with self.assertRaises(SnapshotError):a.restore_savepoint(token)
+        newer=a.savepoint()
+        with self.assertRaises(SnapshotError):a.restore_savepoint(token)
+        a.release_savepoint(newer)
+        pending=a.savepoint()
+        a._engine._proc.kill();a._engine._proc.wait()
+        with patch.object(a._engine,'_spawn',side_effect=AssertionError('dead direct worker must not replay')):
+            with self.assertRaises(RuntimeFailure):a.step([0.,0.,0.])
+            with self.assertRaises(RuntimeFailure):a.restore_savepoint(pending)
+        self.assertFalse(a.usable)

@@ -71,84 +71,54 @@ def isolated_loop(world, field, args):
     receives a constant selected interval E, with midpoint or explicit endpoint
     sampling chosen by this coupling layer in Fortran. Restoring electrons currently replays accepted history.
     """
-    from salmonpy.native_steps import _NativeBackup
-    from salmonpy.dipole_source import DipoleMap, _IsolatedDipoleTrial, _selected_molecular_field
+    from salmonpy.dipole_source import DipoleMap, MolecularFeedback
     from salmonpy.isolated_tddft import load_isolated_runtime, IsolatedTDDFTInitialState
+    from salmonpy.stepping import StepRecoveryError
     from contextlib import ExitStack
-    backup=None if field is None else _NativeBackup(field,field.context.solver_comm,
-        'sp_eh_step_transaction',field.directory,('A','E','step_index','failed','closed'))
     observer=None if field is None or args.energy_box is None else field.energy_observer(args.energy_box[:3],args.energy_box[3:])
-    def packet():
-        if field is None:return None
-        return (field.E[0].copy(),None if observer is None else observer.sample_step())
-    own_leader=world.size//2
-    zero=np.zeros((1,3))
-    token=None if observer is None else backup.capture()
-    if field is not None:field.advance(zero)
-    gathered=world.gather(packet(),root=0)
-    if token is not None:backup.release(token)
-    initial=None if world.rank else [None if x is None else x[0] for x in gathered]
-    budgets=[] if world.rank else [[gathered[0][1],gathered[own_leader][1]]]
     with ExitStack() as stack:
-        bridge=None
+        state=None
         if world.rank==0:
-            selected=_selected_molecular_field(initial[0],initial[own_leader])
-            if np.any(selected):
-                raise ValueError('initial molecular E must be zero; increase source separation or delay')
             runtime=load_isolated_runtime(args.isolated_executable,args.isolated_validation)
             model=stack.enter_context(IsolatedTDDFTInitialState.from_salmon(
                 args.isolated_bundle,args.isolated_input,runtime=runtime,
                 max_steps=args.steps,threads=1))
             state=stack.enter_context(model.new_state(dt=args.dt,position=(-1.,1.,1.)))
-            mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.])
-            bridge=_IsolatedDipoleTrial(state,mapping,sampling=args.isolated_sampling,initial_field=selected)
-            ps=[state.observables.dipole.copy()];js=[];drives=[];norms=[state.electron_number]
+        session=MolecularFeedback(world,field,state=state,
+            mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.]),
+            total_root=0,reference_root=world.size//2,policy='environment_scattered_only',observer=observer)
+        frame=session.start()
+        budgets=[]
+        if world.rank==0:
+            initial_worker_stats=state.worker_statistics()
+            ps=[frame.molecule.dipole.copy()];js=[];drives=[];norms=[frame.molecule.electron_number]
             energies=[state._engine.current[7]];fresh=[state._engine.current[8]]
-            fields=[[initial[0],initial[own_leader],selected]]
+            fields=[[frame.total_E,frame.own_E,frame.selected_E]]
+            budgets.append(frame.record()['field_energy'])
         n=1
         rejected=False
         while n<args.steps:
-            token=None if backup is None else backup.capture()
-            if field is not None:field.advance(zero)
-            predicted=world.gather(None if field is None else field.E[0].copy(),root=0)
-            current=bridge.propose(predicted[0],predicted[own_leader]) if world.rank==0 else None
-            current=world.bcast(current,root=0)
-            if backup is not None:
-                backup.rollback(token)
-                # Native backups are single-use: current is move-restored.
-                # Retire the predictor token and protect the accepted attempt.
-                backup.release(token)
-                token=backup.capture()
-            if field is not None:field.advance(current)
-            accepted_packet=world.gather(packet(),root=0)
-            accepted=None if world.rank else [None if x is None else x[0] for x in accepted_packet]
             injected=args.inject_reject_step==n and not rejected
-            error=None
-            if world.rank==0:
-                try:
-                    if injected:raise ValueError('injected endpoint rejection')
-                    bridge.validate(accepted[0],accepted[own_leader])
-                except Exception as exc:error=str(exc)
-            error=world.bcast(error,root=0)
-            if error:
-                if backup is not None:backup.rollback(token)
-                if bridge is not None:bridge.cancel()
-                if backup is not None:backup.release(token)
+            def validate(frame):
+                if injected:raise ValueError('injected endpoint rejection')
+            try:frame=session.step(validate=validate)
+            except StepRecoveryError as exc:
+                if not exc.original_preserved:raise
                 if injected:
                     rejected=True
                     continue
-                raise ValueError(error)
+                raise
             if world.rank==0:
-                budgets.append([accepted_packet[0][1],accepted_packet[own_leader][1]])
-                provided=bridge._drive.copy()
-                bridge.commit()
-                selected=_selected_molecular_field(accepted[0],accepted[own_leader])
-                ps.append(state.observables.dipole.copy());js.append(current[0].copy());norms.append(state.electron_number)
+                ps.append(frame.molecule.dipole.copy());js.append(frame.current[0].copy())
+                norms.append(frame.molecule.electron_number)
                 energies.append(state._engine.current[7]);fresh.append(state._engine.current[8])
-                drives.append(provided);fields.append([accepted[0],accepted[own_leader],selected])
-            if backup is not None:backup.release(token)
+                drives.append(frame.drive_E);fields.append([frame.total_E,frame.own_E,frame.selected_E])
+                budgets.append(frame.record()['field_energy'])
             n+=1
         if world.rank==0:
+            final_worker_stats=state.worker_statistics()
+            assert final_worker_stats['pid']==initial_worker_stats['pid']
+            assert final_worker_stats['updates']==args.steps-1+final_worker_stats['direct_restores']
             # Independent response to the accepted E trace, with no field trials.
             control=stack.enter_context(model.new_state(dt=args.dt,position=(-1.,1.,1.)))
             for E,p,Ne in zip(drives,ps[1:],norms[1:]):
@@ -169,7 +139,7 @@ def isolated_loop(world, field, args):
             zero_work=_energy_work(np.zeros((args.steps,3)),np.zeros((args.steps,3)),free_energies,free_fresh)
             np.savez(args.output/'history.npz',fields=fields,p=ps,j=js,drive=drives,electron_number=norms,
                 internal_energy_raw=energies,energy_fresh=fresh,energy_work=work,selected_field_energy_work=field_work,total_source_work=total_work,vacuum_reference_work=own_work,zero_field_energy_work=zero_work,
-                drive_time=(np.arange(args.steps-1)+(1.5 if args.isolated_sampling=='midpoint' else 2.))*args.dt,
+                drive_time=(np.arange(args.steps-1)+1.5)*args.dt,
                 energy_observation_steps=np.flatnonzero(fresh),
                 energy_observations=np.asarray(energies)[np.asarray(fresh,dtype=bool)],
                 E_time=np.arange(1,args.steps+1)*args.dt,
@@ -193,7 +163,7 @@ def isolated_loop(world, field, args):
                 applied_relative_residual=held_error['relative_error'],
                 selected_field_midpoint_relative_residual=midpoint_error['relative_error'],
                 applied_selected_midpoint_relative_difference=drive_error['relative_error'],
-                molecular_sampling=args.isolated_sampling,
+                molecular_sampling='midpoint',
                 dt=args.dt,steps=args.steps,field_grid=args.field_grid,field_ranks=int(np.prod(args.field_grid)),material_environment=args.environment,source_amplitude=args.source_amplitude,
                 library_sha256=field.manifest['library_sha256'],
                 isolated_executable_sha256=runtime.executable.sha256,
@@ -203,7 +173,9 @@ def isolated_loop(world, field, args):
                 synthetic_worker=json.loads(args.isolated_validation.read_text()).get('synthetic',False),
                 independent_drive_replay_exact=True,
                 initial_hold=args.dt,electronic_time_offset=args.dt,
-                rollback='isolated accepted-history replay',full_field_energy_balance=False,
+                rollback='isolated in-process live savepoint',no_electronic_replay=True,
+                initial_worker_statistics=initial_worker_stats,final_worker_statistics=final_worker_stats,
+                coupling_api='MolecularFeedback',full_field_energy_balance=False,
                 physical_validation=False,policy='environment_scattered_only',
                 isolated_input_sha256=hashlib.sha256((args.isolated_bundle/args.isolated_input).read_bytes()).hexdigest(),
                 isolated_validation_sha256=hashlib.sha256(args.isolated_validation.read_bytes()).hexdigest(),
@@ -246,7 +218,6 @@ def main():
     parser.add_argument('--isolated-validation',type=Path)
     parser.add_argument('--isolated-bundle',type=Path)
     parser.add_argument('--isolated-input',default='rt.inp')
-    parser.add_argument('--isolated-sampling',choices=('midpoint','endpoint'),default='midpoint',help='midpoint aligns molecular driving with field work; endpoint is an explicit numerical control')
     parser.add_argument('--inject-reject-step',type=int,help='isolated development test: reject once and retry this interval')
     parser.add_argument('--trajectory',type=Path,help='accepted centered history for a single-pass current replay')
     parser.add_argument('--environment',choices=('vacuum','ld'),default='vacuum')

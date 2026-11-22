@@ -5,7 +5,7 @@ module tddft_worker
   implicit none
   private
   public :: worker_requested, worker_configure, worker_initial_A, worker_next_A, worker_reply
-  public :: worker_E_requested, worker_reply_E,worker_norm_requested,worker_electron_number
+  public :: worker_E_requested, worker_reply_E,worker_norm_requested,worker_electron_number,worker_state_reply
   ! Embedded mode is set only by the explicit host-MPI ABI, once per process.
   logical,public,save :: worker_embedded=.false.
   real(8),public,save :: embedded_dt
@@ -116,20 +116,34 @@ contains
       error stop 'SALMONpy: input assets must use relative bundle paths'
   end subroutine
 
-  logical function worker_next_A(A)
+  logical function worker_next_A(A,operation)
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     real(8), intent(out) :: A(3)
+    integer,optional,intent(out)::operation
     character(512) :: line
     character(32) :: command
     integer :: ios,i
     worker_next_A=.false.
+    if(present(operation))operation=0
     read(*,'(a)',iostat=ios) line
     if(ios<0) return
     if(ios/=0) error stop 'SALMONpy: command read failed'
     read(line,*,iostat=ios) command
     if(ios/=0) error stop 'SALMONpy: missing command'
     if(trim(command)=='CLOSE') return
+    if(worker_E_requested().and.present(operation))then
+      select case(trim(command))
+      case('CAPTURE_E');operation=1
+      case('RESTORE_E');operation=2
+      case('RELEASE_E');operation=3
+      case('RESUME_E');operation=4
+      case('PROBE_E');operation=5
+      end select
+      if(operation/=0)then
+        A=0d0;worker_next_A=.true.;return
+      endif
+    endif
     read(line,*,iostat=ios) command,A
     if(worker_E_requested()) then
       if(ios/=0.or.trim(command)/='STEP_E') error stop 'SALMONpy: expected STEP_E E'
@@ -141,6 +155,13 @@ contains
     end do
     worker_next_A=.true.
   end function
+
+  subroutine worker_state_reply(operation,status,step,updates)
+    use iso_fortran_env,only:output_unit
+    integer,intent(in)::operation,status,step,updates
+    write(output_unit,'(a,4(1x,i0))')'SALMONPY_E_STATE_V1',operation,status,step,updates
+    flush(output_unit)
+  end subroutine
 
   subroutine worker_reply(step,J)
     use iso_fortran_env, only: output_unit

@@ -1,4 +1,42 @@
-# Molecular dipoles as one-way FDTD sources
+# Molecular dipoles and FDTD coupling
+
+## Single-molecule two-way coupling
+
+Pass two already-created FDTD groups and one isolated TDDFT state to `MolecularFeedback`. Call collectively in matching order. Supply the molecular state only on `total_root`, a local `field` on every field rank, and `None` elsewhere. `reference_root` is the leader of the vacuum field driven only by this molecule, without illumination, other sources or material. Grid, boundaries, sample positions and current-deposition footprint must match the total field; setup checks this before advancing. The caller creates and closes MPI, fields and molecular states.
+
+```python
+from salmonpy.dipole_source import DipoleMap, MolecularFeedback
+
+mapping = DipoleMap(('molecule',), (10,), [[1.]], [8.])
+coupling = MolecularFeedback(
+    world, field, state=state, mapping=mapping,
+    total_root=0, reference_root=group_size,
+    policy='environment_scattered_only', observer=observer,
+)
+first = coupling.start()  # one field interval with zero current
+for _ in range(steps - 1):
+    frame = coupling.step()
+    if world.rank == 0:
+        records.append(frame.record())
+```
+
+`world` is the caller's MPI communicator; `group_size` includes each field group and its bookkeeping ranks. `state` is `None` except on the reporting rank. `observer` is each field's `energy_observer(...)`, or `None` everywhere when not observing. Save `first` too if needed. `MolecularFrame` is returned only on the reporting rank; peers return `None`. It retains fields, current, dipole, electron number, freshness-aware internal energy and optional box energy observations. `record()` returns a detached serializable dictionary. There is no automatic file output.
+
+The current entry supports one molecule/point with laboratory-axis dipoles and midpoint E driving. Initial selected E must be zero; otherwise increase source separation or delay. The field clock leads the electronic clock by dt. Subtracting the own-vacuum field removes vacuum radiation reaction too. Do not advance participating states outside the coupling while using it.
+
+An inconsistent accepted endpoint or exception in the root-only `step(validate=callback)` rejects the interval. Catch `StepRecoveryError` on all ranks and retry only when `original_preserved=True`. There is no automatic retry. Validators must be read-only and perform no MPI operations. Electron restoration uses a direct live savepoint without replay. Worker loss or an indeterminate restore returns original_preserved=False and forbids retry.
+
+The complete executable example is [molecular_feedback.py](examples/molecular_feedback.py). It explicitly reuses an existing GS and a validated E-driven worker; there is no implicit SCF, build or download.
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 \
+  python -m salmonpy.examples.molecular_feedback FIELD_BUILD E_WORKER RECEIPT EXISTING_GS NEW_OUTPUT \
+  --field-grid 2 1 1 --ld
+```
+
+Its grid and duration are C2H2 wiring-test settings, not converged parameters for arbitrary molecules.
+
+## One-way radiation sources
 
 Use physical charge dipoles p in laboratory axes, in e·bohr. `DipoleMap` conserves
 sum(p) when distributing polarization over explicit macro cells:
@@ -199,7 +237,7 @@ After field rollback and corrected-current advance, validate the actual selected
 endpoint against the predictor. A mismatch rolls fields/electrons back and rejects
 the interval. Native field rollback tokens are single-use: retire the predictor
 token and capture another before the accepted attempt. Electronic cancellation
-uses **accepted-history replay**, not direct/no-recomputation restoration.
+uses a direct live savepoint without replay.
 `--inject-reject-step 30` rejects once and retries for development validation.
 Other errors abort this MPI fixture; this is not a general recovery API.
 
@@ -208,14 +246,12 @@ been connected. Electronic grid24×24×32, spacing0.35Å; one authorized GS calc
 is saved and reused. Maximum reference/E-worker dipole difference is about
 3.86e-12 e·bohr. Four-rank vacuum/synthetic-LD tests (one field rank plus a control
 rank per field) compare independent E-driven responses. The short64-step run at
-dt=.003 au checks wiring, not converged optical response. Electron number, quantum
-work and full Maxwell energy conservation remain unvalidated.
+dt=.003 au checks wiring, not converged optical response. Electron number, quantum work and inner-box six-face energy balance were subsequently verified as described below.
 
 An MPI-linked single-process worker can hang if it inherits its host's MPI
 connection. Child environments therefore omit OMPI/PMI/PMIX/PRTE data and rank
 identities. Parent MPI and scheduler allocation IDs remain untouched. This startup
-path is tested on this Mac/OpenMPI, not certified for all sites. A general public
-two-way TDDFT driver remains unavailable.
+path is tested on this Mac/OpenMPI, not certified for all sites. The current public two-way entry is `MolecularFeedback`, described above.
 
 E3 also records measured electron number and checks it during replay. Fortran diagnoses loss: the endpoint-control C2H2/LD64-step maximum loss fraction about9.95e-15 versus target1e-5. Retry histories including electron number match continuous execution exactly. This short-run diagnostic is not optical convergence evidence.
 
@@ -223,7 +259,7 @@ E3 also records measured electron number and checks it during replay. Fortran di
 Internal-energy/work observation uses E3 and the existing energy cadence. Only
 fresh endpoints participate; no propagation/eigen-energy frequency is changed.
 Fortran separately accumulates held-endpoint work actually seen by TDDFT and
-midpoint-field work. With explicit --isolated-sampling endpoint and source amplitude.1 in this C2H2 development fixture,
+midpoint-field work. In the historical endpoint-control comparison with source amplitude .1,
 the held-work relative residual is about0.897%, while midpoint work differs by
 about28.49%. The default weak run is dominated by separately measured zero-field
 energy drift; it cannot establish energy accuracy. No automatic background
@@ -232,12 +268,11 @@ subtraction, energy stop gate or full-coupled conservation claim is made.
 
 ### Molecular/field midpoint timing
 
-The development isolated coupling defaults to `--isolated-sampling midpoint`.
+The development isolated coupling defaults to midpoint driving.
 Fortran averages selected left/predicted-right E after own-source subtraction.
 Only accepted right E becomes the next left boundary; cancellation preserves both
 quantum state and previous left E. Validate the midpoint from accepted fields.
-No automatic endpoint fallback. `--isolated-sampling endpoint` explicitly selects
-the previous numerical control. Standalone IsolatedTDDFTState.step(E) and the
+No automatic endpoint fallback. The endpoint control remains a historical comparison record. Standalone IsolatedTDDFTState.step(E) and the
 Fortran solver remain unchanged.
 
 `drive_time` uses the field clock: interval center for midpoint, right boundary
@@ -249,8 +284,7 @@ prove total electromagnetic conservation.
 For the C2H2 PZ amplitude.1 comparison, applied work equals selected-field midpoint
 work numerically; internal-energy residual is about0.695%, versus28.49% with the
 endpoint control. Do not subtract zero-field drift. Injected rejection/retry
-matches every continuous history. Full spatial Maxwell/LD/boundary balance is a
-separate remaining task.
+matches every continuous history. The inner-box Maxwell/LD/six-face balance is described below.
 
 ## Energy balance through all six box faces (development)
 
@@ -264,4 +298,4 @@ Yee E/H samples differ by half a step. `field_modified_*` uses the cross-product
 
 With the molecule driven after own-vacuum-field subtraction, add the removed vacuum self-field work to the field change, outward flux, LD work and molecular internal-energy change. Do not subtract zero-field drift. The short C2H2 development test gave an accumulated discrete field residual of about 9.1e-15 Hartree and a joint residual of about 5.9e-8 Hartree, about 0.70% of molecular work. Normalization by the much larger incident field would hide this matter error. This is not a general physical-accuracy certification.
 
-Real FDTD domain tests also passed with two partitions separately along x, y and z (outer MPI6: two field ranks plus one bookkeeping rank per context). Molecular saved arrays exactly equal the one-field-rank results; six-face integrated quantities agree within reduction-order roundoff. The development tool `tools/test_molecular_feedback_mpi.py` accepts `--field-grid NX NY NZ` and requires `2*(NX*NY*NZ+1)` total ranks. Rejection/retry with the same two-partition grid exactly matches continuous execution, including every saved array and six-face record. Electronic rollback still replays accepted history. This is separate from multi-node or large-decomposition evidence.
+Real FDTD domain tests also passed with two partitions separately along x, y and z (outer MPI6: two field ranks plus one bookkeeping rank per context). Molecular saved arrays exactly equal the one-field-rank results; six-face integrated quantities agree within reduction-order roundoff. The development tool `tools/test_molecular_feedback_mpi.py` accepts `--field-grid NX NY NZ` and requires `2*(NX*NY*NZ+1)` total ranks. Rejection/retry with the same two-partition grid exactly matches continuous execution, including every saved array and six-face record. Electronic rollback now uses a direct live savepoint. This is separate from multi-node or large-decomposition evidence.

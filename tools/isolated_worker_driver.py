@@ -17,6 +17,8 @@ class IsolatedWorker:
         self.steps = 0
         self.capacity = capacity
         self.timeout = timeout
+        self.directory = directory
+        self._savepoint = None
         self._events = queue.Queue()
         env = dict(os.environ)
         env.update(SALMONPY_TDDFT_WORKER='E3', OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
@@ -30,7 +32,7 @@ class IsolatedWorker:
                     for line in self._proc.stdout:
                         log.write(line)
                         log.flush()
-                        if line.startswith('SALMONPY_TDDFT_E_V3 '):
+                        if line.startswith(('SALMONPY_TDDFT_E_V3 ','SALMONPY_E_STATE_V1 ')):
                             self._events.put(line)
             finally:
                 self._proc.stdout.close()
@@ -92,6 +94,42 @@ class IsolatedWorker:
         self.time = self.steps*self.dt
         self.dipoles = values
         return values.copy()
+
+    def control(self,command):
+        """Development-only native savepoint command, no numerical propagation."""
+        self._send(command)
+        line=self._events.get(timeout=self.timeout)
+        if line is None:raise RuntimeError('worker stopped during savepoint command; inspect worker.log')
+        fields=line.split()
+        if len(fields)!=5 or fields[0]!='SALMONPY_E_STATE_V1':raise RuntimeError('invalid native savepoint reply')
+        operation,status,step,updates=map(int,fields[1:])
+        return operation,status,step,updates
+
+    def capture(self):
+        from salmonpy.native_steps import _AppendJournal
+        reply=self.control('CAPTURE_E')
+        if reply[1]:raise RuntimeError('native capture rejected: '+str(reply))
+        saved=dict(owner=self,step=self.steps,dipoles=self.dipoles.copy(),
+                    journal=_AppendJournal.capture(self.directory),reply=reply)
+        self._savepoint=saved
+        return saved
+
+    def restore(self,saved):
+        if saved is not self._savepoint or saved['owner'] is not self:
+            raise ValueError('savepoint is stale or belongs to another worker')
+        reply=self.control('RESTORE_E')
+        if reply[1]:raise RuntimeError('native restore rejected: '+str(reply))
+        saved['journal'].restore()
+        resumed=self.control('RESUME_E')
+        if resumed[1]:raise RuntimeError('native output resume rejected: '+str(resumed))
+        self.steps=saved['step'];self.time=self.steps*self.dt;self.dipoles=saved['dipoles'].copy()
+        return reply,resumed
+
+    def release(self):
+        reply=self.control('RELEASE_E')
+        if reply[1]:raise RuntimeError('native release rejected: '+str(reply))
+        self._savepoint=None
+        return reply
 
     def close(self):
         if self._proc.poll() is None:

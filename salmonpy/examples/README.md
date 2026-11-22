@@ -261,3 +261,7 @@ epsilon = dielectric_function(sigma)
 `fdtd_periodic_slab --native-planes`: 計算処理所有タイルから横断面を取得・位置合わせして流束を表示。対応計算プログラムが必要で、未対応なら計算結果を保持して警告します。
 
 混在計算処理サンプルは任意の`--planes-x FRONT BACK --plane-stride 16`で横周期境界の面を確定後だけ取得し、最後にplane-seriesへまとめます。既定は取得しません。
+
+## 分子とFDTDの双方向結合
+
+`molecular_feedback.py` は既存GSを再利用する完全なMPI例です。必要な計算プログラムと実行方法は [分子とFDTD](../DIPOLE_RADIATION.md) を参照してください。SCFやビルドは暗黙に実行しません。

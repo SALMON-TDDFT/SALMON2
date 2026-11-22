@@ -34,6 +34,20 @@ def main():
                     if reference[n,8]==1.:np.testing.assert_equal(frame.internal_energy,reference[n,7])
                     else:assert frame.internal_energy is None
                     np.testing.assert_array_equal(b.step(v).dipole,frame.dipole)
+            live=a.savepoint()
+            initial_stats=a.worker_statistics()
+            live_expected=np.array([a.step(v).dipole for v in E[10:]])
+            before_restore=a.worker_statistics()
+            a.restore_savepoint(live)
+            restored_stats=a.worker_statistics()
+            assert initial_stats['pid']==before_restore['pid']==restored_stats['pid']
+            assert restored_stats['updates']==before_restore['updates']
+            np.testing.assert_equal(a.electron_number,reference[10,6])
+            np.testing.assert_equal(a.internal_energy,reference[10,7])
+            live_actual=np.array([a.step(v).dipole for v in E[10:]])
+            np.testing.assert_array_equal(live_actual,live_expected)
+            a.restore_savepoint(live)
+            a.release_savepoint(live)
             saved=a.snapshot()
             a.save_checkpoint(output/'checkpoint')
             expected=np.array([a.step(v).dipole for v in E[10:]])
@@ -61,11 +75,12 @@ def main():
             disk_actual=np.array([resumed.step(v).dipole for v in E[10:]])
             np.testing.assert_array_equal(disk_actual,expected)
             np.testing.assert_equal(resumed.electron_number,reference[-1,6])
-    np.savez(output/'continuation.npz',expected=expected,actual=actual,disk_actual=disk_actual)
+    np.savez(output/'continuation.npz',expected=expected,actual=actual,disk_actual=disk_actual,live_expected=live_expected,live_actual=live_actual)
     (output/'report.json').write_text(json.dumps(dict(public_loader=True,independent_states=True,
         disk_rebuilt_model=True,disk_continuation_max_abs_error=0.,
         field_packet=True,restore_continuation_max_abs_error=0.,worker_failure_recovery=True,
-        runtime_sha256=runtime.executable.sha256,scope='interface regression; no convergence study'),indent=2)+'\n')
+        runtime_sha256=runtime.executable.sha256,direct_savepoint_same_process=True,direct_restore_evolution_calls=0,
+        direct_continuation_exact=True,scope='interface regression; no convergence study'),indent=2)+'\n')
     print('public isolated loader, replay, independent states and recovery PASS')
 
 

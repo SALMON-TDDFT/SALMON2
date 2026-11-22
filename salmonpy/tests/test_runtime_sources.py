@@ -39,9 +39,6 @@ class RuntimeSources(unittest.TestCase):
   parser=(root/'runtime/sources/solver/src/io/inputoutput.f90').read_text()
   self.assertIn('!SALMONPY_END_INPUT',parser)
   self.assertIn('if(.not.worker_embedded) call worker_configure()',parser)
-  driver=(root/'runtime/sources/solver/src/rt/main_tddft.f90').read_text()
-  self.assertIn('worker_next_A(worker_A)',driver)
-  self.assertIn('worker_reply(itt,rt%curr(:,itt))',driver)
   for name in ('src/maxwell/embedded_eh.f90','src/io/model_inputs.f90','src/io/step_output.f90',
                'src/gs/gs_seed.f90','src/rt/embedded_tddft.f90'):
    self.assertEqual(effective[name]['sha256'],sha(root/'runtime/sources/solver'/name))
