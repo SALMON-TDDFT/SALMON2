@@ -791,3 +791,5 @@ Adjacent outer input checking is also coalesced as described in COUPLED.en.md; f
 Object files alone still require a linker and dependencies on the user's computer.
 For ordinary users, provide a ready-to-run executable or distribution package with
 its required shared libraries checked.
+
+Built-in MPI libraries validate the common host version, widths and ownership rules before attachment. Querying does not start a calculation; see [the C/Fortran host contract](API.en.md). No old-version rescue is provided.

@@ -4,6 +4,18 @@ module salmonpy_parallel_bridge
   use communication
   implicit none
 contains
+  ! Local, allocation-free descriptor: no MPI initialization or attachment.
+  integer(c_int) function sp_host_abi(capacity,values) bind(C)
+    integer(c_int),value::capacity
+    integer(c_int64_t),intent(inout)::values(*)
+    sp_host_abi=13
+    if(capacity<10)return
+    values(1:10)=[1_c_int64_t,int(storage_size(0_c_int),c_int64_t), &
+      int(storage_size(0.0_c_double),c_int64_t),int(storage_size(0_c_int64_t),c_int64_t), &
+      int(storage_size(0),c_int64_t),int(storage_size(0.0_8),c_int64_t), &
+      1_c_int64_t,1_c_int64_t,1_c_int64_t,3_c_int64_t]
+    sp_host_abi=0
+  end function sp_host_abi
   integer(c_int) function sp_attach(handle) bind(C)
     integer(c_int64_t),value :: handle
     integer :: ierr

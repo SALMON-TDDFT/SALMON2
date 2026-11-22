@@ -102,7 +102,7 @@ def probe_native_protocols(build_record, *, component, route):
     prefix = {'tddft': 'sp_tddft_', 'fast_hse': 'sp_fast_hse_', 'fdtd': 'sp_eh_'}[component]
     if component == 'fdtd':
         names = ['checkpoint_protocol', 'recovery_protocol']
-    elif route == 'legacy':
+    elif route == 'single':
         names = ['error_protocol' if component == 'tddft' else 'recovery_protocol']
     else:
         names = ['handle_protocol', 'model_protocol']
@@ -130,11 +130,14 @@ def probe_native_protocols(build_record, *, component, route):
         child = r"""
 import ctypes,hashlib,json,sys
 path,expected,names=sys.argv[1],sys.argv[2],json.loads(sys.argv[3])
+sys.path.insert(0,sys.argv[4])
+from salmonpy.api import query_host_abi
 h=hashlib.sha256()
 with open(path,'rb') as f:
     for block in iter(lambda:f.read(1048576),b''):h.update(block)
 if h.hexdigest()!=expected:raise ValueError('native library changed before loading')
 lib=ctypes.CDLL(path)
+host=query_host_abi(lib)
 values={}
 for name in names:
     fn=getattr(lib,name,None)
@@ -142,10 +145,10 @@ for name in names:
     else:
         fn.argtypes=[];fn.restype=ctypes.c_int
         values[name]=int(fn())
-print(json.dumps({'library_loaded':True,'protocols':values}))
+print(json.dumps({'library_loaded':True,'protocols':values,'host_abi':host}))
 """
         result = subprocess.run([sys.executable, '-I', '-c', child, str(library), expected,
-                                 json.dumps(symbols)], capture_output=True, text=True, timeout=15)
+                                 json.dumps(symbols),str(Path(__file__).resolve().parent.parent)], capture_output=True, text=True, timeout=15)
         if result.returncode:
             raise RuntimeError('protocol child failed: '+result.stderr[-2000:])
         observed = json.loads(result.stdout)
@@ -169,7 +172,7 @@ def main():
     parser.add_argument('--sha256', help='SHA256 of the audited executable' if english else '監査済み実行ファイルのSHA256')
     parser.add_argument('--native-build', help='Explicit trusted audited library build record; loads native code in a child')
     parser.add_argument('--component', help='Built-in tddft, fast_hse, fdtd; custom names remain unverified')
-    parser.add_argument('--route', help='Explicit legacy, shared or registry route')
+    parser.add_argument('--route', help='Explicit single, shared or registry route')
     args = parser.parse_args()
     if args.native_build is not None:
         if args.component is None or args.route is None:

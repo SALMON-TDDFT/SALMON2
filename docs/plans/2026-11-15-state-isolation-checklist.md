@@ -6,7 +6,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | 非対角LD格子係数まで `46589f24` でpush済み。今回の時間更新用作業領域は未コミット |
+| 先に整理 | 最新の検証済み変更のcommit／push | 時間更新用作業領域まで `f4841bcd` でcommit／push済み。共通ホスト契約の変更は未コミット |
 | 完了した範囲 | 主要LD初期化・時間更新の作業配列 | 入力・係数・格子配列と時間更新の明示的な大規模領域を対応。全ての小さな確保・画像用配列は対象にしない |
 | 1 | 現行C/Fortran呼び出し契約の確定 | 呼び出し規約の安定化と、残る操作・実行環境での確認。旧版との後方互換は対象外 |
 | 2 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
@@ -3835,3 +3835,16 @@ restart is not certified by this batch test. Missing/partial spectra are not
 fabricated/retried;close-only failure was not injected. Non-root Mac permissions
 measured. Required restarts,initialization/helper I/O and selected auxiliary
 allocation remain bounded R3 work,then R4 and group3 in the agreed order.
+
+
+## 2026-11-22 — current common C/Fortran host descriptor
+
+- [x] Previous verified tensor step workspace changes committed/pushed as `f4841bcd`.
+- [x] Added local `sp_host_abi` version/type-width/communicator/ownership/thread contract query. No MPI initialization, solver initialization or per-step collective. Missing/mismatched descriptors reject before attachment; no old-version fallback. Single/shared/registry are current public route names.
+- [x] Ordinary and fast-PR HSE rebuilt with mandatory source/object audits. C/Fortran probes verify short-buffer rejection without writes, unchanged tails, equal descriptors and MPI remaining uninitialized. These are contract probes, not HSE physical trajectories.
+- [x] Local MPI6 split into groups1/2/3: rank-local missing/version/width/status errors reject collectively before attachment; subsequent normal attachment and custom A/J response succeed.
+- [x] Source suite679 tests,one optional skip. LD/FDTD scalar,diagonal and rotated-tensor MPI1/2 normal/direct-resume outputs match prior controls byte-for-byte. Results: canonical calc2026 `salmonpy-host-abi-contract-20261122/comparisons.json`. No GS collection.
+- [x] Japanese/English API/runtime guides and AI JSON synchronized; manual synchronization and whitespace checks pass.
+- [ ] R4 remaining: operation-specific signature/lifetime guarantees and wider profile/platform evidence. The common descriptor is not blanket stable solver ABI certification. New changes remain uncommitted; no optional CI dispatched.
+
+Continue bounded R4 operation contracts,then group3 NLCC runtime certification/unit audit. Groups1/2 and molecular work remain deferred. Multinode/Fujitsu/GPU and full HSE physical validation are not established by these local tests.

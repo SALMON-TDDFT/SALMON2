@@ -721,6 +721,11 @@ program test_native_protocol
  use mpi
  implicit none
  interface
+  integer(c_int) function host_query(capacity,values) bind(C,name="sp_host_abi")
+   import c_int,c_int64_t
+   integer(c_int),value::capacity
+   integer(c_int64_t),intent(inout)::values(*)
+  end function
 #ifdef SALMONPY_ABI_FAST_HSE
   integer(c_int) function one() bind(C,name="sp_fast_hse_handle_protocol")
 #else
@@ -751,15 +756,22 @@ program test_native_protocol
   end function
  end interface
  integer(c_int)::a,b,c,d
+ integer(c_int64_t)::host(12)
+ integer(c_int64_t),parameter::expected(10)=[1,32,64,64,32,64,1,1,1,3]
  integer::ierr
  logical::initialized
  call MPI_Initialized(initialized,ierr)
  if(ierr/=MPI_SUCCESS.or.initialized)stop 41
+ host=-91
+ if(host_query(9_c_int,host)/=13)stop 44
+ if(any(host/=-91))stop 45
+ if(host_query(12_c_int,host)/=0)stop 46
+ if(any(host(1:10)/=expected).or.any(host(11:12)/=-91))stop 47
  a=one();b=two();c=three();d=four()
  if(a/=1.or.b/=1.or.c/=1.or.d/=1)stop 42
  call MPI_Initialized(initialized,ierr)
  if(ierr/=MPI_SUCCESS.or.initialized)stop 43
- write(*,'(4(i0,1x))')a,b,c,d
+ write(*,'(14(i0,1x))')host(1:10),a,b,c,d
 end program
 #elif defined(SALMONPY_FIELD_CLOSE_PROBE)
 program test_field_close

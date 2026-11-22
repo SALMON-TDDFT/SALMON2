@@ -1,7 +1,7 @@
 """Experimental fast-PR HSE on an explicitly supplied k-only MPI subgroup.
 
 Build explicitly against the host MPI. One native lifetime on the main thread
-per process on the legacy route; open_model provides shared same-model full/reduced-k state leases.
+per process on the single-state route; open_model provides shared same-model full/reduced-k state leases.
 Input and shared work directories are caller-owned. No MPI import,
 initialization, finalization, compilation or download occurs on module import.
 """
@@ -205,7 +205,7 @@ class NativeFastHSEBackend:
 
     The explicit build receipt binds a host-MPI native library. No conventional
     HSE engine or fallback is supported. Material points require separate groups;
-    the legacy route has one point per group; open_model shares one verified copy
+    the single-state route has one point per group; open_model shares one verified copy
     among independent full-k states. Errors can invalidate the
     whole MPI job; native process-terminating failures are not recoverable.
     allow_symmetry is explicit, identity-bound and restricted to one/two internal

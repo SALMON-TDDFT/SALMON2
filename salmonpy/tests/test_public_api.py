@@ -18,16 +18,38 @@ class PublicAPI(unittest.TestCase):
                 self.assertTrue(hasattr(imported, name), (module, name))
         self.assertIn('__version__', salmonpy.__all__)
         from salmonpy.api import native_contract
-        legacy = native_contract('fast_hse', route='legacy')
+        single = native_contract('fast_hse', route='single')
         shared = native_contract('fast_hse', route='shared')
-        self.assertEqual(legacy['model_settings_owner'], 'process compatibility settings')
+        self.assertEqual(single['model_settings_owner'], 'explicit single-state settings')
         self.assertEqual(shared['model_settings_owner'], 'explicit model')
         self.assertFalse(shared['runtime_verified'])
-        self.assertIn('matter J', native_contract('tddft', route='legacy')['native_current'])
+        self.assertIn('matter J', native_contract('tddft', route='single')['native_current'])
         self.assertEqual(shared['native_current'], 'physical charge-current density j')
         shared['limitations'].append('host edit')
         self.assertNotIn('host edit', native_contract('fast_hse', route='shared')['limitations'])
         self.assertEqual(native_contract('lab.custom', route='anything')['status'], 'unverified')
+        from salmonpy.api import query_host_abi
+        from salmonpy.errors import RuntimeFailure
+        from types import SimpleNamespace
+        class Probe:
+            values=(1,32,64,64,32,64,1,1,1,3)
+            status=0
+            def __call__(self,capacity,buffer):
+                self.capacity=capacity
+                for i,v in enumerate(self.values):buffer[i]=v
+                return self.status
+        probe=Probe();report=query_host_abi(SimpleNamespace(sp_host_abi=probe))
+        self.assertEqual(probe.capacity,10)
+        self.assertEqual(report['version'],1)
+        self.assertFalse(report['initializes_MPI'])
+        self.assertEqual(report['directory_protocol_required'],3)
+        for index,bad in ((0,2),(1,64),(2,32),(3,32),(4,64),(5,32),(6,2),(7,0),(8,2),(9,2)):
+            probe.values=tuple(bad if i==index else v for i,v in enumerate(Probe.values))
+            with self.subTest(word=index),self.assertRaises(RuntimeFailure):query_host_abi(SimpleNamespace(sp_host_abi=probe))
+        probe.values=Probe.values;probe.status=13
+        with self.assertRaises(RuntimeFailure):query_host_abi(SimpleNamespace(sp_host_abi=probe))
+        with self.assertRaisesRegex(RuntimeFailure,'host ABI'):query_host_abi(SimpleNamespace())
+        self.assertFalse(native_contract('fast_hse',route='legacy')['known'])
         from unittest.mock import patch
         from salmonpy.doctor import probe_native_protocols
         with patch('subprocess.run', side_effect=AssertionError('child must not run')):
@@ -71,7 +93,7 @@ class PublicAPI(unittest.TestCase):
         code = '''import sys
 import salmonpy
 from salmonpy.api import native_contract
-assert native_contract('fast_hse', route='legacy')['known']
+assert native_contract('fast_hse', route='single')['known']
 assert not any(x in sys.modules for x in ('mpi4py', 'matplotlib.pyplot', 'ase'))
 assert salmonpy.__version__ == '0.1.0a7'
 # Import contracts formerly repeated in six module test files. Keep per-module

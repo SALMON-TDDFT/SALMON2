@@ -1,5 +1,40 @@
 # Public Python API and compatibility
 
+## Common query before C/Fortran calls
+
+`sp_host_abi(capacity, values)` reports the current host contract and primitive
+widths. Include `native_context.h` and supply at least10 `int64_t` words. Success0
+writes only the first10; short capacity returns13 without writing. The query
+allocates no workspace, communicates nothing and initializes neither MPI nor a solver.
+
+| C index | Meaning | Current value |
+|---|---|---|
+|0|Host contract version|1|
+|1–5|C int, C double, int64, Fortran INTEGER, real(kind=8) bits|32,64,64,32,64|
+|6|Communicator encoding|1: MPI_Comm_c2f result widened to int64; never raw MPI_Comm|
+|7|MPI initialization/finalization owner|1: caller|
+|8|State-operation threading|1: main thread, sequential calls|
+|9|Directory protocol required for I/O|3; not proof that I/O operations exist|
+
+Fortran indexing starts at1. Matching this descriptor does not certify operation
+signatures, MPI implementation, physical profiles or checkpoint compatibility;
+query those separately. Built-in Python MPI attachment validates it after SHA256
+checking and before attachment. A mismatch on one rank rejects the entire owning
+group before attachment. There is no old-version fallback or implicit build.
+User-written backends retain their own contracts instead of being forced into this one.
+
+`salmonpy.api.query_host_abi(library)` queries an explicitly loaded trusted library;
+mismatch raises `RuntimeFailure`. Built-in collective MPI admission reports an
+`InputError`. To query in a separate process without running a calculation:
+
+```sh
+python -m salmonpy.doctor --native-build BUILD_JSON --component fdtd --route single
+```
+
+`single` means one state, `shared` means multiple states of one model, and
+`registry` means registered different-input models. The old `legacy` route is not an alias.
+
+
 [日本語](API.md)
 
 This page describes the available functions and classes, errors and saved data.
@@ -194,12 +229,12 @@ assert contract['model_settings_owner'] == 'explicit model'
 assert contract['runtime_verified'] is False
 ```
 
-`native_contract` describes built-in `tddft`/`fast_hse` routes `legacy`, `shared`,
-`registry`, and `fdtd` route `legacy`. It loads no library, executes no calculation
-and enforces no new restriction. The result distinguishes process-compatibility
-settings from explicit model ownership, caller-owned MPI, sequential main-thread
+`native_contract` describes built-in `tddft`/`fast_hse` routes `single`, `shared`,
+`registry`, and `fdtd` route `single`. It loads no library, executes no calculation
+and enforces no new restriction. The result distinguishes single-state
+ownership from shared/registered model ownership, caller-owned MPI, sequential main-thread
 operations, entry-point collective ordering, current sign and failure scope.
-Legacy standard-TDDFT C current is matter J=-j; its Python adapter returns charge
+Single-state standard-TDDFT C current is matter J=-j; its Python adapter returns charge
 j. Fast-HSE and standard handle C currents are charge j. Follow exact headers for
 query locality; a local diagnostic is not automatically collective.
 
@@ -209,7 +244,7 @@ capabilities separately. Unknown/custom component or route names return
 `known=False`, `status='unverified'` and do not block a user-written calculation code; that
 calculation implementation owns its contract. Each result is independent and may be annotated by
 the calling program without changing later reports. Existing calls, numerical state,
-legacy fallback and accepted calculations are unchanged. Stable C/Fortran calling program
+current execution modes and accepted calculations are unchanged. Stable C/Fortran calling program
 ABI conformance remains a separate milestone.
 
 ### Explicit live protocol probe

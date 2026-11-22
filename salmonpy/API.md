@@ -1,5 +1,40 @@
 # 公開Python APIと互換性
 
+## C／Fortranから呼ぶ前の共通照会
+
+`sp_host_abi(capacity, values)`は、計算プログラムの版と基本型を調べる入口です。
+`native_context.h`を使い、`int64_t`を10個以上用意します。成功時は0を返し、
+先頭10個だけを書きます。容量不足は13を返し、配列を変更しません。
+MPIの初期化・接続、ソルバーの初期化、配列の確保や通信は行いません。
+
+| C配列の添字 | 内容 | 現行値 |
+|---|---|---|
+|0|共通呼び出し規約の版|1|
+|1～5|C int、C double、int64、Fortran INTEGER、real(kind=8)のビット数|32、64、64、32、64|
+|6|コミュニケータの渡し方|1：MPI_Comm_c2fの結果をint64へ拡張。MPI_Commそのものは渡さない|
+|7|MPIの初期化・終了を行う側|1：呼び出し元|
+|8|状態を操作するスレッドの条件|1：メインスレッドから順に呼ぶ|
+|9|I/O操作に必要なディレクトリ処理の版|3。I/O機能を含むことの証明ではない|
+
+Fortranからの配列添字は1始まりです。基本型と版が一致しても、個別操作・MPI実装・
+物理モデル・保存形式が対応する保証にはなりません。それぞれの照会が必要です。
+組み込みライブラリのPython接続は、SHA256照合後・MPI接続前にこの内容を検査し、
+一部ランクだけ不一致でも担当群全員で拒否します。旧版への切替や自動ビルドはしません。
+自作バックエンドの独自契約を、この照会へ強制的に合わせるものではありません。
+
+明示的に読み込んだ信頼できるライブラリを調べるPython関数は
+`salmonpy.api.query_host_abi(library)`です。不一致は`RuntimeFailure`、
+組み込みMPI接続での群内の不一致は`InputError`として通知します。
+計算せずに別プロセスで照会する例：
+
+```sh
+python -m salmonpy.doctor --native-build BUILD_JSON --component fdtd --route single
+```
+
+`single`は一つの状態、`shared`は同じモデルの複数状態、`registry`は異なるモデルの
+登録を表します。旧`legacy`名の別名受入れはありません。
+
+
 [English](API.en.md)
 
 利用できる関数・クラスと、エラーや保存データの扱いを説明します。目的から使い方を選ぶ場合は、先に[はじめに](README.md)または[サンプル集](examples/README.md)を参照してください。
@@ -161,9 +196,9 @@ assert contract['model_settings_owner'] == 'explicit model'
 assert contract['runtime_verified'] is False
 ```
 
-`native_contract`は組み込み`tddft`／`fast_hse`の`legacy`・`shared`・`registry`経路、
-および`fdtd`の`legacy`経路を説明します。ライブラリ読込・計算・新しい制限は行いません。
-プロセス互換設定と明示的モデル所有、MPIの呼出し元所有、メインスレッドの逐次操作、collectiveの順序、電流符号、失敗保証範囲を区別します。
+`native_contract`は組み込み`tddft`／`fast_hse`の`single`・`shared`・`registry`経路、
+および`fdtd`の`single`経路を説明します。ライブラリ読込・計算・新しい制限は行いません。
+単一状態の明示設定と明示的モデル所有、MPIの呼出し元所有、メインスレッドの逐次操作、collectiveの順序、電流符号、失敗保証範囲を区別します。
 標準TDDFTのlegacy C入口は物質電流J=-jを返し、Python側は電荷電流jへ変換します。
 高速HSEと標準handleのC入口は電荷電流jです。照会がローカルかcollectiveかは個別ヘッダーに従い、診断を一律collective扱いしません。
 

@@ -6,11 +6,11 @@ private names and incidental imports are not public APIs.
 """
 from types import MappingProxyType
 
-__all__ = ['PUBLIC_API', 'native_contract']
+__all__ = ['PUBLIC_API', 'native_contract', 'query_host_abi']
 PUBLIC_API = MappingProxyType({'salmonpy.subpixel': ('SubpixelSmoothing','effective_material'), 'salmonpy.optical_materials': ('OpticalMaterial','list_materials','load_material','wavelength_to_frequency'),
  'salmonpy.analysis': ('SurfaceFlux', 'surface_flux', 'PortSpectrum', 'absorbed_energy_density', 'reflection_transmission', 'Table', 'read_table', 'Spectrum', 'spectrum', 'OpticalSpectrum',
  'OpticalSensitivity', 'KCurrentContributions', 'optical_sensitivity', 'k_current_contributions', 'LongWavelengthCorrection', 'long_wavelength_correction', 'optical_conductivity', 'dielectric_function', 'dielectric_tensor', 'waveplate_diagnostic', 'optical_linearity', 'optical_sum_rule'),
- 'salmonpy.api': ('PUBLIC_API', 'native_contract'),
+ 'salmonpy.api': ('PUBLIC_API', 'native_contract', 'query_host_abi'),
  'salmonpy.doctor': ('diagnose', 'probe_native_protocols'),
  'salmonpy.convergence': ('plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan','run_current_grid_scan'),
  'salmonpy.gs_input': ('GSInputMetadata','describe_gs_input'),
@@ -125,7 +125,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.subpixel': ('SubpixelSmoothing','effect
 def native_contract(component, *, route):
     """Describe a built-in execution contract without loading a native library.
 
-    Explicit names: tddft/fast_hse with legacy/shared/registry; fdtd with legacy.
+    Explicit names: tddft/fast_hse with single/shared/registry; fdtd with single.
     This is declared documentation, not a runtime capability check or a stable
     C ABI promise. Unknown/custom components return unverified, never a refusal
     to execute them. Their backend owns its separate contract.
@@ -135,30 +135,60 @@ def native_contract(component, *, route):
               'scope': 'declared interface only; no library loading or execution',
               'limitations': ['Runtime capabilities and checkpoint compatibility require separate queries.']}
     definitions = {
-        'tddft': ('standard_tddft_handles.h', 'standard_tddft_models.h'),
-        'fast_hse': ('fast_hse_handles.h',),
-        'fdtd': ()}
-    if (component not in definitions or route not in ('legacy', 'shared', 'registry')
-            or (component == 'fdtd' and route != 'legacy')):
+        'tddft': ('native_context.h', 'standard_tddft_handles.h', 'standard_tddft_models.h'),
+        'fast_hse': ('native_context.h', 'fast_hse_handles.h',),
+        'fdtd': ('native_context.h',)}
+    if (component not in definitions or route not in ('single', 'shared', 'registry')
+            or (component == 'fdtd' and route != 'single')):
         report['status'] = 'unverified'
         report['limitations'].append('Use the custom backend contract; this description imposes no execution restriction.')
         return report
     report.update(known=True, status='experimental', abi_stability='experimental',
+                  host_abi_version=1,host_abi_query='sp_host_abi',
                   host_thread='main thread, sequential calls',
                   host_owns_mpi_initialization_and_finalization=True,
                   attachment='one native attachment per process; close owned states before detach',
                   collective_order='collective operations must match on the solver communicator; query locality is entry-point specific',
-                  multiple_live_states=route != 'legacy',
+                  multiple_live_states=route != 'single',
                   model_settings_owner=('single field lifetime' if component == 'fdtd' else
-                                        'process compatibility settings' if route == 'legacy' else
+                                        'explicit single-state settings' if route == 'single' else
                                         'explicit model'),
                   headers=['salmonpy/native_adapters/'+name for name in definitions[component]],
                   failure_guarantee='Only declared numerical/transaction failures; not arbitrary STOP, allocation or MPI failure recovery')
     if component != 'fdtd':
         report['boundary'] = 'Cartesian A/c and physical charge-current density j, atomic units'
         report['native_current'] = ('SALMON matter J=-j; Python adapter returns charge j'
-                                    if component == 'tddft' and route == 'legacy' else
+                                    if component == 'tddft' and route == 'single' else
                                     'physical charge-current density j')
     else:
         report['boundary'] = 'Native E/H and mapped A/current coupling; follow COUPLED time/normalization contract'
     return report
+
+
+def query_host_abi(library):
+    """Validate an explicitly loaded, trusted built-in library's current host ABI.
+
+    Does not load libraries, initialize MPI, attach, compile or execute a solver.
+    Unknown user backends keep their own contracts instead of using this query.
+    Per-operation protocols and MPI-library identity are separate requirements.
+    """
+    import ctypes as c
+    from .errors import RuntimeFailure
+    probe=getattr(library,'sp_host_abi',None)
+    if probe is None:raise RuntimeFailure('runtime lacks current host ABI; explicitly rebuild or use a matching runtime')
+    probe.argtypes=[c.c_int,c.POINTER(c.c_int64)];probe.restype=c.c_int
+    words=(c.c_int64*10)()
+    status=probe(len(words),words)
+    if status:raise RuntimeFailure('host ABI query failed with status '+str(status))
+    values=tuple(words)
+    expected=(1,32,64,64,32,64,1,1,1,3)
+    if values!=expected:raise RuntimeFailure('unsupported host ABI descriptor: '+str(values))
+    if (c.sizeof(c.c_int)*8,c.sizeof(c.c_double)*8,c.sizeof(c.c_int64)*8)!=values[1:4]:
+        raise RuntimeFailure('Python and runtime host ABI type widths differ')
+    return {'schema':'salmonpy.host-abi/1','version':values[0],
+            'primitive_bits':{'c_int':values[1],'c_double':values[2],'int64':values[3],
+                              'fortran_integer':values[4],'real8':values[5]},
+            'communicator':'MPI_Fint widened to int64; never raw MPI_Comm',
+            'MPI_ownership':'host','thread_policy':'main thread, sequential',
+            'directory_protocol_required':values[9],'initializes_MPI':False,
+            'scope':'host descriptor only; operation/profile/runtime checks remain separate'}

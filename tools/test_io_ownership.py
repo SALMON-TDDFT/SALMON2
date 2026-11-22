@@ -432,7 +432,7 @@ def main():
             subprocess.run(link,check=True)
             text=subprocess.check_output([str(exe)],cwd=out,text=True)
             outputs[language]=[int(value) for value in text.split()]
-            if outputs[language]!=[1,1,1,1]:raise ValueError('protocol query mismatch')
+            if outputs[language]!=[1,32,64,64,32,64,1,1,1,3,1,1,1,1]:raise ValueError('host/operation ABI query mismatch')
         (out/'result.json').write_text(json.dumps({'status':'passed','profile':'fast_hse' if args.fast_hse else 'standard',
             'protocols':outputs,'runtime_sha256':record['sha256'],'MPI_initialized':False,
             'numerical_states_created':False,'GS_data_collected':False,'scope':'query-only C/Fortran ABI; not full state/step conformance'},indent=2)+'\n')

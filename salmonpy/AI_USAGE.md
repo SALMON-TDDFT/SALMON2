@@ -1468,3 +1468,17 @@ retry the same J; do not replay history or change dt automatically. Workspaces
 are call-owned, reused during iteration and excluded from snapshots/checkpoints.
 No extra collective; budgets only warn. This is not arbitrary OOM/backup-allocation,
 OS/MPI or observation-buffer recovery. Standalone processes stop on failure.
+
+### Common host contract before MPI attachment
+
+Current built-in MPI libraries expose sp_host_abi(capacity,int64_values):10 words,
+version1, primitive widths32/64/64/32/64, MPI_Fint widened to int64, host-owned MPI,
+main-thread sequential state operations, required I/O directory protocol3. Query
+locally before attachment; it initializes no MPI/solver and performs no communication.
+Use api.query_host_abi on an explicitly loaded trusted library, or doctor
+--native-build BUILD_JSON --component fdtd --route single. SHA256/build audit
+trust is still required. Built-in NativeParallelContext rejects subgroup-wide
+ABI mismatch before attach; no old-version fallback or automatic build. Use
+single/shared/registry, not legacy. Unknown user backends remain unverified and
+retain their own contract. This descriptor is not operation/profile/convergence
+or checkpoint certification; use the corresponding current queries.
