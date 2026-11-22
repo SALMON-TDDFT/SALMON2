@@ -6,7 +6,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | LD材料配列の確保失敗処理・後方互換分岐削除は未コミット。再開読込処理と文書改善は `23cb1342` でpush済み |
+| 先に整理 | 最新の検証済み変更のcommit／push | LD材料入力配列・後方互換分岐削除は `e3666160` でpush済み。今回のLD係数用一時配列は未コミット |
 | 1 | 初期化・補助入出力・作業配列の失敗処理 | 未対応箇所を実際に使う経路から絞る。検証済みの保存・読込を作り直さない |
 | 2 | C/Fortranから呼ぶ際の版・互換性確認 | 呼び出し規約の安定化と、残る操作・実行環境での確認 |
 | 3 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
@@ -24,6 +24,16 @@ results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
 ### Completed and verified
+
+- [x] LD coefficient preparation: material list, six common1D/2D and three
+  directional2D/3D arrays now return1120 on partial allocation failure. The
+  existing directional status broadcast becomes a max reduction; scalar LD
+  carries failure to the existing material-vector gate. No new startup/step
+  collective. GNU MPI1/2 source controls and repeated failure/retry cases pass;
+  production/test fields, histories and direct midpoint checkpoints are bitwise
+  identical to the previous e3666160-era controls. No additional input restriction
+  or old-format fallback. Memory budgets remain warning-only.
+  Record: calc2026/salmonpy-ld-coefficient-allocation-recovery-20261122.
 
 - [x] Removed old build/preparation positional arguments, Python chdir runtime
   rescue, old mixed-checkpoint schemas and identity rescue, inferred GS restart
@@ -212,10 +222,11 @@ results/residual diagnostics and pauses the downstream workflow for user review
   Manual11/public-API5 tests,local links and executable-example checks pass.
   Records:calc2026/salmonpy-documentation-readability-20261122/{summary,followup-summary}.json.
 - [x] Reader I/O and documentation integration: published as23cb1342.
-- [ ] Pending integration: directional LD allocation recovery and removal of
-  backward-compatibility branches remain uncommitted after23cb1342. Commit/push
-  when requested; retain required lightweight source/packaging checks and do not
-  dispatch optional heavy CI.
+- [x] Directional LD allocation recovery and backward-compatibility removal
+  were published as e3666160.
+- [ ] Pending integration: LD coefficient scratch recovery remains uncommitted.
+  Commit/push when requested; retain required lightweight source/packaging checks
+  and do not dispatch optional heavy CI.
 - [x] Latest source/installed suites:679 executed,one optional skip,no failures.
   Paired current manuals and AI JSON synchronized. These latest local records
   do not supersede older MPI4/6, multi-platform or physical-convergence evidence.
@@ -236,9 +247,9 @@ results/residual diagnostics and pauses the downstream workflow for user review
    and material/boundary vectors1120 are now covered below. Remaining separate
    work is selected initialization/helper I/O (supported legacy EM readers,native
    saves,batch writers and directory creation verified above) and selected auxiliary
-   allocations (remaining LD coefficient scratch, tensor solver workspaces,
+   allocations (tensor solver workspaces,
    subpixel/observation and snapshot staging buffers; directional LD material-input
-   arrays are already covered by1120) in
+   and coefficient scratch arrays are already covered by1120) in
    supported paths; owned file numbers alone do not establish IO-error recovery.
    Do not add restrictions on valid/custom inputs or promise recovery from
    arbitrary STOP, OS OOM, trapped FP, broken MPI or process termination.

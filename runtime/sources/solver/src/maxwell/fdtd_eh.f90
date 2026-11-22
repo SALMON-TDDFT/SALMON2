@@ -494,7 +494,7 @@ contains
     real(8),allocatable :: diagonal_c2(:,:,:),diagonal_c4(:,:),diagonal_c5(:,:)
     type(s_subpixel_profile)::subpixel_profile
     integer :: observation_unit
-    integer :: allocation_status,ld_allocation_status
+    integer :: allocation_status,ld_allocation_status,ld_allocation_ios
 #ifdef SALMONPY_RECOVERY_TESTING
     integer,optional,intent(in) :: allocation_failure_slot
     integer :: allocation_slot,ld_failure_slot,auxiliary_slot
@@ -1078,12 +1078,16 @@ contains
     if(ld%enabled) then
       !set counter, make media_ld, make max_pole_num_ld, and check pole_num_ld & other conditions
       icount_ld=1; ld%max_pole_num_ld=0;
-      allocate(ld%media_ld(ld%num_ld))
-      ld%media_ld(:)=0;
+      if(allocation_status==0)then
+        call eh_material_allocation_start(6,ld_allocation_ios)
+        if(ld_allocation_ios==0)allocate(ld%media_ld(ld%num_ld),stat=ld_allocation_ios)
+        call eh_material_allocation_result('ld%media_ld',ld_allocation_ios,allocation_status,failure_code=1120)
+      endif
+      if(allocation_status==0)ld%media_ld(:)=0;
       do ii=0,media_num
         select case(media_type(ii))
         case('lorentz-drude','ld-diagonal','ld-tensor','ld-subpixel')
-          ld%media_ld(icount_ld) = ii
+          if(allocation_status==0)ld%media_ld(icount_ld) = ii
           icount_ld              = icount_ld+1
           if(ld%max_pole_num_ld<pole_num_ld(ii)) ld%max_pole_num_ld=pole_num_ld(ii)
           if(pole_num_ld(ii)<=0) then
@@ -1100,61 +1104,109 @@ contains
       icount_ld = 1
       
       !set temporal LD coefficients (will be used later)
-      allocate(tmp_c0_ld(ld%max_pole_num_ld,ld%num_ld),tmp_c1_ld(ld%max_pole_num_ld,ld%num_ld),&
-               tmp_c2_ld(ld%max_pole_num_ld,ld%num_ld),tmp_c3_ld(ld%max_pole_num_ld,ld%num_ld),&
-               tmp_c4_ld(                   ld%num_ld),tmp_c5_ld(                   ld%num_ld))
-      tmp_c0_ld(:,:) = 0.0d0; tmp_c1_ld(:,:) = 0.0d0; tmp_c2_ld(:,:) = 0.0d0; tmp_c3_ld(:,:) = 0.0d0;
-      tmp_c4_ld(  :) = 0.0d0; tmp_c5_ld(  :) = 0.0d0;
-      call ld_coefficients(ld%media_ld,pole_num_ld,gamma_ld,omega_ld,f_ld,omega_p_ld,dt_em,pi, &
-                           tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld,epsilon_em)
+      if(allocation_status==0)then
+        call eh_material_allocation_start(7,ld_allocation_ios)
+        if(ld_allocation_ios==0)allocate(tmp_c0_ld(ld%max_pole_num_ld,ld%num_ld),stat=ld_allocation_ios)
+        call eh_material_allocation_result('tmp_c0_ld',ld_allocation_ios,allocation_status,failure_code=1120)
+      endif
+      if(allocation_status==0)then
+        call eh_material_allocation_start(8,ld_allocation_ios)
+        if(ld_allocation_ios==0)allocate(tmp_c1_ld(ld%max_pole_num_ld,ld%num_ld),stat=ld_allocation_ios)
+        call eh_material_allocation_result('tmp_c1_ld',ld_allocation_ios,allocation_status,failure_code=1120)
+      endif
+      if(allocation_status==0)then
+        call eh_material_allocation_start(9,ld_allocation_ios)
+        if(ld_allocation_ios==0)allocate(tmp_c2_ld(ld%max_pole_num_ld,ld%num_ld),stat=ld_allocation_ios)
+        call eh_material_allocation_result('tmp_c2_ld',ld_allocation_ios,allocation_status,failure_code=1120)
+      endif
+      if(allocation_status==0)then
+        call eh_material_allocation_start(10,ld_allocation_ios)
+        if(ld_allocation_ios==0)allocate(tmp_c3_ld(ld%max_pole_num_ld,ld%num_ld),stat=ld_allocation_ios)
+        call eh_material_allocation_result('tmp_c3_ld',ld_allocation_ios,allocation_status,failure_code=1120)
+      endif
+      if(allocation_status==0)then
+        call eh_material_allocation_start(11,ld_allocation_ios)
+        if(ld_allocation_ios==0)allocate(tmp_c4_ld(ld%num_ld),stat=ld_allocation_ios)
+        call eh_material_allocation_result('tmp_c4_ld',ld_allocation_ios,allocation_status,failure_code=1120)
+      endif
+      if(allocation_status==0)then
+        call eh_material_allocation_start(12,ld_allocation_ios)
+        if(ld_allocation_ios==0)allocate(tmp_c5_ld(ld%num_ld),stat=ld_allocation_ios)
+        call eh_material_allocation_result('tmp_c5_ld',ld_allocation_ios,allocation_status,failure_code=1120)
+      endif
+      if(allocation_status==0)then
+        tmp_c0_ld(:,:) = 0.0d0; tmp_c1_ld(:,:) = 0.0d0; tmp_c2_ld(:,:) = 0.0d0; tmp_c3_ld(:,:) = 0.0d0;
+        tmp_c4_ld(  :) = 0.0d0; tmp_c5_ld(  :) = 0.0d0;
+        call ld_coefficients(ld%media_ld,pole_num_ld,gamma_ld,omega_ld,f_ld,omega_p_ld,dt_em,pi, &
+                             tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld,epsilon_em)
+      endif
       if(allocated(diagonal_eps))then
-        allocate(diagonal_c2(ld%max_pole_num_ld,ld%num_ld,3), &
-          diagonal_c4(ld%num_ld,3),diagonal_c5(ld%num_ld,3))
-        diagonal_c2=0d0;diagonal_c4=0d0;diagonal_c5=0d0
-        diagonal_status=0
-        do diagonal_axis=1,3
-          do diagonal_media=1,ld%num_ld
-            ii=ld%media_ld(diagonal_media)
-            do ij=1,pole_num_ld(ii)
-              diagonal_c2(ij,diagonal_media,diagonal_axis)=diagonal_f(diagonal_axis,ii,ij) &
-                *omega_p_ld(ii)**2*dt_em/(8d0*pi*tmp_c0_ld(ij,diagonal_media))
-              if(.not.ieee_is_finite(diagonal_c2(ij,diagonal_media,diagonal_axis)))diagonal_status=1
-              diagonal_c4(diagonal_media,diagonal_axis)=diagonal_c4(diagonal_media,diagonal_axis) &
-                +diagonal_c2(ij,diagonal_media,diagonal_axis)
-              diagonal_c5(diagonal_media,diagonal_axis)=diagonal_c5(diagonal_media,diagonal_axis) &
-                +diagonal_c2(ij,diagonal_media,diagonal_axis)
+        if(allocation_status==0)then
+          call eh_material_allocation_start(13,ld_allocation_ios)
+          if(ld_allocation_ios==0)allocate(diagonal_c2(ld%max_pole_num_ld,ld%num_ld,3),stat=ld_allocation_ios)
+          call eh_material_allocation_result('diagonal_c2',ld_allocation_ios,allocation_status,failure_code=1120)
+        endif
+        if(allocation_status==0)then
+          call eh_material_allocation_start(14,ld_allocation_ios)
+          if(ld_allocation_ios==0)allocate(diagonal_c4(ld%num_ld,3),stat=ld_allocation_ios)
+          call eh_material_allocation_result('diagonal_c4',ld_allocation_ios,allocation_status,failure_code=1120)
+        endif
+        if(allocation_status==0)then
+          call eh_material_allocation_start(15,ld_allocation_ios)
+          if(ld_allocation_ios==0)allocate(diagonal_c5(ld%num_ld,3),stat=ld_allocation_ios)
+          call eh_material_allocation_result('diagonal_c5',ld_allocation_ios,allocation_status,failure_code=1120)
+        endif
+        diagonal_status=allocation_status
+        if(allocation_status==0)then
+          diagonal_c2=0d0;diagonal_c4=0d0;diagonal_c5=0d0
+          diagonal_status=0
+          do diagonal_axis=1,3
+            do diagonal_media=1,ld%num_ld
+              ii=ld%media_ld(diagonal_media)
+              do ij=1,pole_num_ld(ii)
+                diagonal_c2(ij,diagonal_media,diagonal_axis)=diagonal_f(diagonal_axis,ii,ij) &
+                  *omega_p_ld(ii)**2*dt_em/(8d0*pi*tmp_c0_ld(ij,diagonal_media))
+                if(.not.ieee_is_finite(diagonal_c2(ij,diagonal_media,diagonal_axis)))diagonal_status=1111
+                diagonal_c4(diagonal_media,diagonal_axis)=diagonal_c4(diagonal_media,diagonal_axis) &
+                  +diagonal_c2(ij,diagonal_media,diagonal_axis)
+                diagonal_c5(diagonal_media,diagonal_axis)=diagonal_c5(diagonal_media,diagonal_axis) &
+                  +diagonal_c2(ij,diagonal_media,diagonal_axis)
+              enddo
+              diagonal_c4(diagonal_media,diagonal_axis)=diagonal_eps(diagonal_axis,ii) &
+                +2d0*pi*dt_em*diagonal_c4(diagonal_media,diagonal_axis)
+              diagonal_c5(diagonal_media,diagonal_axis)=diagonal_eps(diagonal_axis,ii) &
+                -2d0*pi*dt_em*diagonal_c5(diagonal_media,diagonal_axis)
+              if(.not.ieee_is_finite(diagonal_c4(diagonal_media,diagonal_axis)))diagonal_status=1111
+              if(.not.ieee_is_finite(diagonal_c5(diagonal_media,diagonal_axis)))diagonal_status=1111
+              if(diagonal_c4(diagonal_media,diagonal_axis)<=0d0)diagonal_status=1111
             enddo
-            diagonal_c4(diagonal_media,diagonal_axis)=diagonal_eps(diagonal_axis,ii) &
-              +2d0*pi*dt_em*diagonal_c4(diagonal_media,diagonal_axis)
-            diagonal_c5(diagonal_media,diagonal_axis)=diagonal_eps(diagonal_axis,ii) &
-              -2d0*pi*dt_em*diagonal_c5(diagonal_media,diagonal_axis)
-            if(.not.ieee_is_finite(diagonal_c4(diagonal_media,diagonal_axis)))diagonal_status=1
-            if(.not.ieee_is_finite(diagonal_c5(diagonal_media,diagonal_axis)))diagonal_status=1
-            if(diagonal_c4(diagonal_media,diagonal_axis)<=0d0)diagonal_status=1
           enddo
-        enddo
-        call comm_bcast(diagonal_status,nproc_group_global)
+        endif
+        ! Reuse the coefficient-status collective for rank-local allocation errors.
+        call comm_get_max(diagonal_status,nproc_group_global)
         if(diagonal_status/=0)then
           if(present(status))then
-            status=1111;return
+            status=diagonal_status;return
           endif
           call stop_em('Nonfinite diagonal LD update coefficients.')
         endif
       endif
       ! LD owns its allocations and zero initialization, including halo values.
-      if(present(status))then
+      if(allocation_status==0)then
+        if(present(status))then
 #ifdef SALMONPY_RECOVERY_TESTING
-        ld_failure_slot=0
-        if(present(allocation_failure_slot))ld_failure_slot=max(0,-allocation_failure_slot)
-        call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array,ld_allocation_status,failure_slot=ld_failure_slot)
+          ld_failure_slot=0
+          if(present(allocation_failure_slot))ld_failure_slot=max(0,-allocation_failure_slot)
+          call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array,ld_allocation_status,failure_slot=ld_failure_slot)
 #else
-        call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array,ld_allocation_status)
+          call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array,ld_allocation_status)
 #endif
-        ! No communication/use of LD arrays before the material-vector gate.
-        ! Carry a failure there instead of adding another startup agreement.
-        if(ld_allocation_status/=0)allocation_status=1119
-      else
-      call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array)
+          ! No communication/use of LD arrays before the material-vector gate.
+          ! Carry a failure there instead of adding another startup agreement.
+          if(ld_allocation_status/=0)allocation_status=1119
+        else
+        call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array)
+        endif
       endif
     end if
     
@@ -3299,14 +3351,17 @@ contains
 #endif
     end subroutine eh_material_allocation_start
 
-    subroutine eh_material_allocation_result(name,ios,ierr)
+    subroutine eh_material_allocation_result(name,ios,ierr,failure_code)
       character(*),intent(in) :: name
       integer,intent(in) :: ios
       integer,intent(inout) :: ierr
+      integer,optional,intent(in) :: failure_code
       if(ios==0)return
       ierr=2
+      if(present(failure_code))ierr=failure_code
       write(*,'(A,I0,A,I0,2A)')'SALMONPY_MATERIAL_ALLOCATION_ERROR rank=',nproc_id_global, &
         ' stat=',ios,' array=',name
+      if(ierr==1120.and..not.present(status))error stop 'Required LD coefficient allocation failed'
     end subroutine eh_material_allocation_result
 
     subroutine eh_read_diagonal(ierr)

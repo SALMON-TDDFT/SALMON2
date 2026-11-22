@@ -15,6 +15,7 @@ exercise reader rejection, public lifetime release and valid-input retry.
 --ld-allocation-admission tests partial LD pole/current-history allocation failures.
 --aux-allocation-admission tests material/boundary coefficient vectors.
 --material-allocation-failures tests partial LD tensor-input array allocation failures.
+--ld-coefficient-allocation-failures tests LD material-list and coefficient scratch failures.
 --point-output-failure MODE --point-output-reference FILE checks optional point I/O and repair.
 --integral-output-failure MODE uses the same faults for xy integrals; --integrals-only enables all integral controls.
 --info-output-failure open|write tests optional final metadata failure and cleanup.
@@ -453,7 +454,7 @@ def main():
             assert not embedded_tddft._used,'clean coefficient rejection still consumes Python lifetime'
             comm.Barrier()
             admission_cases.append('coefficient-'+material_mode+'-'+str(attempt))
-    if '--allocation-admission' in sys.argv or '--ld-allocation-admission' in sys.argv or '--aux-allocation-admission' in sys.argv or '--material-allocation-failures' in sys.argv:
+    if '--allocation-admission' in sys.argv or '--ld-allocation-admission' in sys.argv or '--aux-allocation-admission' in sys.argv or '--material-allocation-failures' in sys.argv or '--ld-coefficient-allocation-failures' in sys.argv:
         # Deterministic STAT failure, confined to a separately built test runtime.
         from salmonpy.errors import InputError
         from salmonpy import embedded_tddft
@@ -464,6 +465,8 @@ def main():
         if '--material-allocation-failures' in sys.argv:
             if not tensor and material_mode!='diagonal':raise ValueError('material allocation tests require tensor or diagonal LD')
             allocation_stages.extend((30,) if material_mode=='diagonal' else (30,31,32))
+        if '--ld-coefficient-allocation-failures' in sys.argv:
+            allocation_stages.extend((33,34,35,36) if tensor else (33,34,35))
         for stage in allocation_stages:
             def allocation_init_call(self,function,*call_args):
                 if getattr(function,'__name__','')=='sp_eh_init':
@@ -477,7 +480,7 @@ def main():
                         NativeEHField(ctx,calc,build,out/f'allocation-{stage}-{attempt}',
                                       points=sample_points,grid=(1,comm.size,1))
                 except InputError as exc:
-                    assert str(1120 if stage in (28,29,30,31,32) else 1119 if stage in (26,27) else 1118) in str(exc),exc
+                    assert str(1120 if stage in (28,29,30,31,32,33,34,35,36) else 1119 if stage in (26,27) else 1118) in str(exc),exc
                 else:raise AssertionError('rank-local allocation failure was not returned')
                 assert ctx._dependents==0
                 if inspect_mpi:assert mpi_counts()[:2]==[0,0]

@@ -1436,3 +1436,14 @@ Invalid material files remain1110. Replacing the existing status broadcast with
 a maximum reduction adds no collective; step arithmetic and checkpoint formats
 are unchanged. Memory-budget excess only warns. This does not cover arbitrary
 allocation failures or OS termination. No legacy API or format fallback is added.
+
+### LD coefficient preparation allocation failures
+
+The1120 constructor-retry contract covers the LD material list, six common
+coefficient arrays and three directional coefficient arrays. Skip dependent
+coefficient/LD-state work after local allocation failure, agree within the field
+group before use, release partial ownership and retry only after the existing
+recovery protocol succeeds. Existing status collectives carry the result; no
+startup or step collective is added. Nonfinite directional coefficients remain1111.
+Budget excess only warns. Do not claim coverage of arbitrary tensor/subpixel or
+observation workspace allocation, OS termination or MPI failure.

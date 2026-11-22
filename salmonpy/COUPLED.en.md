@@ -1059,6 +1059,28 @@ The test-only `--material-allocation-failures` option injects failures after
 partial diagonal, off-diagonal tensor and pole-coefficient allocation.
 Production libraries contain no fault-injection hook.
 
+### Allocation failures while preparing LD update coefficients
+
+Fortran also checks allocation failures for the LD material list, six common
+update-coefficient arrays and three directional coefficient arrays. Partial
+failure skips coefficient evaluation and LD-state initialization that would
+use those arrays. The field group agrees on1120, releases partial arrays and
+owned communication resources, and returns Python to its pre-initialization
+state. The same input can be retried after memory is released. Actual allocation
+failure is an error; exceeding a planning memory budget still only warns.
+
+Directional coefficients replace their existing status broadcast with a group
+maximum reduction. Isotropic LD carries its status in the existing material-array
+agreement. No startup or step collective is added. Coefficient formulas, arithmetic
+order, time placement and checkpoint formats are unchanged. Nonfinite directional
+coefficients retain1111, distinct from allocation failure1120.
+
+The test-only `--ld-coefficient-allocation-failures` option fails one rank during
+material-list, common2D/1D coefficient and directional-coefficient allocation.
+Production has no injection hook. Tensor propagation workspaces, subpixel
+reallocation, observation/image workspaces and OS/MPI failure recovery remain
+outside this bounded support.
+
 ### Optional point-observation I/O failures
 
 Fortran checks open/write/close status for headers and time-series appends to
