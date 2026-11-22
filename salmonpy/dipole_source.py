@@ -42,12 +42,7 @@ class DipoleMap:
 
     def polarization(self, dipoles):
         p = _real(dipoles, (len(self.molecule_ids), 3), 'charge dipoles')
-        with np.errstate(over='raise', invalid='raise', divide='raise'):
-            try:
-                result = (self.weights @ p)/self.cell_volumes[:, None]
-            except FloatingPointError as exc:
-                raise NumericalError('polarization overflow') from exc
-        return _real(result, (len(self.point_ids), 3), 'polarization')
+        return _mapped_dipoles(self,p,p,dt=1.,mode=0,name='polarization')
 
     def current(self, old_dipoles, new_dipoles, *, dt):
         """Interval-average charge current; timestamp is midpoint of the interval."""
@@ -56,12 +51,7 @@ class DipoleMap:
             raise InputError('positive dt required')
         old = _real(old_dipoles, (len(self.molecule_ids), 3), 'old dipoles')
         new = _real(new_dipoles, old.shape, 'new dipoles')
-        with np.errstate(over='raise', invalid='raise', divide='raise'):
-            try:
-                result = (self.weights @ ((new-old)/dt))/self.cell_volumes[:, None]
-            except FloatingPointError as exc:
-                raise NumericalError('dipole current overflow') from exc
-        return _real(result, (len(self.point_ids), 3), 'charge current')
+        return _mapped_dipoles(self,new,old,dt=dt,mode=1,name='dipole current')
 
 
 def drive_native_dipoles(field, mapping, dipoles, *, dt):
@@ -189,11 +179,7 @@ def select_molecular_field(total, *, molecule_id, policy, provenance,
             _identifier(declaration.get(key), key)
             if ref_info.get(key) != declaration[key]:
                 raise InputError('reference differs in '+key)
-        with np.errstate(over='raise', invalid='raise'):
-            try:
-                result = total.value-reference.value
-            except FloatingPointError as exc:
-                raise NumericalError('selected molecular field overflow') from exc
+        result = _selected_molecular_field(total.value,reference.value)
     else:
         raise InputError('explicit provided_drive or environment_scattered_only policy required')
     selected = FieldValue(result, total.time, total.position, 'E:au')
@@ -205,3 +191,141 @@ def select_molecular_field(total, *, molecule_id, policy, provenance,
                 'provenance':declaration, 'reference_provenance':ref_info,
                 'provenance_status':'caller-declared; not solver-certified'}
     return MolecularDrive(selected, metadata)
+
+
+def _molecular_function(name,arguments):
+    import ctypes as c
+    from ._sbe_handles import default_api
+    from .errors import RuntimeFailure
+    try:
+        library=default_api().library;probe=library.sp_molecular_protocol
+        probe.argtypes=[];probe.restype=c.c_int
+        if probe()!=1:raise RuntimeFailure('unsupported molecular development-kernel protocol')
+        fn=getattr(library,name)
+    except AttributeError as exc:raise RuntimeFailure('matching molecular test kernel required; explicitly build/install it') from exc
+    fn.argtypes=arguments;fn.restype=c.c_int
+    return fn
+
+
+def _midpoint_oscillator(p,v,total_left,total_right,*,dt,omega,volume=1.,own_left=None,own_right=None):
+    """Development-only unit-mass/charge test response; all numerics in Fortran.
+
+    Returns new p,v, interval-average j and statistics [H0,H1,Wtotal,Wown,
+    Wdrive,H1-H0-Wdrive,Wtotal-Wown-Wdrive,Wheld-Wdrive]. No input mutation.
+    This is not an isolated-TDDFT propagator or a public two-way driver.
+    """
+    import ctypes as c
+    vectors=[np.ascontiguousarray(_real(value,(3,),name)) for value,name in (
+        (p,'p'),(v,'v'),(total_left,'total left'),(total_right,'total right'),
+        (np.zeros(3) if own_left is None else own_left,'own left'),
+        (np.zeros(3) if own_right is None else own_right,'own right'))]
+    scalars=[float(_real(value,(),name)) for value,name in ((dt,'dt'),(omega,'omega'),(volume,'volume'))]
+    outputs=[np.empty(3),np.empty(3),np.empty(3),np.empty(8)]
+    fn=_molecular_function('sp_molecular_midpoint',[c.c_double]*3+[c.c_void_p]*10)
+    status=fn(*scalars,*(a.ctypes.data for a in vectors+outputs))
+    if status==1:raise InputError('invalid molecular midpoint test input')
+    if status:raise NumericalError('molecular midpoint numerical failure; inputs unchanged')
+    return tuple(outputs)
+
+
+def _molecular_work(p,v,q,w,total_left,total_right,*,omega,own_left,own_right):
+    """Actual accepted-state work diagnostics for the development fixture."""
+    import ctypes as c
+    arrays=[np.ascontiguousarray(_real(a,(3,),'molecular work vector'))
+            for a in (p,v,q,w,total_left,total_right,own_left,own_right)]
+    output=np.empty(8);fn=_molecular_function('sp_molecular_work',[c.c_double]+[c.c_void_p]*9)
+    code=fn(float(omega),*(a.ctypes.data for a in arrays),output.ctypes.data)
+    if code:raise NumericalError('molecular work diagnostic rejected nonfinite values')
+    return output
+
+
+def _molecular_summary(statistics):
+    import ctypes as c
+    a=np.ascontiguousarray(statistics,dtype=np.float64)
+    if a.ndim!=2 or a.shape[1]!=8 or not len(a):raise InputError('nonempty molecular statistics[steps,8] required')
+    output=np.empty(11);fn=_molecular_function('sp_molecular_summary',[c.c_int,c.c_void_p,c.c_void_p])
+    if fn(len(a),a.ctypes.data,output.ctypes.data):raise NumericalError('invalid molecular summary')
+    return output
+
+
+def _selected_molecular_field(total,own):
+    import ctypes as c
+    total=np.ascontiguousarray(_real(total,(3,),'total E'))
+    own=np.ascontiguousarray(_real(own,(3,),'own-source E'));out=np.empty(3)
+    fn=_molecular_function('sp_molecular_select',[c.c_void_p]*3)
+    if fn(total.ctypes.data,own.ctypes.data,out.ctypes.data):raise NumericalError('invalid molecular selected field')
+    return out
+
+
+def _mapped_dipoles(mapping,p,old,*,dt,mode,name):
+    """Owned map arrays are immutable; result is published only after native success."""
+    import ctypes as c
+    p=np.ascontiguousarray(p);old=np.ascontiguousarray(old)
+    result=np.empty((len(mapping.point_ids),3))
+    fn=_molecular_function('sp_molecular_map',[c.c_int]*3+[c.c_double]+[c.c_void_p]*5)
+    code=fn(mode,len(mapping.point_ids),len(mapping.molecule_ids),dt,
+            mapping.weights.ctypes.data,mapping.cell_volumes.ctypes.data,
+            p.ctypes.data,old.ctypes.data,result.ctypes.data)
+    if code==1:raise InputError('invalid dipole map input')
+    if code:raise NumericalError(name+' overflow')
+    return _real(result,result.shape,name)
+
+
+class _IsolatedDipoleTrial:
+    """Private single-molecule endpoint-E transaction for the FDTD fixture.
+
+    The isolated worker owns its length-gauge integration and endpoint-E history.
+    Cancellation uses its supported replay restore, not direct electronic restore.
+    Field backups and collective acceptance belong to the caller. No mutation of
+    the molecule is allowed between propose and commit/cancel.
+    """
+    def __init__(self, state, mapping):
+        from .isolated_tddft import IsolatedTDDFTState
+        if not isinstance(state, IsolatedTDDFTState):
+            raise InputError('isolated E-driven TDDFT state required')
+        if not isinstance(mapping, DipoleMap) or len(mapping.molecule_ids) != 1:
+            raise InputError('single-molecule dipole map required')
+        self.state = state
+        self.mapping = mapping
+        self._saved = None
+        self._drive = None
+        self._validated = False
+
+    def propose(self, total, own):
+        if self._saved is not None:
+            raise InputError('finish the pending molecular trial first')
+        drive = _selected_molecular_field(total, own)
+        old = self.state.observables.dipole
+        self._saved = self.state.snapshot()
+        self._drive = drive
+        try:
+            new = self.state.step(drive).dipole
+            return self.mapping.current([old], [new], dt=self.state.dt)
+        except Exception:
+            self.cancel()
+            raise
+
+    def validate(self, total, own):
+        if self._saved is None:
+            raise InputError('no pending molecular trial')
+        self._validated = False
+        actual = _selected_molecular_field(total, own)
+        if not np.allclose(actual, self._drive, rtol=1.e-10, atol=1.e-14):
+            raise NumericalError('accepted molecular E differs from predicted endpoint; cancel and retry')
+        self._validated = True
+
+    def commit(self):
+        if self._saved is None or not self._validated:
+            raise InputError('validate the accepted molecular endpoint before commit')
+        self._saved = None
+        self._drive = None
+        self._validated = False
+
+    def cancel(self):
+        if self._saved is None:
+            raise InputError('no pending molecular trial')
+        # Keep the token if replay itself fails; the caller can retry restoration.
+        self.state.restore(self._saved)
+        self._saved = None
+        self._drive = None
+        self._validated = False

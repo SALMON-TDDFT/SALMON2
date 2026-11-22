@@ -239,7 +239,13 @@ class TDDFTState(_SnapshotMixin):
     def max_steps(self): return self._capacity
 
     def _spawn(self):
-        environment=dict(os.environ)
+        # A process worker is an independent single-rank MPI application, not
+        # another member of the Python host's communicator. Do not pass parent
+        # runtime connection descriptors/rank identities into its MPI_Init.
+        environment={k:v for k,v in os.environ.items()
+            if not k.startswith(('OMPI_','PMI_','PMIX_','PRTE_'))
+            and k not in ('MPI_LOCALRANKID','MPI_LOCALNRANKS',
+                          'SLURM_PROCID','SLURM_LOCALID')}
         expected=self._model._record_environment
         if expected is not None and any(environment.get(k,'')!=v for k,v in expected):
             raise InputError('native GS record I/O environment differs from conversion')

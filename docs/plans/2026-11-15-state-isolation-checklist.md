@@ -14,9 +14,11 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 | 完了 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBE局所試験、MPI2/4、固定Si/PBE比較。今回のソース・バイナリ向け記録も更新。換算定数は変更なし |
 | 完了 | 初期推定の入力準備・保持GSからの受け渡し | 準備と実行を分離し、保持GSの波動関数・占有数を独立コピー。前回実装は8f3a7663までpush済み |
 | 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
-| 完了 | 最終パッケージ検証 | ソース版・wheel版とも680件実行、各1件任意スキップ。日英ガイド・AI JSON同期。実GSデータは保存せず、許可されたwheel試験の標準出力と検査記録をcalc2026へ保存 |
+| 完了 | 最新パッケージ・分子接続検証 | ソース版・wheel版とも683件実行、各1件任意スキップ。日英・AI JSON同期。今回許可されたC2H2 GSを保存・再利用し、真空/LDの取消再試行を確認。末尾とisolated-fdtd検証記録を参照 |
 
 ### 残る作業と対象拡大
+
+**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消は履歴再生です。電子数・量子系の仕事量と全電磁エネルギー、一般利用向けドライバは残件です。以下はそれと区別する運用・対象拡大の残件です。
 
 1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
 2. **大規模化の計測**：マクロ点・ランク・観測間隔に対するメモリ、通信、ファイル数・I/O負荷の測定。集約・バッファ化は測定上の必要に応じて実装する。
@@ -25,7 +27,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 5. **追加対象の設計・検証**：追加保存形式、GPU、現在の独立状態経路で未検証の物理条件。必要性と対応範囲を決めて進め、全機能への包括的対応を主張しない。
 
 高速HSEの電子数診断と実材料の格子収束調査は利用者指定で後回し、
-分子は保留、TTMは削除済みです。格子/k点の暗黙の補間は追加しません。
+分子は2026-11-22の利用者指示で再開（双方向FDTD結合を先行）。TTMは削除済みです。格子/k点の暗黙の補間は追加しません。
 メモリ予算は警告とし、SCF未収束時は結果・残差を保持して確認を促す方針を維持します。
 重いCIを追加で手動起動せず、ソース・目録・配布物の必須整合性検査は省略しません。
 
@@ -33,7 +35,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
-Molecular work remains paused. Memory budgets warn; SCF nonconvergence retains
+Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Quantum work/norm, full field energy, physical convergence and a public driver remain separate. Memory budgets warn; SCF nonconvergence retains
 results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
@@ -297,21 +299,19 @@ results/residual diagnostics and pauses the downstream workflow for user review
    conventions. Source/wheel679 tests(one skip each) and evidence-reader7 pass.
    Other materials/GPU physical accuracy is not certified by these checks.
 
-NLCC/unit changes are committed/pushed as `5ee9b6c8`. Initial-guess staging
-phase1 is completed below for the existing batch wavefunction seed. Remaining
-implementation scope is retained/HSE state or other seed/backend handoff, not
-new interpolation or implicit reuse across incompatible models. Site-MPI,
-other-platform and scale evidence require their respective environments; keep
-those distinct from missing local implementations. New GS campaigns require
-applicable authorization; previous output grants remain campaign-specific.
+NLCC/unit and retained-GS work are committed through8f3a7663; archive/custom
+initial guesses are published in7009381c. Those initial-guess implementations
+are complete within their recorded scopes. Do not reopen their historical
+unchecked rows as separate tasks. New GS campaigns require applicable user
+permission; prior grants remain campaign-specific.
 
-Separate operational/extensions queue: generalized initial-guess staging;
-site-MPI/multi-node/receipt-filesystem evidence; scale and observation-IO cost;
-Ag fit refinement; optional packed/tiled/sparse/cross-platform migrations and GPU
-prerequisites. Preparation-only DFT/TDDFT/FDTD and customizable launcher argument
-construction already exist; remaining site evidence must not be reported as
-missing implementations. Ag is still a non-default fit requiring refinement.
-Groups1/2 and molecular work remain deferred. TTM is deleted, not deferred.
+The active molecular stage resumed2026-11-22: Fortran centered oscillator/work
+checks and vacuum/LD FDTD trial/rollback regressions precede isolated TDDFT
+attachment. It is not a completed public two-way molecular solver. Other
+operational work remains site-MPI/multinode/receipt filesystem evidence, scale
+and observation I/O, Ag fit refinement, optional storage/GPU and wider physical
+profiles. Preparation-only DFT/TDDFT/FDTD and customizable launcher construction
+already exist. Groups1/2 remain deferred; molecular work is active. TTM is deleted.
 Historical unchecked entries below are scope-at-the-time notes, not additional
 independent tasks or a mandate to generalize every possible configuration.
 
@@ -4026,3 +4026,74 @@ groups1/2 and molecular work deferred. No optional heavy CI dispatch.
 - [x] Retained-GS/NLCC implementation8f3a7663 already pushed to the independent SALMONpy branch.
 - [x] Approved design67917b56 and verified common archive/custom-reader implementation are included in this requested publication. Current queue at the top supersedes historical unchecked entries about initial guesses and pending selected R3/R4/CPU-NLCC integration.
 - [x] Final pre-commit checks: source inventory and receipt binding, initial-guess/public API/manual tests, guide synchronization and whitespace checks. Previously completed source/wheel680-test and MPI numerical records remain the numerical evidence; no redundant physical campaign or optional heavy CI dispatch.
+
+
+## 2026-11-22 — molecular work resumed
+
+The project lead explicitly resumed molecular work and selected two-way FDTD
+coupling first. This supersedes the historical molecular pause, not other deferred
+groups. Approved scope: single fixed molecule, length-gauge E drive; verify a
+Fortran linear oscillator with centered time/work and own-vacuum subtraction
+before attaching isolated TDDFT. Plan:2026-11-22-molecular-centered-feedback.md.
+No real GS data collection is authorized or needed for the oscillator stage.
+
+
+## 2026-11-22 — molecular centered-feedback foundation completed
+
+- [x] Public dipole→P/j mapping and own-source subtraction use the bundled Fortran kernel; existing API/atomic units, conservative weights, read-only ownership and regression values preserved. No import-time build/MPI or old numerical fallback. Direct IEEE NaN/Inf/overflow rejection preserves inputs; mapping tests cover conservation, superposition and static offsets.
+- [x] Fortran development midpoint oscillator, accepted-state work and normalized summaries pass independent analytic second-order and reversed-work-sign controls. This is a test substitute, not molecular TDDFT.
+- [x] Two independent fields use trial/rollback/corrected-current updates after one explicit hold. Vacuum own-source subtraction and synthetic LD scattering pass. dt=.003/.0015/.00075 at fixed duration satisfy normalized work tests; dt=.003 temporal mismatch falls from held3.598e-11 to2.67e-27 au. No full Maxwell/flux conservation or overall coupled-order claim.
+- [x] Ordinary FDTD with accepted j reproduces accepted E without trial/rollback. Public one-way mapping passes1/2 field ranks (2/3 total); centered fixture uses4 total ranks with one rank per field. Source/wheel E,p,j,statistics and one-way histories match exactly.
+- [x] Source/wheel681 tests pass(one optional skip each), standalone oscillator2 tests and tracked-only lightweight build pass. Source/object prohibition guards remain; unchanged field library reused by recorded SHA256. Paired guides, AI instructions/JSON and sample description synchronized. Artifacts/code patch saved in canonical calc2026/salmonpy-molecular-centered-20261122. No real GS data or optional heavy CI dispatch. Implementation uncommitted; planbd45e553 local.
+- [ ] Next: connect isolated length-gauge E→charge-dipole TDDFT to this trial/accept schedule; verify quantum-state preservation/retry and endpoint-E/clock alignment against the current worker/runtime. Real-GS collection still needs applicable permission.
+- [ ] Wider physical/media/multi-molecule/platform/GPU/multinode validation remains separate; no automatic production refinement campaign. Molecular work is active; groups1/2 remain deferred.
+
+Evidence:canonical calc2026/salmonpy-molecular-centered-20261122/{summary.json,validation.md}.
+
+## 2026-11-22 — isolated E-worker / two-field connection
+
+- [x] Private single-molecule transaction passes predicted endpoint E to the existing
+  isolated worker, maps charge-dipole differences in Fortran and validates actual
+  selected endpoint E before committing. No change to the solver's update order.
+- [x] Initial field hold is explicit; electronic time=field time-dt, initially zero
+  selected E required. No second Python midpoint average. Existing isolated and
+  periodic public interfaces are unchanged.
+- [x] MPI4 native-field + explicitly synthetic E-worker cases pass in vacuum and LD.
+  Independent replay of the supplied E history reproduces dipoles exactly. Injected
+  endpoint rejection/retry gives identical full saved E/p/j/drive/time histories to
+  continuous runs. These are transport tests, not molecular TDDFT physics evidence.
+- [x] Fix discovered in rejection test: field transaction rollback is single-use;
+  retire predictor token and capture a fresh accepted-attempt token. Electronic
+  cancellation uses existing accepted-history replay, not direct/no-recompute restore.
+- [x] Source Python suite682 tests passes(one optional skip); paired molecular
+  guides and AI catalog synchronized. No new real GS collection or optional CI.
+- [ ] Real isolated TDDFT/FDTD validation needs an existing GS bundle plus validated
+  isolated E-worker binary/receipt. None identified in this phase; requested existing
+  paths. Quantum norm/work, full-field energy and a public reusable two-way driver
+  remain open. Groups1/2 remain deferred.
+
+
+## 2026-11-22 — authorized real C2H2 / FDTD connection
+
+- [x] User authorized this C2H2 campaign's GS/wavefunction/density/restart and worker
+  copies. GS generated once: PZ, fixed ions,24×24×32 at0.35Å,123 iterations,
+  residual1.0780440e-10. Saved under canonical calc2026/salmonpy-c2h2-feedback-20261122.
+- [x] Reused audited binary7f8e0c7f… after SHA256 check. Two batch RT references
+  match exactly. Isolated E1 worker/reference maximum dipole error3.8553e-12 e·bohr;
+  independent workers and accepted-history replay match exactly.
+- [x] Actual C2H2 connected to two-field MPI4 vacuum/LD fixture;64 steps at.003au.
+  Independent replay of the supplied E drive matches dipoles exactly. Injected
+  rejection at interval30 rolls fields and electrons back, retries and matches all
+  continuous E/p/j/drive/time arrays exactly. Electronic rollback replays history.
+- [x] Fixed a real-MPI startup defect: independent single-process workers inherited
+  parent MPI connection/rank environment and hung. Filter these variables in the
+  child only; preserve parent MPI/environment and scheduler allocation IDs. Unit
+  test reproduces before/fixes after. macOS/OpenMPI evidence only.
+- [x] Source suite683 tests passes(one optional skip); paired guides/AI JSON updated.
+  No optional heavy CI. Source and package changes are not committed yet.
+- [ ] Remaining molecular scope: measured norm/quantum work/full electromagnetic
+  energy, physical convergence, public reusable two-way workflow, broader platforms.
+  The previously missing real-GS/E-worker inputs are now available for this campaign.
+  Groups1/2 remain deferred. No approval implied for unrelated GS campaigns.
+
+- [x] Installed wheel683 tests pass(one optional skip); real vacuum/LD retry histories exactly equal source continuous runs. Evidence:docs/isolated-fdtd-validation-2026-11-22.md and canonical campaign records.

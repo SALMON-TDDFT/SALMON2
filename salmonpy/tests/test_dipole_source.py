@@ -10,6 +10,8 @@ class DipoleSourceTests(unittest.TestCase):
 
     def test_conservation_superposition_and_static_offset(self):
         m = self.model()
+        from salmonpy._sbe_handles import default_api
+        self.assertTrue(callable(default_api().library.sp_molecular_map))
         p = np.array([[1.,2.,3.],[-1.,4.,2.]])
         P = m.polarization(p)
         np.testing.assert_allclose(np.sum(P*np.array([2,5])[:,None],axis=0),p.sum(axis=0))
@@ -37,3 +39,43 @@ class DipoleSourceTests(unittest.TestCase):
             with self.assertRaises(InputError):m.polarization(p)
         for dt in (0,-1,np.inf,True):
             with self.assertRaises(InputError):m.current(np.zeros((2,3)),np.ones((2,3)),dt=dt)
+        from salmonpy._sbe_handles import default_api
+        # Bind via the public map, then check native finite rejection directly.
+        m.polarization(np.zeros((2,3)))
+        fn=default_api().library.sp_molecular_map
+        weights=np.ones((1,1));vol=np.ones(1);p=np.zeros((1,3));out=np.full((1,3),-7.)
+        for bad in (float('nan'),float('inf')):
+            p[0,0]=bad
+            self.assertEqual(fn(0,1,1,1.,weights.ctypes.data,vol.ctypes.data,p.ctypes.data,p.ctypes.data,out.ctypes.data),1)
+            np.testing.assert_array_equal(out,np.full((1,3),-7.))
+
+    def test_fortran_centered_oscillator_work_and_rejection(self):
+        from salmonpy.dipole_source import _midpoint_oscillator
+        from salmonpy.errors import NumericalError
+        p=np.array([.2,.1,0.]);v=np.array([.3,0.,0.]);left=np.array([.5,.2,0.]);right=np.array([.7,-.1,0.])
+        old_p=p.copy();old_v=v.copy()
+        pn,vn,j,stats=_midpoint_oscillator(p,v,left,right,dt=.01,omega=2.,volume=8.)
+        np.testing.assert_array_equal(p,old_p);np.testing.assert_array_equal(v,old_v)
+        np.testing.assert_allclose(j,(pn-p)/.08,rtol=1e-13,atol=1e-15)
+        self.assertLess(abs(stats[5]),1e-12);self.assertLess(abs(stats[6]),1e-12)
+        self.assertGreater(abs(stats[7]),1e-8)
+        own=np.array([.1,-.2,.3])
+        q,w,k,other=_midpoint_oscillator(p,v,left+own,right+own,dt=.01,omega=2.,volume=8.,own_left=own,own_right=own)
+        np.testing.assert_allclose(q,pn,atol=1e-15,rtol=1e-13)
+        for invalid in (float('nan'),float('inf')):
+            with self.assertRaises((InputError,NumericalError)):
+                _midpoint_oscillator(p,v,[invalid,0,0],right,dt=.01,omega=2.,volume=8.)
+        np.testing.assert_array_equal(p,old_p)
+        # Exercise the Fortran IEEE rejection directly, bypassing Python validation.
+        from salmonpy._sbe_handles import default_api
+        fn=default_api().library.sp_molecular_midpoint
+        vectors=[old_p.copy(),old_v.copy(),left.copy(),right.copy(),np.zeros(3),np.zeros(3)]
+        outputs=[np.full(3,-7.),np.full(3,-7.),np.full(3,-7.),np.full(8,-7.)]
+        for bad in (float('nan'),float('inf')):
+            vectors[2][0]=bad
+            self.assertEqual(fn(.01,2.,8.,*(a.ctypes.data for a in vectors+outputs)),1)
+            for out in outputs:np.testing.assert_array_equal(out,np.full(out.shape,-7.))
+        vectors[2][:]=left
+        vectors[0][:]=1e300
+        self.assertEqual(fn(.01,2.,8.,*(a.ctypes.data for a in vectors+outputs)),4)
+        for out in outputs:np.testing.assert_array_equal(out,np.full(out.shape,-7.))

@@ -132,21 +132,87 @@ conversion occurs. The pure additive regression sample is:
 python -m salmonpy.examples.molecular_field_selection
 ```
 
-A causal native/reference schedule, oscillator source-work regression and actual
-isolated-TDDFT feedback remain future work. This selector does not close that gap.
+This selector does not advance fields. The centered oscillator schedule and work
+checks are separate development tests below; isolated-TDDFT feedback is next.
 
-### Development feedback schedule (not a public TDDFT loop)
+### Development midpoint feedback (molecular TDDFT not attached)
 
-The source-only `tools/test_molecular_feedback_mpi.py` exercises a harmonic
-oscillator with two independent solver vacuum fields. After an explicit first
-interval hold, sampled E(n) drives the next dipole interval and its current is
-supplied to field step n+1. Four total ranks, one thread each, suffice. A separate
-illumination-only baseline verifies own-source subtraction. This is an oscillator
-fixture; its midpoint integrator is not the isolated TDDFT endpoint-E algorithm.
+Molecular work resumed on2026-11-22. The source tool
+`tools/test_molecular_feedback_mpi.py` couples one test oscillator to two
+independent fields, subtracting only its own vacuum-source field. Oscillator,
+current, work and residual numerics are Fortran. This is a development substitute,
+not a molecular model or a public two-way TDDFT driver.
 
-The oscillator's work identity passes, but the held-drive field coupling has a
-first-order temporal work discrepancy. In the recorded short pulse test, reducing
-dt from .003 to .0015 to .00075 au reduced its magnitude from 3.60e-11 to 1.75e-11
-to 8.63e-12 au; these remain material relative to the absorbed work. Consequently
-neither total coupled-energy conservation nor production molecular feedback is
-established. See the source validation record for the separate accepted checks.
+After one explicit zero-current hold interval, capture both fields, predict
+endpoint fields, update the oscillator using their midpoint, restore the fields
+and advance with the corrected current. Recheck the actual endpoint update and
+work before accepting. Trial observation files are rolled back too. The fixture
+uses four ranks (one rank per field plus control ranks); it does not demonstrate
+large spatial MPI scaling.
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 2 python tools/test_molecular_feedback_mpi.py external BUILD NEW_BASE --dt .003 --steps 64
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python tools/test_molecular_feedback_mpi.py feedback BUILD NEW_RUN --baseline NEW_BASE --dt .003 --steps 64 --schedule centered
+```
+
+BUILD is an existing audited FDTD library build.json; no implicit build occurs.
+Add `--environment ld` to both commands for the synthetic LD environment. Its
+own-source reference contains neither LD nor illumination. Baseline dt, steps,
+environment and library must match before updates. `--schedule held` selects an
+explicit old-algorithm control; it is not a fallback.
+
+At dt=.003 au the old held schedule had a temporal work mismatch about3.60e-11 au;
+midpoint feedback reduced it to about2.67e-27 au for that fixture. The synthetic
+LD test retains nonzero scattered feedback with consistent midpoint work.
+Report normalized energy/work residuals as well as absolute errors. This checks
+sampled E/dipole work, not full-volume Maxwell energy plus boundary flux,
+overall coupled second-order convergence or arbitrary media/multiple molecules.
+The chosen policy removes vacuum radiation reaction and includes no spontaneous
+emission. The following development path connects the isolated E worker; C2H2 wiring is tested below, with physical convergence still separate.
+
+An explicit `replay` control feeds accepted currents through ordinary FDTD without
+trials/rollback. Vacuum and LD electric-field histories match exactly, checking
+that the trial mechanism preserves the existing field update for the same input.
+
+Dipole-to-polarization/current mapping and own-source subtraction also use the bundled Fortran kernel. Wheels include it; source users explicitly build the lightweight kernels. Mapping needs no SALMON executable, and import never compiles or communicates.
+
+
+### Isolated E-worker connection (development)
+
+The same fixture accepts `--isolated-executable`, `--isolated-validation`,
+`--isolated-bundle` and `--isolated-input` to replace the oscillator with
+`IsolatedTDDFTState`. Supply a validated isolated E worker and an existing GS
+bundle. A periodic A worker is not sufficient. No SCF/download/build is implicit.
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python tools/test_molecular_feedback_mpi.py feedback BUILD NEW_RUN --isolated-executable E_WORKER --isolated-validation VALIDATION_JSON --isolated-bundle EXISTING_GS --isolated-input rt.inp --dt .003 --steps 64
+```
+
+The first field interval holds zero current. Electronic time zero follows that
+hold; output records `electronic_time` and the dt offset from field time. Initial
+selected E must be zero to match the worker's E0; increase source separation or
+delay otherwise. Pass predicted endpoint E to the existing worker without another
+Python midpoint average or changes to its integration order. Fortran converts the
+dipole difference into charge current.
+
+After field rollback and corrected-current advance, validate the actual selected
+endpoint against the predictor. A mismatch rolls fields/electrons back and rejects
+the interval. Native field rollback tokens are single-use: retire the predictor
+token and capture another before the accepted attempt. Electronic cancellation
+uses **accepted-history replay**, not direct/no-recomputation restoration.
+`--inject-reject-step 30` rejects once and retries for development validation.
+Other errors abort this MPI fixture; this is not a general recovery API.
+
+In addition to the labelled synthetic worker, real fixed-ion C2H2 PZ TDDFT has
+been connected. Electronic grid24×24×32, spacing0.35Å; one authorized GS calculation
+is saved and reused. Maximum reference/E-worker dipole difference is about
+3.86e-12 e·bohr. Four-rank vacuum/synthetic-LD tests (one field rank plus a control
+rank per field) compare independent E-driven responses. The short64-step run at
+dt=.003 au checks wiring, not converged optical response. Electron number, quantum
+work and full Maxwell energy conservation remain unvalidated.
+
+An MPI-linked single-process worker can hang if it inherits its host's MPI
+connection. Child environments therefore omit OMPI/PMI/PMIX/PRTE data and rank
+identities. Parent MPI and scheduler allocation IDs remain untouched. This startup
+path is tested on this Mac/OpenMPI, not certified for all sites. A general public
+two-way TDDFT driver remains unavailable.

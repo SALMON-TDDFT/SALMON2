@@ -166,3 +166,53 @@ class IsolatedTDDFTTests(unittest.TestCase):
                 state.restore_checkpoint(full)
                 np.testing.assert_array_equal(state.observables.dipole,expected)
                 self.assertEqual(state.time,1025*.02)
+
+    def test_fdtd_trial_commit_cancel_and_independence(self):
+        from salmonpy.dipole_source import DipoleMap, _IsolatedDipoleTrial
+        from salmonpy.errors import NumericalError
+        a,b=self.state(),self.state()
+        mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.])
+        bridge=_IsolatedDipoleTrial(a,mapping)
+        drive=np.array([.03,-.01,.02]);own=np.array([.1,.2,.3])
+        before=a.observables.dipole.copy()
+        current=bridge.propose(drive+own,own)
+        from salmonpy.dipole_source import _selected_molecular_field
+        expected=b.step(_selected_molecular_field(drive+own,own)).dipole
+        np.testing.assert_array_equal(a.observables.dipole,expected)
+        np.testing.assert_allclose(current,mapping.current([before],[expected],dt=.02),rtol=0,atol=1e-18)
+        with self.assertRaises(InputError):bridge.propose(drive,own)
+        with self.assertRaises(NumericalError):bridge.validate(drive+own+[.01,0,0],own)
+        bridge.cancel()
+        self.assertEqual(a.time,0.)
+        np.testing.assert_array_equal(a.observables.dipole,before)
+        bridge.propose(drive+own,own)
+        bridge.validate(drive+own,own)
+        bridge.commit()
+        np.testing.assert_array_equal(a.observables.dipole,expected)
+        bridge.propose(drive+own,own);bridge.cancel()
+        np.testing.assert_array_equal(a.observables.dipole,expected)
+        self.assertEqual(a.time,.02)
+        with self.assertRaises(InputError):bridge.commit()
+        with self.assertRaises(InputError):_IsolatedDipoleTrial(a,DipoleMap(('a','b'),(10,),[[1.,1.]],[8.]))
+
+    def test_worker_does_not_inherit_parent_mpi_connection(self):
+        import os
+        original=subprocess.Popen
+        launched=[]
+        def capture(args,**kw):
+            launched.append(kw['env'].copy())
+            return original(args,**kw)
+        parent=dict(OMPI_COMM_WORLD_RANK='3',OMPI_COMM_WORLD_SIZE='4',
+                    PMIX_RANK='3',PMIX_SERVER_URI41='parent-only',PMI_FD='123',
+                    PRTE_LAUNCHED='1',MPI_LOCALRANKID='3',SLURM_PROCID='3',
+                    SLURM_LOCALID='3',SLURM_JOB_ID='retain-allocation',
+                    OPENBLAS_NUM_THREADS='1',OMP_NUM_THREADS='1')
+        with patch.dict(os.environ,parent),patch('salmonpy.tddft.subprocess.Popen',side_effect=capture):
+            a=self.state()
+            a.step([0,0,.01])
+            self.assertEqual(os.environ['PMIX_RANK'],'3')
+        env=launched[0]
+        for key in parent:
+            if key.startswith(('OMPI_','PMIX_','PMI_','PRTE_')) or key in ('MPI_LOCALRANKID','SLURM_PROCID','SLURM_LOCALID'):
+                self.assertTrue(key not in env, key+' leaked into child MPI environment')
+        self.assertEqual(env['SLURM_JOB_ID'],'retain-allocation')

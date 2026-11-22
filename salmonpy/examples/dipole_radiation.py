@@ -1,4 +1,4 @@
-"""Prepare conservative molecular polarization currents; NumPy only.
+"""Prepare conservative molecular polarization currents with the bundled Fortran kernel; no SALMON executable.
 
 Run: python -m salmonpy.examples.dipole_radiation
 See DIPOLE_RADIATION.md for the optional native MPI field connection.
