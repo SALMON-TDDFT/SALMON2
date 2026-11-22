@@ -22,3 +22,11 @@ additivity, finite/NaN rejection and unmodified outputs. Then actual vacuum/LD
 C2H2 plus retry, unchanged prior trajectories, source/wheel suites and manuals.
 Joint matter balance explicitly includes own-vacuum work; separate pointwise
 quantum error from larger electromagnetic flux/storage scales. Reuse existing GS.
+
+MPI follow-up: extend only the explicit development driver with --field-grid;
+reuse the audited library and existing GS. Compare actual x/y/z two-partition
+runs against one field rank; retain all six faces and source/LD work. Run the
+same decomposition with a rejected interval and installed-wheel retry. Do not
+infer many-rank/multi-node capability from the small local tests. Record the
+decomposition explicitly and keep numerical comparison in existing native
+kernels/test assertions. No physical CI job or new solver selector is required.

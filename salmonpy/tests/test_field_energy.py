@@ -35,7 +35,7 @@ class FieldBoxEnergyTests(unittest.TestCase):
         self.assertGreater(abs(full[16]),1.e-7)
         self.assertGreater(full[6],0.);self.assertGreater(full[7],0.)
         _,a=sample(ownedhi=(3,6,6));_,b=sample(ownedlo=(4,1,1))
-        
+
         # Cancellation of ~26 Hartree storage leaves ~1e-14 roundoff residuals.
         np.testing.assert_allclose(a+b,full,rtol=1.e-12,atol=1.e-13)
         source[1]*=-1

@@ -2,6 +2,7 @@
 
 external: 2 ranks, illumination-only baseline. feedback: 4 ranks, two native
 field contexts. Each context owns one field rank plus one bookkeeping rank.
+Isolated feedback accepts --field-grid X Y Z: use 2*(X*Y*Z+1) ranks.
 replay: 2 ranks, accepted currents through ordinary FDTD with no trial/rollback.
 """
 import argparse
@@ -80,17 +81,18 @@ def isolated_loop(world, field, args):
     def packet():
         if field is None:return None
         return (field.E[0].copy(),None if observer is None else observer.sample_step())
+    own_leader=world.size//2
     zero=np.zeros((1,3))
     token=None if observer is None else backup.capture()
     if field is not None:field.advance(zero)
     gathered=world.gather(packet(),root=0)
     if token is not None:backup.release(token)
     initial=None if world.rank else [None if x is None else x[0] for x in gathered]
-    budgets=[] if world.rank else [[gathered[0][1],gathered[2][1]]]
+    budgets=[] if world.rank else [[gathered[0][1],gathered[own_leader][1]]]
     with ExitStack() as stack:
         bridge=None
         if world.rank==0:
-            selected=_selected_molecular_field(initial[0],initial[2])
+            selected=_selected_molecular_field(initial[0],initial[own_leader])
             if np.any(selected):
                 raise ValueError('initial molecular E must be zero; increase source separation or delay')
             runtime=load_isolated_runtime(args.isolated_executable,args.isolated_validation)
@@ -102,14 +104,14 @@ def isolated_loop(world, field, args):
             bridge=_IsolatedDipoleTrial(state,mapping,sampling=args.isolated_sampling,initial_field=selected)
             ps=[state.observables.dipole.copy()];js=[];drives=[];norms=[state.electron_number]
             energies=[state._engine.current[7]];fresh=[state._engine.current[8]]
-            fields=[[initial[0],initial[2],selected]]
+            fields=[[initial[0],initial[own_leader],selected]]
         n=1
         rejected=False
         while n<args.steps:
             token=None if backup is None else backup.capture()
             if field is not None:field.advance(zero)
             predicted=world.gather(None if field is None else field.E[0].copy(),root=0)
-            current=bridge.propose(predicted[0],predicted[2]) if world.rank==0 else None
+            current=bridge.propose(predicted[0],predicted[own_leader]) if world.rank==0 else None
             current=world.bcast(current,root=0)
             if backup is not None:
                 backup.rollback(token)
@@ -125,7 +127,7 @@ def isolated_loop(world, field, args):
             if world.rank==0:
                 try:
                     if injected:raise ValueError('injected endpoint rejection')
-                    bridge.validate(accepted[0],accepted[2])
+                    bridge.validate(accepted[0],accepted[own_leader])
                 except Exception as exc:error=str(exc)
             error=world.bcast(error,root=0)
             if error:
@@ -137,13 +139,13 @@ def isolated_loop(world, field, args):
                     continue
                 raise ValueError(error)
             if world.rank==0:
-                budgets.append([accepted_packet[0][1],accepted_packet[2][1]])
+                budgets.append([accepted_packet[0][1],accepted_packet[own_leader][1]])
                 provided=bridge._drive.copy()
                 bridge.commit()
-                selected=_selected_molecular_field(accepted[0],accepted[2])
+                selected=_selected_molecular_field(accepted[0],accepted[own_leader])
                 ps.append(state.observables.dipole.copy());js.append(current[0].copy());norms.append(state.electron_number)
                 energies.append(state._engine.current[7]);fresh.append(state._engine.current[8])
-                drives.append(provided);fields.append([accepted[0],accepted[2],selected])
+                drives.append(provided);fields.append([accepted[0],accepted[own_leader],selected])
             if backup is not None:backup.release(token)
             n+=1
         if world.rank==0:
@@ -192,7 +194,7 @@ def isolated_loop(world, field, args):
                 selected_field_midpoint_relative_residual=midpoint_error['relative_error'],
                 applied_selected_midpoint_relative_difference=drive_error['relative_error'],
                 molecular_sampling=args.isolated_sampling,
-                dt=args.dt,steps=args.steps,material_environment=args.environment,source_amplitude=args.source_amplitude,
+                dt=args.dt,steps=args.steps,field_grid=args.field_grid,field_ranks=int(np.prod(args.field_grid)),material_environment=args.environment,source_amplitude=args.source_amplitude,
                 library_sha256=field.manifest['library_sha256'],
                 isolated_executable_sha256=runtime.executable.sha256,
                 TDDFT_attached=not json.loads(args.isolated_validation.read_text()).get('synthetic',False),
@@ -250,6 +252,7 @@ def main():
     parser.add_argument('--environment',choices=('vacuum','ld'),default='vacuum')
     parser.add_argument('--schedule',choices=('held','centered'),default='centered',help='held is an explicit old-algorithm control, not a fallback')
     parser.add_argument('--source-amplitude',type=float,default=.001,help='explicit pulse amplitude for diagnostic signal/background comparisons')
+    parser.add_argument('--field-grid',nargs=3,type=int,default=(1,1,1),metavar=('NX','NY','NZ'),help='isolated feedback: MPI spatial decomposition per field context')
     parser.add_argument('--energy-box',nargs=6,type=int,metavar=('LX','LY','LZ','UX','UY','UZ'),help='inclusive inner box; opt-in field energy observation')
     parser.add_argument('--dt',type=float,default=.003)
     parser.add_argument('--steps',type=int,default=64)
@@ -273,7 +276,12 @@ def main():
         raise ValueError('injection needs an isolated interval in 1..steps-1')
     if isolated and (not feedback or args.schedule!='centered' or args.isolated_validation is None or args.isolated_bundle is None):
         raise ValueError('isolated coupling needs feedback, centered, validation and bundle')
-    if world.size!=(4 if feedback else 2):raise ValueError('wrong rank count')
+    if any(v<1 for v in args.field_grid):parser.error('positive field-grid dimensions required')
+    field_ranks=int(np.prod(args.field_grid))
+    if field_ranks!=1 and not isolated:parser.error('this decomposition test currently exercises isolated feedback')
+    group_size=field_ranks+1
+    if world.size!=group_size*(2 if feedback else 1):
+        raise ValueError('need '+str(group_size*(2 if feedback else 1))+' MPI ranks for this field grid')
     if feedback and not isolated and args.baseline is None:raise ValueError('--baseline required')
     error=None
     if feedback and not isolated and world.rank==0:
@@ -301,10 +309,11 @@ def main():
         except Exception as exc:error=str(exc)
     error=world.bcast(error,root=0)
     if error:raise ValueError(error)
-    pair=world.rank//2
+    pair=world.rank//group_size
     sub=world.Split(pair,world.rank)
     dt=args.dt;steps=args.steps;volume=8.;omega=2.
-    plan=ParallelPlan((SolverGroup('field',(0,),role='field'),SolverGroup('labels',(1,),point_ids=(10,))))
+    plan=ParallelPlan((SolverGroup('field',tuple(range(field_ranks)),role='field'),
+        SolverGroup('labels',(field_ranks,),point_ids=(10,))))
     try:
         if world.rank==0:args.output.mkdir(parents=True,exist_ok=False)
         world.Barrier()
@@ -321,7 +330,7 @@ def main():
                         source=PlaneWave(AcosPulse(args.source_amplitude if pair==0 else 0.,20.,.15),0,-16.),
                         observations=((-1.,1.,1.),))
                     field=NativeEHField(context,calculation,args.build,args.output/('field-'+str(pair)),
-                        points={10:(19,20,20)},grid=(1,1,1))
+                        points={10:(19,20,20)},grid=tuple(args.field_grid))
                 if isolated:
                     isolated_loop(world,field,args)
                     return
