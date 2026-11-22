@@ -119,6 +119,29 @@ class SCFSettings:
         object.__setattr__(self,'tolerance',_positive(self.tolerance,'tolerance'))
 
 
+_GUESS_FILES=('info.bin','occupation.bin','wfn.bin')
+
+
+def _initial_guess_source(calculation,initial_guess,destination,executable_sha256=None):
+    """Authenticate the existing wavefunction seed; never execute or modify it."""
+    if not isinstance(initial_guess,GroundStateResult):
+        raise InputTypeError('initial_guess must be a completed GroundStateResult')
+    source=initial_guess._with_restart()
+    record=json.loads((source.directory/'ground-state.json').read_text())
+    signature=calculation._restart_signature()
+    if executable_sha256 is not None:signature['executable_sha256']=executable_sha256
+    if any(record.get(key)!=value for key,value in signature.items()):
+        raise InputError('initial guess requires matching executable, cell, grid, kmesh, species, potentials, electrons, states and XC')
+    if Path(destination).expanduser().resolve().is_relative_to(source.directory):
+        raise InputError('initial guess output must be outside its source directory')
+    return source,record
+
+
+def _initial_guess_text(text):
+    return text.replace("yn_restart='n'", "yn_restart='y', read_gs_restart_data='wfn', "
+                        "yn_reset_step_restart='y', directory_read_data='./initial_guess/'",1)
+
+
 def _read_status(path):
     try:
         rows=Path(path).read_text().splitlines()
@@ -309,17 +332,8 @@ class DFT:
         dest=Path(directory).expanduser().resolve()
         source = None
         if initial_guess is not None:
-            if not isinstance(initial_guess, GroundStateResult):
-                raise InputTypeError('initial_guess must be a completed GroundStateResult')
-            source = initial_guess._with_restart()
-            source_record = json.loads((source.directory/'ground-state.json').read_text())
-            signature = dict(self._restart_signature(), executable_sha256=executable.sha256)
-            if any(source_record.get(key) != value for key, value in signature.items()):
-                raise InputError('initial guess requires matching executable, cell, grid, kmesh, species, potentials, electrons, states and XC')
-            if dest.is_relative_to(source.directory):
-                raise InputError('initial guess output must be outside its source directory')
-            text = text.replace("yn_restart='n'", "yn_restart='y', read_gs_restart_data='wfn', "
-                                "yn_reset_step_restart='y', directory_read_data='./initial_guess/'", 1)
+            source,source_record=_initial_guess_source(self,initial_guess,dest,executable.sha256)
+            text=_initial_guess_text(text)
         dest.mkdir(parents=True,exist_ok=False)
         work=dest/'native';work.mkdir()
         record={'schema':'salmonpy.gs/1','status':'started','executable_sha256':executable.sha256,
@@ -336,7 +350,7 @@ class DFT:
             if source is not None:
                 guess = work/'initial_guess'
                 guess.mkdir()
-                for name in ('info.bin', 'occupation.bin', 'wfn.bin'):
+                for name in _GUESS_FILES:
                     relative = 'native/data_for_restart/'+name
                     shutil.copy2(source.directory/relative, guess/name)
                     if _digest(guess/name) != source_record['files'][relative]:

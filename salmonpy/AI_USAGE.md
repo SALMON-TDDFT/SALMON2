@@ -1544,3 +1544,12 @@ application records may be reused explicitly for the exact binary/reference,
 never inferred for a different build. No material-convergence/GPU guarantee.
 
 NLCC certification scripts/tests are maintainer source-checkout tools requiring audited build objects; wheel users consume the completed validated runtime/receipt through load_validated_build or runtime bundles, without compiling or running those maintainer tests.
+
+## Explicit initial guess in preparation
+
+prepare_dft(...,initial_guess=GroundStateResult) stages only authenticated
+info/occupation/wfn files and records required_executable_sha256. It shares
+DFT.run checks/input rendering; no execution/automatic GS discovery/submission.
+Choose/verify that executable on the compute node in a separate job. Atomic
+publication rejects a changed staged seed. This is wavefunction warm start,not
+mixing-history SCF resume or general HSE/live/custom-backend seed support.

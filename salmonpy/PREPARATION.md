@@ -175,12 +175,12 @@ DFT／TDDFTのバッチ投入経路をこの追加だけで共通化したとは
 
 ## DFT／TDDFTも準備だけで終了する
 
-`prepare_dft(model, new_directory, scf=None, save_restart=True)`は、DFT.input_textと
+`prepare_dft(model, new_directory, scf=None, save_restart=True, initial_guess=None)`は、DFT.input_textと
 同じ入力・擬ポテンシャル・対称性ファイルを保存し、Pathを返します。SCFもプロセスも
 起動しません。既定のsave_restart=Trueは将来実行するDFTでGSを保存・再利用する設定で、
 準備時にGSを作る意味ではありません。Falseなら将来の再開データ出力を無効にします。
-既存のDFT.run、初期推定GSを使うwarm start、未収束を警告して継続する方針は変えません。
-新しい入口はfresh DFT入力用で、warm startのGSコピーや互換検査を自動では行いません。
+既存DFT.runとwarm startの数値処理は変えません。未収束時は結果を残し、残差確認のため
+後続処理を一旦止めます。既定は新規入力で、initial_guessを明示した場合だけ初期推定を準備します。
 
 ```python
 from salmonpy.preparation import prepare_dft
@@ -229,3 +229,18 @@ PythonのA→Jワーカーを使う場合も、準備とは別です。TDDFTInit
 既存GS束のsnapshot loaderで、new_stateはワーカーを起動します。管理ノードの
 入力準備だけを意図した時に、これらを自動で続けて呼ばないでください。
 caller-owned MPI内では既存の計算処理同じプロセス内での計算経路を使います。
+
+### 初期推定を明示して準備だけ行う
+
+`prepare_dft(model, "new-prepared", initial_guess=previous_result)` は、
+DFT.runと同じ整合性検査と入力生成を使います。info.bin・occupation.bin・wfn.bin
+の3ファイルだけをinitial_guess/へ複製し、公開前にコピーのハッシュを照合します。
+元GSの記録とrequired_executable_sha256も残します。元GSは変更せず、実行ファイルを
+読み込まず、SCFやジョブ投入にも進みません。計算ノードで記録された実行ファイルの
+SHA256を選択・確認してから、別のジョブとして起動してください。
+
+セル・格子・k点・元素・擬ポテンシャル・電子数・状態数・XCは一致が必要です。
+原子位置は既存warm start同様に変更可能です。波動関数の初期推定であり、混合履歴を
+含む厳密なSCF再開ではありません。他形式や自作バックエンド、高速HSEの生存状態間の
+初期推定移行は別作業です。prepare_electronsの例には明示的な
+`--initial-guess GS_DIRECTORY`を追加しました。例と同じ物質モデルのGSを指定します。

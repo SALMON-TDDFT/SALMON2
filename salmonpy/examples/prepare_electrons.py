@@ -8,7 +8,7 @@ import argparse
 import json
 from pathlib import Path
 import numpy as np
-from salmonpy.dft import DFT,Pseudopotential
+from salmonpy.dft import DFT,Pseudopotential,GroundStateResult
 from salmonpy.preparation import prepare_dft,prepare_tddft
 
 
@@ -26,13 +26,15 @@ def main():
     modes=parser.add_subparsers(dest='kind',required=True)
     dft=modes.add_parser('dft',help='write a small Si DFT input only')
     dft.add_argument('pseudo_file',type=Path);dft.add_argument('directory',type=Path)
+    dft.add_argument('--initial-guess',type=Path,help='explicit completed GS of the same sample model; stage3 wavefunction seed files only')
     dft.add_argument('--no-save-restart',action='store_true',help='disable restart output in the future DFT run')
     rt=modes.add_parser('tddft',help='copy supplied RT input and explicitly listed assets only')
     rt.add_argument('input_file',type=Path);rt.add_argument('directory',type=Path)
     rt.add_argument('--asset',nargs=2,action='append',default=[],metavar=('NAME','LOCAL_FILE'))
     args=parser.parse_args()
     if args.kind=='dft':
-        directory=prepare_dft(silicon_model(args.pseudo_file),args.directory,save_restart=not args.no_save_restart)
+        initial=None if args.initial_guess is None else GroundStateResult.open(args.initial_guess)
+        directory=prepare_dft(silicon_model(args.pseudo_file),args.directory,save_restart=not args.no_save_restart,initial_guess=initial)
     else:
         files=dict(args.asset)
         if len(files)!=len(args.asset):parser.error('duplicate asset name')

@@ -131,7 +131,7 @@ Siサンプルは--no-restartと--max-iterationsに対応します。
 `DFT(..., xc="tbmbj", cval=None)` または `dft_from_atoms(..., xc="tbmbj", cval=1.2)` を使います。JSONの物質レシピでも `xc` と任意の `cval` を指定できます。係数はGS記録、warm startの整合性検査、TDDFT入力へ引き継ぎます。TB-mBJはモデルポテンシャルのため、全エネルギーと力は未検証の診断値として警告し、計算は続行します。ASE Calculatorによる最適化の対象にはしません。サンプルは `python -m salmonpy.examples.dft_tbmbj --help` で確認できます。今回の確認は合成密度の計算処理XC評価とインターフェース検査であり、実材料の物理精度保証ではありません。
 
 
-管理ノードで入力保存だけを行う場合はpreparation.prepare_dftを使います。既存runやwarm startとは別で、自動的に計算へ進みません。日英のPREPARATION.md／PREPARATION.en.mdを参照してください。
+管理ノードで入力保存だけを行う場合はpreparation.prepare_dftを使います。実行とは独立した入口で、自動的に計算へ進みません。initial_guessを明示すれば、同じwarm start検査と入力生成を使って3ファイルの初期推定も準備できます。日英のPREPARATION.md／PREPARATION.en.mdを参照してください。
 
 
 ## SCF未収束時の確認待ち（2026-11-21）

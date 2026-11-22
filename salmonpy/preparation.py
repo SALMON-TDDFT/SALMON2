@@ -103,7 +103,7 @@ def _publish_stage(stage,dest):
         raise
 
 
-def _prepare_native(directory,kind,input_name,input_data,assets,metadata):
+def _prepare_native(directory,kind,input_name,input_data,assets,metadata,*,expected_hashes=None):
     """Common input-only publication for native payloads and explicit files."""
     dest=Path(directory).expanduser().absolute()
     if dest.exists() or dest.is_symlink():raise FileExistsError(dest)
@@ -118,7 +118,10 @@ def _prepare_native(directory,kind,input_name,input_data,assets,metadata):
             target=stage/name;target.parent.mkdir(parents=True,exist_ok=True)
             if isinstance(data,bytes):target.write_bytes(data)
             else:shutil.copyfile(data,target)
-            digest,size=_hash(target);entries[name]={'sha256':digest,'size':size}
+            digest,size=_hash(target)
+            if expected_hashes is not None and name in expected_hashes and digest!=expected_hashes[name]:
+                raise InputError('initial guess changed while staging: '+name)
+            entries[name]={'sha256':digest,'size':size}
         _write(stage/manifest,{'schema':f'salmonpy.prepared-{kind}/1','status':'prepared-not-run',
                               'input':input_name,**metadata,'files':entries})
         _publish_stage(stage,dest)
@@ -140,20 +143,30 @@ def prepare_fdtd(calculation,directory,*,mpi=None):
                             'mpi_grid':None if mpi is None else list(mpi.grid)})
 
 
-def prepare_dft(calculation,directory,*,scf=None,save_restart=True):
+def prepare_dft(calculation,directory,*,scf=None,save_restart=True,initial_guess=None):
     """Write a fresh DFT input and immutable PP/symmetry assets, without SCF.
 
-    Default restart saving is unchanged. No initial-guess state is loaded or
-    copied; the existing run(initial_guess=...) path remains separate.
+    Optional explicit initial_guess stages the authenticated wavefunction seed.
+    No runtime is loaded or started; its required checksum is recorded.
     """
-    from .dft import DFT,SCFSettings,_restart_output_text
+    from .dft import DFT,SCFSettings,_restart_output_text,_initial_guess_source,_initial_guess_text,_GUESS_FILES
     from .errors import InputTypeError
     if not isinstance(calculation,DFT):raise InputTypeError('calculation must be DFT')
     scf=SCFSettings() if scf is None else scf
     text=_restart_output_text(calculation.input_text(scf),save_restart)
     metadata={'xc':calculation.xc,'save_restart':save_restart}
     if calculation.xc=='hse06':metadata['required_runtime_profile']='fast-pr'
-    return _prepare_native(directory,'dft','gs.inp',text.encode('utf-8'),dict(calculation.input_assets),metadata)
+    assets=dict(calculation.input_assets);expected={}
+    if initial_guess is not None:
+        source,record=_initial_guess_source(calculation,initial_guess,directory)
+        text=_initial_guess_text(text)
+        metadata['required_executable_sha256']=record['executable_sha256']
+        metadata['initial_guess']={'mode':'wavefunction','source_directory':str(source.directory),
+                                   'manifest_sha256':_hash(source.directory/'ground-state.json')[0]}
+        for name in _GUESS_FILES:
+            key='initial_guess/'+name;relative='native/data_for_restart/'+name
+            assets[key]=source.directory/relative;expected[key]=record['files'][relative]
+    return _prepare_native(directory,'dft','gs.inp',text.encode('utf-8'),assets,metadata,expected_hashes=expected)
 
 
 def prepare_tddft(input_file,directory,*,files=None):

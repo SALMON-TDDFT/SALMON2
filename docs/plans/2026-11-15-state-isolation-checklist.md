@@ -6,7 +6,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | FDTD・GS操作契約まで `a2f0a9a4` でcommit／push済み。NLCC・単位監査の変更は未コミット |
+| 先に整理 | 最新の検証済み変更のcommit／push | NLCC・単位監査まで `5ee9b6c8` でcommit／push済み。初期推定の入力準備接続は未コミット |
 | 完了した範囲 | 主要LD初期化・時間更新の作業配列 | 入力・係数・格子配列と時間更新の明示的な大規模領域を対応。全ての小さな確保・画像用配列は対象にしない |
 | 完了した範囲 | 現行C/Fortranの主操作契約 | 共通・電子状態・FDTD・GSを整理し、GNU Macで検証。他環境・任意機能の証明は別枠。後方互換なし |
 | 完了した範囲 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBEの局所試験とMPI2/4、固定Si/PBE全体比較が合格。換算定数は変更なし。他物質・GPUの精度保証ではない |
@@ -287,8 +287,10 @@ results/residual diagnostics and pauses the downstream workflow for user review
    conventions. Source/wheel679 tests(one skip each) and evidence-reader7 pass.
    Other materials/GPU physical accuracy is not certified by these checks.
 
-Next concrete housekeeping: commit/push the verified NLCC/unit changes. Next
-implementation candidate is generalized initial-guess staging/reuse. Site-MPI,
+NLCC/unit changes are committed/pushed as `5ee9b6c8`. Initial-guess staging
+phase1 is completed below for the existing batch wavefunction seed. Remaining
+implementation scope is retained/HSE state or other seed/backend handoff, not
+new interpolation or implicit reuse across incompatible models. Site-MPI,
 other-platform and scale evidence require their respective environments; keep
 those distinct from missing local implementations. New GS campaigns require
 applicable authorization; previous output grants remain campaign-specific.
@@ -3964,3 +3966,17 @@ reference/manual files match. Current fixed Si SCF converged at72 iterations,
 residual7.60746e-12<threshold1e-11;this is not physical discretization convergence.
 Summary.json records exact SHA256 and limited CPU/XC scope. No new optional CI
 dispatched. Changes remain uncommitted.
+
+
+## 2026-11-22 — explicit warm-start input preparation
+
+- [x] NLCC/unit work committed/pushed as `5ee9b6c8`.
+- [x] `prepare_dft(...,initial_guess=GroundStateResult)` stages only info.bin,occupation.bin,wfn.bin. Shared DFT.run compatibility check and namelist renderer preserve existing run input bytes. Source remains unchanged;no automatic discovery,SCF/runtime load,compile or submission. Required executable SHA256 and source manifest digest are recorded for the separate compute-node job.
+- [x] Stage verifies copied seed hashes before publication; incompatible models or changed copied bytes leave no final prepared directory. Existing unconverged-SCF review and wavefunction-only semantics remain;this is not mixing-history restart. Fresh preparation is unchanged.
+- [x] Consolidated existing DFT/preparation tests use synthetic files,compare old run/prepared input bytes,and inject a changed staged wavefunction. No real GS copied,collected or computed. Sample `prepare_electrons` has an explicit --initial-guess flag;paired preparation guides,DFT guide,AI guidance and searchable task/API index synchronized.
+- [ ] Remaining initial-guess generalization:retained GS/fast-HSE live-state and other archive/custom-backend seed handoff. Do not infer changed-grid/kmesh interpolation or HSE support from this batch-file staging step.
+
+Source/wheel suite and package details are recorded in canonical calc2026
+`salmonpy-guess-preparation-20261122/summary.json`. Current changes uncommitted.
+Site/other-platform/scale validation,Ag fit,optional formats/GPU remain separate;
+groups1/2 and molecular work deferred. No optional heavy CI dispatch.

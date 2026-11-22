@@ -193,6 +193,31 @@ class WarmStartTest(unittest.TestCase):
             self.assertEqual({p.name for p in (result.directory/'native/initial_guess').iterdir()},
                              {'info.bin','occupation.bin','wfn.bin'})
             self.assertEqual(json.loads((result.directory/'ground-state.json').read_text())['initial_guess']['mode'], 'wavefunction')
+            from salmonpy.preparation import prepare_dft
+            with patch('subprocess.run',side_effect=AssertionError('preparation must not execute')):
+                prepared=prepare_dft(displaced,root/'prepared-warm',initial_guess=source)
+            self.assertEqual((prepared/'gs.inp').read_text(),text)
+            proof=json.loads((prepared/'salmonpy-prepared-dft.json').read_text())
+            self.assertEqual(proof['required_executable_sha256'],engine.sha256)
+            for name in ('info.bin','occupation.bin','wfn.bin'):
+                self.assertEqual((prepared/'initial_guess'/name).read_bytes(),(source.directory/'native/data_for_restart'/name).read_bytes())
+            self.assertEqual(proof['status'],'prepared-not-run')
+            from salmonpy.manual import search
+            self.assertTrue(any('salmonpy.preparation.prepare_dft' in t['api'] for t in search('initial_guess')['tasks']))
+            with self.assertRaises(ValueError):prepare_dft(replace(displaced,grid=(14,)*3),root/'bad-prepared',initial_guess=source)
+            self.assertFalse((root/'bad-prepared').exists())
+            import shutil
+            original_copy=shutil.copyfile
+            def corrupt_copy(src,dst,*args,**kwargs):
+                value=original_copy(src,dst,*args,**kwargs)
+                if Path(dst).name=='wfn.bin':Path(dst).write_bytes(b'corrupted synthetic seed')
+                return value
+            with patch('salmonpy.preparation.shutil.copyfile',side_effect=corrupt_copy):
+                with self.assertRaisesRegex(ValueError,'changed while staging'):
+                    prepare_dft(displaced,root/'raced-prepared',initial_guess=source)
+            self.assertFalse((root/'raced-prepared').exists())
+
+
             GroundStateResult.open(source.directory)
             self.assertEqual((source.directory/'ground-state.json').read_bytes(), original)
             def load_transverse(bundle, name, **options):

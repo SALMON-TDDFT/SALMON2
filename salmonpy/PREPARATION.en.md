@@ -205,14 +205,14 @@ separate DFT/TDDFT batch paths.
 
 ## Preparation-only DFT and TDDFT
 
-`prepare_dft(model, new_directory, scf=None, save_restart=True)` writes the same
+`prepare_dft(model, new_directory, scf=None, save_restart=True, initial_guess=None)` writes the same
 fresh DFT input, pseudopotentials and symmetry assets as the existing renderer,
 then returns a Path. It starts no SCF or process. Default save_restart=True
 retains normal GS saving/reuse in the future calculation; preparation itself
 creates no GS. False disables restart output in that future run. Existing
-DFT.run, warm starts and warning-only SCF nonconvergence are unchanged. The new
-helper prepares fresh DFT inputs, without automatically copying or validating
-an initial-guess GS.
+DFT.run and warm-start numerics are unchanged. SCF nonconvergence retains results
+and pauses downstream use for explicit residual review. Fresh inputs remain the
+default; explicitly passing initial_guess stages its verified wavefunction seed.
 
 ```python
 from salmonpy.preparation import prepare_dft
@@ -262,3 +262,19 @@ Python A→J workers are a separate execution mode: TDDFTInitialState.from_salmo
 is a GS snapshot loader, and new_state starts a worker. Do not automatically
 follow preparation with these when only management-node staging was requested.
 Use the existing solver in-process path inside caller-owned MPI applications.
+
+### Explicit wavefunction seed for preparation only
+
+`prepare_dft(model, "new-prepared", initial_guess=previous_result)` shares the
+existing DFT.run compatibility check and generates byte-identical warm-start
+input. It copies only info.bin/occupation.bin/wfn.bin into initial_guess/, checks
+the copied hashes before publication, and records required_executable_sha256
+plus source-manifest provenance. The source GS stays unchanged; no executable
+is loaded, no SCF starts and nothing is submitted. On the compute node, choose
+the recorded executable SHA256 explicitly before a separate job launch.
+
+Cell/grid/kmesh/species/PP/electron count/states/XC must match; ionic positions
+may differ as in the existing warm start. This reuses wavefunctions, not mixing
+history or an exact SCF checkpoint. Other seeds/backends and HSE live-state
+initial-guess migration are separate work. The preparation example adds explicit
+`--initial-guess GS_DIRECTORY`; its source must match that example's model.
