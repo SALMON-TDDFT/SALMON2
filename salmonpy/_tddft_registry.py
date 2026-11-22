@@ -17,16 +17,8 @@ from ._shared_tddft import NativeTDDFTModel,_configure,_profile,_agree
 
 def _configure_registry(lib):
     _configure(lib)
-    vec=np.ctypeslib.ndpointer(dtype=np.float64,shape=(3,),flags='C_CONTIGUOUS')
-    dec=np.ctypeslib.ndpointer(dtype=np.int32,shape=(5,),flags='C_CONTIGUOUS')
-    specs={'registry_protocol':[],
-           'model_register':[c.c_char_p,c.c_double,c.c_int,vec,dec,c.POINTER(c.c_int64),c.POINTER(c.c_int64),vec],
-           'model_spawn':[c.c_int64,c.POINTER(c.c_int64),vec],
-           'model_close':[c.c_int64]}
-    for name,args in specs.items():
-        fn=getattr(lib,'sp_tddft_'+name,None)
-        if fn is None:raise InputError('heterogeneous standard TDDFT registry ABI missing; use an explicitly matching runtime')
-        fn.argtypes=args;fn.restype=c.c_int
+    from .api import _bind_state_operations
+    _bind_state_operations(lib,'tddft',route='registry')
     if lib.sp_tddft_registry_protocol()!=1:raise InputError('unsupported TDDFT registry protocol')
 
 

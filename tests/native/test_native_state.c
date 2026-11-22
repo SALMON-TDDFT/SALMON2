@@ -1,4 +1,4 @@
-/* Functional TDDFT/fast-PR-HSE host. Existing GS only; no disk checkpoints. */
+/* Functional TDDFT/fast-PR-HSE host. Existing GS references; optional direct electronic checkpoint test. */
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +25,7 @@ static int sp_tddft_handle_step(int64_t h,const double old[3],const double a[3],
 }
 #define sp_tddft_handle_info sp_fast_hse_handle_info
 #define sp_tddft_handle_close sp_fast_hse_handle_close
+#define sp_tddft_handle_checkpoint sp_fast_hse_handle_checkpoint
 #else
 #include "standard_tddft_handles.h"
 #define HOST_DT .003
@@ -49,18 +50,20 @@ static void drive(int i,int point,double a[3]) {
 #endif
 }
 int main(int argc,char **argv) {
-    int provided,rank,size,finalized,point,first,last,step,before_step,after_step;
+    int provided,rank,size,finalized,point,first,last,step,before_step,after_step,checkpoint;
+    char checkpoint_path[8192];
+    double fullhistory[2][12][3];
     int64_t h[2]={0,0},fresh;
     double zero[3]={0,0,0},a[3],j[2][3],old[2][3]={{0}},initial[3],before_a[3],before_j[3],after_a[3],after_j[3],history[4][3];
     FILE *trace=NULL;
     MPI_Init_thread(&argc,&argv,MPI_THREAD_FUNNELED,&provided);
-    if(provided<MPI_THREAD_FUNNELED || argc!=3) MPI_Abort(MPI_COMM_WORLD,92);
+    if(provided<MPI_THREAD_FUNNELED || (argc!=3 && argc!=4)) MPI_Abort(MPI_COMM_WORLD,92);
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm_size(MPI_COMM_WORLD,&size);
-    work=argv[1];point=atoi(argv[2]);first=point?point-1:0;last=point?first:1;
+    checkpoint=argc==4;work=argv[1];point=atoi(argv[2]);first=point?point-1:0;last=point?first:1;
     if(point<0 || point>2) MPI_Abort(MPI_COMM_WORLD,93);
     int dec[5]={1,size,1,1,1};
     require(sp_attach((int64_t)MPI_Comm_c2f(MPI_COMM_WORLD)),0);
-    if(sp_io_directory_protocol()<2) MPI_Abort(MPI_COMM_WORLD,94);
+    if(sp_io_directory_protocol()!=3) MPI_Abort(MPI_COMM_WORLD,94);
     if(rank==0) { char path[8192];snprintf(path,sizeof(path),"%s/trace.tsv",work);trace=fopen(path,"wx");if(!trace)MPI_Abort(MPI_COMM_WORLD,95); }
     CALL(sp_tddft_handle_init("rt.inp",HOST_DT,16,zero,dec,&h[first],j[first]),0);
     for(int k=0;k<3;k++)initial[k]=j[first][k];
@@ -82,7 +85,29 @@ int main(int argc,char **argv) {
             require(after_step,before_step);same(after_a,before_a);same(after_j,before_j);
             if(k==0 && i<=4)for(int d=0;d<3;d++)history[i-1][d]=j[k][d];
         }
+        for(int d=0;d<3;d++)fullhistory[k][i-1][d]=j[k][d];
+        if(checkpoint && !point && i==6) {
+            snprintf(checkpoint_path,sizeof(checkpoint_path),"%s/state-%d-rank-%d.bin",work,k,rank);
+            CALL(sp_tddft_handle_checkpoint(h[k],checkpoint_path,0),0);
+        }
         if(trace)fprintf(trace,"%d %d %.17g %.17g %.17g %.17g %.17g %.17g\n",i,k+1,a[0],a[1],a[2],j[k][0],j[k][1],j[k][2]);
+    }
+    if(checkpoint && !point) {
+        for(int k=0;k<2;k++) {
+            CALL(sp_tddft_model_new(&fresh,after_j),0);
+            snprintf(checkpoint_path,sizeof(checkpoint_path),"%s/state-%d-rank-%d.bin",work,k,rank);
+            CALL(sp_tddft_handle_checkpoint(fresh,checkpoint_path,1),0);
+            CALL(sp_tddft_handle_info(fresh,&step,after_a,after_j),0);
+            require(step,6);same(after_j,fullhistory[k][5]);drive(6,k,a);same(after_a,a);
+            for(int i=7;i<=12;i++) {
+                drive(i,k,a);CALL(sp_tddft_handle_step(fresh,after_a,a,after_j),0);
+                same(after_j,fullhistory[k][i-1]);
+                for(int d=0;d<3;d++)after_a[d]=a[d];
+            }
+            CALL(sp_tddft_handle_close(fresh),0);
+            CALL(sp_tddft_handle_info(h[k],&step,after_a,after_j),0);
+            require(step,12);same(after_j,fullhistory[k][11]);
+        }
     }
     if(!point) {
         CALL(sp_tddft_handle_info(h[1],&before_step,before_a,before_j),0);

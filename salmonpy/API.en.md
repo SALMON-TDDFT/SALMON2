@@ -703,3 +703,49 @@ creation/register/spawn, step/info, checkpoint/transaction and close have their
 own collective order, token, current-sign and profile requirements. The common
 operation table does not replace or certify those contracts. Full operation and
 platform coverage remains on the task list.
+
+
+## TDDFT and fast-HSE state operations
+
+For the built-in current interfaces,
+`native_contract(component, route=...)['state_operations']` lists required C
+symbols, argument order, result, collective scope, ownership and mode meanings.
+The same declaration supplies Python bindings for single/shared/registry routes.
+Resolve every required symbol before binding or state execution; retain separate
+protocol/profile admission. Optional timers, electron-number diagnostics and
+retained-GS imports keep their own capability queries. They are not implied by
+this required-operation list. Custom backends remain independent.
+
+Arguments are C values unless marked pointer. `int64` is an opaque signed
+64-bit token, not an address; `string` is a NUL-terminated filesystem byte string.
+`vector3` means contiguous three-element float64 Cartesian data,
+`decomposition5` contiguous five-element int32, `history8` eight-element int32.
+`int*`, `int64*`, `double*` are scalar output pointers; `buffer` is writable
+caller storage. All buffers are caller-owned and not retained after return.
+Protocol queries are local; state calls are main-thread, sequential collectives
+on the owning solver group in the same order, with the model's I/O directory.
+Only successful outputs may be consumed. Nonzero status does not universally
+mean rollback succeeded; use the operation-specific recovery contract.
+
+| Operation | Lifetime / behavior |
+|---|---|
+| handle_init / model_register | Return a positive owning generation-checked state token; registration also returns a negative model token. Keep inputs/GS/PP immutable. Close each state exactly once. |
+| model_new / model_spawn | Start an independent state from original GS, never from a sibling excitation. TDDFT inherits dt/capacity/decomposition/A0; HSE receives dt/capacity per call. |
+| handle_step | Old and new A/c endpoints in atomic units; old must exactly equal the accepted endpoint. Standard handle APIs and HSE return charge j; standard single-state C API returns matter J=−j. HSE also writes total energy in Hartree. |
+| handle_info / handle_label | Query accepted step/A/j or a state-owned output prefix. Label capacity includes NUL; too small returns13. |
+| handle_checkpoint | Modes0 save,1 fresh load,2 stage,3 commit,4 cancel. Paths may differ by rank. Caller authenticates runtime/input/topology compatibility. Raw load alone is not whole-session atomic restore. |
+| handle_transaction | Standard:0 capture,1 rollback/close streams,2 release,3 reopen. HSE:0 capture,1 rollback/close streams,2 reopen/flush/release (retain on failure),3 reopen. Caller restores only this owner's stream bytes between rollback and reopen. |
+| handle_close / model_close | Consume state token / retire model allocator. Existing children retain model resources until last close. A stale token stays invalid after slot reuse. Close owned states before detach. |
+
+Shared/registry rejection codes include11 mixed rank arguments,12 stale token
+or attachment/lifetime mismatch,13 buffer/capacity limits; other codes depend on
+operation/profile. See the shipped C headers for exact prototypes. The required
+single route list covers the existing initialization/update/shutdown entry
+points; it is not a declaration that all single-state optional operations are
+covered. No universal recovery from MPI failure, STOP or invalid pointers is
+promised. This work standardizes current signatures; broader profiles/platforms
+still require separate evidence.
+
+Each entry also records ordered `parameters` with name/type/in-or-out.
+`decomposition_order` is k/orbital/grid-x/grid-y/grid-z. Standard single-state
+C output is explicitly named `J_matter`, distinguishing it from charge j.

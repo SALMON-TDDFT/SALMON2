@@ -11,12 +11,12 @@ extern "C" {
  * fixed-ion semilocal model (PZ/TB-mBJ/Libxc-PZ/PBE), middlepoint/transverse.
  * dt, capacity, decomposition and initial A are common. New states read original
  * GS, not a sibling excitation. Only RT/current and energy streams are owned;
- * optional global-name analysis outputs are rejected. Legacy ABI unchanged.
+ * optional global-name analysis outputs are rejected. Single-state entry points have separate signatures.
  * Every call except protocol queries: main thread, same order on all subgroup
  * ranks, within one attachment lifetime. Host initializes/finalizes MPI. Close
  * every state before detach; don't copy owning native objects.
  * A is Cartesian A/c (atomic units). All handle j values are CHARGE current
- * density = minus SALMON matter current; legacy sp_tddft_* still return matter J.
+ * density = minus SALMON matter current; single-state sp_tddft_* return matter J.
  * Checkpoint is same-binary/input/topology, caller-authenticated, not portable.
  * 0 success,11 mixed-rank arguments,12 stale/invalid token or lifetime,
  * 13 small label buffer or exhausted propagation capacity,14 transaction conflict,
@@ -43,6 +43,8 @@ int sp_tddft_timer_protocol(void);
 int sp_tddft_handle_timers(int64_t token,double seconds[4]);
 int sp_tddft_handle_electron_number(int64_t token,double *value);
 int sp_tddft_handle_info(int64_t token,int *step,double A[3],double j[3]);
+/* Caller owns buffers; no pointer is retained. Outputs valid only on success.
+ * A nonzero status is not a blanket rollback guarantee; use declared recovery. */
 /* Modes0 save,1 fresh load,2 stage,3 commit,4 cancel; paths are rank-local. */
 int sp_tddft_handle_checkpoint(int64_t token,const char *path,int mode);
 /* 0 capture,1 numeric rollback/close streams,3 reopen,2 release.

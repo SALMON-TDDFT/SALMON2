@@ -28,6 +28,7 @@ def main():
     p.add_argument('--fdtd-restart-io',action='store_true',help='synthetic EM restart/helper file-unit ownership and exact-byte controls; no GS')
     p.add_argument('--field-close',action='store_true')
     p.add_argument('--abi-contract',action='store_true')
+    p.add_argument('--state-checkpoint',action='store_true',help='C state host saves/loads electronic checkpoints; references existing GS only')
     p.add_argument('--tbmbj-input',action='store_true',help='check public TB-mBJ input on synthetic density, without GS')
     p.add_argument('--model-settings',action='store_true',help='check explicit HSE settings ownership without GS creation')
     p.add_argument('--parser-host',action='store_true',help='check status-only versus explicit native-host parser selection')
@@ -379,7 +380,7 @@ def main():
                 if digest(exe)!=executables[language]['sha256'] or digest(lib)!=record['sha256']:
                     raise ValueError('validated executable/runtime changed')
                 with (work/'stdout.log').open('w') as log:
-                    subprocess.run([args.mpiexec,'-n',str(ranks),str(exe),str(work),str(point)],cwd=work,
+                    subprocess.run([args.mpiexec,'-n',str(ranks),str(exe),str(work),str(point),*(['checkpoint'] if args.state_checkpoint and language=='c' else [])],cwd=work,
                                    env=env,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=240)
                 if args.state_symmetry:
                     observed=(work/'stdout.log').read_text()
@@ -406,7 +407,8 @@ def main():
                  'C_Fortran_currents_match':True,'independent_controls_match':True,
                  'bad_old_A_preserves_state':True,'stale_generation_rejected':True,
                  'fresh_state_matches_original_start':True,'MPI_caller_survives_detach':True,
-                 'GS_bytes_unchanged':True,'GS_data_collected':False,'electronic_disk_checkpoints_created':False,
+                 'GS_bytes_unchanged':True,'GS_data_collected':False,'electronic_disk_checkpoints_created':args.state_checkpoint,
+                 'C_direct_resume_exact':True if args.state_checkpoint else None,
                  'runtime_sha256':record['sha256'],'executables':executables,'rtol':2e-10,'atol':2e-12,
                  'scope':profile+' state-lifecycle ABI; not full profile/physics/platform conformance'}
         (results/'result.json').write_text(json.dumps(summary,indent=2)+'\n')

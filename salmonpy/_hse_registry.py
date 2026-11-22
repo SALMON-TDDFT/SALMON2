@@ -9,15 +9,8 @@ from ._shared_hse import NativeFastHSEModel
 
 
 def _configure(lib):
-    vector=np.ctypeslib.ndpointer(dtype=np.float64,ndim=1,shape=(3,),flags='C_CONTIGUOUS')
-    specs={'sp_fast_hse_registry_protocol':[],
-           'sp_fast_hse_model_register':[c.c_char_p,c.c_double,c.c_int,c.c_int,c.POINTER(c.c_int64),c.POINTER(c.c_int64),vector],
-           'sp_fast_hse_model_spawn':[c.c_int64,c.c_double,c.c_int,c.POINTER(c.c_int64),vector],
-           'sp_fast_hse_model_close':[c.c_int64]}
-    for name,args in specs.items():
-        fn=getattr(lib,name,None)
-        if fn is None:raise InputError('heterogeneous HSE registry requires an explicitly built matching runtime')
-        fn.argtypes=args;fn.restype=c.c_int
+    from .api import _bind_state_operations
+    _bind_state_operations(lib,'fast_hse',route='registry')
     if lib.sp_fast_hse_registry_protocol()!=1:raise InputError('unsupported HSE registry protocol')
 
 

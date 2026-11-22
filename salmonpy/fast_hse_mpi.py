@@ -115,14 +115,8 @@ def _symmetry_preflight(path, setting):
 
 
 def _configure(lib):
-    vec = np.ctypeslib.ndpointer(dtype=np.float64, ndim=1, shape=(3,), flags='C_CONTIGUOUS')
-    lib.sp_fast_hse_init.argtypes = [c.c_char_p, c.c_double, c.c_int, vec]
-    lib.sp_fast_hse_step.argtypes = [vec, vec, vec, c.POINTER(c.c_double)]
-    lib.sp_fast_hse_checkpoint.argtypes = [c.c_char_p, c.c_int]
-    lib.sp_fast_hse_info.argtypes = [c.POINTER(c.c_int), vec, vec]
-    lib.sp_fast_hse_close.argtypes = []
-    for name in ('init','step','checkpoint','info','close'):
-        getattr(lib, 'sp_fast_hse_'+name).restype = c.c_int
+    from .api import _bind_state_operations
+    _bind_state_operations(lib,'fast_hse',route='single')
 
 
 def _require_cell_protocol(lib,groups,symmetry,operations=None):

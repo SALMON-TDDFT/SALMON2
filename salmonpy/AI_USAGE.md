@@ -1494,3 +1494,18 @@ is not machine-code validation or full solver ABI certification. Never interpret
 void/value-returning operations as recoverable error-code APIs. Keep solver-specific
 state/token/checkpoint/profile contracts separate. User backends keep their own
 contracts; do not impose this built-in symbol set on them.
+
+## Built-in electronic state-operation contracts
+
+Use `native_contract('tddft' or 'fast_hse', route=...)['state_operations']` for
+current argument order/types, ownership and checkpoint/transaction mode meanings.
+Never interchange standard/HSE transaction mode2: standard releases, HSE also
+reopens/flushes and retains on failure. Protocol/profile queries remain required.
+All state calls use the owning group/main thread/matching order/model I/O directory.
+Only successful outputs are valid; do not infer arbitrary rollback from nonzero
+status. Keep charge j versus standard single-state C matter J signs explicit.
+Stage/commit/cancel plus host coordination provide session protection; raw load
+alone does not. Optional diagnostics/retained-GS capabilities and custom backends
+keep separate contracts.
+
+Use ordered `parameters` names/directions as well as argument types; old_A and new_A share a type. Standard single C current is `J_matter`; decomposition order is k/orbital/grid-x/grid-y/grid-z.

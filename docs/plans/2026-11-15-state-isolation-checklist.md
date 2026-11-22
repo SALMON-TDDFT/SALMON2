@@ -6,7 +6,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | 共通ホスト契約まで `26dca23c` でcommit／push済み。操作別の共通呼び出し契約は検証中 |
+| 先に整理 | 最新の検証済み変更のcommit／push | 共通6操作の契約まで `a2411deb` でcommit／push済み。TDDFT・高速HSEの状態操作契約は未コミット |
 | 完了した範囲 | 主要LD初期化・時間更新の作業配列 | 入力・係数・格子配列と時間更新の明示的な大規模領域を対応。全ての小さな確保・画像用配列は対象にしない |
 | 1 | 現行C/Fortran呼び出し契約の確定 | 呼び出し規約の安定化と、残る操作・実行環境での確認。旧版との後方互換は対象外 |
 | 2 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
@@ -3863,3 +3863,18 @@ Continue bounded R4 operation contracts,then group3 NLCC runtime certification/u
 Final installed validation details are recorded in canonical calc2026
 `salmonpy-host-operations-20261122/summary.json`. These operation-contract changes
 are uncommitted; groups1/2 and molecular work remain deferred. No heavy CI dispatch.
+
+
+## 2026-11-22 — TDDFT / fast-PR HSE state-operation contracts
+
+- [x] Common host operation changes committed/pushed as `a2411deb` to independent SALMONpy.
+- [x] Current single/shared/registry required state signatures now have one declaration per component. `native_contract(...)["state_operations"]` exposes ordered parameter names, exact type tokens, in/out direction, ownership, collective scope, endpoint/current conventions and checkpoint/transaction modes. Python factories bind those same declarations; no import-time loading or new timestep communication. All required symbols resolve before binding; custom backends are unconstrained.
+- [x] Preserve component differences: ordinary single C returns matter J, handles return charge j; HSE also returns total energy. TDDFT inherits model dt/capacity/decomposition while HSE spawn receives dt/capacity. Transaction mode2 is standard release vs HSE reopen/flush/release with retention on failure. Raw checkpoint load is not whole-session atomicity.
+- [x] Existing consolidated signature tests cover all missing required entries without executing state operations or leaving partial type declarations. No extra Python test module/count. Japanese/English guides, AI JSON and C header ownership/error notes synchronized.
+- [x] Existing C/Fortran state host reused with optional `--abi-state --state-checkpoint`. Ordinary PZ and fast-HSE MPI1/2 C/Fortran currents agree; independent points, rejected old A, stale generations and caller MPI lifetime remain correct. C loads direct checkpoints into new states and compares subsequent currents exactly. GS is referenced by symlink and byte-checked unchanged; no GS calculation or collection.
+- [x] Source vs prior installed Python, ordinary/HSE × shared/registry × MPI1/2:8 profiles,16 executions, two independent drives each; currents match bitwise and direct resume after step6 matches continuous steps7–12, no replay. Result directory: canonical calc2026 `salmonpy-state-operation-contracts-20261122`.
+- [ ] Broader XC/symmetry/platform evidence, every optional diagnostic/GS import and arbitrary MPI/process/invalid-pointer failure recovery are separate; do not label the complete solver ABI stable from this scoped verification. Continue bounded R4 then group3 NLCC certification/unit audit. Groups1/2 and molecules remain deferred.
+
+Final source/distribution checks and installed matrix are recorded in that
+directory's summary.json. This state-contract work remains uncommitted; no
+optional heavy CI dispatched.

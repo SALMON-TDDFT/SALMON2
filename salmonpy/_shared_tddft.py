@@ -40,19 +40,8 @@ def _profile(initial):
 
 
 def _configure(lib):
-    vec=np.ctypeslib.ndpointer(dtype=np.float64,shape=(3,),flags='C_CONTIGUOUS')
-    dec=np.ctypeslib.ndpointer(dtype=np.int32,shape=(5,),flags='C_CONTIGUOUS')
-    specs={'handle_protocol':[],'model_protocol':[],
-           'handle_init':[c.c_char_p,c.c_double,c.c_int,vec,dec,c.POINTER(c.c_int64),vec],
-           'model_new':[c.POINTER(c.c_int64),vec],'handle_step':[c.c_int64,vec,vec,vec],
-           'handle_info':[c.c_int64,c.POINTER(c.c_int),vec,vec],
-           'handle_checkpoint':[c.c_int64,c.c_char_p,c.c_int],
-           'handle_transaction':[c.c_int64,c.c_int],'handle_close':[c.c_int64],
-           'handle_label':[c.c_int64,c.c_void_p,c.c_int]}
-    for name,args in specs.items():
-        fn=getattr(lib,'sp_tddft_'+name,None)
-        if fn is None:raise InputError('standard TDDFT handle ABI missing; explicitly use/build a matching runtime')
-        fn.argtypes=args;fn.restype=c.c_int
+    from .api import _bind_state_operations
+    _bind_state_operations(lib,'tddft',route='shared')
     if lib.sp_tddft_handle_protocol()!=1 or lib.sp_tddft_model_protocol()!=1:
         raise InputError('unsupported standard TDDFT handle/model protocol')
 

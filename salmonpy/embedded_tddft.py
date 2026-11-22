@@ -160,11 +160,8 @@ class NativeTDDFTBackend:
                 dt=_positive(dt,'dt');base=_profile(initial)
             lib=c.CDLL(str(self.library))
             if shared:_configure(lib)
-            vec=np.ctypeslib.ndpointer(dtype=np.float64,ndim=1,shape=(3,),flags='C_CONTIGUOUS')
-            dec=np.ctypeslib.ndpointer(dtype=np.int32,ndim=1,shape=(5,),flags='C_CONTIGUOUS')
-            lib.sp_tddft_init.argtypes=[c.c_char_p,c.c_double,c.c_int,vec,dec,vec];lib.sp_tddft_init.restype=c.c_int
-            lib.sp_tddft_step.argtypes=[vec,vec,vec];lib.sp_tddft_step.restype=c.c_int
-            lib.sp_tddft_close.argtypes=[];lib.sp_tddft_close.restype=c.c_int
+            from .api import _bind_state_operations
+            _bind_state_operations(lib,'tddft',route='single')
         except Exception as exc: error=str(exc)
         errors=comm.allgather(error)
         if any(errors): raise InputError(str(errors))

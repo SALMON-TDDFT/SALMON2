@@ -13,21 +13,8 @@ from .sbe import _integer
 
 
 def _configure_handles(lib, *, symmetry=False):
-    vector=np.ctypeslib.ndpointer(dtype=np.float64,ndim=1,shape=(3,),flags='C_CONTIGUOUS')
-    specs={'sp_fast_hse_handle_protocol':[], 'sp_fast_hse_model_protocol':[],
-           'sp_fast_hse_handle_init':[c.c_char_p,c.c_double,c.c_int,c.c_int,c.POINTER(c.c_int64),vector],
-           'sp_fast_hse_model_new':[c.c_double,c.c_int,c.POINTER(c.c_int64),vector],
-           'sp_fast_hse_handle_step':[c.c_int64,vector,vector,vector,c.POINTER(c.c_double)],
-           'sp_fast_hse_handle_info':[c.c_int64,c.POINTER(c.c_int),vector,vector],
-           'sp_fast_hse_handle_history':[c.c_int64,np.ctypeslib.ndpointer(dtype=np.int32,ndim=1,shape=(8,),flags='C_CONTIGUOUS')],
-           'sp_fast_hse_handle_transaction':[c.c_int64,c.c_int],
-           'sp_fast_hse_handle_checkpoint':[c.c_int64,c.c_char_p,c.c_int],
-           'sp_fast_hse_handle_close':[c.c_int64],
-           'sp_fast_hse_handle_label':[c.c_int64,c.c_void_p,c.c_int]}
-    for name,args in specs.items():
-        fn=getattr(lib,name,None)
-        if fn is None:raise InputError('shared HSE model ABI missing; explicitly rebuild current runtime')
-        fn.argtypes=args;fn.restype=c.c_int
+    from .api import _bind_state_operations
+    _bind_state_operations(lib,'fast_hse',route='shared')
     if lib.sp_fast_hse_handle_protocol()!=1 or lib.sp_fast_hse_model_protocol()!=1:
         raise InputError('unsupported shared HSE model protocol')
 

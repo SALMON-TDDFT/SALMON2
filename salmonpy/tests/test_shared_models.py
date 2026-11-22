@@ -50,6 +50,32 @@ class SharedTDDFTTests(unittest.TestCase):
         self.assertEqual(events,['detach'])
 
     def test_bound_handle_cannot_overwrite_abi_signature(self):
+        from salmonpy.api import native_contract, _bind_state_operations
+        from salmonpy.errors import InputError
+        for component in ('tddft','fast_hse'):
+            for route in ('shared','registry'):
+                operations=native_contract(component,route=route)['state_operations']
+                self.assertTrue(any(name.endswith('handle_step') for name in operations))
+                step_spec=next(v for k,v in operations.items() if k.endswith('handle_step'))
+                self.assertEqual([p['name'] for p in step_spec['parameters']][:4],['state','old_A','new_A','j'])
+                self.assertEqual(step_spec['parameters'][3]['direction'],'out')
+                self.assertTrue(any(name.endswith('handle_checkpoint') for name in operations))
+                class Fn:
+                    def __call__(self,*args):raise AssertionError('binding must not execute state operations')
+                functions={name:Fn() for name in operations}
+                for missing in functions:
+                    partial=SimpleNamespace(**{k:v for k,v in functions.items() if k!=missing})
+                    with self.subTest(component=component,route=route,missing=missing),self.assertRaisesRegex(InputError,missing):
+                        _bind_state_operations(partial,component,route=route)
+                    self.assertFalse(any(hasattr(f,'argtypes') for f in functions.values()))
+                _bind_state_operations(SimpleNamespace(**functions),component,route=route)
+                import ctypes as c
+                for name,fn in functions.items():self.assertIs(fn.restype,c.c_int,name)
+                checkpoint=next(v for k,v in operations.items() if k.endswith('handle_checkpoint'))
+                self.assertEqual(checkpoint['modes'],{0:'save',1:'fresh load',2:'stage',3:'commit',4:'cancel'})
+                checkpoint['modes'][0]='edited'
+                fresh=native_contract(component,route=route)['state_operations']
+                self.assertEqual(next(v for k,v in fresh.items() if k.endswith('handle_checkpoint'))['modes'][0],'save')
         from salmonpy._shared_tddft import _Library
         calls=[]
         def fn(*args):calls.append(args);return 0

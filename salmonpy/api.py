@@ -173,6 +173,119 @@ def _bind_host_operations(library):
         function.restype = types[result]
 
 
+
+def _state_operations(component, route):
+    """Current required state entries only; optional diagnostics stay separate."""
+    if component not in ('tddft', 'fast_hse'):
+        return {}
+    prefix = 'sp_tddft_' if component == 'tddft' else 'sp_fast_hse_'
+    if route == 'single':
+        specs = ({'init': ('string', 'double', 'int', 'vector3', 'decomposition5', 'vector3'),
+                  'step': ('vector3', 'vector3', 'vector3'), 'close': ()}
+                 if component == 'tddft' else
+                 {'init': ('string', 'double', 'int', 'vector3'),
+                  'step': ('vector3', 'vector3', 'vector3', 'double*'),
+                  'checkpoint': ('string', 'int'),
+                  'info': ('int*', 'vector3', 'vector3'), 'close': ()})
+    else:
+        specs = {'handle_protocol': (), 'model_protocol': (),
+                 'handle_info': ('int64', 'int*', 'vector3', 'vector3'),
+                 'handle_checkpoint': ('int64', 'string', 'int'),
+                 'handle_transaction': ('int64', 'int'),
+                 'handle_close': ('int64',), 'handle_label': ('int64', 'buffer', 'int')}
+        if component == 'tddft':
+            specs.update(handle_init=('string', 'double', 'int', 'vector3', 'decomposition5', 'int64*', 'vector3'),
+                         model_new=('int64*', 'vector3'),
+                         handle_step=('int64', 'vector3', 'vector3', 'vector3'))
+        else:
+            specs.update(handle_init=('string', 'double', 'int', 'int', 'int64*', 'vector3'),
+                         model_new=('double', 'int', 'int64*', 'vector3'),
+                         handle_step=('int64', 'vector3', 'vector3', 'vector3', 'double*'),
+                         handle_history=('int64', 'history8'))
+        if route == 'registry':
+            specs.update(registry_protocol=(), model_close=('int64',))
+            if component == 'tddft':
+                specs.update(model_register=('string', 'double', 'int', 'vector3', 'decomposition5', 'int64*', 'int64*', 'vector3'),
+                             model_spawn=('int64', 'int64*', 'vector3'))
+            else:
+                specs.update(model_register=('string', 'double', 'int', 'int', 'int64*', 'int64*', 'vector3'),
+                             model_spawn=('int64', 'double', 'int', 'int64*', 'vector3'))
+    report = {}
+    for name, args in specs.items():
+        query = name.endswith('_protocol')
+        entry = {'arguments': list(args), 'returns': 'int',
+                 'collective': 'local' if query else 'solver group',
+                 'requires': 'none' if query else 'live attachment; matching call order; correct model I/O directory',
+                 'buffer_lifetime': 'caller-owned; not retained after return',
+                 'thread': 'main thread, sequential',
+                 'failure': 'protocol version' if query else '0 success; nonzero operation-specific status; outputs valid only on success'}
+        if name.endswith('checkpoint'):
+            entry['modes'] = {0:'save',1:'fresh load',2:'stage',3:'commit',4:'cancel'}
+            entry['path'] = 'NUL-terminated rank-local path; caller authenticates input/runtime/topology compatibility'
+            entry['atomicity'] = 'stage/commit/cancel participate in caller-coordinated restore; raw load alone is not whole-session atomic'
+        if name.endswith('transaction'):
+            entry['modes'] = ({0:'capture',1:'rollback and close streams',2:'release',3:'reopen streams'}
+                              if component == 'tddft' else
+                              {0:'capture',1:'rollback and close streams',2:'reopen/flush/release; retain on failure',3:'reopen streams'})
+            entry['atomicity'] = 'caller restores only owned stream bytes between rollback and reopen'
+        if name.endswith('step'):
+            entry['inputs'] = 'old and new Cartesian A/c endpoints, atomic units; old equals accepted endpoint'
+            entry['outputs'] = ('SALMON matter J=-j' if component=='tddft' and route=='single' else 'charge-current density j')
+            if component=='fast_hse':entry['energy']='total energy, Hartree'
+            entry['atomicity'] = 'only documented numerical/transaction rejection paths preserve accepted state; not arbitrary MPI/process failures'
+        if name in ('model_register','model_spawn','model_new','handle_init'):
+            entry['ownership'] = 'returned positive state token is owning and generation-checked; close once; never copy as an independent state'
+        if name == 'model_register':entry['model_token']='negative opaque generation token; distinct from state token'
+        if name == 'model_close':entry['effect']='retire allocator; existing children retain model until last state closes'
+        if name == 'handle_close':entry['effect']='consumes state token; stale token rejected even after slot reuse; does not detach MPI'
+        if name == 'handle_info':entry['effect']='read accepted step, A/c and charge j without propagation'
+        if name == 'handle_label':entry['capacity']='bytes including NUL; insufficient capacity returns13; no truncated successful label'
+        names = {
+            'init': ['path','dt','capacity']+(['initial_A','decomposition'] if component=='tddft' else [])+['j'],
+            'step': ['old_A','new_A','j']+(['energy'] if component=='fast_hse' else []),
+            'info': ['step','accepted_A','j'], 'checkpoint': ['path','mode'], 'close': [],
+            'handle_init': ['path','dt','capacity']+(['initial_A','decomposition'] if component=='tddft' else ['allow_symmetry'])+['state','j'],
+            'model_new': (['dt','capacity'] if component=='fast_hse' else [])+['state','j'],
+            'model_register': ['path','dt','capacity']+(['initial_A','decomposition'] if component=='tddft' else ['allow_symmetry'])+['model','state','j'],
+            'model_spawn': ['model']+(['dt','capacity'] if component=='fast_hse' else [])+['state','j'],
+            'model_close': ['model'],
+            'handle_step': ['state','old_A','new_A','j']+(['energy'] if component=='fast_hse' else []),
+            'handle_info': ['state','step','accepted_A','j'], 'handle_history': ['state','history'],
+            'handle_checkpoint': ['state','path','mode'], 'handle_transaction': ['state','mode'],
+            'handle_close': ['state'], 'handle_label': ['state','label','capacity'],
+        }.get(name, [])
+        if component=='tddft' and route=='single':names=['J_matter' if n=='j' else n for n in names]
+        if len(names)!=len(args):raise AssertionError('state parameter declaration differs: '+name)
+        entry['parameters']=[{'name':parameter,'type':kind,
+                              'direction':'out' if parameter in ('j','J_matter','energy','step','accepted_A','history','label') or kind=='int64*' else 'in'}
+                             for parameter,kind in zip(names,args)]
+        if 'decomposition' in names:entry['decomposition_order']=['k','orbital','grid_x','grid_y','grid_z']
+        report[prefix+name]=entry
+    return report
+
+
+def _bind_state_operations(library, component, *, route):
+    """Bind required current signatures atomically with respect to symbol lookup."""
+    import ctypes as c
+    import numpy as np
+    from .errors import InputError
+    specs=_state_operations(component,route)
+    if not specs:raise InputError('no built-in state operation contract for '+str(component))
+    functions=[]
+    for name,entry in specs.items():
+        function=getattr(library,name,None)
+        if function is None:raise InputError('runtime lacks required state operation '+name)
+        functions.append((function,entry['arguments']))
+    types={'string':c.c_char_p,'double':c.c_double,'int':c.c_int,'int64':c.c_int64,
+           'int*':c.POINTER(c.c_int),'int64*':c.POINTER(c.c_int64),
+           'double*':c.POINTER(c.c_double),'buffer':c.c_void_p,
+           'vector3':np.ctypeslib.ndpointer(dtype=np.float64,shape=(3,),flags='C_CONTIGUOUS'),
+           'decomposition5':np.ctypeslib.ndpointer(dtype=np.int32,shape=(5,),flags='C_CONTIGUOUS'),
+           'history8':np.ctypeslib.ndpointer(dtype=np.int32,shape=(8,),flags='C_CONTIGUOUS')}
+    for function,args in functions:
+        function.argtypes=[types[arg] for arg in args];function.restype=c.c_int
+
+
 def native_contract(component, *, route):
     """Describe a built-in execution contract without loading a native library.
 
@@ -197,6 +310,7 @@ def native_contract(component, *, route):
     report.update(known=True, status='experimental', abi_stability='experimental',
                   host_abi_version=1,host_abi_query='sp_host_abi',
                   host_operations=_host_operations(),
+                  state_operations=_state_operations(component,route),
                   host_thread='main thread, sequential calls',
                   host_owns_mpi_initialization_and_finalization=True,
                   attachment='one native attachment per process; close owned states before detach',
