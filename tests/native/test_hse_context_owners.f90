@@ -13,10 +13,11 @@ program context_owners
  use sym_sub,only:read_sw_symmetry
  use structures,only:s_rt_run_config
  use salmonpy_tddft_context,only:tddft_context,rt_open,rt_input_config,rt_step,rt_close, &
-   rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_probe_write
+   rt_step_transaction,rt_checkpoint,rt_current,rt_accepted_step,rt_probe_write,s_rt_model_settings
  implicit none
  type(tddft_context),pointer::a=>null(),b=>null()
  type(s_rt_run_config)::ca,cb
+ type(s_rt_model_settings)::settings_a,settings_b
  character(32)::mode,arg,directory,path_a,path_b
  character(:),allocatable::a_rt,a_energy,b_rt,b_energy
  real(8)::j(3),energy_a=0d0,energy_b=0d0,held_b(3)
@@ -43,11 +44,11 @@ program context_owners
    dt=ca%delta_t;nt=ca%max_steps
  endif
  if(dual.or.mode=='single-a'.or.index(mode,'late-')==1)then
-   call rt_open(a,'a',status,config=ca);call require(status,1)
+   call rt_open(a,'a',status,config=ca,model_settings=settings_a);call require(status,1)
    if(nproc_id_global==0)open(newunit=ua,file='a-trace.dat',status='new')
  endif
  if(dual.or.mode=='single-b')then
-   call rt_open(b,'b',status,config=cb);call require(status,2)
+   call rt_open(b,'b',status,config=cb,model_settings=settings_b);call require(status,2)
    if(nproc_id_global==0)open(newunit=ub,file='b-trace.dat',status='new')
  endif
  write(path_a,'(a,i0,a)')'a-',nproc_id_global,'.bin'
@@ -63,7 +64,7 @@ program context_owners
      call bytes_write('a_rt_energy.data',a_energy)
    endif
    call MPI_Barrier(comm,ierr)
-   call rt_open(b,'b',status,config=cb);call require(status,203)
+   call rt_open(b,'b',status,config=cb,model_settings=settings_b);call require(status,203)
    if(nproc_id_global==0)open(newunit=ub,file='b-trace.dat',status='new')
    if(mode=='late-failure'.or.mode=='late-retry')then
      if(nproc_id_global==0)then

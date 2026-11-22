@@ -412,7 +412,7 @@ def install_runtime(directory, *, catalog=None, required=(), artifact=None, host
             raise
 
 
-def build_runtime(upstream=None, directory=None, *, jobs, cmake_args=()):
+def build_runtime(directory, *, jobs, cmake_args=()):
     """Explicit local build. Retain logs/source on failure; no dependency install.
 
     Returns the audited executable path and hash, not a portable distribution or
@@ -430,11 +430,9 @@ def build_runtime(upstream=None, directory=None, *, jobs, cmake_args=()):
     if not prepare.is_file() or not checker.is_file():
         raise RuntimeFailure('runtime build resources missing; reinstall a complete SALMONpy wheel')
     if directory is None:
-        directory, upstream = upstream, None
-    if directory is None:
         raise InputError('a new build directory is required')
     work = Path(directory).expanduser().resolve()
-    if work.is_relative_to(resources) or (upstream is not None and work.is_relative_to(Path(upstream).expanduser().resolve())):
+    if work.is_relative_to(resources):
         raise InputError('build directory must be outside source checkouts')
     work.mkdir(parents=True, exist_ok=False)
     commands = [
@@ -479,7 +477,7 @@ def main(argv=None):
             p.add_argument('directory'); p.add_argument('--artifact')
             p.add_argument('--archive', help='local ZIP downloaded from CI; verified against the catalog')
     p = sub.add_parser('build', help='explicit source build; requires compilers, libraries and CMake; uses bundled sources')
-    p.add_argument('upstream', help='new output directory, or legacy upstream argument'); p.add_argument('directory', nargs='?')
+    p.add_argument('directory', help='new output directory')
     p.add_argument('--jobs', required=True, type=int)
     p.add_argument('--cmake-arg', action='append', default=[], help='repeat --cmake-arg=-DNAME=VALUE')
     p = sub.add_parser('verify')
@@ -495,7 +493,7 @@ def main(argv=None):
             exe = load_runtime(args.directory, required=args.require)
             result = {'executable': str(exe.path), 'sha256': exe.sha256}
         else:
-            result = build_runtime(args.upstream, args.directory, jobs=args.jobs, cmake_args=args.cmake_arg)
+            result = build_runtime(args.directory, jobs=args.jobs, cmake_args=args.cmake_arg)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, zipfile.BadZipFile) as exc:
         parser.exit(2, str(exc)+'\n')
     print(json.dumps(result, indent=2))

@@ -1202,7 +1202,7 @@ PBE準備段階2→8で、復元直後の軌道・密度は完全一致、SCF再
 compatible_runtime=True)` を明示します。対応MPI配置を変える場合のみ
 `repartition=True` も指定します。
 
-新しい保存には `salmonpy.scf-rebuild/1 または /2` の情報を付けます。記録済みのsolver／
+新しい保存には `salmonpy.scf-rebuild/2` の情報を付けます。記録済みのsolver／
 adapterソース全体とビルド種別の指紋、計算処理 streamの整数／整数8／実数8／
 複素数8／論理値の真偽／文字の格納サイズ・バイト列、HSE／FFTWの形式フラグ、
 OS／CPU種別です。計算処理検査はMPI・GS初期化やファイル出力を行いません。

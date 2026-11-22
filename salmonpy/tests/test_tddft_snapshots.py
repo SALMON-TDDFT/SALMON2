@@ -27,7 +27,7 @@ for line in sys.stdin:
         n+=1; a=list(map(float,p[1:])); j=[.83*x+dt*y+.001*n for x,y in zip(j,a)]
     elif p[0]=='CLOSE': break
     else: continue
-    print('SALMONPY_TDDFT_V1',n,*j,flush=True)
+    print('SALMONPY_TDDFT_V1',n,*j,8.,flush=True)
 '''
 
 class TDDFTSnapshots(unittest.TestCase):

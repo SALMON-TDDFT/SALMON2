@@ -6,12 +6,12 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 検証済み変更のcommit／push | 再開データの読込エラー処理、日英・AI文書の読みやすさ改善は未コミット |
+| 先に整理 | 最新の検証済み変更のcommit／push | LD材料配列の確保失敗処理・後方互換分岐削除は未コミット。再開読込処理と文書改善は `23cb1342` でpush済み |
 | 1 | 初期化・補助入出力・作業配列の失敗処理 | 未対応箇所を実際に使う経路から絞る。検証済みの保存・読込を作り直さない |
 | 2 | C/Fortranから呼ぶ際の版・互換性確認 | 呼び出し規約の安定化と、残る操作・実行環境での確認 |
 | 3 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
 
-再開ディレクトリの準備まで `06bf7cea` でpush済み。読込処理はsource／wheel各94ケースと両版679テスト（各1件スキップ）で検証済みです。文書は104件を点検し、追加15件を整理、関連16テストを確認しました。
+再開読込処理と文書改善は `23cb1342` でpush済みです。今回のLD初期化と後方互換分岐削除も、source／wheel各679テスト（各1件スキップ）で検証済みです。MPI1／2のLD＋FDTD・直接保存復元は修正前とビット一致し、自作バックエンドの事前検査はMPI3で確認しました。HSEはビルド・C/Fortran照会・MPI1／2の明示所有を確認しましたが、今回の削除後に実材料のHSE計算を再実行したわけではありません。日英文書・AI JSONは同期済みで、最終文書/API16テストも通っています。
 
 多ノード・施設MPI、大規模I/O、追加保存形式、他環境、Agフィット改善は別枠です。高速HSEの電子数診断と実材料の格子収束調査は利用者指定で後回し、分子は保留、TTMは削除済みです。重いCIを追加で手動起動しません。
 
@@ -24,6 +24,22 @@ results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
 ### Completed and verified
+
+- [x] Removed old build/preparation positional arguments, Python chdir runtime
+  rescue, old mixed-checkpoint schemas and identity rescue, inferred GS restart
+  flags, SCF rebuild/1 and missing codec/revision rescue, implicit HSE settings,
+  old EXX input aliases and missing RT reference-density rescue. Current custom
+  backends, numerical reference kernels and explicit execution modes remain.
+  Evidence: calc2026/salmonpy-remove-backward-compatibility-20261122.
+
+- [x] Directional LD input-array allocation failures: diagonal/full tensor
+  partial allocation returns1120 before array broadcast; group cleanup and
+  constructor retry are verified with GNU MPI1/2. Production/testing scalar,
+  diagonal and rotated-tensor histories and direct midpoint checkpoints match
+  bitwise; scalar/tensor prior controls also match. Existing startup broadcast
+  is replaced, adding no collective. Source/wheel evidence is recorded separately
+  in calc2026/salmonpy-ld-material-allocation-recovery-20261122.
+  No backward-compatibility path is added. Broader workspace failures remain open.
 
 - [x] Covered ordinary-XC/fast-PR HSE SCF memory and same-binary/model/topology disk continuation, residual CSV/plots, protected numerical staging and common disk binding. Ordinary-XC pure k/orbital/spatial and mixed-layout changed-rank restart are measured. Dense fast-PR HSE full/reduced-k × orbital × spatial mixed restart is measured below. Same-source rebuilt binaries and exact declared metadata-only source transitions are verified; arbitrary changed-numerics/cross-platform migration and packed/tiled/sparse formats remain outside the measured scope.
 
@@ -195,9 +211,11 @@ results/residual diagnostics and pauses the downstream workflow for user review
   and added task/state-creation navigation with developer details folded separately.
   Manual11/public-API5 tests,local links and executable-example checks pass.
   Records:calc2026/salmonpy-documentation-readability-20261122/{summary,followup-summary}.json.
-- [ ] Pending integration:reader I/O changes and documentation review remain
-  uncommitted after06bf7cea. Commit/push when requested;retain required lightweight
-  source/packaging checks and do not dispatch optional heavy CI.
+- [x] Reader I/O and documentation integration: published as23cb1342.
+- [ ] Pending integration: directional LD allocation recovery and removal of
+  backward-compatibility branches remain uncommitted after23cb1342. Commit/push
+  when requested; retain required lightweight source/packaging checks and do not
+  dispatch optional heavy CI.
 - [x] Latest source/installed suites:679 executed,one optional skip,no failures.
   Paired current manuals and AI JSON synchronized. These latest local records
   do not supersede older MPI4/6, multi-platform or physical-convergence evidence.
@@ -218,8 +236,9 @@ results/residual diagnostics and pauses the downstream workflow for user review
    and material/boundary vectors1120 are now covered below. Remaining separate
    work is selected initialization/helper I/O (supported legacy EM readers,native
    saves,batch writers and directory creation verified above) and selected auxiliary
-   allocations (LD scratch,
-   tensor/subpixel/observation and snapshot staging buffers) in
+   allocations (remaining LD coefficient scratch, tensor solver workspaces,
+   subpixel/observation and snapshot staging buffers; directional LD material-input
+   arrays are already covered by1120) in
    supported paths; owned file numbers alone do not establish IO-error recovery.
    Do not add restrictions on valid/custom inputs or promise recovery from
    arbitrary STOP, OS OOM, trapped FP, broken MPI or process termination.
@@ -240,6 +259,17 @@ missing implementations. Ag is still a non-default fit requiring refinement.
 Groups1/2 and molecular work remain deferred. TTM is deleted, not deferred.
 Historical unchecked entries below are scope-at-the-time notes, not additional
 independent tasks or a mandate to generalize every possible configuration.
+
+### Current-format policy and historical evidence
+
+Older completed source-pair migrations and old-schema records below remain
+historical evidence. They do not authorize restoring removed compatibility paths.
+Current SCF rebuild matching requires schema2, codec identity and state revision;
+old missing-revision transition declarations are removed. Current mixed direct
+and replay writers use direct/4 and replay/2. Distinct current numerical methods,
+custom backend contracts and single/shared/registered execution remain supported.
+The remaining ABI task is to define and verify the current caller/runtime contract,
+not to maintain older releases. No automatic old-format rescue is planned.
 
 ### User-directed execution order (2026-11-19)
 
@@ -271,9 +301,10 @@ Group5 now has concrete R0–R4 scope in [resource inventory](2026-11-20-group5-
 5. [ ] Retained GS timers are now owner-scoped and independently queryable;
    transient DOS/PDOS/band/AVS file units and model-derived output conversions
    are isolated below. Retained GS now uses a native path scope without host chdir.
-   Standard/shared/registered TDDFT and fast-PR HSE now use scope2 through one
-   common helper, including GS→RT setup; native FDTD now uses scope3 without host
-   chdir. HSE initialization compatibility guards are now model-owned below.
+   Standard/shared/registered TDDFT, fast-PR HSE and FDTD now require directory
+   protocol3 through one common helper, including GS→RT setup, without host chdir.
+   HSE initialization settings are explicitly caller-owned; the implicit fallback
+   has been removed.
    Remaining initialization/
    other I/O/MPI ownership (native unit30 fixed; propagation MPI child ownership
    is now state-scoped below). Standard TDDFT/fast-PR HSE singleton and

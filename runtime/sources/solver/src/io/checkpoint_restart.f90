@@ -1166,11 +1166,11 @@ subroutine read_rho0_s(idir,lg,mg,system,info,rho0_s,is_self_checkpoint,success)
   iu1_r = 96
   dir_file_in = trim(idir)//"rho0_s.bin"
 
-  ! Backward compatibility: older restart data has no rho0_s.bin.
+  ! Current RT checkpoints require the saved t=0 density; never reconstruct it.
   if(comm_is_root(nproc_id_global)) inquire(file=resolve_path(dir_file_in),exist=file_exists)
   call comm_bcast(file_exists,nproc_group_global)
   success = file_exists
-  if(.not. file_exists) return
+  if(.not.file_exists)error stop 'RT checkpoint missing required rho0_s.bin'
 
   if (is_self_checkpoint) then
     open(iu1_r,file=resolve_path(dir_file_in),form='unformatted',access='stream')

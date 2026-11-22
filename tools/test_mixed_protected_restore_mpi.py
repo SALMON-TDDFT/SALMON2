@@ -107,7 +107,7 @@ def main():
         assert not called and not coupled.response.failed
         manifest=json.loads((Path(directory)/'complete.json').read_text())
         identity_cases=[]
-        if manifest['schema']=='salmonpy.native-direct/3':
+        if manifest['schema']=='salmonpy.native-direct/4' and manifest.get('identity') is not None:
             from copy import deepcopy
             assert manifest['identity']==json.loads((root/'identity.json').read_text())
             for name in ('run','point','material','definition','initial','initial_digest','ld','ownership','bool'):

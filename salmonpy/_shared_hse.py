@@ -84,7 +84,7 @@ class NativeFastHSEModel:
     def _call(self,fn,*args):
         from ._native_group import _directory_call
         self._native._live()
-        return _directory_call(self.lib,self._native.context.solver_comm,self.work,fn,*args,minimum_protocol=2)
+        return _directory_call(self.lib,self._native.context.solver_comm,self.work,fn,*args)
 
     def new_state(self,point_id=None,*,dt=None,capacity=None):
         """Fresh original-GS state, never a copy of another state's excitation."""

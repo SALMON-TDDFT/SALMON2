@@ -67,7 +67,7 @@ class DFTTest(unittest.TestCase):
             (native/'gs.inp').write_text('input')
             (native/'gs_status.dat').write_text('SALMONPY_GS_V1\n1 37\n1e-10 1e-9 -31.25\nrho_dne\n')
             files={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in native.rglob('*') if p.is_file()}
-            (root/'ground-state.json').write_text(json.dumps({'schema':'salmonpy.gs/1','status':'complete','energy_hartree':-31.25,'iterations':37,'files':files}))
+            (root/'ground-state.json').write_text(json.dumps({'schema':'salmonpy.gs/1','status':'complete','energy_hartree':-31.25,'iterations':37,'restart_saved':True,'files':files}))
             GroundStateResult.open(root)
             (native/'hubbard_param.dat').write_text('unexpected physical input')
             with self.assertRaisesRegex(ValueError,'files'):GroundStateResult.open(root)
@@ -181,7 +181,7 @@ class WarmStartTest(unittest.TestCase):
             legacy_path=source.directory/'ground-state.json'
             original=legacy_path.read_bytes();legacy=json.loads(original);legacy.pop('restart_saved')
             legacy_path.write_text(json.dumps(legacy))
-            self.assertTrue(GroundStateResult.open(source.directory).restart_saved)
+            with self.assertRaisesRegex(ValueError,'restart_saved'):GroundStateResult.open(source.directory)
             legacy_path.write_bytes(original)
             original = (source.directory/'ground-state.json').read_bytes()
             displaced = replace(model, fractional_positions=[[.01,0,0]])

@@ -41,7 +41,7 @@ class GSExportTests(unittest.TestCase):
         (restart/'occupation.bin').write_bytes(np.array([2.,0.],dtype='<f8').tobytes())
         self.waves=np.asarray(self.values['wavefunctions'],dtype='<c16');(restart/'wfn.bin').write_bytes(self.waves.tobytes())
         settings=SCFSettings()
-        self.record=dict(self.dft._restart_signature(),schema='salmonpy.gs/1',status='complete',
+        self.record=dict(self.dft._restart_signature(),schema='salmonpy.gs/1',status='complete',restart_saved=True,
             fractional_positions=self.dft.fractional_positions.tolist(),executable_sha256=self.model.executable.sha256,
             energy_hartree=-1.,iterations=1,tolerance=settings.tolerance,max_iterations=settings.max_iterations,
             input_sha256=hashlib.sha256((native/'gs.inp').read_bytes()).hexdigest())

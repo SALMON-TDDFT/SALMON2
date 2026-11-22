@@ -31,13 +31,13 @@ class DirectCheckpointTests(unittest.TestCase):
 
     def test_changed_signature_rejected(self):
         with tempfile.TemporaryDirectory() as d:
-            p=Path(d);(p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/1','signature':{'old':1},'ranks':1}))
+            p=Path(d);(p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/4','signature':{'old':1},'ranks':1}))
             with self.assertRaisesRegex(ValueError,'mismatch'):checkpoint(self.world(),self.coupled(),p,{'steps':128},restore=True)
 
     def test_corrupted_rank_file_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d);data=p/'rank-0.json';data.write_text('{}');(p/'frames.json').write_text('[]')
-            m={'schema':'salmonpy.native-direct/1','signature':{'steps':128},'step':64,'ranks':1,'files':{data.name:digest(data), 'frames.json':digest(p/'frames.json')}}
+            m={'schema':'salmonpy.native-direct/4','signature':{'steps':128},'step':64,'ranks':1,'files':{data.name:digest(data), 'frames.json':digest(p/'frames.json')}}
             (p/'complete.json').write_text(json.dumps(m));data.write_text('changed')
             with self.assertRaisesRegex(ValueError,'checksum'):checkpoint(self.world(),self.coupled(),p,{'steps':128},restore=True)
 
@@ -80,7 +80,7 @@ class DirectCheckpointTests(unittest.TestCase):
             data={'step':64,'J':[[0.,0.,0.]],'response_A':[[0.,0.,0.]],'states':{'1':{}}}
             (p/'rank-0.json').write_text(json.dumps(data));(p/'frames.json').write_text('[]')
             files={n:digest(p/n) for n in ('rank-0.json','frames.json')}
-            (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/1',
+            (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/4',
                 'signature':{'steps':128},'ranks':1,'step':64,'files':files}))
             world=self.world();world.allgather=lambda value:[value,(None,'different-manifest',value[2])]
             coupled=self.coupled();coupled.response.context=SimpleNamespace(plan=SimpleNamespace(point_ids=(1,)))
@@ -95,7 +95,7 @@ class DirectCheckpointTests(unittest.TestCase):
                   'states':{'1':{'A':[1.,0.,0.],'current':[0.,0.,0.]}}}
             (p/'rank-0.json').write_text(json.dumps(data));(p/'frames.json').write_text('[]')
             files={n:digest(p/n) for n in ('rank-0.json','frames.json')}
-            (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/1',
+            (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/4',
                 'signature':{'steps':128},'ranks':1,'step':64,'files':files}))
             coupled=self.coupled()
             coupled.response.states={1:SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1',
@@ -115,7 +115,7 @@ class DirectCheckpointTests(unittest.TestCase):
                       'states':{'1':{'A':[0.,0.,0.],'current':bad}}}
                 (p/'rank-0.json').write_text(json.dumps(data));(p/'frames.json').write_text('[]')
                 files={n:digest(p/n) for n in ('rank-0.json','frames.json')}
-                (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/1',
+                (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/4',
                     'signature':{'steps':128},'ranks':1,'step':64,'files':files}))
                 state=SimpleNamespace(native=object(),current=np.zeros(3),checkpoint=Mock(),
                                       lib=SimpleNamespace(sp_tddft_checkpoint=Mock()))
@@ -208,14 +208,14 @@ class DirectCheckpointTests(unittest.TestCase):
                 admission.assert_not_called()
         self.assertFalse(coupled.response.failed)
 
-    def test_multi_binary_names_are_distinct_and_legacy_names_remain(self):
+    def test_binary_names_include_rank_and_point(self):
         from salmonpy.examples._direct_checkpoint import _state_filename
         worker=lambda:SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1')
         a,b=worker(),worker()
         r=SimpleNamespace(states={10:a,20:b})
         self.assertEqual(_state_filename(r,10,3),'worker-3-point-10.bin')
         self.assertNotEqual(_state_filename(r,10,3),_state_filename(r,20,3))
-        self.assertEqual(_state_filename(SimpleNamespace(states={10:a}),10,3),'worker-3.bin')
+        self.assertEqual(_state_filename(SimpleNamespace(states={10:a}),10,3),'worker-3-point-10.bin')
 
     def test_version_four_identity_cannot_be_silently_downgraded(self):
         from salmonpy.examples._mixed_identity import check_identity

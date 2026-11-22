@@ -9,18 +9,12 @@ contains
     character(*),intent(in) :: mode
     logical,intent(in) :: spinor
     logical,optional,intent(in) :: spinor_pair_supported,crystal_reuse_supported
-    character(1),intent(inout) :: orbits,pairs,spin_pairs
+    character(1),intent(out) :: orbits,pairs,spin_pairs
     character(*),intent(out) :: reason
     integer,intent(out) :: ierr
-    character(1) :: selected(3),legacy(3)
-    integer :: i
-    logical :: explicit_legacy,eligible,crystal
-    ierr=1;reason='Invalid exx_k_algorithm or legacy yes/no value'
-    legacy=[orbits,pairs,spin_pairs]
-    do i=1,3
-      if(legacy(i)/=' '.and.legacy(i)/='y'.and.legacy(i)/='n')return
-    enddo
-    explicit_legacy=any(legacy/=' ')
+    character(1) :: selected(3)
+    logical :: eligible,crystal
+    ierr=1;reason='Invalid exx_k_algorithm'
     eligible=.true.
     if(present(spinor_pair_supported))eligible=spinor_pair_supported
     crystal=.false.
@@ -37,13 +31,7 @@ contains
           reason='auto: full spinor real-space pairs'
         endif
       endif
-      ! An old orbit request predates automatic spinor pairs; do not add a conflicting route.
-      if(legacy(1)=='y'.and.legacy(3)==' ')selected(3)='n'
-      do i=1,3
-        if(legacy(i)/=' ')selected(i)=legacy(i)
-      enddo
-      if(explicit_legacy)reason='legacy switches: compatibility override of auto policy'
-      if(crystal.and.legacy(1)/='n')selected(1)='y'
+      if(crystal)selected(1)='y'
       if(selected(1)=='y'.and..not.spinor)then
         selected(2)='n'
         reason='auto: crystal-symmetry FFT reuse takes precedence over Hermitian pairs'
@@ -63,14 +51,6 @@ contains
     case default
       return
     end select
-    if(mode/='auto')then
-      do i=1,3
-        if(legacy(i)/=' '.and.legacy(i)/=selected(i))then
-          reason='Conflicting exx_k_algorithm and legacy exchange switches'
-          return
-        endif
-      enddo
-    endif
     if(selected(1)=='y'.and.selected(3)=='y')then
       reason='Conflicting orbit reuse and spinor full-pair selection'
       return

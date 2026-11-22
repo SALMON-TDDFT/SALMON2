@@ -638,8 +638,8 @@ program tbmbj_input_host
  call MPI_Finalize(ierr)
  print *, 'TB-mBJ input and independent XC evaluation PASS'
 end program
-#elif defined(SALMONPY_HSE_LEGACY_WARNING_PROBE)
-program legacy_warning_host
+#elif defined(SALMONPY_HSE_OWNED_SETTINGS_PROBE)
+program owned_settings_host
  use parallelization,only:setup_parallel
  use, intrinsic :: iso_fortran_env,only:error_unit
  use mpi
@@ -657,7 +657,7 @@ program legacy_warning_host
   end function
  end interface
  type(tddft_context),pointer::ctx=>null()
- type(s_rt_model_settings)::owner
+ type(s_rt_model_settings)::owner,other_owner
  integer::ierr,status
  call MPI_Init(ierr)
  status=attach(int(MPI_COMM_WORLD,c_int64_t))
@@ -670,13 +670,11 @@ program legacy_warning_host
   write(error_unit,*)'explicit-owner status/context:',status,associated(ctx),'theory:',trim(theory)
   call MPI_Abort(MPI_COMM_WORLD,92,ierr)
  endif
- write(*,*)'explicit owner attempted before any fallback'
- write(error_unit,'(a)')'explicit-owner-complete'
- flush(error_unit)
- call rt_model_settings(.true.)
- call rt_model_settings(.true.)
- call rt_open(ctx,'probe',status)
- if(status==0.or.associated(ctx))call MPI_Abort(MPI_COMM_WORLD,93,ierr)
+ call rt_model_settings(.true.,other_owner)
+ call rt_model_settings(.true.,owner)
+ call rt_open(ctx,'other',status,model_settings=other_owner)
+ if(status==0.or.associated(ctx))call MPI_Abort(MPI_COMM_WORLD,94,ierr)
+ write(*,*)'required owned settings PASS'
  status=detach()
  if(status/=0)call MPI_Abort(MPI_COMM_WORLD,94,ierr)
  call MPI_Finalize(ierr)

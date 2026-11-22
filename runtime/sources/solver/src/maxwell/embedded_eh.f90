@@ -224,7 +224,7 @@ end function
     used=.true.
 #ifdef SALMONPY_RECOVERY_TESTING
     allocation_failure_slot=0
-    if(fault_stage>=24.and.fault_stage<=29)then
+    if(fault_stage>=24.and.fault_stage<=32)then
       if(nproc_id_global==fault_rank)then
         select case(fault_stage)
         case(24,25)
@@ -233,6 +233,12 @@ end function
           allocation_failure_slot=merge(-2,-20,fault_stage==26)
         case(28,29)
           allocation_failure_slot=merge(102,105,fault_stage==28)
+        case(30)
+          allocation_failure_slot=202
+        case(31)
+          allocation_failure_slot=204
+        case(32)
+          allocation_failure_slot=205
         end select
       endif
       fault_stage=0;fault_rank=-1
@@ -272,7 +278,7 @@ end function
   integer(c_int) function sp_eh_test_fault(stage,rank) bind(C)
     integer(c_int),value :: stage,rank
     sp_eh_test_fault=1
-    if(stage<20.or.stage>29.or.rank<0)return
+    if(stage<20.or.stage>32.or.rank<0)return
     fault_stage=stage;fault_rank=rank;sp_eh_test_fault=0
   end function
 #endif

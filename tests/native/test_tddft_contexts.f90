@@ -9,8 +9,10 @@ program probe
  use plusU_global,only:read_Hubbard_parameters
  use sym_sub,only:read_sw_symmetry
  use structures,only:s_rt_run_config
- use salmonpy_tddft_context,only:rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write
+ use salmonpy_tddft_context,only:s_rt_model_settings, &
+   rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write
  implicit none
+ type(s_rt_model_settings)::owner_a,owner_b
  type(tddft_context),pointer::a=>null(),b=>null()
  type(s_rt_run_config)::config_a,config_b
  character(16)::capacity_mode
@@ -47,34 +49,44 @@ program probe
  config_a%max_steps=capacity_a;config_b%max_steps=capacity_b
  if(mode/='solo_b')then
   config_a%max_steps=0
-  call rt_open(a,'invalid_config',code,config=config_a);if(code==0.or.associated(a))stop 12
+  call rt_open(a,'invalid_config',code,config=config_a, &
+     model_settings=owner_a);if(code==0.or.associated(a))stop 12
   config_a%max_steps=huge(0)
-  call rt_open(a,'invalid_config',code,config=config_a);if(code==0.or.associated(a))stop 13
+  call rt_open(a,'invalid_config',code,config=config_a, &
+     model_settings=owner_a);if(code==0.or.associated(a))stop 13
   config_a%max_steps=capacity_a
-  call rt_open(a,'mixed_config',code,config=config_a,delta_t=dt_a)
+  call rt_open(a,'mixed_config',code,config=config_a,delta_t=dt_a, &
+     model_settings=owner_a)
   if(code==0.or.associated(a))stop 14
-  call rt_open(a,'invalid_omp',code,openmp_mode='invalid');if(code==0.or.associated(a))stop 10
-  call rt_open(a,'invalid_dt',code,delta_t=-1d0);if(code==0.or.associated(a))stop 8
-  call rt_open(a,'invalid_dt',code,delta_t=ieee_value(0d0,ieee_quiet_nan))
+  call rt_open(a,'invalid_omp',code,openmp_mode='invalid', &
+     model_settings=owner_a);if(code==0.or.associated(a))stop 10
+  call rt_open(a,'invalid_dt',code,delta_t=-1d0, &
+     model_settings=owner_a);if(code==0.or.associated(a))stop 8
+  call rt_open(a,'invalid_dt',code,delta_t=ieee_value(0d0,ieee_quiet_nan), &
+     model_settings=owner_a)
   if(code==0.or.associated(a))stop 9
-  call rt_open(a,'a',code,config=config_a);if(code/=0)stop 1
+  call rt_open(a,'a',code,config=config_a, &
+     model_settings=owner_a);if(code/=0)stop 1
   ! Another legacy calculation entering warmup must not affect A, B or reopened RT states.
   if(mode/='solo_a'.and.mode/='native')exx_pre_scf_active=.true.
   open(newunit=ua,file='a_trace.bin',access='stream',form='unformatted',status='new')
  endif
  if(mode/='solo_a'.and.mode/='native')then
-  call rt_open(b,'b',code,config=config_b);if(code/=0)stop 2
+  call rt_open(b,'b',code,config=config_b, &
+     model_settings=owner_b);if(code/=0)stop 2
   open(newunit=ub,file='b_trace.bin',access='stream',form='unformatted',status='new')
  endif
  do step=1,nt
   if(step==nt/2+1.and.mode=='reopen_a')then
    call rt_close(a);close(ua)
-   call rt_open(a,'a_reopened',code,config=config_a);if(code/=0)stop 4
+   call rt_open(a,'a_reopened',code,config=config_a, &
+     model_settings=owner_a);if(code/=0)stop 4
    open(newunit=ua,file='a_reopened_trace.bin',access='stream',form='unformatted',status='new')
   endif
   if(step==nt/2+1.and.mode=='reopen_b')then
    call rt_close(b);close(ub)
-   call rt_open(b,'b_reopened',code,config=config_b);if(code/=0)stop 5
+   call rt_open(b,'b_reopened',code,config=config_b, &
+     model_settings=owner_b);if(code/=0)stop 5
    open(newunit=ub,file='b_reopened_trace.bin',access='stream',form='unformatted',status='new')
   endif
   if(mode=='reverse')then

@@ -1,5 +1,9 @@
 # SALMONpy：AI向け利用・実装ガイド
 
+## No backward-compatibility fallback
+
+Use current inputs/APIs only. Runtime preparation/build accepts one output directory. Shared-library directory protocol3 is required; never emulate an older runtime with Python chdir. Require GS restart_saved, SCF rebuild/2 codec/state revision, direct/4 or replay/2 mixed checkpoints. Do not infer missing metadata, use the removed unidentified-checkpoint option or accept old worker replies without measured electron number. For HSE pass an owned model_settings; never use implicit global settings. Fortran inputs use exx_mlwf_* and exx_k_algorithm, without old aliases. RT restarts require rho0_s.bin. Current custom backends and numerical/platform choices remain supported; these are not version fallbacks.
+
 利用者が行いたい計算から入口を選びます。最初に `manual.json` の検索と[サンプル集](examples/README.md)を使い、既に分かっている条件を再質問せず、目的・使用可能な総メモリ・CPU数の不足分だけを確認してください。
 
 | 目的 | 使う入口・ガイド |
@@ -642,7 +646,7 @@ HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベース
 
 保存／復元の実行入口は `checkpointing.CheckpointTarget` と `execute_checkpoint`。引数なしのsave／restore関数を渡し、パスや保存形式は計算処理が決める。戻り値はcompatibilityのJSONとプロセス内のfield／statesで、保存トークンや配列をMPI転送・コピーしない。失敗は例外で通知し、Falseなどの戻り値はエラー扱いしない。MPIでは群の点数差を同期スロットで扱い、コールバック失敗後は次のスロットへ進まない。実行済み変更の巻き戻しや計算処理内部の通信停止からの回復は保証しない。完了markerやハッシュ認証は呼び出し元プログラムの方針で管理する。custom_checkpoint例は実際のJSON保存と復元も共通入口から呼ぶ。
 
-元の状態を維持する復元はCheckpointStateとrestore_checkpointを使う。各Targetはstage_restoreで独立候補を読み、全ランクの成功合意後にホルダー一式を切り替える。ホルダー外の別名は旧状態を指すため、計算はlive.field／live.statesを通して再開する。元へLOADする関数をstage_restoreに登録せず、可変の数値バッファを共有しない。初期化済み不変計算処理資源は専用候補仕様に従う。discard_restoreは失敗した準備についてNoneも受け、自群の通信手順を完了する。候補破棄の失敗はAtomicRestoreError.cleanup_errors、元の維持はoriginal_preservedで確認する。既存execute_checkpointは既定で非原子的。保護経路で未対応を検出したら自動で従来経路へ下げない。再ビルドしたPythonから直接呼ぶFDTD／TDDFT／高速PR HSEには実験的な数値候補ABI（mode2準備／3反映／4破棄）がある。内部ヘルパーとMPI試験はCHECKPOINTINGを参照。全群の候補成功後に別途計算処理反映と準備済みPythonメタデータの更新が必要で、ホルダー切替だけでは完了しない。初期化済み不変資源の共有は維持するが数値候補は分離する。複数計算処理 lifetimeの同時実行ではない。通常mpi_mixed_nativeの--direct-resumeは候補対応ABIでの保護復元が既定。場内全LD・SBEの独立ハンドルとPython側の時計・電流・アダプター・所有リスト・framesを反映前に準備する。進行済みセッションの準備失敗でもfailedを立てず、元を維持して全ランクで継続／再試行できる。成功後はsession.statesを参照し、旧SBE解放エラーはcheckpoint_cleanup_errorsへ分ける。旧ABI・プロセス分離HSE・自作direct-onlyは事前拒否。明示的な--unprotected-direct-restore／protected=Falseだけが従来方式で、自動fallbackは禁止。古いABIは版確認で拒否し、反映時のメモリ枯渇やプロセス異常は回復保証外。
+元の状態を維持する復元はCheckpointStateとrestore_checkpointを使う。各Targetはstage_restoreで独立候補を読み、全ランクの成功合意後にホルダー一式を切り替える。ホルダー外の別名は旧状態を指すため、計算はlive.field／live.statesを通して再開する。元へLOADする関数をstage_restoreに登録せず、可変の数値バッファを共有しない。初期化済み不変計算処理資源は専用候補仕様に従う。discard_restoreは失敗した準備についてNoneも受け、自群の通信手順を完了する。候補破棄の失敗はAtomicRestoreError.cleanup_errors、元の維持はoriginal_preservedで確認する。既存execute_checkpointは既定で非原子的。保護経路で未対応を検出したら自動で従来経路へ下げない。再ビルドしたPythonから直接呼ぶFDTD／TDDFT／高速PR HSEには実験的な数値候補ABI（mode2準備／3反映／4破棄）がある。内部ヘルパーとMPI試験はCHECKPOINTINGを参照。全群の候補成功後に別途計算処理反映と準備済みPythonメタデータの更新が必要で、ホルダー切替だけでは完了しない。初期化済み不変資源の共有は維持するが数値候補は分離する。複数計算処理 lifetimeの同時実行ではない。通常mpi_mixed_nativeの--direct-resumeは候補対応ABIでの保護復元が既定。場内全LD・SBEの独立ハンドルとPython側の時計・電流・アダプター・所有リスト・framesを反映前に準備する。進行済みセッションの準備失敗でもfailedを立てず、元を維持して全ランクで継続／再試行できる。成功後はsession.statesを参照し、旧SBE解放エラーはcheckpoint_cleanup_errorsへ分ける。旧ABI・プロセス分離HSE・自作direct-onlyは事前拒否。通常サンプルの旧復元オプションは削除済み。共通APIのprotected=Falseは自作バックエンド用の明示的な非原子操作であり、自動fallbackには使わない。古いABIは版確認で拒否し、反映時のメモリ枯渇やプロセス異常は回復保証外。
 
 通常混在のライブ巻戻しは既存SALMONの計算出力ファイルを切り詰めない。保存framesと以後のstep戻り値を使うか、
 新規MPIジョブ・出力先で再開する。数値の一致とappend済みファイル全体のバイト一致を混同しない。
@@ -656,7 +660,7 @@ HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベース
 
 `identity.json`、通常実行の `result.json` と `point-response` アーカイブに同じ識別情報を引き継ぎます。直接保存の外側の形式は `salmonpy.native-direct/3`、再計算方式は `salmonpy.native-replay/2` です。数値状態の内部形式と更新順は変更しません。直接復元はIDとMPI分割を数値状態の読み込み前に照合し、保存時は全ランクでのID一致を検査します。
 
-IDのない旧保存を使う場合だけ `--legacy-checkpoint-identity` を明示します。これは識別情報を検証できない旧経路であり、新形式のID不一致を回避する指定ではありません。失敗時に元の状態を保つ復元は引き続き既定です。自作呼び出し元プログラムでは `ResponseSession` の `point_record` / `point_map` に識別情報を渡してください。IDは呼び出し側の宣言であり、物理精度の認証ではありません。
+旧版向けの引数・再開形式・欠落項目の補完は提供しません。現在のAPIと保存形式を使用してください。混在計算サンプルは常に物質・初期状態の識別情報を保存します。
 
 ## 点ID付きのメモリsnapshot
 
@@ -1421,3 +1425,14 @@ A batch failed read terminates initialization nonzero before using invalid value
 Explicit local validation: `tools/test_em_restart_read.py BUILD_JSON NEW_OUTPUT --batch`; no GS is required. Keep this physical run out of required CI.
 
 For shared input/output restart paths, new layout metadata is published only after every required old payload is read successfully; a failed read must leave that input set unchanged. This does not make later multi-file checkpoint saves atomic. Keep a separately completed archive.
+
+### Directional LD material allocation errors
+
+The1120 initialization recovery contract also covers partial allocation of
+diagonal/full-tensor LD material-input arrays. Agree within the field group
+before array transfer, release partial arrays and owned communication resources,
+and permit constructor retry only after the existing recovery protocol succeeds.
+Invalid material files remain1110. Replacing the existing status broadcast with
+a maximum reduction adds no collective; step arithmetic and checkpoint formats
+are unchanged. Memory-budget excess only warns. This does not cover arbitrary
+allocation failures or OS termination. No legacy API or format fallback is added.

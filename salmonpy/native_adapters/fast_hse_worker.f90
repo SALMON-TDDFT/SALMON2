@@ -12,9 +12,11 @@ program fast_hse_worker
  use timer,only:timer_initialize
  use plusU_global,only:read_Hubbard_parameters
  use sym_sub,only:read_sw_symmetry
- use salmonpy_tddft_context,only:tddft_context,rt_open,rt_step,rt_close,rt_current,rt_checkpoint,rt_accepted_step
+ use salmonpy_tddft_context,only:tddft_context,rt_open,rt_step,rt_close,rt_current, &
+   rt_checkpoint,rt_accepted_step,s_rt_model_settings
  implicit none
  type(tddft_context),pointer::ctx=>null()
+ type(s_rt_model_settings)::model_settings
  integer::commands,ios,code,accepted
  real(8)::ac(3),current(3),energy
  character(8192)::line
@@ -39,7 +41,7 @@ program fast_hse_worker
  call read_Hubbard_parameters
  call read_sw_symmetry(yn_symmetry)
  call timer_initialize
- call rt_open(ctx,'worker',code)
+ call rt_open(ctx,'worker',code,model_settings=model_settings)
  if(code/=0)call fail('OPEN',code)
  call rt_current(ctx,current,code)
  if(code/=0)call fail('CURRENT',code)

@@ -1,5 +1,13 @@
 # Prepare the calculation programs for DFT, TDDFT and FDTD
 
+## Current formats only
+
+Source preparation and `build_runtime(directory, *, jobs, cmake_args=())` accept one output directory. The old `UPSTREAM OUTPUT` form is removed. Shared-library calls require directory protocol3; Python never changes its process-wide working directory to accommodate older libraries.
+
+GS records require `restart_saved`. SCF rebuild matching accepts only `salmonpy.scf-rebuild/2` with codec and state revision. Missing old metadata is not inferred. MPI repartition within the current format and explicitly validated rebuilt-runtime matching remain separate supported features.
+
+Fortran inputs use `exx_mlwf_interval`, `exx_mlwf_maxiter`, `exx_mlwf_tolerance` and `exx_k_algorithm`. The old `hse_mlwf_*` and `yn_exx_fft_orbits`, `yn_exx_k_pair_symmetry`, `yn_exx_spinor_pair_fft` input aliases are removed. Current RT checkpoints require `rho0_s.bin`; missing reference density is never reconstructed to continue a restart.
+
 A matching wheel is sufficient for LD and SBE. DFT, TDDFT, FDTD and band calculations
 also require the SALMON calculation program.
 

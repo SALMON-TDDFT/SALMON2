@@ -1,5 +1,13 @@
 # DFT・TDDFT・FDTDに必要な計算プログラムを用意する
 
+## 現行形式のみを使用する方針
+
+ソース準備と`build_runtime(directory, *, jobs, cmake_args=())`は出力先一つだけを受け取ります。旧`UPSTREAM OUTPUT`形式は受け付けません。Pythonから共有ライブラリを呼ぶ場合は作業ディレクトリ処理のprotocol3が必要で、旧版のためにPythonプロセス全体のディレクトリを変更する処理はありません。
+
+GS記録には`restart_saved`を必須とし、SCF再ビルド照合はcodecと状態版を持つ`salmonpy.scf-rebuild/2`だけを扱います。旧記録を推測で補完しません。同じ現行形式でのMPI再分割と、明示的に検証した再ビルド間の照合は別の機能です。
+
+Fortran入力は`exx_mlwf_interval`・`exx_mlwf_maxiter`・`exx_mlwf_tolerance`と`exx_k_algorithm`に統一しました。旧`hse_mlwf_*`と`yn_exx_fft_orbits`・`yn_exx_k_pair_symmetry`・`yn_exx_spinor_pair_fft`の入力別名は削除しました。現行のRT再開データは`rho0_s.bin`を必要とし、欠落時に参照密度を作り直して継続しません。
+
 LD・SBEは、対応するwheelを導入すれば使えます。DFT・TDDFT・FDTD・バンド計算には、追加のSALMON計算プログラムが必要です。
 
 まず、自分のOS・CPUと必要な機能に合うビルド済み配布物を探します。見つからない場合だけ、同梱ソースを明示的にビルドしてください。Pythonから一ステップずつ計算を進める方法では、実行ファイルの代わりに対応する共有ライブラリを使います。importだけでダウンロードやコンパイルが始まることはありません。
@@ -212,8 +220,8 @@ Wannier、空間分割・MPI、対称性、spin、予測、全エネルギー・
 標準ソルバーと高速PR版HSEの本体ソース一式を、元のライセンス・由来情報とともに
 リポジトリとwheelに保持します。準備時は全ファイルのハッシュを検証してコピーし、
 段階別の完成形について変更前後のハッシュを確認して配置します。Gitやパッチ適用は不要です。
-旧形式の UPSTREAM OUTPUT 引数も受け付けますが、使用するのは同梱した固定ソースであり、
-指定された外部チェックアウトは変更しません。HSEの保守対象は高速版のみです。標準版の
+ソース準備・ビルドの位置引数は、新しい出力ディレクトリ一つだけです。
+HSEの保守対象は高速版のみです。標準版の
 USE_HSE=ON は明示的に拒否し、高速版のreference-onlyは比較専用とします。
 
 source_tree_sha256 は同梱ツリーの一覧、replacements_sha256 は段階別の完成形一覧を

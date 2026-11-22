@@ -175,7 +175,7 @@ class NativeEHField:
                       1112: 'off-diagonal tensor FDTD does not implement nonzero Bloch phase',
                       1114: 'subpixel update coefficients are invalid; inspect profile rates and dt',
                       1113: 'reference-frequency subpixel material profile is missing or invalid',
-                      1120: 'native material/boundary coefficient allocation failed; release memory or reduce per-rank grid and retry',
+                      1120: 'FDTD material/boundary coefficient allocation failed; release memory and retry',
                       1119: 'native LD state array allocation failed; reduce per-rank grid or pole count, or release memory and retry',
                       1118: 'native FDTD core array allocation failed; reduce per-rank grid or release memory and retry',
                       1117: 'automatic MPI partition is unavailable for this rank count; supply an explicit spatial grid',
@@ -364,7 +364,7 @@ class NativeEHField:
     def _call(self,fn,*args):
         from ._native_group import _directory_call
         self.native._live()
-        return _directory_call(self.lib,self.context.solver_comm,self.directory,fn,*args,minimum_protocol=3)
+        return _directory_call(self.lib,self.context.solver_comm,self.directory,fn,*args)
 
     def advance(self,J_previous):
         """Advance with identical global point currents on every field rank."""

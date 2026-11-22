@@ -297,7 +297,8 @@ class TDDFTState(_SnapshotMixin):
             raise RuntimeFailure('SALMON TDDFT worker exited before reply:\n'+message)
         fields=line.split()
         self._electron_number=None
-        if self._reply_size==3 and len(fields)==6:
+        if self._reply_size==3:
+            if len(fields)!=6:raise RuntimeFailure('TDDFT worker protocol requires measured electron number')
             self._electron_number=float(fields[-1]);fields=fields[:-1]
         if len(fields)!=2+self._reply_size or int(fields[1])!=index: raise RuntimeFailure('TDDFT worker protocol sequence mismatch')
         return _array([float(x) for x in fields[2:]],'worker observables',(self._reply_size,))

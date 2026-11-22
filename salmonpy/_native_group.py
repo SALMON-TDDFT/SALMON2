@@ -20,34 +20,26 @@ class _SessionGroup:
         if errors:raise RuntimeFailure('shared native group cleanup failed: '+str(errors))
 
 
-def _directory_call(lib,comm,work,fn,*args,minimum_protocol=1):
+def _directory_call(lib,comm,work,fn,*args):
     """One main-thread native I/O scope, with collective admission/cleanup."""
     import ctypes as c
     import os
-    from pathlib import Path
     from .errors import InputError
-    entered=False;previous=None;error=None
+    entered=False;error=None
     try:
         try:
             probe=getattr(lib,'sp_io_directory_protocol',None)
-            version=0
-            if probe is not None:
-                probe.argtypes=[];probe.restype=c.c_int
-                version=probe()
-                if version not in (1,2,3):raise InputError('unsupported native directory scope')
-            if version>=minimum_protocol:
-                enter=lib.sp_io_directory_enter;leave=lib.sp_io_directory_leave
-                enter.argtypes=[c.c_char_p];enter.restype=c.c_int
-                leave.argtypes=[];leave.restype=None
-                status=enter(os.fsencode(work));entered=status==0
-                if status:raise InputError('native directory scope rejected: '+str(status))
-            else:
-                previous=Path.cwd()
-                os.chdir(work)
+            if probe is None:raise InputError('runtime requires directory protocol3; rebuild or install a matching runtime')
+            probe.argtypes=[];probe.restype=c.c_int
+            if probe()!=3:raise InputError('runtime requires directory protocol3; rebuild or install a matching runtime')
+            enter=lib.sp_io_directory_enter;leave=lib.sp_io_directory_leave
+            enter.argtypes=[c.c_char_p];enter.restype=c.c_int
+            leave.argtypes=[];leave.restype=None
+            status=enter(os.fsencode(work));entered=status==0
+            if status:raise InputError('native directory scope rejected: '+str(status))
         except Exception as exc:error=str(exc)
         errors=comm.allgather(error)
         if any(errors):raise InputError('native directory scope: '+str(errors))
         return fn(*args)
     finally:
         if entered:leave()
-        if previous is not None:os.chdir(previous)

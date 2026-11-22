@@ -1,5 +1,9 @@
 # Checkpoint capability and compatibility
 
+## Current mixed-session checkpoint formats
+
+Direct persistence uses `salmonpy.native-direct/4`; replay persistence uses `salmonpy.native-replay/2`. Older schemas, automatic conversion and the unidentified-old-checkpoint option are removed. Custom hosts may use unidentified states in the current format, but identity presence must match between writer and reader.
+
 [日本語](CHECKPOINTING.md)
 
 `salmonpy.checkpointing` provides common input checking and execution for built-in and user
@@ -273,9 +277,9 @@ not a failed restoration. solver resources still have one lifetime; allocation
 failure during publication, process death and failed MPI remain outside recovery.
 
 Older ABIs, process-isolated HSE workers and custom direct-only LOAD targets are
-rejected before loading. Only explicitly request legacy behavior with CLI
-`--unprotected-direct-restore` or internal `protected=False`; it does not preserve
-original states on mid-load failure. There is no automatic fallback.
+rejected before loading. The ordinary example always uses protected restoration. The common API still
+allows explicit `protected=False` for custom non-atomic backend operations;
+that mode does not preserve original states on mid-load failure. There is no automatic fallback.
 
 `tools/test_mixed_protected_restore_mpi.py` takes the ordinary sample arguments,
 injects a rank failure after loading a later electronic candidate, then checks
@@ -296,7 +300,7 @@ Memory advice includes concurrent candidate storage; see [MEMORY.en.md](MEMORY.e
 
 The same identity appears in `identity.json`, normal-run `result.json`, and the `point-response` archive. Identified direct checkpoints use `salmonpy.native-direct/3`; replay checkpoints use `salmonpy.native-replay/2`. Numerical payload formats and update order are unchanged. Direct restore checks identity and MPI ownership before loading numerical state; save checks agreement across all ranks.
 
-Use `--legacy-checkpoint-identity` explicitly only for old unidentified checkpoints. This cannot bypass identity mismatches in identified checkpoints and does not disable protected restore. Custom hosts supply `ResponseSession` point records through `point_record` / `point_map`. These are caller declarations, not certification of physical accuracy.
+Old arguments, checkpoint schemas and missing-field defaults are not supported. Use the current API and checkpoint writer. The mixed example always records material and initial-state identities.
 
 ## In-memory snapshots with point identity
 

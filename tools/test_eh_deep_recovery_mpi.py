@@ -14,6 +14,7 @@ exercise reader rejection, public lifetime release and valid-input retry.
 --allocation-admission injects partial core-3D allocation failures (test build only).
 --ld-allocation-admission tests partial LD pole/current-history allocation failures.
 --aux-allocation-admission tests material/boundary coefficient vectors.
+--material-allocation-failures tests partial LD tensor-input array allocation failures.
 --point-output-failure MODE --point-output-reference FILE checks optional point I/O and repair.
 --integral-output-failure MODE uses the same faults for xy integrals; --integrals-only enables all integral controls.
 --info-output-failure open|write tests optional final metadata failure and cleanup.
@@ -356,9 +357,9 @@ def main():
                     if '--inactive-electronic-settings' in sys.argv:
                         text=text.replace('&system','&system\n nelem=1',1)
                         text+=("\n&pseudo\n file_pseudo(1)='missing-electronic-only_rps.dat'\n/\n"
-                               "&functional\n hse_mlwf_interval=11, exx_mlwf_interval=12,\n"
-                               " hse_mlwf_maxiter=13, exx_mlwf_maxiter=14,\n"
-                               " hse_mlwf_tolerance=1d-7, exx_mlwf_tolerance=2d-7,\n"
+                               "&functional\n exx_mlwf_interval=12,\n"
+                               " exx_mlwf_maxiter=14,\n"
+                               " exx_mlwf_tolerance=2d-7,\n"
                                " exx_k_algorithm='user_route', exx_factor_history_frames=0,\n"
                                " exx_factor_n_teach=0, exx_factor_exact_interval=0\n/\n")
                     (self.directory/'inputfile').write_text(
@@ -452,7 +453,7 @@ def main():
             assert not embedded_tddft._used,'clean coefficient rejection still consumes Python lifetime'
             comm.Barrier()
             admission_cases.append('coefficient-'+material_mode+'-'+str(attempt))
-    if '--allocation-admission' in sys.argv or '--ld-allocation-admission' in sys.argv or '--aux-allocation-admission' in sys.argv:
+    if '--allocation-admission' in sys.argv or '--ld-allocation-admission' in sys.argv or '--aux-allocation-admission' in sys.argv or '--material-allocation-failures' in sys.argv:
         # Deterministic STAT failure, confined to a separately built test runtime.
         from salmonpy.errors import InputError
         from salmonpy import embedded_tddft
@@ -460,6 +461,9 @@ def main():
         if '--allocation-admission' in sys.argv:allocation_stages.extend((24,25))
         if '--ld-allocation-admission' in sys.argv:allocation_stages.extend((26,27))
         if '--aux-allocation-admission' in sys.argv:allocation_stages.extend((28,29))
+        if '--material-allocation-failures' in sys.argv:
+            if not tensor and material_mode!='diagonal':raise ValueError('material allocation tests require tensor or diagonal LD')
+            allocation_stages.extend((30,) if material_mode=='diagonal' else (30,31,32))
         for stage in allocation_stages:
             def allocation_init_call(self,function,*call_args):
                 if getattr(function,'__name__','')=='sp_eh_init':
@@ -473,7 +477,7 @@ def main():
                         NativeEHField(ctx,calc,build,out/f'allocation-{stage}-{attempt}',
                                       points=sample_points,grid=(1,comm.size,1))
                 except InputError as exc:
-                    assert str(1120 if stage in (28,29) else 1119 if stage in (26,27) else 1118) in str(exc),exc
+                    assert str(1120 if stage in (28,29,30,31,32) else 1119 if stage in (26,27) else 1118) in str(exc),exc
                 else:raise AssertionError('rank-local allocation failure was not returned')
                 assert ctx._dependents==0
                 if inspect_mpi:assert mpi_counts()[:2]==[0,0]

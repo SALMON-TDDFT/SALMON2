@@ -157,8 +157,9 @@ def _scf_codec_digest(hashes):
 
 def _scf_contract_mismatch(saved,current,mode):
     if not isinstance(saved,dict) or current is None:return ['runtime_contract'],None
-    schemas=('salmonpy.scf-rebuild/1','salmonpy.scf-rebuild/2')
-    if saved.get('schema') not in schemas or current.get('schema') not in schemas:return ['schema'],None
+    if saved.get('schema')!='salmonpy.scf-rebuild/2' or current.get('schema')!='salmonpy.scf-rebuild/2':return ['schema'],None
+    if any(record.get('codec_sha256') is None or type(record.get('state_revision')) is not int for record in (saved,current)):
+        return ['codec_sha256/state_revision'],None
     fields=('stream_sha256','platform','machine')
     mismatch=[name for name in fields if saved.get(name)!=current.get(name)]
     if saved.get('codec_sha256') is not None and current.get('codec_sha256') is not None and saved['codec_sha256']!=current['codec_sha256']:
@@ -178,7 +179,7 @@ def _scf_contract_mismatch(saved,current,mode):
     revision=entry.get('state_revision')
     if type(revision) is not int or current.get('state_revision')!=revision:mismatch.append('state_revision')
     old_revision=saved.get('state_revision')
-    if old_revision!=revision and not (old_revision is None and entry.get('allow_legacy_state_revision') is True):
+    if old_revision!=revision:
         mismatch.append('saved_state_revision')
     if not entry.get('id') or not entry.get('validation'):mismatch.append('compatibility_evidence')
     return mismatch,entry.get('id') if not mismatch else None
@@ -196,15 +197,13 @@ def _scf_runtime_contract(session):
     kinds=np.zeros(8,dtype=np.int32);payload=np.zeros(128,dtype=np.int8)
     if fn(kinds.ctypes.data,payload.ctypes.data)!=0:raise InputError('native SCF stream representation unavailable')
     abi=hashlib.sha256(json.dumps(kinds.tolist()).encode()+payload.tobytes()).hexdigest()
-    contract={'schema':'salmonpy.scf-rebuild/1','source_sha256':source,
-              'stream_sha256':abi,'platform':sys.platform,'machine':platform.machine()}
     codec=getattr(session.backend,'_scf_codec_digest',None)
-    if codec is not None:
-        contract.update(schema='salmonpy.scf-rebuild/2',codec_sha256=codec,state_revision=None)
-        revision=getattr(session.lib,'sp_gs_scf_state_revision',None)
-        if revision is not None:
-            revision.argtypes=[];revision.restype=c.c_int
-            contract['state_revision']=revision()
+    revision=getattr(session.lib,'sp_gs_scf_state_revision',None)
+    if codec is None or revision is None:return None
+    revision.argtypes=[];revision.restype=c.c_int
+    contract={'schema':'salmonpy.scf-rebuild/2','source_sha256':source,
+              'stream_sha256':abi,'platform':sys.platform,'machine':platform.machine(),
+              'codec_sha256':codec,'state_revision':revision()}
     return contract
 
 
@@ -490,10 +489,10 @@ class NativeGSSession:
     def _live(self):
         self._native._live()
         if self.closed:raise InputError('GS session is closed')
-    def _call(self,work,fn,*args,minimum_protocol=1):
+    def _call(self,work,fn,*args):
         from ._native_group import _directory_call
         self._native._live()
-        return _directory_call(self.lib,self._native.context.solver_comm,work,fn,*args,minimum_protocol=minimum_protocol)
+        return _directory_call(self.lib,self._native.context.solver_comm,work,fn,*args)
 
     def _check(self,code):
         codes=self.comm.allgather(code)

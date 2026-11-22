@@ -34,15 +34,12 @@ no compilation, download, solver loading or MPI initialization. No console outpu
 is added by snapshot/restore. Numerical dependencies remain NumPy plus explicitly
 prepared LD/SBE calculation routines; requirements for optional packages and calculation programs have not changed.
 
-## Compatibility policy
+## Current API policy
 
-Every distributed behavior/API change gets a new package version. Within a
-release, do not change units, current sign, time layout or array names silently.
-Preview releases may introduce documented breaking changes: pin the tested
-package version and consult the migration note. A future stable release should
-use a deprecation period before removals; no such stability is promised for all
-experimental MPI/in-process functions today. This inventory is an API boundary,
-not a claim that every listed function has equal maturity.
+SALMONpy is unpublished and does not provide backward-compatibility branches,
+old argument aliases, format migration or a deprecation period. Use the current
+documented API, runtime and writers together. Units, current sign and time layout
+must remain explicit. Package versions identify releases; pin the tested version.
 
 Archive, timing, runtime and snapshot schemas have independent versions.
 Do not infer archive compatibility from the package version alone. In-memory

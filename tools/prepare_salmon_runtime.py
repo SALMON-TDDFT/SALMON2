@@ -1,7 +1,7 @@
 """Prepare the bundled solver in a new external directory, without Git or patches.
 
-One positional argument is the output. The historical UPSTREAM OUTPUT form is
-accepted for compatibility, but the pinned repository-owned source is used.
+The single positional argument is the output directory.
+The pinned repository-owned source is used.
 """
 import argparse,json,subprocess,sys,hashlib
 from pathlib import Path
@@ -10,12 +10,11 @@ import importlib.util
 _store_spec=importlib.util.spec_from_file_location('salmonpy_source_store',Path(__file__).with_name('runtime_sources.py'))
 store=importlib.util.module_from_spec(_store_spec);_store_spec.loader.exec_module(store)
 
-def prepare(source, directory=None):
-    if directory is None:directory=source;source=None
+def prepare(directory):
     root=Path(__file__).resolve().parents[1]
     spec=json.loads((root/'runtime/source.json').read_text())
     dest=Path(directory).expanduser().resolve()
-    if dest.is_relative_to(root) or (source is not None and dest.is_relative_to(Path(source).expanduser().resolve())):
+    if dest.is_relative_to(root):
         raise ValueError('new external directory outside source checkouts required')
     dest.mkdir(parents=True,exist_ok=False)
     marker=dest/'salmonpy-runtime-source.json'
@@ -41,5 +40,5 @@ def prepare(source, directory=None):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('source_or_output');parser.add_argument('directory',nargs='?')
-    args=parser.parse_args();print(prepare(args.source_or_output,args.directory))
+    parser.add_argument('directory')
+    args=parser.parse_args();print(prepare(args.directory))

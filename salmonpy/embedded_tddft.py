@@ -234,7 +234,7 @@ class _NativeState:
     def _call(self,fn,*args):
         from ._native_group import _directory_call
         self.native._live()
-        return _directory_call(self.lib,self.native.context.solver_comm,self.work,fn,*args,minimum_protocol=2)
+        return _directory_call(self.lib,self.native.context.solver_comm,self.work,fn,*args)
 
     @property
     def timing_seconds(self):

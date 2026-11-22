@@ -9,9 +9,11 @@ program probe
  use timer
  use plusU_global,only:read_Hubbard_parameters
  use sym_sub,only:read_sw_symmetry,use_symmetry,SymMatA,Ainv,Binv
- use salmonpy_tddft_context,only:tddft_context,rt_open,rt_step,rt_close,rt_probe_write, &
+ use salmonpy_tddft_context,only:s_rt_model_settings, &
+   tddft_context,rt_open,rt_step,rt_close,rt_probe_write, &
    rt_checkpoint,rt_accepted_step,rt_current
  implicit none
+ type(s_rt_model_settings)::owner_ctx,owner_second
  type(tddft_context),pointer::ctx=>null(),second=>null()
  character(16)::mode,split_text
  character(4096)::path
@@ -40,9 +42,11 @@ program probe
  call read_sw_symmetry(yn_symmetry)
  call timer_initialize
  if(mode=='default')then
-   call rt_open(ctx,'run',code)
+   call rt_open(ctx,'run',code, &
+     model_settings=owner_ctx)
  else
-   call rt_open(ctx,'run',code,allow_symmetry=.true.)
+   call rt_open(ctx,'run',code,allow_symmetry=.true., &
+     model_settings=owner_ctx)
  endif
  if(mode=='default'.or.mode=='open-reject'.or.mode=='inner-reject')then
    if(code==0.or.associated(ctx))stop 23
@@ -53,7 +57,8 @@ program probe
  endif
  if(code/=0)stop 1
  if(mode=='lifetime')then
-   call rt_open(second,'second',code,allow_symmetry=.true.)
+   call rt_open(second,'second',code,allow_symmetry=.true., &
+     model_settings=owner_second)
    if(code==0.or.associated(second))stop 33
    mode='continuous'
  endif

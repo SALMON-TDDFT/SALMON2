@@ -43,7 +43,7 @@ module salmonpy_fast_hse_mpi
  integer(c_int64_t),parameter::handle_stride=2147483648_c_int64_t
  logical,save::handle_mode=.false.,model_symmetry=.false.
  integer,save::handle_group=0
- type(s_rt_model_settings),save::shared_settings
+ type(s_rt_model_settings),save::shared_settings,single_state_settings
  type model_slot
    type(s_rt_model_settings)::init_settings
    type(s_gs_seed),allocatable::memory_gs
@@ -141,7 +141,7 @@ end function
  sp_fast_hse_init=1;J=0d0
  if(.not.attached_main_thread())return
  call legacy_timer_enter()
- sp_fast_hse_init=initialize(path,timestep,capacity,J,.false.)
+ sp_fast_hse_init=initialize(path,timestep,capacity,J,.false.,model_settings=single_state_settings)
  call legacy_timer_leave()
  end function
  integer(c_int) function sp_fast_hse_init_symmetry(path,timestep,capacity,J) bind(C)
@@ -152,7 +152,7 @@ end function
  sp_fast_hse_init_symmetry=1;J=0d0
  if(.not.attached_main_thread())return
  call legacy_timer_enter()
- sp_fast_hse_init_symmetry=initialize(path,timestep,capacity,J,.true.)
+ sp_fast_hse_init_symmetry=initialize(path,timestep,capacity,J,.true.,model_settings=single_state_settings)
  call legacy_timer_leave()
  end function
  integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry,registered,output_name,memory_gs,model_settings)
@@ -166,7 +166,7 @@ end function
  use exx_worker_service,only:service_enabled
 #endif
  type(s_gs_seed),optional,intent(in)::memory_gs
- type(s_rt_model_settings),optional,intent(inout)::model_settings
+ type(s_rt_model_settings),intent(inout)::model_settings
  logical,intent(in)::allow_symmetry
  character(*),optional,intent(in)::output_name
  character(80)::selected_name

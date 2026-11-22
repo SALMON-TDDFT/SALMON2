@@ -57,9 +57,8 @@ class FieldRecoveryTests(unittest.TestCase):
             self.assertEqual(NativeEHField._call(f,lambda:9),9)
         self.assertEqual(events,['leave'])
         f.lib.sp_io_directory_protocol=Function(lambda:2)
-        with patch('os.chdir') as legacy_chdir:
-            self.assertEqual(NativeEHField._call(f,lambda:9),9)
-        self.assertEqual(legacy_chdir.call_count,2)
+        with patch('os.chdir',side_effect=AssertionError('host chdir forbidden')):
+            with self.assertRaises(InputError):NativeEHField._call(f,lambda:9)
         self.assertEqual(events,['leave'])
         with self.assertRaises(InputError):f.advance(np.ones((1,3)))
         self.assertTrue(f.failed);self.assertEqual(f.step_index,1)

@@ -22,7 +22,7 @@ class MixedIdentityTests(unittest.TestCase):
     def test_full_identity_is_detached_and_matching(self):
         coupled,record,mapping,ld=self.fixture()
         current=checkpoint_identity(coupled)
-        check_identity(current,copy.deepcopy(current),'salmonpy.native-direct/3')
+        check_identity(current,copy.deepcopy(current),'salmonpy.native-direct/4')
         self.assertEqual(current['point_metadata']['point_run']['run_id'],'run-a')
         self.assertEqual(current['constitutive']['cell_ids'],{'1':'drude'})
         current['constitutive']['materials']['drude']['material_id']='changed'
@@ -39,13 +39,16 @@ class MixedIdentityTests(unittest.TestCase):
             elif field=='bool':saved['point_metadata']['mpi_point_map'][0]['ranks']=[True]
             else:r['points'][0][field]='e'*64
             with self.subTest(field=field),self.assertRaisesRegex(ValueError,'identity'):
-                check_identity(current,saved,'salmonpy.native-direct/3')
+                check_identity(current,saved,'salmonpy.native-direct/4')
 
-    def test_legacy_is_explicit_and_cannot_strip_identified_archive(self):
+    def test_current_schema_and_optional_identity(self):
         coupled,_,_,_=self.fixture();current=checkpoint_identity(coupled)
-        check_identity(None,None,'salmonpy.native-direct/2')
-        with self.assertRaises(ValueError):check_identity(current,None,'salmonpy.native-direct/2')
-        with self.assertRaises(ValueError):check_identity(None,current,'salmonpy.native-direct/3')
+        check_identity(None,None,'salmonpy.native-direct/4')
+        for schema in ('salmonpy.native-direct/1','salmonpy.native-direct/2','salmonpy.native-direct/3','salmonpy.native-replay/1'):
+            with self.subTest(schema=schema),self.assertRaisesRegex(ValueError,'schema'):
+                check_identity(None,None,schema)
+        with self.assertRaises(ValueError):check_identity(current,None,'salmonpy.native-direct/4')
+        with self.assertRaises(ValueError):check_identity(None,current,'salmonpy.native-direct/4')
 
     def test_no_implicit_identity_for_legacy_session(self):
         self.assertIsNone(checkpoint_identity(SimpleNamespace(response=SimpleNamespace())))

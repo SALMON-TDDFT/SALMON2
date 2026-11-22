@@ -28,8 +28,8 @@ def main():
     p.add_argument('--fdtd-restart-io',action='store_true',help='synthetic EM restart/helper file-unit ownership and exact-byte controls; no GS')
     p.add_argument('--field-close',action='store_true')
     p.add_argument('--abi-contract',action='store_true')
-    p.add_argument('--legacy-settings-warning',action='store_true',help='check one-time HSE compatibility warning without GS creation')
     p.add_argument('--tbmbj-input',action='store_true',help='check public TB-mBJ input on synthetic density, without GS')
+    p.add_argument('--model-settings',action='store_true',help='check explicit HSE settings ownership without GS creation')
     p.add_argument('--parser-host',action='store_true',help='check status-only versus explicit native-host parser selection')
     p.add_argument('--abi-state',action='store_true')
     p.add_argument('--fixture',type=Path)
@@ -272,14 +272,19 @@ def main():
             'automatic_and_fixed_input':True,'owned_XC_unchanged_by_global_settings':True,
             'GS_data_collected':False,'scope':'synthetic XC/parser contract; no SCF or physical-material validation'},indent=2)+'\n')
         return
-    if args.legacy_settings_warning:
+    if args.model_settings:
         record=json.loads(args.build.read_text());lib=Path(record['library'])
-        if record.get('schema')!='salmonpy.fast-hse-mpi/1':p.error('legacy-settings-warning needs a fast-HSE build')
+        if record.get('schema')!='salmonpy.fast-hse-mpi/1':p.error('model-settings needs a fast-HSE build')
         digest=lambda path:hashlib.sha256(path.read_bytes()).hexdigest()
         if digest(lib)!=record['sha256']:raise ValueError('runtime hash changed')
         command=record.get('configure_command') or record['commands'][0]
         build=Path(command[command.index('-B')+1]);obj=out/'warning.o';exe=out/'warning-host'
-        subprocess.run([args.fc,'-cpp','-DSALMONPY_HSE_LEGACY_WARNING_PROBE','-I'+str(lib.parent),'-I'+str(build),'-c',str(fixture),'-o',str(obj)],check=True)
+        subprocess.run([args.fc,'-cpp','-DSALMONPY_HSE_OWNED_SETTINGS_PROBE','-I'+str(lib.parent),'-I'+str(build),'-c',str(fixture),'-o',str(obj)],check=True)
+        omitted=out/'missing-owner.f90'
+        omitted.write_text('program missing_owner\n use salmonpy_tddft_context,only:rt_model_settings\n call rt_model_settings(.true.)\nend program\n')
+        missing=subprocess.run([args.fc,'-I'+str(lib.parent),'-I'+str(build),'-c',str(omitted),'-o',str(out/'missing-owner.o')],capture_output=True,text=True)
+        (out/'missing-owner.log').write_text(missing.stdout+missing.stderr)
+        assert missing.returncode!=0 and 'owner' in missing.stderr.lower(),missing.stderr
         for objects in (out,build.parent):
             subprocess.run([sys.executable,str(checker),'--object-tree',str(objects)],check=True)
         link=mpi_link_command([args.fc,str(obj),str(lib),'-o',str(exe)])
@@ -291,11 +296,10 @@ def main():
             (out/f'stdout-{ranks}.log').write_text(result.stdout)
             (out/f'stderr-{ranks}.log').write_text(result.stderr)
             result.check_returncode()
-            assert result.stderr.count('legacy_settings fallback')==1
-            assert result.stderr.index('explicit-owner-complete')<result.stderr.index('legacy_settings fallback')
-            assert 'explicit owner attempted before any fallback' in result.stdout
+            assert 'required owned settings PASS' in result.stdout
+            assert 'fallback' not in result.stderr
         (out/'result.json').write_text(json.dumps({'status':'passed','runtime_sha256':record['sha256'],
-            'executable_sha256':exe_sha,'ranks':sorted({1,args.ranks}),'warning_count_per_MPI_job':1,
+            'executable_sha256':exe_sha,'ranks':sorted({1,args.ranks}),'explicit_owner_required':True,
             'solver_states_created':False},indent=2)+'\n')
         return
     if args.parser_host:

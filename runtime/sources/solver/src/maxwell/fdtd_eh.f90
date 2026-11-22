@@ -688,8 +688,9 @@ contains
       call eh_read_diagonal(diagonal_status)
       if(diagonal_status/=0)then
         if(present(status))then
-          status=1110;return
+          status=merge(1120,1110,diagonal_status==2);return
         endif
+        if(diagonal_status==2)error stop 'Required LD material coefficient allocation failed'
         call stop_em('Invalid or missing salmonpy-ld-diagonal.dat tensor input.')
       endif
       if(comm_is_root(nproc_id_global))write(*,'(A)')'SALMONPY_FDTD_LD_DIAGONAL_V1'
@@ -698,8 +699,9 @@ contains
       call eh_read_tensor(diagonal_status)
       if(diagonal_status/=0)then
         if(present(status))then
-          status=1110;return
+          status=merge(1120,1110,diagonal_status==2);return
         endif
+        if(diagonal_status==2)error stop 'Required LD material coefficient allocation failed'
         call stop_em('Invalid or missing salmonpy-ld-tensor.dat input.')
       endif
       if(comm_is_root(nproc_id_global))write(*,'(A)')'SALMONPY_FDTD_LD_TENSOR_V1'
@@ -3286,18 +3288,50 @@ contains
     
     !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ set fdtd coefficient ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    subroutine eh_material_allocation_start(slot,ios)
+      integer,intent(in) :: slot
+      integer,intent(out) :: ios
+      ios=0
+#ifdef SALMONPY_RECOVERY_TESTING
+      if(present(allocation_failure_slot))then
+        if(allocation_failure_slot==200+slot)ios=1
+      endif
+#endif
+    end subroutine eh_material_allocation_start
+
+    subroutine eh_material_allocation_result(name,ios,ierr)
+      character(*),intent(in) :: name
+      integer,intent(in) :: ios
+      integer,intent(inout) :: ierr
+      if(ios==0)return
+      ierr=2
+      write(*,'(A,I0,A,I0,2A)')'SALMONPY_MATERIAL_ALLOCATION_ERROR rank=',nproc_id_global, &
+        ' stat=',ios,' array=',name
+    end subroutine eh_material_allocation_result
+
     subroutine eh_read_diagonal(ierr)
       integer,intent(out)::ierr
       integer::unit,ios,nrecord,version,record,imedia,np,q,axis
       character(64)::magic
       logical::seen(0:200)
-      allocate(diagonal_eps(3,0:media_num),diagonal_f(3,0:media_num,100))
-      do axis=1,3
-        diagonal_eps(axis,:)=epsilon_em(0:media_num)
-        diagonal_f(axis,:,:)=f_ld(0:media_num,:)
-      enddo
       ierr=0;seen=.false.
-      if(comm_is_root(nproc_id_global))then
+      if(ierr==0)then
+        call eh_material_allocation_start(1,ios)
+        if(ios==0)allocate(diagonal_eps(3,0:media_num),stat=ios)
+        call eh_material_allocation_result('diagonal_eps',ios,ierr)
+      endif
+      if(ierr==0)then
+        call eh_material_allocation_start(2,ios)
+        if(ios==0)allocate(diagonal_f(3,0:media_num,100),stat=ios)
+        call eh_material_allocation_result('diagonal_f',ios,ierr)
+      endif
+      if(ierr==0)then
+        do axis=1,3
+          diagonal_eps(axis,:)=epsilon_em(0:media_num)
+          diagonal_f(axis,:,:)=f_ld(0:media_num,:)
+        enddo
+      endif
+      if(comm_is_root(nproc_id_global).and.ierr==0)then
         open(newunit=unit,file=resolve_path('salmonpy-ld-diagonal.dat'),status='old',action='read',iostat=ios)
         if(ios/=0)then
           ierr=1
@@ -3334,7 +3368,8 @@ contains
           close(unit)
         endif
       endif
-      call comm_bcast(ierr,nproc_group_global)
+      ! Same startup gate as the former root status broadcast; no extra collective.
+      call comm_get_max(ierr,nproc_group_global)
       if(ierr/=0)return
       call comm_bcast(diagonal_eps,nproc_group_global)
       call comm_bcast(diagonal_f,nproc_group_global)
@@ -3653,22 +3688,48 @@ contains
         ierr=1;return
       endif
       if(.not.allocated(diagonal_eps))then
-        allocate(diagonal_eps(3,0:media_num),diagonal_f(3,0:media_num,100))
-        do a=1,3
-          diagonal_eps(a,:)=epsilon_em(0:media_num)
-          diagonal_f(a,:,:)=f_ld(0:media_num,:)
-        enddo
+        if(ierr==0)then
+          call eh_material_allocation_start(1,ios)
+          if(ios==0)allocate(diagonal_eps(3,0:media_num),stat=ios)
+          call eh_material_allocation_result('diagonal_eps',ios,ierr)
+        endif
+        if(ierr==0)then
+          call eh_material_allocation_start(2,ios)
+          if(ios==0)allocate(diagonal_f(3,0:media_num,100),stat=ios)
+          call eh_material_allocation_result('diagonal_f',ios,ierr)
+        endif
+        if(ierr==0)then
+          do a=1,3
+            diagonal_eps(a,:)=epsilon_em(0:media_num)
+            diagonal_f(a,:,:)=f_ld(0:media_num,:)
+          enddo
+        endif
       endif
-      allocate(fe%tensor_raw(3,3,0:maxp,0:media_num),fe%tensor_corr(3,3,0:maxp,0:media_num))
-      allocate(fe%tensor_rates(3,maxp,0:media_num))
-      fe%tensor_rates=0d0
-      do m=0,media_num
-        do q=1,min(maxp,pole_num_ld(m))
-          fe%tensor_rates(:,q,m)=[omega_p_ld(m),omega_ld(m,q),gamma_ld(m,q)]
+      if(ierr==0)then
+        call eh_material_allocation_start(3,ios)
+        if(ios==0)allocate(fe%tensor_raw(3,3,0:maxp,0:media_num),stat=ios)
+        call eh_material_allocation_result('fe%tensor_raw',ios,ierr)
+      endif
+      if(ierr==0)then
+        call eh_material_allocation_start(4,ios)
+        if(ios==0)allocate(fe%tensor_corr(3,3,0:maxp,0:media_num),stat=ios)
+        call eh_material_allocation_result('fe%tensor_corr',ios,ierr)
+      endif
+      if(ierr==0)then
+        call eh_material_allocation_start(5,ios)
+        if(ios==0)allocate(fe%tensor_rates(3,maxp,0:media_num),stat=ios)
+        call eh_material_allocation_result('fe%tensor_rates',ios,ierr)
+      endif
+      if(ierr==0)then
+        fe%tensor_rates=0d0
+        do m=0,media_num
+          do q=1,min(maxp,pole_num_ld(m))
+            fe%tensor_rates(:,q,m)=[omega_p_ld(m),omega_ld(m,q),gamma_ld(m,q)]
+          enddo
         enddo
-      enddo
-      fe%tensor_raw=0d0;fe%tensor_corr=0d0
-      if(comm_is_root(nproc_id_global))then
+        fe%tensor_raw=0d0;fe%tensor_corr=0d0
+      endif
+      if(comm_is_root(nproc_id_global).and.ierr==0)then
         open(newunit=unit,file=resolve_path('salmonpy-ld-tensor.dat'),status='old',action='read',iostat=ios)
         if(ios==0)then
           read(unit,*,iostat=ios)magic,version
@@ -3702,7 +3763,8 @@ contains
         endif
         if(ios/=0)ierr=1
       endif
-      call comm_bcast(ierr,nproc_group_global)
+      ! Agree local allocation and root input errors before broadcasting arrays.
+      call comm_get_max(ierr,nproc_group_global)
       if(ierr/=0)return
       call comm_bcast(fe%tensor_raw,nproc_group_global)
       call comm_bcast(fe%tensor_rtol,nproc_group_global)

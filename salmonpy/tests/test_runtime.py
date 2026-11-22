@@ -100,14 +100,14 @@ class RuntimeTests(unittest.TestCase):
     def test_build_invalid_arguments_do_not_create_directory(self):
         for jobs, options in [(0, []), (True, []), (1, ['--bad'])]:
             with self.assertRaises(ValueError):
-                runtime.build_runtime(self.root/'upstream', self.root/'build', jobs=jobs, cmake_args=options)
+                runtime.build_runtime(self.root/'build', jobs=jobs, cmake_args=options)
             self.assertFalse((self.root/'build').exists())
 
     def test_build_failure_keeps_diagnostics(self):
         import subprocess
         with patch.object(runtime.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'fixture')):
             with self.assertRaises(subprocess.CalledProcessError):
-                runtime.build_runtime(self.root/'upstream', self.root/'build', jobs=1)
+                runtime.build_runtime(self.root/'build', jobs=1)
         record = json.loads((self.root/'build/build.json').read_text())
         self.assertEqual(record['status'], 'failed')
         configure=next(command for command in record['commands'] if command[0]=='cmake')

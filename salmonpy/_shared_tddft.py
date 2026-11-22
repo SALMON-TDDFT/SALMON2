@@ -100,7 +100,7 @@ class NativeTDDFTModel:
     def _call(self,fn,*args):
         from ._native_group import _directory_call
         self._native._live()
-        return _directory_call(self.lib,self._native.context.solver_comm,self.work,fn,*args,minimum_protocol=2)
+        return _directory_call(self.lib,self._native.context.solver_comm,self.work,fn,*args)
     def new_state(self,point_id=None):
         from .embedded_tddft import _NativeState
         from .material_response import _response_timing

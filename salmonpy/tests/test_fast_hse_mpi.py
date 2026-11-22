@@ -46,7 +46,8 @@ class NativeFastHSETests(unittest.TestCase):
             c.cast(step,c.POINTER(c.c_int)).contents.value=2
             A[:]=[.2,.3,.4];current[:]=[4,5,6];return 0
         lib=SimpleNamespace(sp_fast_hse_step=step,sp_fast_hse_checkpoint=checkpoint,
-                            sp_fast_hse_info=info,sp_fast_hse_close=lambda:0)
+                            sp_fast_hse_info=info,sp_fast_hse_close=lambda:0,
+                            sp_io_directory_protocol=lambda:3,sp_io_directory_enter=lambda p:0,sp_io_directory_leave=lambda:None)
         state=_State(native,lib,self.root,.01,3,'hse_taylor4')
         state.initialized=True
         return state,calls

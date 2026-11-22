@@ -7,9 +7,11 @@ program probe
  use timer
  use plusU_global,only:read_Hubbard_parameters
  use sym_sub,only:read_sw_symmetry
- use salmonpy_tddft_context,only:tddft_context,rt_open,rt_step,rt_close,rt_probe_write, &
+ use salmonpy_tddft_context,only:s_rt_model_settings, &
+   tddft_context,rt_open,rt_step,rt_close,rt_probe_write, &
    rt_checkpoint,rt_accepted_step
  implicit none
+ type(s_rt_model_settings)::owner_ctx
  type(tddft_context),pointer::ctx=>null()
  character(16)::mode,split_text
  character(4096)::path
@@ -26,7 +28,8 @@ program probe
  call read_Hubbard_parameters
  call read_sw_symmetry(yn_symmetry)
  call timer_initialize
- call rt_open(ctx,'run',code);if(code/=0)stop 1
+ call rt_open(ctx,'run',code, &
+     model_settings=owner_ctx);if(code/=0)stop 1
  first=0;last=nt
  if(mode=='reject')then
    call rt_checkpoint(ctx,trim(path),.true.,code)

@@ -110,7 +110,7 @@ class NativeTDDFTRegistry:
     def _call(self,work,fn,*args):
         from ._native_group import _directory_call
         self._native._live()
-        return _directory_call(self.lib,self._native.context.solver_comm,work,fn,*args,minimum_protocol=2)
+        return _directory_call(self.lib,self._native.context.solver_comm,work,fn,*args)
 
     def open_model(self,initial,dt,*,decomposition=None):
         from .embedded_tddft import NativeTDDFTInitialState,_manifest,_copy_bundle,_digest

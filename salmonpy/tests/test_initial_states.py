@@ -40,7 +40,7 @@ class InitialStateTests(unittest.TestCase):
         (self.native/'gs.inp').write_text(model.input_text())
         (self.native/'gs_status.dat').write_text('SALMONPY_GS_V1\n1 2\n1e-10 1e-9 -1.0\nrho_dne\n')
         (self.native/'pseudo1_rps.dat').write_bytes(model.pseudopotentials[0].data)
-        self.record={'schema':'salmonpy.gs/1','status':'complete',**model._restart_signature(),
+        self.record={'schema':'salmonpy.gs/1','status':'complete','restart_saved':True,**model._restart_signature(),
                      'fractional_positions':model.fractional_positions.tolist(),
                      'energy_hartree':-1.,'iterations':2,'max_iterations':300,'tolerance':1e-9,
                      'executable_sha256':self.engine.sha256}

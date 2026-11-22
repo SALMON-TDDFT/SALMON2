@@ -388,7 +388,7 @@ class GroundStateResult:
         record=json.loads((root/'ground-state.json').read_text())
         if record.get('schema')!='salmonpy.gs/1' or record.get('status')!='complete': raise InputError('not a completed GS result')
         files=record.get('files',{})
-        saved=record.get('restart_saved',True)
+        saved=record.get('restart_saved')
         if type(saved) is not bool:raise InputError('invalid restart_saved flag')
         restart={f'native/data_for_restart/{n}' for n in ('info.bin','occupation.bin','wfn.bin')}
         required={'native/gs.inp','native/gs_status.dat'}

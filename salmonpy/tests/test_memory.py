@@ -42,7 +42,7 @@ class MemoryAdviceTests(unittest.TestCase):
         from salmonpy._memory_advice import restore_advice,RESERVE
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name,size in [('field-0.bin',100),('electronic-0.bin',200),('rank-0.json',4),('frames.json',8)]:
+            for name,size in [('field-0.bin',100),('electronic-0-point-1.bin',200),('rank-0.json',4),('frames.json',8)]:
                 (root/name).write_bytes(b'x'*size)
             raw=SimpleNamespace(_initial=SimpleNamespace(eigen=SimpleNamespace(shape=(2,1))))
             coupled=SimpleNamespace(field=object(),response=SimpleNamespace(states={1:SimpleNamespace(native=True),2:SimpleNamespace(_raw=raw)}),
@@ -72,7 +72,7 @@ class MemoryAdviceTests(unittest.TestCase):
         from salmonpy._memory_advice import restore_advice
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name in ('worker-0.bin','rank-0.json','frames.json'):
+            for name in ('worker-0-point-1.bin','rank-0.json','frames.json'):
                 (root/name).write_bytes(b'x'*8)
             state=SimpleNamespace(_process=object(),checkpoint_protocol='salmonpy.direct-state/1')
             coupled=SimpleNamespace(field=None,response=SimpleNamespace(states={1:state}),memory_reports=[],memory_budget_bytes=4*2**30)

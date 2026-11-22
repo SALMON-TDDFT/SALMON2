@@ -68,7 +68,6 @@ module inputoutput
     integer :: inml_dc=0
     integer :: inml_unfolding=0
   end type
-  type(s_input_parser),target,save,private :: legacy_parser
 
   ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
   private :: salmon_all_finite,finite_real_1d
@@ -82,6 +81,7 @@ contains
     character(*),optional,intent(in) :: input_path
     type(s_input_parser),optional,target,intent(inout) :: workspace
     type(s_input_parser),pointer :: parser
+    type(s_input_parser),target :: local_parser
     integer,optional,intent(out) :: status
     logical,optional,intent(in) :: native_host
     logical :: host
@@ -95,7 +95,7 @@ contains
       parser=>workspace
       parser%isolated=.true.
     else
-      parser=>legacy_parser
+      parser=>local_parser
       parser%isolated=.false.
     endif
     call read_stdin(input_path,parser)
@@ -295,9 +295,6 @@ contains
     logical,optional,intent(in) :: native_host
     logical :: native_maxwell
     real(8) :: norm
-    ! Read-only compatibility aliases; computational modules use EXX names.
-    integer :: hse_mlwf_interval,hse_mlwf_maxiter
-    real(8) :: hse_mlwf_tolerance
 
     namelist/calculation/ &
       & theory, &
@@ -373,9 +370,9 @@ contains
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, &
       & exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
-      & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
+      & exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
       & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
-      & exx_factor_mode,exx_k_algorithm,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft, &
+      & exx_factor_mode,exx_k_algorithm, &
       & yn_hse_sr_pair_symmetry, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
@@ -774,7 +771,7 @@ contains
 
     call initialize_inputoutput_units
 
-    call initialize_parser_defaults(parser,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance)
+    call initialize_parser_defaults(parser)
 
     if (comm_is_root(nproc_id_global)) then
       if(.not.parser%isolated)parser%fh_namelist = get_filehandle()
@@ -1011,30 +1008,9 @@ contains
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
     call comm_bcast(yn_hse_wannier,nproc_group_global)
-    call comm_bcast(hse_mlwf_interval,nproc_group_global)
     call comm_bcast(exx_mlwf_interval,nproc_group_global)
-    if(hse_mlwf_interval/=-huge(1))then
-      if(exx_mlwf_interval/=-huge(1).and.exx_mlwf_interval/=hse_mlwf_interval.and..not.native_maxwell) &
-        error stop 'conflicting EXX/legacy MLWF interval'
-      exx_mlwf_interval=hse_mlwf_interval
-    endif
-    if(exx_mlwf_interval==-huge(1))exx_mlwf_interval=10
-    call comm_bcast(hse_mlwf_maxiter,nproc_group_global)
     call comm_bcast(exx_mlwf_maxiter,nproc_group_global)
-    if(hse_mlwf_maxiter/=-huge(1))then
-      if(exx_mlwf_maxiter/=-huge(1).and.exx_mlwf_maxiter/=hse_mlwf_maxiter.and..not.native_maxwell) &
-        error stop 'conflicting EXX/legacy MLWF maxiter'
-      exx_mlwf_maxiter=hse_mlwf_maxiter
-    endif
-    if(exx_mlwf_maxiter==-huge(1))exx_mlwf_maxiter=200
-    call comm_bcast(hse_mlwf_tolerance,nproc_group_global)
     call comm_bcast(exx_mlwf_tolerance,nproc_group_global)
-    if(hse_mlwf_tolerance/=-huge(1d0))then
-      if(exx_mlwf_tolerance/=-huge(1d0).and.exx_mlwf_tolerance/=hse_mlwf_tolerance.and..not.native_maxwell) &
-        error stop 'conflicting EXX/legacy MLWF tolerance'
-      exx_mlwf_tolerance=hse_mlwf_tolerance
-    endif
-    if(exx_mlwf_tolerance==-huge(1d0))exx_mlwf_tolerance=1d-6
     call comm_bcast(yn_exx_dc_mlwf,nproc_group_global)
     call string_lowercase(yn_exx_dc_mlwf)
     call comm_bcast(exx_pre_scf_threshold,nproc_group_global)
@@ -1612,12 +1588,10 @@ contains
   ! Resolve omitted controls before broadcasts and compatibility checks.
   ! Extended KY explicitly declares j-resolved data; legacy formats retain
   ! their scalar default. Explicit user choices are never silently overridden.
-  subroutine initialize_parser_defaults(parser,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance)
+  subroutine initialize_parser_defaults(parser)
     implicit none
     type(s_input_parser),intent(inout) :: parser
     integer :: ii
-    integer,intent(out) :: hse_mlwf_interval,hse_mlwf_maxiter
-    real(8),intent(out) :: hse_mlwf_tolerance
     if(parser%isolated)then
       ! Parser views never borrow a preceding model's atom allocations.
       if(allocated(Rion))deallocate(Rion)
@@ -1704,12 +1678,9 @@ contains
     rvv10_b=5.3d0;rvv10_c=.0093d0;rvv10_nq=32
     hse_omega = .11d0 / ulength_from_au ! inverse input length
     yn_hse_wannier = 'n'
-    exx_mlwf_interval = -huge(1)
-    hse_mlwf_interval = -huge(1)
-    exx_mlwf_maxiter = -huge(1)
-    hse_mlwf_maxiter = -huge(1)
-    exx_mlwf_tolerance = -huge(1d0)
-    hse_mlwf_tolerance = -huge(1d0)
+    exx_mlwf_interval = 10
+    exx_mlwf_maxiter = 200
+    exx_mlwf_tolerance = 1d-6
     exx_mlwf_radius = 0d0
     exx_factor_mode = 'off'
     exx_k_algorithm = 'auto'

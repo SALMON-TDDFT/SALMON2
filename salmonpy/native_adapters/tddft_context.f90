@@ -36,8 +36,6 @@ module salmonpy_tddft_context
   type(fixed_settings)::values
   logical::pinned=.false.
  end type
- type(s_rt_model_settings),save::legacy_settings
- logical,save::legacy_settings_warning_emitted=.false.
 type :: checkpoint_payload
   type(s_orbital) :: spsi_in,spsi_out,tpsi
   type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
@@ -91,24 +89,11 @@ type(s_unfold) :: unfold
  integer::Mit=0,accepted=0
  end type
 contains
- subroutine warn_legacy_settings()
- use, intrinsic :: iso_fortran_env,only:error_unit
- if(legacy_settings_warning_emitted)return
- legacy_settings_warning_emitted=.true.
- if(nproc_id_global==0)write(error_unit,'(a)') &
-   'SALMONpy warning: legacy_settings fallback is process-owned; pass model_settings for independent models.'
- end subroutine
  subroutine rt_model_settings(reset,owner)
  logical,intent(in)::reset
- type(s_rt_model_settings),optional,intent(inout)::owner
- if(present(owner))then
-  owner%pinned=.not.reset
-  if(.not.reset)owner%values=capture_settings()
- else
-  call warn_legacy_settings()
-  legacy_settings%pinned=.not.reset
-  if(.not.reset)legacy_settings%values=capture_settings()
- endif
+ type(s_rt_model_settings),intent(inout)::owner
+ owner%pinned=.not.reset
+ if(.not.reset)owner%values=capture_settings()
  end subroutine
  subroutine rt_step_transaction(ctx,mode,status)
  use communication,only:comm_get_max
@@ -238,18 +223,13 @@ contains
  type(s_rt_run_config),optional,intent(in)::config
  type(s_gs_seed),optional,intent(in)::memory_gs
  logical,optional,intent(in)::allow_symmetry
- type(s_rt_model_settings),optional,intent(inout)::model_settings
+ type(s_rt_model_settings),intent(inout)::model_settings
  type(s_rt_model_settings)::owner_settings
  type(s_rt_run_config)::selected
  character(len(sysname))::saved_name
  logical::exists
  integer::i,child_owner
- owner_settings=legacy_settings
- if(present(model_settings))then
-  owner_settings=model_settings
- else
-  call warn_legacy_settings()
- endif
+ owner_settings=model_settings
  status=1
 #if defined(USE_OPENACC) || defined(USE_FFTW)
  goto 900
@@ -354,11 +334,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  ctx%run_settings=selected
  ctx%settings=capture_settings()
  owner_settings%values=ctx%settings;owner_settings%pinned=.true.
- if(present(model_settings))then
-  model_settings=owner_settings
- else
-  legacy_settings=owner_settings
- endif
+ model_settings=owner_settings
  ctx%accepted=ctx%Mit
  status=0
  end subroutine

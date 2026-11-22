@@ -44,10 +44,10 @@ with ParallelContext.create(world,plan) as context:
             if case=='inner-layout': saved['participants'][1]['states']['1']['decomposition']=[1,2,1,1,1]
             if case=='ownership': saved['groups'][1]['ranks']=[2,1]
             if case=='format': saved['participants'][2]['states']['1']['format']='other-numeric/1'
-            manifest={'schema':'salmonpy.native-direct/2','ranks':world.size,'signature':{'steps':4},'step':1,
+            manifest={'schema':'salmonpy.native-direct/4','ranks':world.size,'signature':{'steps':4},'step':1,
                       'compatibility':saved,'files':{p.name:digest(p) for p in path.iterdir()}}
             if case=='missing':
-                manifest['schema']='salmonpy.native-direct/1';manifest.pop('compatibility')
+                manifest.pop('compatibility')
             (path/'complete.json').write_text(json.dumps(manifest))
         world.Barrier()
         state.checkpoint_modes=('save',) if case=='unsupported' and world.rank==2 else ('save','restore')

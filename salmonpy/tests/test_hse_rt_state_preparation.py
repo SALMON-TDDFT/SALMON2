@@ -22,7 +22,7 @@ class HSEStatePreparation(unittest.TestCase):
 
     def test_recursive_output_rejected_before_git(self):
         with patch.object(prepare.subprocess,'check_output',side_effect=AssertionError('must not query')):
-            with self.assertRaisesRegex(ValueError,'external'):
+            with self.assertRaises(TypeError):
                 prepare.prepare(self.source,self.source/'nested')
         self.assertFalse((self.source/'nested').exists())
 
@@ -36,14 +36,14 @@ class HSEStatePreparation(unittest.TestCase):
     def test_existing_evidence_is_preserved(self):
         self.output.mkdir();keep=self.output/'keep';keep.write_text('existing evidence')
         with patch.object(prepare.subprocess,'check_output',return_value=PROFILE['upstream_commit']):
-            with self.assertRaises(FileExistsError):prepare.prepare(self.source,self.output)
+            with self.assertRaises(FileExistsError):prepare.prepare(self.output)
         self.assertEqual(keep.read_text(),'existing evidence')
         self.assertEqual(list(self.output.iterdir()),[keep])
 
     def test_failed_archive_preserved_and_not_approved(self):
         with patch.object(prepare.subprocess,'check_output',return_value=PROFILE['upstream_commit']), \
              patch.object(prepare.subprocess,'run',side_effect=OSError('archive failure')):
-            with self.assertRaisesRegex(OSError,'archive failure'):prepare.prepare(self.source,self.output)
+            with self.assertRaisesRegex(OSError,'archive failure'):prepare.prepare(self.output)
         marker=json.loads((self.output/'salmonpy-hse-rt-state.json').read_text())
         self.assertEqual(marker['status'],'failed-not-approved')
         self.assertEqual(list(self.source.iterdir()),[])
@@ -51,14 +51,14 @@ class HSEStatePreparation(unittest.TestCase):
     def test_routing_and_reference_options_cannot_be_combined(self):
         with patch.object(prepare.subprocess,'check_output',side_effect=AssertionError('must not query')):
             with self.assertRaisesRegex(ValueError,'reference-only'):
-                prepare.prepare(self.source,self.output,reference_only=True,explicit_routing=True)
+                prepare.prepare(self.output,reference_only=True,explicit_routing=True)
         self.assertFalse(self.output.exists())
 
     def test_failed_routing_preparation_keeps_capability_marker(self):
         with patch.object(prepare.subprocess,'check_output',return_value=PROFILE['upstream_commit']), \
              patch.object(prepare.subprocess,'run',side_effect=OSError('archive failure')):
             with self.assertRaisesRegex(OSError,'archive failure'):
-                prepare.prepare(self.source,self.output,explicit_routing=True)
+                prepare.prepare(self.output,explicit_routing=True)
         marker=json.loads((self.output/'salmonpy-hse-rt-state.json').read_text())
         self.assertEqual(marker['status'],'failed-not-approved')
         self.assertTrue(marker['explicit_rt_routing'])

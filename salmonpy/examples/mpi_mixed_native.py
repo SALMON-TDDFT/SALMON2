@@ -61,7 +61,6 @@ def main():
     parser.add_argument('--tddft-model-groups',type=Path,help='offline JSON mapping group IDs to TDDFT material-ID lists; one registry per group')
     parser.add_argument('--layers', type=Path, help='native-layers/1 JSON referencing sbe-point, si-tddft, hse-point, drude, lorentz')
     parser.add_argument('--run-id', default='mixed-example', help='explicit experiment/run identity; fixture default mixed-example')
-    parser.add_argument('--legacy-checkpoint-identity', action='store_true', help='explicit unidentified session for old checkpoint readers; cannot bypass identified archives')
     parser.add_argument('--memory-budget-gib', type=float, help='aggregate advisory memory budget across MPI ranks; warning only')
     parser.add_argument('--rank-budget', type=int, help='advisory planning budget; defaults to the launched world size')
     parser.add_argument('--field-shape', type=int, nargs=3, default=(40,40,40), help='even Maxwell grid counts >=40; electronic GS grid is unchanged')
@@ -76,14 +75,11 @@ def main():
     parser.add_argument('--resume', type=Path, help='reconstruct and continue a replay checkpoint')
     parser.add_argument('--direct-save-at', type=int, help='save internal states and stop at this step')
     parser.add_argument('--direct-resume', type=Path, help='protected internal-state restore without replay; candidate-capable runtime required')
-    parser.add_argument('--unprotected-direct-restore', action='store_true', help='explicit legacy restore with no failure-preservation guarantee')
     args = parser.parse_args()
     try:
         grid,points=_field_layout(args.field_shape)
     except ValueError as exc:
         parser.error(str(exc))
-    if args.unprotected_direct_restore and args.direct_resume is None:
-        parser.error('unprotected-direct-restore requires direct-resume')
     if args.direct_save_at is not None and not 0 < args.direct_save_at < args.steps:
         parser.error('direct-save-at must be between zero and steps')
     if (args.direct_save_at is not None or args.direct_resume is not None) and (args.save_at is not None or args.resume is not None):
@@ -240,7 +236,7 @@ def main():
         restored = None
         if args.resume is not None:
             metadata = json.loads((args.resume/'checkpoint.json').read_text())
-            if metadata.get('schema') not in ('salmonpy.native-replay/1','salmonpy.native-replay/2') or metadata['signature'] != signature:
+            if metadata.get('schema') != 'salmonpy.native-replay/2' or metadata['signature'] != signature:
                 raise ValueError('replay checkpoint input/library/topology differs')
             if digest_file(args.resume/'history.npz') != metadata['history_sha256']:
                 raise ValueError('replay checkpoint checksum mismatch')
@@ -267,19 +263,18 @@ def main():
         if context.group.role == 'field':
             field = NativeEHField(context, calculation, args.build, output/'field', points=points, grid=tuple(args.field_grid))
         point_record=point_map=constitutive_identity=None
-        if not args.legacy_checkpoint_identity:
-            from salmonpy.examples._mixed_identity import sample_records
-            ld_records={}
-            if assembly is None:
-                ld_definitions={} if args.without_ld else {mid:asdict(model.config) for mid,model in zip(('drude','lorentz'),materials)}
-                cell_ids={} if args.without_ld else {'1':'drude','2':'lorentz'}
-            else:
-                ar=assembly.record()
-                ld_definitions={mid:entry['parameters'] for mid,entry in ar['materials'].items() if entry['kind']=='ld'}
-                ld_records={mid:entry.get('material_record') for mid,entry in ar['materials'].items() if entry['kind']=='ld'}
-                cell_ids={str(number):mid for mid,number in ar['constitutive_material_ids'].items()}
-            point_record,point_map,constitutive_identity=sample_records(args.run_id,signature,points,bindings,
-                constitutive=ld_definitions,cell_ids=cell_ids,assembly=assembly,constitutive_records=ld_records)
+        from salmonpy.examples._mixed_identity import sample_records
+        ld_records={}
+        if assembly is None:
+            ld_definitions={} if args.without_ld else {mid:asdict(model.config) for mid,model in zip(('drude','lorentz'),materials)}
+            cell_ids={} if args.without_ld else {'1':'drude','2':'lorentz'}
+        else:
+            ar=assembly.record()
+            ld_definitions={mid:entry['parameters'] for mid,entry in ar['materials'].items() if entry['kind']=='ld'}
+            ld_records={mid:entry.get('material_record') for mid,entry in ar['materials'].items() if entry['kind']=='ld'}
+            cell_ids={str(number):mid for mid,number in ar['constitutive_material_ids'].items()}
+        point_record,point_map,constitutive_identity=sample_records(args.run_id,signature,points,bindings,
+            constitutive=ld_definitions,cell_ids=cell_ids,assembly=assembly,constitutive_records=ld_records)
         session = ResponseSession(context, bindings, dt=dt,point_record=point_record,point_map=point_map)
         for point,binding in bindings.items():
             if binding.key=='hse-point' and np.max(np.abs(session.initial_current[point]))>1e-12:
@@ -307,10 +302,9 @@ def main():
         start = 0
         if args.direct_resume is not None:
             from salmonpy.examples._direct_checkpoint import checkpoint
-            start = checkpoint(world, coupled, args.direct_resume, signature, restore=True, protected=not args.unprotected_direct_restore)
+            start = checkpoint(world, coupled, args.direct_resume, signature, restore=True, protected=True)
             if world.rank == 0:
-                history = (json.loads((args.direct_resume/'frames.json').read_text()) if args.unprotected_direct_restore
-                           else coupled.checkpoint_frames)
+                history = coupled.checkpoint_frames
                 for frame in history:
                     for key, value in frame.items():
                         if isinstance(value, list): frame[key] = np.asarray(value)
@@ -388,7 +382,7 @@ def main():
                 np.savez(checkpoint/'history.npz', **{key: np.asarray([h[key] for h in history])
                          for key in ('A_over_c','E_at_points','J_charge')})
                 (checkpoint/'checkpoint.json').write_text(json.dumps({
-                    'schema': ('salmonpy.native-replay/2' if identity is not None else 'salmonpy.native-replay/1'), 'identity': identity, 'step': stop,
+                    'schema': 'salmonpy.native-replay/2', 'identity': identity, 'step': stop,
                     'signature': signature, 'history_sha256': digest_file(checkpoint/'history.npz')}, indent=2)+'\n')
                 print(checkpoint)
             world.Barrier()

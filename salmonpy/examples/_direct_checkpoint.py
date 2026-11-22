@@ -22,21 +22,9 @@ def digest(path):
 
 
 def _state_filename(response,point,rank):
-    """Keep one-state legacy names; namespace binary siblings by point ID."""
-    state=response.states[point]
-    electronic=hasattr(state,'native')
-    prefix='electronic' if electronic else 'worker'
-    peers=sum(hasattr(other,'native') if electronic else
-              getattr(other,'checkpoint_protocol',None)=='salmonpy.direct-state/1'
-              for other in response.states.values())
-    suffix='-point-'+str(point) if peers>1 else ''
-    return f'{prefix}-{rank}{suffix}.bin'
-
-
-def _multiple_binary(response):
-    return (sum(hasattr(s,'native') for s in response.states.values())>1 or
-            sum(getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1'
-                for s in response.states.values())>1)
+    """Namespace every binary payload by point ID, including one-point groups."""
+    prefix='electronic' if hasattr(response.states[point],'native') else 'worker'
+    return f'{prefix}-{rank}-point-{point}.bin'
 
 
 def _verify_files(root, files, rank, ranks):
@@ -301,7 +289,7 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         if restore:
             manifest = json.loads((root/'complete.json').read_text())
             manifest_id = hashlib.sha256(json.dumps(manifest,sort_keys=True,allow_nan=False).encode()).hexdigest()
-            if manifest['schema'] not in ('salmonpy.native-direct/1','salmonpy.native-direct/2','salmonpy.native-direct/3','salmonpy.native-direct/4') or manifest['signature'] != signature or manifest['ranks'] != world.size:
+            if manifest['schema'] != 'salmonpy.native-direct/4' or manifest['signature'] != signature or manifest['ranks'] != world.size:
                 raise ValueError('checkpoint input/library/topology mismatch')
             check_identity(current_identity,manifest.get('identity'),manifest['schema'])
             if type(manifest['step']) is not int or not 0 < manifest['step'] < signature['steps']:
@@ -346,7 +334,6 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         raise ValueError('checkpoint manifests differ across ranks')
     if any(item[3]!=identity_digest for item in agreement):
         raise ValueError('checkpoint identity differs across ranks')
-    multiple_binary=any(world.allgather(_multiple_binary(r)))
     compatibility=_compatibility(world,coupled,restore=restore,
         saved=manifest.get('compatibility') if restore else None,
         available_files=manifest['files'] if restore else None,protected=protected and restore)
@@ -468,8 +455,7 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
                 {k: v.tolist() if isinstance(v,np.ndarray) else v for k,v in h.items()}
                 for h in frames], allow_nan=False)+'\n')
             files = {p.name: digest(p) for p in sorted(root.iterdir())}
-            completion={'schema':('salmonpy.native-direct/4' if multiple_binary else
-                                  'salmonpy.native-direct/3' if current_identity is not None else 'salmonpy.native-direct/2'),
+            completion={'schema':'salmonpy.native-direct/4',
                 'compatibility':compatibility,'ranks':world.size,'signature':signature,'step':coupled.step_index,'files':files}
             if current_identity is not None:completion['identity']=current_identity
             (root/'complete.tmp').write_text(json.dumps(completion, indent=2)+'\n')

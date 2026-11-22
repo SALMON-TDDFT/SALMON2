@@ -64,12 +64,12 @@ def open_model(gs,dt,max_steps):
     _agree(comm,error)
     dec=np.asarray(session.backend.decomposition,dtype=np.int32)
     model_token=c.c_int64();state_token=c.c_int64();current=np.zeros(3)
-    code=session._call(work,fn,gs._token,dt,count,dec.ctypes.data,c.byref(model_token),c.byref(state_token),current.ctypes.data,minimum_protocol=2)
+    code=session._call(work,fn,gs._token,dt,count,dec.ctypes.data,c.byref(model_token),c.byref(state_token),current.ctypes.data)
     outcomes=comm.allgather((int(code),model_token.value,state_token.value,bool(np.isfinite(current).all())))
     if any(code or mid>=0 or sid<=0 or not finite for code,mid,sid,finite in outcomes) or len({(m,s) for _,m,s,_ in outcomes})!=1:
         if all(code==0 and mid<0 and sid>0 for code,mid,sid,_ in outcomes):
-            session._call(work,session.lib.sp_tddft_handle_close,state_token.value,minimum_protocol=2)
-            session._call(work,session.lib.sp_tddft_model_close,model_token.value,minimum_protocol=2)
+            session._call(work,session.lib.sp_tddft_handle_close,state_token.value)
+            session._call(work,session.lib.sp_tddft_model_close,model_token.value)
         raise RuntimeFailure('memory GS→TDDFT registration failed: '+str(outcomes))
     registry=session._td_registry
     if registry is None:
@@ -147,12 +147,12 @@ def _open_fast_model(gs,dt,max_steps):
     except Exception as exc:error=str(exc)
     _agree(comm,error)
     mid=c.c_int64();sid=c.c_int64();current=np.zeros(3)
-    code=session._call(work,fn,gs._token,b'inputfile',dt,count,int(symmetry),c.byref(mid),c.byref(sid),current,minimum_protocol=2)
+    code=session._call(work,fn,gs._token,b'inputfile',dt,count,int(symmetry),c.byref(mid),c.byref(sid),current)
     outcomes=comm.allgather((int(code),mid.value,sid.value,bool(np.isfinite(current).all())))
     if any(code or m>=0 or h<=0 or not finite for code,m,h,finite in outcomes) or len({(m,h) for _,m,h,_ in outcomes})!=1:
         if all(code==0 and m<0 and h>0 for code,m,h,_ in outcomes):
-            session._call(work,lib.sp_fast_hse_handle_close,sid.value,minimum_protocol=2)
-            session._call(work,lib.sp_fast_hse_model_close,mid.value,minimum_protocol=2)
+            session._call(work,lib.sp_fast_hse_handle_close,sid.value)
+            session._call(work,lib.sp_fast_hse_model_close,mid.value)
         raise RuntimeFailure('memory GS→fast HSE registration failed: '+str(outcomes))
     registry=session._td_registry
     if registry is None:

@@ -1292,7 +1292,7 @@ with a separately rebuilt library, explicitly use
 `session.run(..., restart=checkpoint, compatible_runtime=True)`. Combine with
 `repartition=True` only when changing to a supported MPI layout.
 
-A new checkpoint records a `salmonpy.scf-rebuild/1 or /2` contract: all recorded solver
+A new checkpoint records a `salmonpy.scf-rebuild/2` contract: all recorded solver
 and adapter source hashes/build schema; solver stream storage sizes and byte
 patterns for integer/integer8/real8/complex8/logical true/false/character; HSE/FFTW
 layout flags; and OS/architecture. The solver probe needs no MPI or GS state and
