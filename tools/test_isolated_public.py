@@ -75,9 +75,49 @@ def main():
             disk_actual=np.array([resumed.step(v).dipole for v in E[10:]])
             np.testing.assert_array_equal(disk_actual,expected)
             np.testing.assert_equal(resumed.electron_number,reference[-1,6])
+    # Direct numerical disk persistence: first process exits before import.
+    from salmonpy.native_steps import _AppendJournal
+    from salmonpy.errors import SnapshotError
+    import hashlib, shutil
+    with IsolatedTDDFTInitialState.from_salmon(validation/'first','input.inp',runtime=runtime,
+                                              max_steps=25,threads=1,timeout=30) as direct_model:
+        with direct_model.new_state(dt=dt) as first:
+            for value in E[:10]:first.step(value)
+            original_pid=first.worker_statistics()['pid']
+            first.save_direct_checkpoint(output/'direct-checkpoint')
+            direct_expected=[first.step(value) for value in E[10:]]
+            token=first.savepoint();first.release_savepoint(token)
+            run=Path(first._engine._work.name)/'run'
+            expected_files={name:(run/name).read_bytes() for name in _AppendJournal.capture(run).files}
+        with direct_model.new_state(dt=dt) as second:
+            second.restore_direct_checkpoint(output/'direct-checkpoint')
+            restored=second.worker_statistics()
+            assert restored['pid']!=original_pid and restored['updates']==0 and restored['step']==10
+            for value,control in zip(E[10:],direct_expected):
+                observed=second.step(value)
+                for attribute in ('electronic_change','dipole','electron_number','internal_energy'):
+                    np.testing.assert_equal(getattr(observed,attribute),getattr(control,attribute))
+            assert second.worker_statistics()['updates']==len(E)-10
+            token=second.savepoint();second.release_savepoint(token)
+            run=Path(second._engine._work.name)/'run'
+            for name,raw in expected_files.items():assert raw==(run/name).read_bytes()
+            broken=output/'invalid-direct-checkpoint'
+            shutil.copytree(output/'direct-checkpoint',broken)
+            binary=broken/'isolated-state.bin';raw=binary.read_bytes();binary.write_bytes(raw[:-1]+b'!')
+            metadata=json.loads((broken/'manifest.json').read_text())
+            metadata['files']['isolated-state.bin']['sha256']=hashlib.sha256(binary.read_bytes()).hexdigest()
+            (broken/'manifest.json').write_text(json.dumps(metadata))
+            before=second.worker_statistics();dipole=second.observables.dipole.copy()
+            try:second.restore_direct_checkpoint(broken)
+            except SnapshotError:pass
+            else:raise AssertionError('incomplete native trailer was accepted')
+            assert second.worker_statistics()==before and second.usable
+            np.testing.assert_array_equal(second.observables.dipole,dipole)
     np.savez(output/'continuation.npz',expected=expected,actual=actual,disk_actual=disk_actual,live_expected=live_expected,live_actual=live_actual)
     (output/'report.json').write_text(json.dumps(dict(public_loader=True,independent_states=True,
         disk_rebuilt_model=True,disk_continuation_max_abs_error=0.,
+        direct_disk_new_process=True,direct_disk_restore_updates=0,direct_disk_all_observations_exact=True,
+        direct_disk_output_streams_exact=True,direct_disk_failed_candidate_preserves_original=True,
         field_packet=True,restore_continuation_max_abs_error=0.,worker_failure_recovery=True,
         runtime_sha256=runtime.executable.sha256,direct_savepoint_same_process=True,direct_restore_evolution_calls=0,
         direct_continuation_exact=True,scope='interface regression; no convergence study'),indent=2)+'\n')

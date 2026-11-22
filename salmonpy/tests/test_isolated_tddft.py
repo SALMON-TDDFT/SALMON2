@@ -9,9 +9,10 @@ from unittest.mock import patch
 import numpy as np
 from salmonpy.errors import InputError, SnapshotError, RuntimeFailure
 
-WORKER = '''import sys
+WORKER = '''import sys,json
+from pathlib import Path
 v=[0.]*6;n=0;updates=0;saved=None
-codes={'CAPTURE_E':1,'RESTORE_E':2,'RELEASE_E':3,'RESUME_E':4,'PROBE_E':5}
+codes={'CAPTURE_E':1,'RESTORE_E':2,'RELEASE_E':3,'RESUME_E':4,'PROBE_E':5,'SAVE_E':6,'LOAD_E':7}
 for line in sys.stdin:
  p=line.split()
  if not p:continue
@@ -27,6 +28,8 @@ for line in sys.stdin:
    if saved is None:status=14
    else:saved=None
   elif op==4 and saved is None:status=14
+  elif op==6:Path('isolated-state.bin').write_text(json.dumps([n,v]))
+  elif op==7:n,v=json.loads(Path('isolated-state.bin').read_text());saved=(n,list(v))
   print('SALMONPY_E_STATE_V1',op,status,n,updates,flush=True)
   continue
  if p[0]=='INIT_E':dt=float(p[1])
@@ -39,13 +42,13 @@ for line in sys.stdin:
 
 
 def receipt(binary):
-    return dict(schema='salmonpy.isolated-worker-validation/4',
+    return dict(schema='salmonpy.isolated-worker-validation/5',
                 executable_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                 protocol='SALMONPY_TDDFT_E_V3',steps=20,interleaved_independence=True,
-                savepoint_same_process=True,savepoint_extra_evolutions=0,savepoint_stale_rejected=True,
+                direct_disk_process_exit_exact=True,direct_disk_extra_evolutions=0,savepoint_same_process=True,savepoint_extra_evolutions=0,savepoint_stale_rejected=True,
                 savepoint_continuation_max_abs_error=0.,
                 replay_continuation_max_abs_error=0.,repeat_max_abs_error=0.,reference_max_abs_error=0.,reference_energy_max_abs_error=0.,
-                capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint'])
+                capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint','direct-disk-state'])
 
 
 class IsolatedTDDFTTests(unittest.TestCase):
@@ -386,3 +389,42 @@ class IsolatedTDDFTTests(unittest.TestCase):
             with self.assertRaises(RuntimeFailure):a.step([0.,0.,0.])
             with self.assertRaises(RuntimeFailure):a.restore_savepoint(pending)
         self.assertFalse(a.usable)
+
+    def test_direct_disk_process_exit(self):
+        folder=self.bundle.parent/'direct-disk'
+        with self.model.new_state(dt=.02) as a:
+            for i in range(5):
+                a.step([.001*i,.002,-.003])
+            before=a.worker_statistics()
+            a.save_direct_checkpoint(folder)
+            self.assertEqual(a.worker_statistics(),before)
+            with self.assertRaises(SnapshotError):
+                a.save_direct_checkpoint(folder)
+            expected=a.step([.007,-.002,.001]).dipole
+        with self.model.new_state(dt=.02) as b:
+            b.restore_direct_checkpoint(folder)
+            self.assertNotEqual(before['pid'],b.worker_statistics()['pid'])
+            self.assertEqual(b.worker_statistics()['updates'],0)
+            np.testing.assert_array_equal(b.step([.007,-.002,.001]).dipole,expected)
+            retained=b.worker_statistics();values=b.observables.dipole.copy()
+            with patch.object(b._engine,'_spawn',side_effect=AssertionError('reject before spawn')):
+                with self.assertRaises(SnapshotError):
+                    b.restore_direct_checkpoint(folder,max_bytes=1)
+                binary=folder/'isolated-state.bin';raw=binary.read_bytes()
+                binary.write_bytes(b'x'+raw[1:])
+                with self.assertRaises(SnapshotError):
+                    b.restore_direct_checkpoint(folder)
+                binary.write_bytes(raw)
+            from salmonpy.isolated_tddft import _EEngine
+            command=_EEngine._command
+            def fail_load(owner,name,op):
+                return (4,0,0) if op==7 else command(owner,name,op)
+            with patch.object(_EEngine,'_command',fail_load):
+                with self.assertRaises(SnapshotError):
+                    b.restore_direct_checkpoint(folder)
+            self.assertEqual(b.worker_statistics(),retained)
+            np.testing.assert_array_equal(b.observables.dipole,values)
+        with self.model.new_state(dt=.02,position=(1.,0.,0.)) as different:
+            with patch.object(different._engine,'_spawn',side_effect=AssertionError('reject before spawn')):
+                with self.assertRaises(SnapshotError):
+                    different.restore_direct_checkpoint(folder)

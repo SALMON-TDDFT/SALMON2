@@ -139,6 +139,8 @@ contains
       case('RELEASE_E');operation=3
       case('RESUME_E');operation=4
       case('PROBE_E');operation=5
+      case('SAVE_E');operation=6
+      case('LOAD_E');operation=7
       end select
       if(operation/=0)then
         A=0d0;worker_next_A=.true.;return

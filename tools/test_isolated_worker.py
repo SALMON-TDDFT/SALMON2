@@ -112,12 +112,15 @@ def run(executable, reference, directory):
         np.testing.assert_array_equal(continued, trajectories[0][11:])
     run_savepoint(executable,reference,root/'savepoint-proof',saved_step=7)
     proof=json.loads((root/'savepoint-proof/report.json').read_text())
-    report = dict(schema='salmonpy.isolated-worker-validation/4',
+    disk=run_direct_disk(executable,reference,root/'direct-disk-proof')
+    report = dict(schema='salmonpy.isolated-worker-validation/5',
+                  direct_disk_process_exit_exact=all(v['continuation_exact'] and v['output_streams_exact'] for v in disk['cases']),
+                  direct_disk_extra_evolutions=0,
                   savepoint_same_process=proof['same_process'],
                   savepoint_extra_evolutions=proof['restore_additional_evolution_calls'],
                   savepoint_stale_rejected=proof['stale_savepoint_rejected'],
                   savepoint_continuation_max_abs_error=0.,
-                  capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint'],
+                  capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint','direct-disk-state'],
                   interleaved_independence=True, field_packet_missing_E_rejected=True,
                   replay_continuation_max_abs_error=0., executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
                   protocol='SALMONPY_TDDFT_E_V3', steps=len(fields),
@@ -127,6 +130,50 @@ def run(executable, reference, directory):
     np.savez(root / 'dipoles.npz', fields=fields, dt=dt, values=trajectories[0])
     (root / 'report.json').write_text(json.dumps(report, indent=2)+'\n')
     print(json.dumps(report, indent=2))
+
+
+def run_direct_disk(executable, reference, directory):
+    """Raw-worker process-exit proof; requires no pre-existing runtime receipt."""
+    from isolated_worker_driver import IsolatedWorker
+    from salmonpy.field_input import FieldPacket, FieldValue
+    root=Path(directory);root.mkdir(parents=True,exist_ok=False)
+    reference=Path(reference);contents=(reference/'first/input.inp').read_text()
+    records=[]
+    for saved_step in (0,7,8,20):
+        case=root/str(saved_step);case.mkdir()
+        def prepare(name):
+            folder=case/name;folder.mkdir()
+            for asset in ('C_rps.dat','H_rps.dat'):shutil.copy2(reference/'gs'/asset,folder/asset)
+            shutil.copytree(reference/'gs/data_for_restart',folder/'data_for_restart')
+            return folder
+        def step(worker,n):
+            vector=((.01,.003,.02),(.02,-.004,-.01),(-.01,.005,.006))[(n-1)%3]
+            return worker.step_fields(FieldPacket(E=FieldValue(vector,time=n*.003,position=(0,0,0),unit='E:au')))
+        first=prepare('first')
+        with IsolatedWorker(executable,first,contents,dt=.003,capacity=20) as a:
+            for n in range(1,saved_step+1):step(a,n)
+            pid=a._proc.pid
+            assert a.control('SAVE_E')==(6,0,saved_step,saved_step)
+            saved=a.dipoles.copy()
+            streams={f.name:f.read_bytes() for f in first.glob('*.data')}
+            expected=[step(a,n) for n in range(saved_step+1,21)]
+        expected_streams={f.name:f.read_bytes() for f in first.glob('*.data')}
+        second=prepare('second');shutil.copyfile(first/'isolated-state.bin',second/'isolated-state.bin')
+        with IsolatedWorker(executable,second,contents,dt=.003,capacity=20) as b:
+            assert b._proc.pid!=pid
+            assert b.control('LOAD_E')==(7,0,saved_step,0)
+            for name,raw in streams.items():(second/name).write_bytes(raw)
+            assert b.control('RELEASE_E')==(3,0,saved_step,0)
+            b.steps=saved_step;b.time=saved_step*.003;b.dipoles=saved
+            actual=[step(b,n) for n in range(saved_step+1,21)]
+            np.testing.assert_array_equal(actual,expected)
+            assert b.control('PROBE_E')==(5,0,20,20-saved_step)
+        assert set(expected_streams)=={f.name for f in second.glob('*.data')}
+        for name,raw in expected_streams.items():assert raw==(second/name).read_bytes()
+        records.append(dict(saved_step=saved_step,new_process=True,restore_extra_evolutions=0,continuation_exact=True,output_streams_exact=True))
+    report=dict(schema='salmonpy.isolated-direct-validation/1',cases=records)
+    (root/'report.json').write_text(json.dumps(report,indent=2)+'\n')
+    return report
 
 
 def run_savepoint(executable,reference,directory,*,saved_step=7):

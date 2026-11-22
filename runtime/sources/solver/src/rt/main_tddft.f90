@@ -90,10 +90,12 @@ type :: isolated_savepoint
  integer::step
 end type
 type(isolated_savepoint),allocatable::worker_saved
+integer(8)::worker_checkpoint_limit
 type(step_output_state)::worker_outputs
 integer::worker_operation,worker_status,worker_updates
 logical::worker_outputs_closed
 
+worker_checkpoint_limit=0_8
 worker_updates=0
 worker_outputs_closed=.false.
 
@@ -310,7 +312,7 @@ call rt_state_clear(independent_hse)
 #endif
 contains
 
-subroutine isolated_state_control(operation,status)
+recursive subroutine isolated_state_control(operation,status)
  integer,intent(in)::operation
  integer,intent(out)::status
  status=0
@@ -394,10 +396,284 @@ subroutine isolated_state_control(operation,status)
   if(operation==3)deallocate(worker_saved)
  case(5)
   ! Read-only monotonic update counter; never part of restored numerical state.
+ case(6)
+  ! Saving copies numerical state only; no propagation or shared process handles.
+  call isolated_state_control(1,status)
+  if(status/=0)return
+  call isolated_disk_io(.false.,status)
+  deallocate(worker_saved)
+ case(7)
+  ! Only a fresh worker may import. Failed reads never install partial arrays.
+  if(itt/=0.or.worker_updates/=0.or.allocated(worker_saved))then
+   status=14;return
+  endif
+  call isolated_state_control(1,status)
+  if(status/=0)return
+  call isolated_disk_io(.true.,status)
+  if(status/=0)then
+   deallocate(worker_saved);return
+  endif
+  call isolated_state_control(2,status)
+
  case default
   status=11
  end select
 end subroutine
+
+integer(8) function checkpoint_io_limit()
+ checkpoint_io_limit=worker_checkpoint_limit
+end function
+
+subroutine isolated_disk_io(reading,status)
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ logical,intent(in)::reading
+ integer,intent(out)::status
+ integer::u,ios,close_status,header(8),expected(8),extra
+ real(8)::saved_dt,cell(3,3)
+ character(32)::magic
+ worker_checkpoint_limit=max(64_8*(int(nt,8)+1_8),64_8*int(system%ngrid,8))
+ if(allocated(spsi_in%zwf))worker_checkpoint_limit=max(worker_checkpoint_limit,size(spsi_in%zwf,kind=8))
+ if(allocated(spsi_in%rwf))worker_checkpoint_limit=max(worker_checkpoint_limit,size(spsi_in%rwf,kind=8))
+ expected=[1,nt,system%nspin,system%no,system%nk,lg%num]
+ header=expected;saved_dt=dt;cell=system%primitive_a;magic='SALMONPY_ISOLATED_DIRECT_V1'
+ if(reading)then
+  open(newunit=u,file='isolated-state.bin',access='stream',form='unformatted',status='old', &
+    action='read',iostat=ios)
+ else
+  open(newunit=u,file='isolated-state.bin',access='stream',form='unformatted',status='new', &
+    action='write',iostat=ios)
+ endif
+ status=ios
+ if(ios/=0)return
+ if(reading)then
+  read(u,iostat=ios)magic,header,saved_dt,cell
+  if(ios==0)then
+   if(magic/='SALMONPY_ISOLATED_DIRECT_V1'.or.any(header/=expected))ios=1
+   if(saved_dt/=dt.or.any(cell/=system%primitive_a))ios=1
+  endif
+ else
+  write(u,iostat=ios)magic,header,saved_dt,cell
+ endif
+ if(ios==0)call isolated_payload_io(u,reading,worker_saved,ios)
+ if(ios==0)then
+  magic='SALMONPY_ISOLATED_COMPLETE_V1'
+  if(reading)then
+   read(u,iostat=ios)magic
+   if(ios==0.and.magic/='SALMONPY_ISOLATED_COMPLETE_V1')ios=1
+   if(ios==0)then
+    read(u,iostat=ios)extra
+    if(is_iostat_end(ios))then
+     ios=0
+    else
+     ios=1
+    endif
+   endif
+   if(worker_saved%step<0.or.worker_saved%step>nt)ios=1
+   if(.not.ieee_is_finite(worker_saved%cval))ios=1
+  else
+   write(u,iostat=ios)magic
+  endif
+ endif
+ close(u,iostat=close_status)
+ if(close_status/=0)ios=close_status
+ status=ios
+end subroutine
+
+subroutine isolated_payload_io(unit,reading,value,ios)
+  integer,intent(in)::unit
+  logical,intent(in)::reading
+  type(isolated_savepoint),intent(inout)::value
+  integer,intent(inout)::ios
+  logical::present_array
+  integer::lo(7),hi(7),i1,i2,k,allocation_status
+  integer(8)::elements,extent
+  if(ios/=0)return
+  call checkpoint_io_s_orbital(unit,reading,value%spsi_in,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_orbital(unit,reading,value%spsi_out,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_orbital(unit,reading,value%tpsi,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%rho,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%rho_jm,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vh,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vh_stock1,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vh_stock2,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vbox,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vpsl,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_rt(unit,reading,value%rt,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_poisson(unit,reading,value%poisson,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_dft_energy(unit,reading,value%energy,ios)
+  if(ios/=0)return
+  present_array=allocated(value%rho_s)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%rho_s))deallocate(value%rho_s)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_io_limit())then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_io_limit()/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%rho_s))then
+        if(any(lo(1:1)/=lbound(value%rho_s)).or.any(hi(1:1)/=ubound(value%rho_s)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%rho_s(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%rho_s);hi(1:1)=ubound(value%rho_s)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%rho_s,1),ubound(value%rho_s,1)
+    call checkpoint_io_s_scalar(unit,reading,value%rho_s(i1),ios)
+    if(ios/=0)return
+    enddo
+  endif
+  present_array=allocated(value%V_local)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%V_local))deallocate(value%V_local)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_io_limit())then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_io_limit()/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%V_local))then
+        if(any(lo(1:1)/=lbound(value%V_local)).or.any(hi(1:1)/=ubound(value%V_local)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%V_local(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%V_local);hi(1:1)=ubound(value%V_local)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%V_local,1),ubound(value%V_local,1)
+    call checkpoint_io_s_scalar(unit,reading,value%V_local(i1),ios)
+    if(ios/=0)return
+    enddo
+  endif
+  present_array=allocated(value%Vxc)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%Vxc))deallocate(value%Vxc)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_io_limit())then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_io_limit()/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%Vxc))then
+        if(any(lo(1:1)/=lbound(value%Vxc)).or.any(hi(1:1)/=ubound(value%Vxc)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%Vxc(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%Vxc);hi(1:1)=ubound(value%Vxc)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%Vxc,1),ubound(value%Vxc,1)
+    call checkpoint_io_s_scalar(unit,reading,value%Vxc(i1),ios)
+    if(ios/=0)return
+    enddo
+  endif
+  if(reading)then
+    read(unit,iostat=ios) value%fields
+  else
+    write(unit,iostat=ios) value%fields
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios)value%cval,value%step,value%xc%use_tau_operator, &
+      value%xc%vtau_has_shadow_values,value%xc%e_tau
+  else
+    write(unit,iostat=ios)value%cval,value%step,value%xc%use_tau_operator, &
+      value%xc%vtau_has_shadow_values,value%xc%e_tau
+  endif
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%xc%vtau,ios)
+  call checkpoint_io_s_vector(unit,reading,value%xc%uvel,ios)
+end subroutine
+
+#include "checkpoint_arrays.inc"
 
 subroutine print_header()
   use parallelization, only: nproc_id_global

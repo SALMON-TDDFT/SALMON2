@@ -265,3 +265,5 @@ epsilon = dielectric_function(sigma)
 ## 分子とFDTDの双方向結合
 
 `molecular_feedback.py` は既存GSを再利用する完全なMPI例です。必要な計算プログラムと実行方法は [分子とFDTD](../DIPOLE_RADIATION.md) を参照してください。SCFやビルドは暗黙に実行しません。
+
+`isolated_response.py`は`--stop-after 7 --direct-checkpoint NEW`で分子を途中保存できます。同じ入力で別途`--resume-direct NEW`を実行すると残りのEだけを計算します。最大ステップ数と実行ファイルは同一にし、revision5の検証記録を使います。

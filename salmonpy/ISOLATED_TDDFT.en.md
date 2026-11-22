@@ -21,7 +21,7 @@ with IsolatedTDDFTInitialState.from_salmon(
 
 E/time use atomic units and dipoles use e*bohr. `dipole` includes ions and electrons; `electronic_change` is the electronic dipole change. Arrays are read-only. Initial E/time are zero. `new_state(position=...)` declares the field evaluation position (default zero, bohr), without moving or rotating atoms.
 
-Loading checks a bounded local validation record and the executable SHA256. Current schema: `salmonpy.isolated-worker-validation/4`. E3 still returns nine numerical values, but evidence of same-process direct restoration with zero extra evolution calls and stale-token rejection is required. Revision3 receipts are rejected. Loading never downloads, builds, runs validation, initializes MPI or starts a worker. A receipt is local evidence, not a signature or a substitute for eigensolver auditing.
+Loading checks a bounded local validation record and the executable SHA256. Current schema: `salmonpy.isolated-worker-validation/5`. E3 still returns nine numerical values, but evidence of same-process direct restoration with zero extra evolution calls and stale-token rejection is required. Revision3 receipts are rejected. Loading never downloads, builds, runs validation, initializes MPI or starts a worker. A receipt is local evidence, not a signature or a substitute for eigensolver auditing.
 
 `tools/test_isolated_worker.py EXECUTABLE EXISTING_REFERENCE NEW_VALIDATION` explicitly runs ordinary response and direct-restore validation, reusing the supplied GS without SCF. It is a development calculation tool. This does not announce a distributed runtime catalog: supply a locally validated calculation program.
 
@@ -52,6 +52,43 @@ Run this inside a live state context. E time/position/units are checked; missing
 
 `frame.electron_number` is the actual Fortran density integral. Relative loss1e-5 is an advisory diagnostic, not an automatic stop. `frame.internal_energy` is present only at fresh endpoints according to the existing energy cadence, otherwise `None`. Never silently add energy evaluations or subtract zero-field drift.
 
+## Direct disk restart after process exit
+
+```python
+with model.new_state(dt=dt) as state:
+    for E in first_fields:
+        state.step(E)
+    state.save_direct_checkpoint('new-electronic-checkpoint')
+# The original worker has now exited. Reopen the same GS model/settings.
+with model.new_state(dt=dt) as resumed:
+    resumed.restore_direct_checkpoint('new-electronic-checkpoint')
+    assert resumed.worker_statistics()['updates'] == 0
+    for E in remaining_fields:
+        frame = resumed.step(E)
+```
+
+`salmonpy.isolated-direct/1` stores the Fortran numerical buffers/histories,
+Poisson and XC work state, accepted index, cached observations and output streams.
+Per-file SHA256, model settings and executable identity are checked before loading.
+The original GS bundle is supplied separately; it is loaded for initialization,
+with no SCF and no replay of elapsed electronic steps. A fresh candidate process
+is installed only after complete import and output reconnection. Failed imports
+leave the current worker unchanged. Imported states never silently recover by
+replay. One additional electronic state may coexist during restoration.
+
+Use the same executable, GS/input, dt, capacity, position and thread settings.
+This binary format has no cross-compiler or changed-layout portability claim.
+Release live savepoints before disk operations. `max_bytes` optionally limits
+bytes read, not resident memory. Saved directories are never overwritten.
+Only the existing audited output modes are supported. The current worker receipt
+revision5 includes real process-exit restart proof; older receipts are rejected.
+
+The response example accepts `--stop-after 7 --direct-checkpoint NEW_CHECKPOINT`.
+A second invocation with the same E NPZ and settings can use
+`--resume-direct NEW_CHECKPOINT`; it advances only the remaining samples.
+These operations save the molecule only; a complete coupled-field restart must
+also coordinate both FDTD states and the coupling clock.
+
 ## History persistence and replay (separate from direct restore)
 
 `snapshot()/restore()` save and replay accepted E/observation history. They require the same initial model, dt, position, capacity, threads and binary. A candidate is checked before replacement, preserving the original if replay fails. Cost grows with history, with two workers coexisting during validation. Ordinary `step()` recovery without a live direct token also uses this history-replay mechanism.
@@ -61,7 +98,7 @@ state.save_checkpoint('new-history-checkpoint')
 resumed.restore_checkpoint('new-history-checkpoint', max_bytes=16*1024*1024)
 ```
 
-The caller creates `resumed` with the same initial data/settings. `salmonpy.isolated-tddft-checkpoint/3` is a hashed Zarr v3-compatible history format containing E0, initial/current nine observations, E history and observation history. Supply the GS separately. `max_bytes` adds a file-reading budget, not an RSS limit. This is not a direct wavefunction checkpoint. Durable direct disk persistence remains open.
+The caller creates `resumed` with the same initial data/settings. `salmonpy.isolated-tddft-checkpoint/3` is a hashed Zarr v3-compatible history format containing E0, initial/current nine observations, E history and observation history. Supply the GS separately. `max_bytes` adds a file-reading budget, not an RSS limit. This is not a direct wavefunction checkpoint. Use the direct API above for numerical persistence after worker exit.
 
 ## Outputs and FDTD
 

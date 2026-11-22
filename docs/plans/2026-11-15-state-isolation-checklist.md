@@ -14,11 +14,11 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 | 完了 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBE局所試験、MPI2/4、固定Si/PBE比較。今回のソース・バイナリ向け記録も更新。換算定数は変更なし |
 | 完了 | 初期推定の入力準備・保持GSからの受け渡し | 準備と実行を分離し、保持GSの波動関数・占有数を独立コピー。前回実装は8f3a7663までpush済み |
 | 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
-| 完了 | 最新パッケージ・分子接続検証 | 六面収支・x/y/z各2分割まで5d6892c7へpush済み。続く単一分子の公開結合APIは実装・検証済みで未コミット。公開保存点と直接取消まで接続。ソース・wheelとも690件実行、各1件任意スキップ。末尾の最新記録を参照 |
+| 完了 | 最新パッケージ・分子接続検証 | 六面収支・x/y/z各2分割まで5d6892c7へpush済み。単一分子の公開結合API・公開保存点・直接取消は3af42587へpush済み。分子の直接ディスク保存／再開も実装済み。ソース・wheelとも691件実行、各1件任意スキップ。末尾の最新記録を参照 |
 
 ### 残る作業と対象拡大
 
-**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消はワーカー内保存点から直接復元します。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。光源・吸収層を除いた内側の箱について、六面流束を含む場・等方LD・分子の離散エネルギー収支と実MPI2分割を確認済みです。単一分子用の一般利用向け入口はMolecularFeedbackとして実装済みです。プロセス終了後も使える直接ディスク保存／復元、テンソル・界面平滑化・任意の背景誘電率への観測拡張、広い物理条件での収束確認は残件です。以下はそれと区別する運用・対象拡大の残件です。
+**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消はワーカー内保存点から直接復元します。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。光源・吸収層を除いた内側の箱について、六面流束を含む場・等方LD・分子の離散エネルギー収支と実MPI2分割を確認済みです。単一分子用の一般利用向け入口はMolecularFeedbackとして実装済みです。結合全体の直接ディスク再開への分子状態接続、テンソル・界面平滑化・任意の背景誘電率への観測拡張、広い物理条件での収束確認は残件です。以下はそれと区別する運用・対象拡大の残件です。
 
 1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
 2. **大規模化の計測**：マクロ点・ランク・観測間隔に対するメモリ、通信、ファイル数・I/O負荷の測定。集約・バッファ化は測定上の必要に応じて実装する。
@@ -35,7 +35,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
-Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum-work observation/comparison and selected-field midpoint timing are verified. Six-face inner-box energy balance is verified for scalar LD, including real two-partition FDTD tests along x/y/z. Tensor/subpixel/arbitrary-background energy observation, physical convergence, and direct isolated-electron restoration without replay remain separate. A public single-molecule driver is implemented as MolecularFeedback; see the latest evidence below. Memory budgets warn; SCF nonconvergence retains
+Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum-work observation/comparison and selected-field midpoint timing are verified. Six-face inner-box energy balance is verified for scalar LD, including real two-partition FDTD tests along x/y/z. Tensor/subpixel/arbitrary-background energy observation and physical convergence remain open. MolecularFeedback, live direct cancellation and process-exit molecular direct disk restart are implemented and verified in the latest entries below. Coordinated disk persistence of both fields and the molecular/coupling state remains open. Memory budgets warn; SCF nonconvergence retains
 results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
@@ -305,9 +305,11 @@ are complete within their recorded scopes. Do not reopen their historical
 unchecked rows as separate tasks. New GS campaigns require applicable user
 permission; prior grants remain campaign-specific.
 
-The active molecular stage resumed2026-11-22: Fortran centered oscillator/work
-checks and vacuum/LD FDTD trial/rollback regressions precede isolated TDDFT
-attachment. It is not a completed public two-way molecular solver. Other
+The active molecular stage resumed2026-11-22. MolecularFeedback, the PZ isolated
+worker, live direct rollback and molecular-only direct disk restart are now verified
+within the latest recorded scope. Next: coordinated durable restart of the total
+field, own-vacuum reference field, molecular state and accepted field/electronic step indices; tensor/
+subpixel/background energy-observation coverage; physical convergence. Other
 operational work remains site-MPI/multinode/receipt filesystem evidence, scale
 and observation I/O, Ag fit refinement, optional storage/GPU and wider physical
 profiles. Preparation-only DFT/TDDFT/FDTD and customizable launcher construction
@@ -4220,3 +4222,51 @@ midpoint-work-summary.json. Follow-up still uncommitted; no manual heavy CI.
 - [ ] 次段階：プロセス終了後も使える直接ディスク保存／復元。現在の履歴再生アーカイブとは区別する。
 
 既存の許可済みGSを再利用し、新規SCFなし。変更は未コミット。追加の物理CIは起動していない。
+
+## 2026-11-22 分子の直接ディスク保存／再開
+
+3af42587は独立SALMONpyへpush済み。以下はその後の変更で、未コミット。
+
+- [x] save_direct_checkpoint／restore_direct_checkpointを公開。Fortranが波動関数両バッファ・一時軌道・密度／ポテンシャル・RT履歴・Poisson・エネルギー・XC作業状態・外場・更新番号を直接ストリーム保存。出力ファイルとPython観測／履歴メタデータは別に保持。履歴をSTEP_Eで再計算しない。
+- [x] 形状／dt／セル／完了印、ファイルSHA256、入力・実行ファイルの一致を照合。新しい候補プロセスで読み込み、出力再接続を完了してから切替。破損・候補失敗で元のPID・時刻・観測値を保持する。旧形式への救済分岐なし。
+- [x] 許可済みC2H2 GSを再利用。0／7／8／20ステップで元プロセスを終了後に再開し、復元直後の時間発展0回、続行した9観測量と出力ファイルが連続実行に完全一致。PZ・固定イオン・ワーカー1ランクの範囲。
+- [x] 配列保存処理を通常TDDFTと共通化。数値処理文は既存と同一で、所有するサイズ上限の参照だけ関数化。Git追跡ファイルだけから新規ビルドし、禁止ソルバーのソース／全オブジェクト監査を通過。NLCC XC・力MPI1/2、GS不要のC／Fortran問い合わせ契約を確認。
+- [x] ソース・最終wheelとも691件実行、各1件任意スキップ。wheelで実プロセス再開と破損候補拒否を実測。サンプルの途中保存・別実行での再開が、連続実行の全保存配列と完全一致。日英ガイド・AI JSON・サンプルの収録バイト一致。
+- [ ] 次候補：分子の保存を本計算の場・自己真空参照場・各計算の時間ステップ番号と処理段階と協調させた一括ディスク再開。今回の分子単体保存と区別する。
+
+検証文書：docs/isolated-direct-disk-validation-2026-11-22.md。
+既存キャンペーンのdirect-disk-verified-summary.jsonとdirect-disk-verified-artifactsに記録。
+新規SCF・追加の物理CIは実行していない。異なる実行ファイル／容量／コンパイラをまたぐ可搬性、
+孤立系の内部MPI、広い物理条件の収束は今回の保証範囲に含めない。
+
+## 2026-11-22 最新リスト照合（直接ディスク再開後）
+
+現在の実装・実測記録と照合済み。旧節の未完了項目は重複して数えない。
+
+- 完了：分子の公開双方向結合、直接取消、プロセス終了後の分子単体の直接ディスク再開。
+- 次候補：本計算の場・自己真空参照場・分子・各計算の時間ステップ番号と処理段階を揃えた一括保存／再開。
+- 物理／観測：テンソル・界面平滑化・任意背景誘電率の六面収支観測、分子結合の物理条件の収束確認。
+- 運用／対象拡大：施設MPI・多ノード、規模別メモリ／通信／I/O計測、Linux・Intel Mac等の重いライブラリ配布・実行証拠、Agフィット改善。
+- 別枠：GPU・追加保存形式などは必要性に応じた設計／検証対象。現在の必須完了条件に自動追加しない。
+- 利用者指定の後回し：高速HSEの実測電子数診断と実材料の格子収束キャンペーン。
+
+3af42587はpush済み。今回の直接ディスク再開と文書・リスト更新は未コミット。
+検証集計はdirect-disk-verified-summary.json、ソース／wheel各691件・任意スキップ各1件。
+
+## 時間ステップ番号による処理の記述
+
+「結合時刻」「時間位置」という略記は使わず、各計算の時間ステップ番号と
+電場・電流を渡す処理を明示する。現在のMolecularFeedbackでは次の対応となる。
+
+| 処理段階 | 本計算・自己真空参照のFDTD | 分子TDDFT |
+|---|---|---|
+| 受理済み状態 | ステップn | ステップn−1 |
+| 電場の予測 | 一時的にn→n+1へ進め、電場を取得 | n−1を保持 |
+| 分子の更新 | 予測した電場を渡す | n−1→nへ進め、分極電流を返す |
+| 電流を反映した場の更新 | ステップnへ戻し、分極電流を使ってn→n+1へ進める | nを保持 |
+| 受理完了 | ステップn+1 | ステップn |
+
+初期保持後はFDTDがステップ1、分子がステップ0。
+一括保存／再開の次段階では、受理完了後の両FDTDと分子のステップ番号、
+次の更新で参照する保存済み電場を揃えて扱う。未受理の予測途中と区別する。
+これは現行処理の説明であり、一括ディスク再開の実装完了を意味しない。

@@ -12,7 +12,7 @@ from .tddft import TDDFTInitialState, TDDFTState, _digest
 
 __all__ = ['IsolatedRuntime','load_isolated_runtime','DipoleObservables',
            'IsolatedTDDFTInitialState','IsolatedTDDFTState','IsolatedSavepoint']
-_CAPABILITIES = {'isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint'}
+_CAPABILITIES = {'isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint','direct-disk-state'}
 
 
 def _receipt(payload, executable):
@@ -26,12 +26,14 @@ def _receipt(payload, executable):
         return result
     try:
         data = json.loads(payload, object_pairs_hook=unique)
-        valid = (data['schema']=='salmonpy.isolated-worker-validation/4'
+        valid = (data['schema']=='salmonpy.isolated-worker-validation/5'
                  and data['protocol']=='SALMONPY_TDDFT_E_V3'
                  and data['executable_sha256']==executable.sha256
                  and type(data['steps']) is int and data['steps']>=20
                  and data['interleaved_independence'] is True
                  and set(data['capabilities'])==_CAPABILITIES
+                 and data['direct_disk_process_exit_exact'] is True
+                 and type(data['direct_disk_extra_evolutions']) is int and data['direct_disk_extra_evolutions']==0
                  and data['savepoint_same_process'] is True
                  and type(data['savepoint_extra_evolutions']) is int and data['savepoint_extra_evolutions']==0
                  and data['savepoint_stale_rejected'] is True)
@@ -39,9 +41,9 @@ def _receipt(payload, executable):
             value=data[key]
             valid = valid and type(value) in (int,float) and np.isfinite(value) and 0 <= value <= 1.e-10
     except (KeyError, TypeError, ValueError, RecursionError) as exc:
-        raise InputError('invalid isolated-worker revision4 validation receipt') from exc
+        raise InputError('invalid isolated-worker revision5 validation receipt') from exc
     if not valid or _digest(executable.path)!=executable.sha256:
-        raise InputError('isolated E-worker revision4 evidence or binary hash does not match')
+        raise InputError('isolated E-worker revision5 evidence or binary hash does not match')
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +133,7 @@ class _EEngine(TDDFTState):
         self._restore_updates = None
         self._direct_failed = False
         self._direct_restores = 0
+        self._direct_origin = False
         super()._spawn()
         self._command('PROBE_E', 5)
 
@@ -148,7 +151,7 @@ class _EEngine(TDDFTState):
             if len(values) != 5 or values[0] != 'SALMONPY_E_STATE_V1':
                 raise RuntimeFailure('isolated savepoint protocol mismatch')
             op, status, step, updates = map(int, values[1:])
-            if op != operation or not 0 <= step <= self._capacity or updates < step:
+            if op != operation or not 0 <= step <= self._capacity or updates < 0:
                 raise RuntimeFailure('isolated savepoint sequence mismatch')
             return status, step, updates
         except Exception as exc:
@@ -235,7 +238,7 @@ class _EEngine(TDDFTState):
     def step(self, E):
         if self._direct_failed or self._restore_pending is not None:
             raise RuntimeFailure('isolated worker has an incomplete or failed direct restore')
-        if self._savepoint is None:
+        if self._savepoint is None and not self._direct_origin:
             return super().step(E)
         # The live-savepoint route never enters TDDFTState's process/replay recovery.
         E = _real(E, (3,), 'E')
@@ -255,6 +258,123 @@ class _EEngine(TDDFTState):
         self._curr_history.append(current.copy())
         self._steps += 1
         return self.current
+
+    def save_direct_checkpoint(self, directory):
+        """Persist Fortran numerical state and output streams without propagation."""
+        import shutil
+        import tempfile
+        if self._savepoint is not None or not self.usable:
+            raise SnapshotError('release the live savepoint and complete restoration before disk save')
+        destination = Path(directory).expanduser().absolute()
+        if destination.exists() or destination.is_symlink():
+            raise SnapshotError('checkpoint destination already exists')
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        run = Path(self._work.name) / 'run'
+        binary = run / 'isolated-state.bin'
+        if binary.exists():
+            binary.unlink()
+        status, step, _ = self._command('SAVE_E', 6)
+        if status or step != self._steps:
+            raise SnapshotError('worker declined direct disk save: '+str(status))
+        temporary = Path(tempfile.mkdtemp(prefix='.isolated-checkpoint-', dir=destination.parent))
+        try:
+            from .native_steps import _AppendJournal
+            streams = sorted(_AppendJournal.capture(run).files)
+            files = {}
+            for name in ['isolated-state.bin', *streams]:
+                shutil.copyfile(run/name, temporary/name)
+                files[name] = dict(sha256=_digest(temporary/name), bytes=(temporary/name).stat().st_size)
+            metadata = dict(schema='salmonpy.isolated-direct/1', settings=self._snapshot_settings(),
+                            executable_sha256=self._executable.sha256, step=self._steps,
+                            observables=self.current.tolist(), history=[v.tolist() for v in self._history],
+                            observable_history=[v.tolist() for v in self._curr_history], files=files)
+            (temporary/'manifest.json').write_text(json.dumps(metadata, allow_nan=False, indent=2)+'\n')
+            temporary.rename(destination)
+        finally:
+            if temporary.exists():
+                shutil.rmtree(temporary)
+            binary.unlink(missing_ok=True)
+
+    def restore_direct_checkpoint(self, directory, *, max_bytes=None):
+        """Validate, load in an independent fresh worker, then replace this worker."""
+        import shutil
+        if self._savepoint is not None or not self.usable:
+            raise SnapshotError('release the live savepoint before disk restoration')
+        try:
+            root = Path(directory).expanduser().resolve(strict=True)
+            manifest = root/'manifest.json'
+            if manifest.is_symlink() or not manifest.is_file():
+                raise ValueError('checkpoint manifest is not a regular file')
+            if max_bytes is not None and manifest.stat().st_size > max_bytes:
+                raise ValueError('checkpoint exceeds explicit read limit')
+            data = json.loads(manifest.read_text())
+            if (data['schema'] != 'salmonpy.isolated-direct/1'
+                    or data['settings'] != self._snapshot_settings()
+                    or data['executable_sha256'] != self._executable.sha256):
+                raise ValueError('checkpoint model, runtime or settings differ')
+            step = data['step']
+            if type(step) is not int or not 0 <= step <= self._capacity:
+                raise ValueError('invalid saved step')
+            observations = _real(data['observables'], (9,), 'saved observations')
+            history = _real(data['history'], (step, 3), 'saved E history') if step else np.empty((0,3))
+            currents = _real(data['observable_history'], (step, 9), 'saved observations history') if step else np.empty((0,9))
+            files = data['files']
+            if not isinstance(files, dict) or 'isolated-state.bin' not in files:
+                raise ValueError('missing numerical state')
+            if {v.name for v in root.iterdir()} != {'manifest.json', *files}:
+                raise ValueError('checkpoint file inventory differs')
+            total = manifest.stat().st_size
+            for name, record in files.items():
+                if (not isinstance(name,str) or Path(name).name != name or name in ('.','..')
+                        or not (name == 'isolated-state.bin' or name.endswith('.data'))):
+                    raise ValueError('invalid checkpoint filename')
+                path = root/name
+                if path.is_symlink() or not path.is_file() or path.stat().st_size != record['bytes']:
+                    raise ValueError('checkpoint file type or size differs')
+                total += path.stat().st_size
+            if max_bytes is not None and total > max_bytes:
+                raise ValueError('checkpoint exceeds explicit read limit')
+            for name, record in files.items():
+                if _digest(root/name) != record['sha256']:
+                    raise ValueError('checkpoint checksum mismatch')
+        except (KeyError, ValueError, TypeError, OSError) as exc:
+            raise SnapshotError('invalid isolated direct checkpoint: '+str(exc)) from exc
+        candidate = None
+        try:
+            candidate = _EEngine(self._model, self.dt, self._position)
+            run = Path(candidate._work.name)/'run'
+            shutil.copyfile(root/'isolated-state.bin', run/'isolated-state.bin')
+            status, actual_step, updates = candidate._command('LOAD_E', 7)
+            if status or actual_step != step or updates != 0:
+                raise SnapshotError('worker rejected direct checkpoint; original worker retained')
+            # LOAD_E leaves native output writers closed until imported bytes exist.
+            expected_streams = {v.name for v in run.glob('*.data')}
+            if expected_streams != {name for name in files if name.endswith('.data')}:
+                raise SnapshotError('saved output stream inventory differs')
+            for name in files:
+                if name.endswith('.data'):
+                    if not (run/name).is_file() or (run/name).is_symlink():
+                        raise SnapshotError('saved output stream differs from initialized streams')
+                    shutil.copyfile(root/name, run/name)
+            status, actual_step, updates = candidate._command('RELEASE_E', 3)
+            if status or actual_step != step or updates != 0:
+                raise SnapshotError('restored worker could not reconnect outputs')
+            candidate._steps = step
+            candidate._current = np.array(observations, copy=True)
+            candidate._history = [v.copy() for v in history]
+            candidate._curr_history = [v.copy() for v in currents]
+            candidate._direct_origin = True
+            self.close()
+            self.__dict__.update(candidate.__dict__)
+            # Transfer ownership; candidate must never close the installed process.
+            candidate._closed = True
+            candidate._proc = None
+            candidate._work = None
+            candidate._owner = None
+            candidate = None
+        finally:
+            if candidate is not None:
+                candidate.close()
 
     def snapshot(self):
         if self._savepoint is not None:
@@ -359,6 +479,14 @@ class IsolatedTDDFTState:
 
     def snapshot(self): return self._engine.snapshot()
     def restore(self,snapshot): self._engine.restore(snapshot)
+    def save_direct_checkpoint(self, directory):
+        """Save numerical state directly; no E-history replay is needed to resume."""
+        self._engine.save_direct_checkpoint(directory)
+
+    def restore_direct_checkpoint(self, directory, *, max_bytes=None):
+        """Resume in a new process, retaining the original state if import fails."""
+        self._engine.restore_direct_checkpoint(directory, max_bytes=max_bytes)
+
     def save_checkpoint(self,directory):
         """Save accepted E/dipole replay history; GS files remain separate."""
         self._engine.save_checkpoint(directory)

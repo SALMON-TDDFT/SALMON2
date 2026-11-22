@@ -268,3 +268,5 @@ The mixed solver sample optionally accepts `--planes-x FRONT BACK --plane-stride
 ## Molecular feedback to FDTD
 
 `molecular_feedback.py` is a complete MPI example reusing an existing GS. Required calculation programs and invocation are documented in [Molecular/FDTD coupling](../DIPOLE_RADIATION.en.md). It does not implicitly run SCF or a build.
+
+`isolated_response.py`: `--stop-after 7 --direct-checkpoint NEW` saves the molecule at step7; a separate invocation with the same input can use `--resume-direct NEW` to evolve only remaining E samples. Both calls need the same capacity/runtime and a revision5 validation record.

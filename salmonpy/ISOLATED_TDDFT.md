@@ -21,7 +21,7 @@ with IsolatedTDDFTInitialState.from_salmon(
 
 E・時刻は原子単位、双極子はe·bohrです。`dipole` はイオンと電子を合わせた全電荷双極子、`electronic_change` は電子双極子変化です。配列は読み取り専用です。初期E・時刻はゼロ。`new_state(position=...)` は場を評価する位置（既定(0,0,0) bohr）を指定し、分子座標の移動・回転は行いません。
 
-読込みは64 KiB以下のローカル検証記録と、実行ファイルのSHA256を照合します。現行の記録形式は `salmonpy.isolated-worker-validation/4`。数値応答はE3の9成分のままですが、同一プロセス・時間発展追加0回の直接復元と、古い退避の拒否の実証を必須にしています。旧revision3の記録は受け付けません。読込み時にダウンロード・ビルド・検証計算・MPI初期化・ワーカー起動は行いません。記録はローカル検証の証拠で、電子署名や禁止ソルバー監査の代用ではありません。
+読込みは64 KiB以下のローカル検証記録と、実行ファイルのSHA256を照合します。現行の記録形式は `salmonpy.isolated-worker-validation/5`。数値応答はE3の9成分のままですが、同一プロセス・時間発展追加0回の直接復元と、古い退避の拒否の実証を必須にしています。旧revision4以前の記録は受け付けません。読込み時にダウンロード・ビルド・検証計算・MPI初期化・ワーカー起動は行いません。記録はローカル検証の証拠で、電子署名や禁止ソルバー監査の代用ではありません。
 
 既存の参照入力を使う `tools/test_isolated_worker.py EXECUTABLE EXISTING_REFERENCE NEW_VALIDATION` で、通常応答と直接復元を検証した記録を作成できます。これはRT計算を実行する開発用ツールです。新しいSCFは行いません。対応環境への配布が完了したという意味ではなく、手元の検証済み計算プログラムを明示して使います。
 
@@ -52,6 +52,42 @@ frame = state.step_fields(FieldPacket(E=FieldValue(
 
 `frame.electron_number` はFortranが積分した実測電子数です。減少率1e-5は診断の目安であり、それだけで計算を停止しません。`frame.internal_energy` は既存の計算頻度で新しく評価された端点だけ値を返し、それ以外は `None` です。計算頻度を勝手に増やしたりゼロ外場ドリフトを自動で差し引いたりしません。
 
+## プロセス終了後の直接ディスク再開
+
+```python
+with model.new_state(dt=dt) as state:
+    for E in first_fields:
+        state.step(E)
+    state.save_direct_checkpoint('new-electronic-checkpoint')
+# 元のワーカーは終了。同じGSと設定から新しい状態を作る。
+with model.new_state(dt=dt) as resumed:
+    resumed.restore_direct_checkpoint('new-electronic-checkpoint')
+    assert resumed.worker_statistics()['updates'] == 0
+    for E in remaining_fields:
+        frame = resumed.step(E)
+```
+
+`salmonpy.isolated-direct/1`はFortranの数値配列・履歴・Poisson・XC作業状態、
+受理ステップ、観測値、出力ファイルを保存します。各ファイルのSHA256と、
+モデル・実行ファイルの一致を読み込み前に確認します。元のGSは別途指定し、
+初期化時に読み込みます。SCFや経過済み時間ステップの再計算はしません。
+別ワーカーで読み込みと出力再接続を完了してから切り替えるため、
+候補の復元失敗時も元のワーカーを保持します。復元した状態の異常時に、
+履歴再生へ暗黙に切り替えません。復元中は電子状態が追加で必要です。
+
+実行ファイル・GS／入力・dt・最大ステップ数・位置・スレッド数は同一にします。
+異なるコンパイラや配列配置をまたぐ可搬形式ではありません。
+保存点を解放してからディスク操作を行います。max_bytesは任意の読み込み量制限で、
+メモリ使用量の制限ではありません。既存ディレクトリは上書きしません。
+対象は既存の確認済み出力モードです。ワーカー検証記録は実際のプロセス終了後の
+再開を含むrevision5を要求し、古い記録は受け付けません。
+
+応答サンプルで`--stop-after 7 --direct-checkpoint NEW_CHECKPOINT`を指定すると、
+7ステップで終了して保存します。同じE NPZと設定で別途
+`--resume-direct NEW_CHECKPOINT`を指定すると、残りだけを進めます。
+これは分子単体の保存です。FDTD結合全体の再開には二つの場と結合時刻も
+協調して保存する必要があります。
+
 ## 履歴の保存と再実行（直接復元とは別）
 
 `snapshot()/restore()` は受理済みEと観測量の履歴を保存・再実行する入口です。同じ初期モデル、dt・位置・容量・スレッド数・バイナリが必要です。候補プロセスの観測量を照合してから交換し、復元失敗時は元の状態を保持します。費用は履歴長に依存し、検証中は新旧二ワーカー分の資源を使います。直接退避を使わない通常の `step()` の異常回復もこの履歴再実行方式です。
@@ -61,7 +97,7 @@ state.save_checkpoint('new-history-checkpoint')
 resumed.restore_checkpoint('new-history-checkpoint', max_bytes=16*1024*1024)
 ```
 
-`resumed` は同じ初期データ・設定で呼び出し元が作成した状態です。ディスク形式は `salmonpy.isolated-tddft-checkpoint/3`。E0、初期／現在の9観測量、E履歴と観測履歴をハッシュ付きで保存するZarr v3互換形式です。GSは別途用意します。`max_bytes` は追加のファイル読み込み予算であり全RSS上限ではありません。これは波動関数の直接チェックポイントではありません。直接の耐久ディスク保存は残件です。
+`resumed` は同じ初期データ・設定で呼び出し元が作成した状態です。ディスク形式は `salmonpy.isolated-tddft-checkpoint/3`。E0、初期／現在の9観測量、E履歴と観測履歴をハッシュ付きで保存するZarr v3互換形式です。GSは別途用意します。`max_bytes` は追加のファイル読み込み予算であり全RSS上限ではありません。これは波動関数の直接チェックポイントではありません。直接の数値保存には上記のsave_direct_checkpointを使います。
 
 ## 出力とFDTD
 

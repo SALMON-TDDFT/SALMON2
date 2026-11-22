@@ -503,7 +503,7 @@ FIELD_INPUT.mdの検証用E3プロトコルは、ソースから明示的にビ�
 PZ・固定イオン・中点伝播の双極子を比較する開発用接続です。結晶のTDDFTInitialStateにEを
 渡したり、検証用driverを公開初期状態ローダーとして案内したりしないでください。
 公開入口はISOLATED_TDDFT.mdのload_isolated_runtimeとIsolatedTDDFTInitialStateです。
-revision4のローカル検証記録に結び付いたバイナリに限定します。savepoint系は同じプロセスへの直接退避、snapshot/restoreは受理履歴の保存・再実行です。
+revision5のローカル検証記録に結び付いたバイナリに限定します。savepoint系は同じプロセスへの直接退避、snapshot/restoreは受理履歴の保存・再実行です。
 既存配布runtimeの自動対応、電流密度への暗黙変換、孤立系ローダーのMPI応答サービスへの直結は未対応です。孤立系のsave_checkpoint/restore_checkpointは専用E/dipoleスキーマで履歴再実行を行います。GSとruntimeは別途指定し、同一容量・dt・位置・版などを照合します。周期系形式と混同しないでください。
 
 分子双極子からFDTDへの一方向接続はDIPOLE_RADIATION.mdを参照してください。電荷双極子、
@@ -1556,6 +1556,13 @@ mixing-history SCF resume or general HSE/live/custom-backend seed support.
 
 ## 単一分子の双方向FDTD結合
 
-`MolecularFeedback` は呼び出し元が作成した二つの場・一つのE駆動分子状態・MPIを使う公開入口です。`dipole_radiation` を検索し、DIPOLE_RADIATION.mdと完全例 `examples/molecular_feedback.py` を参照します。`start()` の1dt保持と中点E・自己真空場差し引きの条件を省略しません。分子状態はtotal_rootだけ、場は各担当ランクに渡し、初期化・終了は呼び出し元が担当します。取消は公開のsavepoint/restore_savepoint/release_savepointを使う直接復元です。検証記録revision4を必須とし、旧記録や履歴再生へ暗黙に切り替えません。ワーカー喪失時は復元保証なしとして扱います。`StepRecoveryError.original_preserved` を確認せずに再試行せず、暗黙のSCF・ビルド・ダウンロード・自動再試行は追加しません。
+`MolecularFeedback` は呼び出し元が作成した二つの場・一つのE駆動分子状態・MPIを使う公開入口です。`dipole_radiation` を検索し、DIPOLE_RADIATION.mdと完全例 `examples/molecular_feedback.py` を参照します。`start()` の1dt保持と中点E・自己真空場差し引きの条件を省略しません。分子状態はtotal_rootだけ、場は各担当ランクに渡し、初期化・終了は呼び出し元が担当します。取消は公開のsavepoint/restore_savepoint/release_savepointを使う直接復元です。検証記録revision5を必須とし、旧記録や履歴再生へ暗黙に切り替えません。ワーカー喪失時は復元保証なしとして扱います。`StepRecoveryError.original_preserved` を確認せずに再試行せず、暗黙のSCF・ビルド・ダウンロード・自動再試行は追加しません。
 
 孤立系の `savepoint()` は同じワーカー内で一つだけ保持する退避です。明示的に解放します。`snapshot()/restore()` と `save_checkpoint()/restore_checkpoint()` は受理履歴の保存・再実行であり別の用途です。直接退避中に履歴再生は行わず、保持中の履歴アーカイブ作成は拒否します。プロセスを終了した後に使える直接ディスク保存は未実装です。
+
+分子の直接ディスク再開は`save_direct_checkpoint`／`restore_direct_checkpoint`。
+`salmonpy.isolated-direct/1`のFortran状態を新しいワーカーへ読み込み、経過済みE履歴を
+再計算しない。同じ実行ファイル・GS入力・dt・容量・位置・スレッド数を指定する。
+GSは初期化で読み込むがSCFしない。保存は新規ディレクトリのみ。復元候補の失敗時は
+元の状態を維持する。既存のsave_checkpointは明示的な履歴再生形式なので混同しない。
+分子だけの保存をFDTD結合全体の保存と案内しない。直接形式には現行revision5検証記録が必要。
