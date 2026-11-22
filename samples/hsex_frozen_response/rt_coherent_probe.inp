@@ -1,0 +1,102 @@
+&calculation
+  theory='tddft_pulse'
+/
+
+&control
+ checkpoint_interval=0,
+ yn_self_checkpoint='n'
+  directory_read_data='./data_for_restart/'
+  sysname = 'Si'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&parallel
+  nproc_k=8
+  nproc_ob=1
+  nproc_rgrid=1,1,1
+/
+
+&system
+  yn_periodic = 'y'
+  al_vec2 = 0.0, 5.13, 5.13
+  al_vec3 = 5.13, 0.0, 5.13
+  al_vec1 = 5.13, 5.13, 0.0
+  nstate = 4
+  nelec = 8
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = './Si_rps.dat'
+  lmax_ps(1) = 2
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'tbmbj'
+  kli_mode='hsex'
+ yn_hsex_update_w='n',
+ hsex_screen_step=800,
+ hsex_screen_interval=0,
+ hsex_w_solver='auto',
+ yn_hsex_coherent_optical='y',
+ hsex_coherent_omega=.124947695397227,
+ hsex_coherent_axis=3,
+ yn_hsex_frozen_optical='n',
+ hsex_frozen_rank=512,
+ hsex_frozen_tol=1d-6,
+ yn_hsex_frozen_reference='n'
+ hsex_w_qgrid=2,2,2,
+ hsex_w_cutoff=1.0,
+ hsex_w_eta=0.01
+
+/
+
+&rgrid
+  num_rgrid = 8, 8, 8
+/
+
+&kgrid
+  num_kgrid = 2, 2, 2
+/
+
+&tgrid
+  nt = 1600
+  gram_schmidt_interval=10
+  dt = 0.0516767166707017
+/
+
+&propagation
+  propagator='middlepoint'
+  yn_predictor_corrector='y'
+/
+&scf
+  ncg = 4
+  nscf = 350
+  threshold = 1.d-9
+/
+
+&emfield
+ trans_longi='tr'
+ ae_shape1='Acos2'
+ tw1=165.3654933462454,omega1=0.124947695397227,E_amplitude1=1d-6,phi_CEP1=0.25
+ epdir_re1=0,0,1
+
+/
+
+&analysis
+ projection_option='no'
+
+  nenergy = 1000
+  de = 0.001
+/
+
+&atomic_coor
+  'Si'	.0	.0	.0	1
+  'Si'	2.565	2.565	2.565	1
+/

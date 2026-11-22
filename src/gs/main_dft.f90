@@ -509,13 +509,29 @@ if(yn_hsex_prepare_w=='y')then
       tag='HXN1'
     else if(xc_func%xctype(1)==salmon_xctype_tbmbj)then
       reference_v=reshape(Vxc(1)%f,[size(reference_v)]);reference_e=cval;tag='HXT1'
+    else if(kli_mode=='off')then
+      ! Independent scalar LDA screening; this is not a KLI RT reference.
+      reference_v=reshape(Vxc(1)%f,[size(reference_v)]);reference_e=0d0;tag='HXL1'
     else
       call kli_get_reference(reference_v,reference_e)
       tag='HXR1'
     endif
+    if(yn_hsex_reduced_reference=='y')then
+      call hsex_compute_internal(system,mg,info,spsi,shpsi,sttpsi,energy%esp(:,:,1),system%rocc(:,:,1), &
+        nfilled,hsex_w_boxes,screen_eta,V_local,stencil,srg,ppg,pair_first,pair_count,screened,solver_override='hybrid')
+      call hsex_save_internal('hsex-reference.bin',tag,0,system,mg,info,hsex_w_boxes,nfilled,reference_v,reference_e, &
+        energy%esp(:,:,1),system%rocc(:,:,1),pair_first,screened)
+      if(comm_is_root(info%id_ko))write(*,*)'HSEX_REDUCED_REFERENCE_W_PASS same GS/Hamiltonian'
+    endif
     call hsex_compute_internal(system,mg,info,spsi,shpsi,sttpsi,energy%esp(:,:,1),system%rocc(:,:,1), &
       nfilled,hsex_w_boxes,screen_eta,V_local,stencil,srg,ppg,pair_first,pair_count,screened)
-    if(yn_hsex_head_only=='y')then
+    if(hsex_frozen_rank>0)then
+      if(comm_is_root(info%id_ko))write(*,*)'HSEX_INTERNAL_FROZEN_DIAGNOSTIC_DONE no W publication'
+    else if(hsex_reduced_target>0)then
+      if(comm_is_root(info%id_ko))write(*,*)'HSEX_INTERNAL_REDUCED_DIAGNOSTIC_PASS no W publication'
+    else if(hsex_pdep_rank/=0.and.hsex_w_solver/='pdep'.and.product(num_kgrid)>1)then
+      if(comm_is_root(info%id_ko))write(*,*)'HSEX_INTERNAL_PDEP_DIAGNOSTIC_PASS no W publication'
+    else if(yn_hsex_head_only=='y')then
       if(comm_is_root(info%id_ko))write(*,*)'HSEX_INTERNAL_GS_HEAD_PASS'
     else
       call hsex_save_internal(trim(screen_path),tag,0,system,mg,info,hsex_w_boxes,nfilled,reference_v,reference_e, &

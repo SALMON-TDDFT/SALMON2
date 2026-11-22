@@ -1,6 +1,7 @@
 set(SOURCES
    broyden.f90
    const.f90
+   hsex_update_schedule.f90
    hamiltonian.f90
    hse_reference_export.f90
    initialization.f90

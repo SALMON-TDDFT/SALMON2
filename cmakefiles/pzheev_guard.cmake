@@ -1,6 +1,9 @@
 # User policy: PZHEEV is prohibited, including workspace-query calls.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
-set(SALMON_EIGENSOLVER_GUARD "${PROJECT_SOURCE_DIR}/tools/check_forbidden_eigensolvers.py")
+# The helper is included from src/, but its function also guards sibling
+# test targets. Keep the mandatory checker visible in every directory scope.
+set(SALMON_EIGENSOLVER_GUARD "${PROJECT_SOURCE_DIR}/tools/check_forbidden_eigensolvers.py"
+    CACHE INTERNAL "Mandatory application eigensolver checker" FORCE)
 execute_process(
   COMMAND "${Python3_EXECUTABLE}" "${SALMON_EIGENSOLVER_GUARD}"
           --source-root "${PROJECT_SOURCE_DIR}/src"

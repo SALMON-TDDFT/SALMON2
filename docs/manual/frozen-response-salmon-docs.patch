@@ -1,0 +1,287 @@
+diff --git a/source/input_keyword_list.rst b/source/input_keyword_list.rst
+index b37816c..cd35893 100644
+--- a/source/input_keyword_list.rst
++++ b/source/input_keyword_list.rst
+@@ -795,6 +795,282 @@ character, default='none'
+    |
+    | To use libxc libraries, ``--enable-libxc`` option must be added in excecuting configure. The available option of the exchange-correlation functionals are listed in the LibXC website. [See https://libxc.gitlab.io/functionals/]
+ 
++.. _hsex_w_solver:
++
++hsex_w_solver
++^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='auto'
++
++   | Microscopic screening solver: ``auto``, ``dense``, ``hybrid``, ``sternheimer``, ``reduced``, ``pdep`` or ``frozen``.
++   | ``frozen`` enables experimental full-q adiabatic static snapshot RPA using occupied RT orbitals.
++   | Use ``yn_hsex_update_w='y'``, ``projection_option='no'``, ``nstate=nelec/2``, positive ``hsex_frozen_rank`` and TB-mBJ HSEX RT.
++   | Set ``hsex_screen_step`` and optionally ``hsex_screen_interval`` for endpoint updates.
++   | The response H includes frozen HSEX once, without an instantaneous eigenstate occupation projection.
++   | All q/G local-field entries within the cutoff are retained. Nq=Nk and power-of-two full meshes are currently required.
++   | Static reciprocity/Hermiticity defects and eta dependence are checked against ``hsex_w_eta_tol`` before adoption.
++   | By default the insulating head uses the shortest finite-q shell; see ``yn_hsex_frozen_optical`` for the opt-in stationary insulating limit. Metallic Drude limits remain unsupported.
++   | A failed convergence or consistency check preserves the current W and stops the run.
++
++.. _hsex_frozen_rank:
++
++hsex_frozen_rank
++^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] integer, default=0
++
++   | Positive values enable frozen-H occupied-orbital response; the solver selects diagnostic or full-W mode.
++   | The value caps each of the two response spaces; it is not a fixed rank of the exact solution.
++   | Zero disables this response path and preserves the existing calculation path.
++   | CPU scalar, full uniform k grids and k-only MPI are supported.
++   | For GS use ``yn_hsex_prepare_w='y'``, ``kli_mode='off'`` and ``hsex_w_solver='auto'``.
++   | For TB-mBJ HSEX RT use ``projection_option='no'``, ``yn_hsex_update_w='n'`` and a positive ``hsex_screen_step``.
++   | With ``hsex_w_solver='auto'``, the RT diagnostic uses occupied propagated orbitals and the frozen propagation HSEX operator.
++   | With ``hsex_w_solver='frozen'``, ``yn_hsex_update_w='y'`` and ``nstate=nelec/2``, all q/G response entries update W.
++   | Full-W updates require CPU scalar TB-mBJ HSEX RT, ``projection_option='no'``, Nq=Nk and power-of-two meshes.
++   | They require every residual bound to converge and write ``hsex-frozen-updated-NNNNNNNNN.bin`` (HXT1).
++   | Static Hermitian/reciprocal defects and eta dependence must be below ``hsex_w_eta_tol``.
++   | This is guarded adiabatic snapshot RPA, with a shortest-finite-q-shell insulating mini-BZ closure, not a metallic optical limit.
++   | The full-W residual uses a conservative spectral-frame upper bound including H/source defects and roundoff.
++   | The single-q diagnostic writes ``hsex-frozen-q.dat`` and does not publish or replace W.
++   | ``HSEX_FROZEN_Q_DIAGNOSTIC_DONE`` reports unfinished sources explicitly; completion of a diagnostic is not solver convergence.
++   | This coordinator is for validation, not a scalable production W driver.
++
++.. _yn_hsex_frozen_optical:
++
++yn_hsex_frozen_optical
++^^^^^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='n'
++
++   | ``'y'`` selects analytic insulating head/wings with the full ``frozen`` W solver.
++   | The occupied projector must be stationary: ``||[H,P]||F/||P||F <= max(1e-8,hsex_frozen_tol)`` in Ha.
++   | Only the small occupied Hamiltonian is diagonalized; no empty RT states or occupation projection is introduced.
++   | The optical velocity includes kinetic, nonlocal pseudopotential and frozen HSEX terms exactly once.
++   | The complete Gamma mini-BZ cell is replaced using the existing local-field/form-factor integration.
++   | At fixed finite q, shared-space responses at eta, eta/2, eta/4 extrapolate chi to eta=0 including linear and quadratic terms.
++   | Extrapolation uncertainty, assembled W changes and dielectric positivity are checked before adoption.
++   | A failed check aborts before W publication, without fallback to the minimum-shell approximation.
++   | Coherent nonstationary optical limits and metallic static/Drude limits are not supported by this stationary insulating option.
++   | ``'n'`` preserves the experimental minimum-finite-q-shell closure.
++
++.. _yn_hsex_sternheimer_optical:
++
++yn_hsex_sternheimer_optical
++^^^^^^^^^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='n'
++
++   | ``'y'`` reads an unexcited GS, computes occupied-only finite-frequency diagnostics and returns without physical RT propagation.
++   | Requires scalar CPU TB-mBJ, ``kli_mode='off'``, ``theory='tddft_response'``, ``ae_shape1='impulse'``, ``trans_longi='tr'``.
++   | Use full uniform k weights, k-only MPI, ``nstate=nelec/2``, ``hsex_w_solver='auto'``, no W preparation/update or projection.
++   | Set positive ``hsex_frozen_rank``, ``hsex_frozen_tol``, ``hsex_w_eta`` and zero ``hsex_screen_step``.
++   | ``nenergy,de`` select zero through ``nenergy*de``; ``hsex_coherent_axis`` selects polarization.
++   | Energy/time quantities follow ``unit_system``; ``nt,dt`` select the companion time table, not physical propagation.
++   | The self-consistent tangent uses native Hartree and TB-mBJ density, kinetic-density, current and explicit-A derivatives.
++   | Static occupied-only Sternheimer inverses precondition a distributed real rational Krylov solve.
++   | All requested frequencies are checked against the original full-space tangent equation before acceptance.
++   | Raw current includes its contact/DC term; stationary insulating density-head conversion is reported separately.
++   | Density probes include both +/-q with reciprocal folding, at q=0 and q=(1/Nk_x,0,0).
++   | These probes are diagonal chi0 diagnostics, not a newly published full local-field W.
++   | Frequency and finite-window reconstructions have independent PASS/REJECT markers; require window PASS for time comparisons.
++   | Run a separate ordinary impulse with this flag off to test actual RT propagation. No production W-update behavior is changed.
++
++.. _hsex_sternheimer_kernel:
++
++hsex_sternheimer_kernel
++^^^^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='both'
++
++   | ``'both'``: density probes plus independent and self-consistent optical kernels.
++   | ``'independent'``: frozen-potential optical kernel only, excluding density probes.
++   | ``'selfconsistent'``: Hartree/TB-mBJ tangent kernel only, excluding density probes.
++   | ``'density'``: stationary q=0 and finite-q density probes only.
++   | ``'reference'``: static raw-current/contact and insulating optical-density reference only.
++   | ``yn_fix_func='y'`` excludes the self-consistent kernel and is incompatible with explicit ``'selfconsistent'``.
++
++.. _hsex_frozen_parallel:
++
++hsex_frozen_parallel
++^^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='legacy'
++
++   | ``'legacy'`` keeps the original root Krylov/owner H-action service.
++   | ``'pairs'`` distributes frozen-W solves over q groups and source k workers.
++   | Requires full frozen W, positive ``hsex_frozen_rank``, scalar CPU and k-only MPI.
++   | Each worker streams two occupied/HSEX frames, retaining A and target PP phases, then solves locally.
++   | Pair workers orthogonalize only newly generated H-basis candidates; the original-H residual still certifies convergence.
++   | Does not replicate the full all-k density matrix or add propagated orbitals.
++   | Excludes stationary optical closure and currently rejects +U frame transfer.
++   | Works with the existing shell or finite-q q2 Gamma closure; failure preserves active W.
++   | Per-q chi storage and dielectric assembly/inversion remain on root.
++
++.. _hsex_frozen_nproc_q:
++
++hsex_frozen_nproc_q
++^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] integer, default=1
++
++   | Number of q worker groups in pair mode; must be positive and divide ``nproc_k``.
++   | The other MPI dimension divides source k. Eight MPI with2q groups gives2q by4k workers.
++   | This distributes existing ranks; it does not multiply the requested rank count.
++   | Legacy mode requires1.
++
++.. _hsex_frozen_precondition:
++
++hsex_frozen_precondition
++^^^^^^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='none'
++
++   | ``'none'`` keeps polynomial expansion.
++   | ``'kinetic'`` uses the Fourier inverse of ``1 Ha + |G+k+A|^2/2`` on H-basis vectors in pair mode.
++   | Changes basis generation only; convergence uses the unchanged original-equation residual.
++   | General Nr, including12, is supported by the existing FFT/direct-transform helper.
++   | Rejects failed/nonfinite callbacks. Speed improvement depends on the resulting basis size and is not guaranteed.
++
++.. _hsex_frozen_closure:
++
++hsex_frozen_closure
++^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='strict'
++
++   | ``'strict'`` retains the original rejection of non-Hermitian static response.
++   | ``'hermitian'`` explicitly uses ``(chi+chi^dagger)/2`` after q/−q reality validation and before dielectric inversion.
++   | A defined quadratic static approximation; not a validated full causal nonequilibrium W or an error-controlled deletion.
++   | Logs the raw defect and discarded Frobenius fraction for every eta; a large discarded part remains a limitation.
++   | Uses eta,eta/2,eta/4 and the existing chi-level extrapolation even with shell Gamma.
++   | Retains q reality, solver, finite, dielectric-positivity, eta/W-change and final reciprocity guards.
++   | Requires full frozen W and positive response rank; excludes stationary optical closure.
++   | Preserves the occupied RT orbital count, with no density/eigenstate or thermal projection.
++   | Compare fixed and updated W using a common equilibrium W prepared with these same eta/closure rules.
++
++.. _hsex_frozen_window:
++
++hsex_frozen_window
++^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='none'
++
++   | ``'gaussian'`` or ``'exponential'`` windows only the pump-induced differential response, preserving static equilibrium W0.
++   | Requires Hermitian closure, full frozen W, pair MPI workers and fresh zero-A occupied-only scalar CPU RT.
++   | Initial static W_eq must match W0 within relative tolerance at most 1e-6; initialization does not replace W0.
++   | Uses chi_eq_static + Herm(chi_window(t)) - Herm(chi_window(eq)); W is anchored to the supplied W0.
++   | No RT-orbital damping, thermal projection or change in propagated orbital count.
++   | Restart, independently generated LDA reference W and stationary optical closure are unsupported.
++   | Finite-window response is a model choice, not an eta-to-zero limit; retain reality/positivity/reciprocity guards.
++
++.. _hsex_frozen_window_time:
++
++hsex_frozen_window_time
++^^^^^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] real, default=0.5 fs in selected time units
++
++   | Positive finite one-sided window area A. Exponential decay time is A; Gaussian sigma is A sqrt(2/pi).
++   | A=0.5 fs gives Gaussian sigma=0.398942 fs and exponential eta=hbar/A=1.3164 eV.
++   | An empirical Drude relaxation time motivates this auxiliary window but does not add a collision model to RT.
++   | Test time-width and shape dependence; reported absolute chi bounds are not W error estimates.
++
++.. _hsex_frozen_gamma:
++
++hsex_frozen_gamma
++^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='shell'
++
++   | ``'shell'`` preserves the existing frozen-W closure selection, including the separate stationary optical option.
++   | ``'q2'`` selects finite-q density-response Gamma-cell fitting with ``hsex_w_solver='frozen'`` and positive ``hsex_frozen_rank``.
++   | Requires ``yn_hsex_frozen_optical='n'`` and the existing occupied-only scalar, k-only MPI frozen-RT update conditions.
++   | Current frozen power-of-two grids need ``Nk=Nq>=8`` in each direction, with at least 52 nonaliased small-q samples.
++   | At each finite q, samples at eta, eta/2 and eta/4 extrapolate chi0 before inversion; ``hsex_w_eta_tol`` gates that step and W changes.
++   | ``hsex_w_head_tol`` separately gates nested fits of the complete box matrix q^2 W; same-radius ties are retained.
++   | The spherical Gamma-cell average replaces the complete q=0 box block once, retaining the regular term when the singular term vanishes.
++   | The legacy scalar head is not added again. No raw-current DC subtraction or forced removal of a pumped Drude response is used.
++   | Only the small-q stencil is gathered on root; final pair ownership and the existing discrete-R transform convention are retained.
++   | Insufficient sampling, nonfinite data, failed eta/q fits or positivity checks abort before publishing a new W.
++   | Coherent snapshots without an admissible static limit may be rejected; this option does not establish physical q/grid convergence.
++
++.. _yn_hsex_coherent_optical:
++
++yn_hsex_coherent_optical
++^^^^^^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='n'
++
++   | ``'y'`` enables an occupied-only coherent electric-impulse optical diagnostic.
++   | Requires scalar CPU TB-mBJ HSEX RT, full uniform k weights, k-only MPI, ``projection_option='no'``, ``nstate=nelec/2``.
++   | Select ``hsex_w_solver='auto'``, ``yn_hsex_update_w='n'``, positive ``hsex_frozen_rank`` and a single ``hsex_screen_step``.
++   | Keep ``hsex_screen_interval=0``, ``yn_hsex_frozen_reference='n'`` and ``yn_hsex_frozen_optical='n'``.
++   | The frozen endpoint H drives an evolving coherent background. No instantaneous-state occupation projection is performed.
++   | Both resolvents and the kinetic/nonlocal/HSEX contact term enter the current response.
++   | Actual finite-A operator differences check the derivatives before accepting the diagnostic.
++   | Writes ``hsex-coherent-optical.dat``; it preserves the main RT orbitals and active W.
++   | Also reports local-potential covariance and expectation changes for joint integer/half-grid translations.
++   | Integer translation is a numerical control; half-grid defects expose local collocation aliasing.
++   | This does not resample nonlocal projectors or remove low-energy/Drude response poles.
++   | The output is an IP response, not a general static screened Gamma-cell interaction or a full local-field dielectric matrix.
++   | q=0 momentum transfer does not require the Bloch k mesh to include Gamma.
++
++.. _hsex_coherent_omega:
++
++hsex_coherent_omega
++^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] real(8), default=0.125 Ha
++
++   | Nonnegative probe energy, in the energy units selected by ``unit_system``.
++   | The diagnostic evaluates zero and this frequency at ``hsex_w_eta`` and half that width.
++   | No static-W limit or pole removal is inferred automatically from these two widths.
++
++.. _hsex_coherent_axis:
++
++hsex_coherent_axis
++^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] integer, default=3
++
++   | Cartesian polarization of the diagonal optical response: 1=x, 2=y, 3=z.
++
++.. _hsex_frozen_qpoint:
++
++hsex_frozen_qpoint(3)
++^^^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] integer, default=1,0,0
++
++   | Integer coordinates on ``hsex_w_qgrid``. This q grid must divide ``num_kgrid``.
++   | With the auto single-q diagnostic the selected point must be nonzero modulo the q grid.
++   | This selected point is ignored by the full-q frozen W solver. Its stationary analytic optical option uses ``yn_hsex_frozen_optical``.
++
++.. _hsex_frozen_tol:
++
++hsex_frozen_tol
++^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] real(8), default=1d-5
++
++   | Positive relative Frobenius residual tolerance, including a roundoff safety term, for each commutator response equation.
++   | Responses at ``i*hsex_w_eta`` and ``i*hsex_w_eta/2`` share H actions and response spaces.
++   | Observable errors are reported independently when the reference is enabled.
++
++.. _yn_hsex_frozen_reference:
++
++yn_hsex_frozen_reference
++^^^^^^^^^^^^^^^^^^^^^^^^
++
++[Trial, development HSEX extension] character, default='n'
++
++   | ``'y'`` enables an independent full-H spectral reference, limited to at most 512 real-space points.
++   | Dense H is constructed only in this explicit validation reference; it is not used by the low-rank solver.
++   | Reference preparation time and the relative error of the full induced density are reported separately.
++   | ``'n'`` retains the matrix-free diagnostic without a numerical reference.
++
++
+ .. _&rgrid:
+ 
+ &rgrid

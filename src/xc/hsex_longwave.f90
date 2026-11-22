@@ -3,7 +3,7 @@
 module hsex_longwave
   implicit none
   private
-  public :: longwave_band, longwave_cell
+  public :: longwave_band, longwave_cell,longwave_lowrank_cell
   abstract interface
     subroutine action(x,y,status)
       implicit none
@@ -91,15 +91,13 @@ contains
     real(8),intent(out) :: macro(3,3)
     complex(8),intent(out) :: point(:,:),average(:,:)
     integer,intent(out) :: status
-    complex(8),allocatable :: dielectric(:,:),inverse(:,:),coupling(:,:),screened(:,:),forms(:,:),base(:,:),projected(:,:)
-    complex(8),allocatable :: previous(:,:),previous_regular(:,:),regular(:,:),vector(:)
-    real(8),allocatable :: bare(:),nodes(:),weights(:),radial(:),radial_weight(:)
-    real(8) :: pi,factor,qc,mu,phi,direction(3),denom,weight,radius,error
+    complex(8),allocatable :: dielectric(:,:),inverse(:,:),coupling(:,:),screened(:,:),forms(:,:),base(:,:)
+
+    real(8),allocatable :: bare(:)
+    real(8) :: pi,factor,radius
     complex(8) :: tensor(3,3)
     real(8) :: coords(3,size(g,2)+1)
-    real(8) :: rec_inverse(3,3),rec_work(3,3)
-    integer :: rec_piv(3)
-    integer :: nb,na,i,j,info,order,azimuth,polar,rad,iteration,nrad
+    integer :: nb,na,i,j,info
     status=1;macro=0d0;point=0d0;average=0d0
     nb=size(g,2);na=boxes**3
     if(any(shape(chi)/=[nb+3,nb+3]).or.any(shape(point)/=[na,na]).or.any(shape(average)/=[na,na]))return
@@ -108,13 +106,8 @@ contains
     if(.not.screen_finite(chi).or..not.screen_finite(rec).or..not.screen_finite([vol]).or.vol<=0d0)return
     status=2
     pi=acos(-1d0);factor=2d0/(nk*vol)
-    rec_work=rec;rec_inverse=0d0
-    do i=1,3
-      rec_inverse(i,i)=1d0
-    enddo
-    call dgesv(3,3,rec_work,3,rec_piv,rec_inverse,3,info)
+    allocate(bare(nb),dielectric(nb,nb),inverse(nb,nb),coupling(nb,3),screened(nb,3),stat=info)
     if(info/=0)return
-    allocate(bare(nb),dielectric(nb,nb),inverse(nb,nb),coupling(nb,3),screened(nb,3))
     do i=1,nb
       radius=sum(matmul(rec,dble(g(:,i)))**2)
       if(radius<=1d-14)return
@@ -159,17 +152,118 @@ contains
       call dsyev('N','L',3,matrix,3,eigen,workspace,size(workspace),info)
       if(info/=0.or.minval(eigen)<=0d0)return
     end block
-    allocate(forms(na,nb+1),base(na,na),projected(na,3),previous(na,na),previous_regular(na,na),regular(na,na),vector(na))
+    allocate(forms(na,nb+1),base(na,na),stat=info)
+    if(info/=0)return
     coords(:,1)=0d0;coords(:,2:)=dble(g)
     call screen_forms(n,boxes,coords,forms)
     do i=1,nb
       forms(:,i+1)=forms(:,i+1)*bare(i)
     enddo
-    base=0d0;projected=0d0
+    base=0d0
+    if(nb>0)base=matmul(matmul(conjg(forms(:,2:)),inverse),transpose(forms(:,2:)))/vol
+    call longwave_integrate(n,boxes,g,rec,vol,nk,macro,screened,base,point,average,status)
+  end subroutine longwave_cell
+
+  subroutine longwave_lowrank_cell(n,boxes,g,rec,vol,nk,basis,values,macro,point,average,status)
+    use hsex_screen_math, only: screen_finite,screen_forms,screen_inverse
+    implicit none
+    integer,intent(in) :: n(3),boxes,g(:,:),nk
+    real(8),intent(in) :: rec(3,3),vol,values(:)
+    complex(8),intent(in) :: basis(:,:)
+    real(8),intent(out) :: macro(3,3)
+    complex(8),intent(out) :: point(:,:),average(:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: f(:,:),head(:,:),small(:,:),inverse(:,:),screened(:,:),forms(:,:),d(:,:)
+    complex(8),allocatable :: projected(:,:),temp(:,:),base(:,:)
+    complex(8) :: tensor(3,3)
+    real(8),allocatable :: bare(:)
+    real(8) :: coords(3,size(g,2)+1),radius
+    integer :: nb,r,na,i,code
+    status=1;macro=0d0;point=0d0;average=0d0
+    nb=size(g,2);r=size(values);na=boxes**3
+    if(any(n<1).or.boxes<1.or.nk<1.or.vol<=0d0.or.size(g,1)/=3)return
+    if(any(mod(n,boxes)/=0).or.r<1.or.r>nb+3)return
+    if(any(shape(basis)/=[nb+3,r]).or.any(shape(point)/=[na,na]).or.any(shape(average)/=[na,na]))return
+    if(.not.screen_finite(basis).or..not.screen_finite(values).or..not.screen_finite([vol]))return
+    if(.not.screen_finite(rec).or.any(values<0d0))return
+    allocate(f(nb,r),head(3,r),small(r,r),inverse(r,r),screened(nb,3),forms(na,nb+1),d(na,nb),stat=code)
+    if(code/=0)return
+    allocate(projected(na,r),temp(na,r),base(na,na),bare(nb),stat=code)
+    if(code/=0)return
+    do i=1,r
+      f(:,i)=basis(4:,i)*sqrt(values(i));head(:,i)=basis(:3,i)*sqrt(values(i))
+    enddo
+    small=matmul(conjg(transpose(f)),f)
+    do i=1,r
+      small(i,i)=small(i,i)+1d0
+    enddo
+    call screen_inverse(small,inverse,code)
+    if(code/=0)return
+    screened=matmul(f,matmul(inverse,conjg(transpose(head))))
+    tensor=matmul(head,matmul(inverse,conjg(transpose(head))))
+    do i=1,3
+      tensor(i,i)=tensor(i,i)+1d0
+    enddo
+    if(maxval(abs(aimag(tensor)))>1d-8.or.maxval(abs(tensor-transpose(tensor)))>1d-8)return
+    macro=real(tensor,8)
+    coords(:,1)=0d0;coords(:,2:)=dble(g)
+    call screen_forms(n,boxes,coords,forms)
+    do i=1,nb
+      radius=sum(matmul(rec,dble(g(:,i)))**2)
+      if(radius<=1d-14)return
+      bare(i)=sqrt(4d0*acos(-1d0)/radius)
+      d(:,i)=conjg(forms(:,i+1))*bare(i)
+    enddo
+    base=0d0;projected=0d0;temp=0d0
     if(nb>0)then
-      base=matmul(matmul(conjg(forms(:,2:)),inverse),transpose(forms(:,2:)))/vol
-      projected=matmul(conjg(forms(:,2:)),screened)
+      call zgemm('N','C',na,na,nb,cmplx(1d0,0d0,8),d,na,d,na,cmplx(0d0,0d0,8),base,na)
+      call zgemm('N','N',na,r,nb,cmplx(1d0,0d0,8),d,na,f,nb,cmplx(0d0,0d0,8),projected,na)
+      call zgemm('N','N',na,r,r,cmplx(1d0,0d0,8),projected,na,inverse,r,cmplx(0d0,0d0,8),temp,na)
+      call zgemm('N','C',na,na,r,cmplx(-1d0,0d0,8),temp,na,projected,na,cmplx(1d0,0d0,8),base,na)
     endif
+    base=base/vol
+    call longwave_integrate(n,boxes,g,rec,vol,nk,macro,screened,base,point,average,status)
+  end subroutine longwave_lowrank_cell
+
+  subroutine longwave_integrate(n,boxes,g,rec,vol,nk,macro,screened,base,point,average,status)
+    use hsex_screen_math, only: screen_forms,screen_finite
+    use, intrinsic :: iso_fortran_env, only: error_unit
+    implicit none
+    integer,intent(in) :: n(3),boxes,g(:,:),nk
+    real(8),intent(in) :: rec(3,3),vol,macro(3,3)
+    complex(8),intent(in) :: screened(:,:),base(:,:)
+    complex(8),intent(out) :: point(:,:),average(:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: forms(:,:),projected(:,:),previous(:,:),previous_regular(:,:),regular(:,:),vector(:)
+    real(8),allocatable :: bare(:),nodes(:),weights(:),radial(:),radial_weight(:)
+    real(8) :: pi,qc,mu,phi,direction(3),denom,weight,radius,error,coords(3,size(g,2)+1)
+    real(8) :: rec_inverse(3,3),rec_work(3,3)
+    integer :: rec_piv(3),nb,na,i,j,info,order,azimuth,polar,rad,iteration,nrad
+    status=1;point=0d0;average=0d0
+    nb=size(g,2);na=boxes**3;pi=acos(-1d0)
+    if(.not.screen_finite(macro).or..not.screen_finite(base).or..not.screen_finite(screened))return
+    block
+      real(8) :: eigen(3),matrix(3,3),workspace(16)
+      matrix=macro
+      call dsyev('N','L',3,matrix,3,eigen,workspace,size(workspace),info)
+      if(info/=0.or.minval(eigen)<=0d0)return
+    end block
+    rec_work=rec;rec_inverse=0d0
+    do i=1,3
+      rec_inverse(i,i)=1d0
+    enddo
+    call dgesv(3,3,rec_work,3,rec_piv,rec_inverse,3,info)
+    if(info/=0)return
+    allocate(forms(na,nb+1),bare(nb),projected(na,3),previous(na,na),previous_regular(na,na),regular(na,na),vector(na),stat=info)
+    if(info/=0)return
+    coords(:,1)=0d0;coords(:,2:)=dble(g)
+    call screen_forms(n,boxes,coords,forms)
+    do i=1,nb
+      bare(i)=sqrt(4d0*pi/sum(matmul(rec,dble(g(:,i)))**2))
+      forms(:,i+1)=forms(:,i+1)*bare(i)
+    enddo
+    projected=0d0
+    if(nb>0)projected=matmul(conjg(forms(:,2:)),screened)
     qc=(6d0*pi*pi/(vol*nk))**(1d0/3d0)
     previous=0d0;previous_regular=0d0
     status=6
@@ -227,7 +321,7 @@ contains
     if(.not.screen_finite(average).or..not.screen_finite(regular))return
     point=regular
     status=0
-  end subroutine longwave_cell
+  end subroutine longwave_integrate
 
   subroutine legendre(nodes,weights)
     implicit none

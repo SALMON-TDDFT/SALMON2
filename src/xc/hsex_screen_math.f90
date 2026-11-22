@@ -4,6 +4,7 @@ module hsex_screen_math
   private
   public :: screen_sites,screen_geometry,screen_forms,screen_assemble,screen_channels
   public :: screen_metal_head,screen_transform,screen_population,screen_finite,screen_inverse
+  public :: screen_shift,screen_q2_head
   interface screen_finite
     module procedure finite_real,finite_complex,finite_real2,finite_complex2,finite_complex3
   end interface
@@ -106,19 +107,26 @@ contains
     real(8),intent(in)::q(:,:)
     complex(8),intent(out)::forms(boxes**3,size(q,2))
     integer::i,g,a,b,j,m
-    complex(8)::factor
+    complex(8)::axis_factor(0:boxes-1,3)
     real(8)::angle
     forms=1d0
     do g=1,size(q,2)
+      ! Each one-dimensional sum is shared by boxes in the other two axes.
+      ! Keep the finite-grid sums and product/division order unchanged.
+      do a=1,3
+        m=n(a)/boxes
+        do b=0,boxes-1
+          axis_factor(b,a)=0d0
+          do j=b*m,(b+1)*m-1
+            angle=-2d0*acos(-1d0)*j*q(a,g)/n(a)
+            axis_factor(b,a)=axis_factor(b,a)+cmplx(cos(angle),sin(angle),8)
+          enddo
+        enddo
+      enddo
       do i=0,boxes**3-1
         do a=1,3
           b=mod(i/boxes**(a-1),boxes);m=n(a)/boxes
-          factor=0d0
-          do j=b*m,(b+1)*m-1
-            angle=-2d0*acos(-1d0)*j*q(a,g)/n(a)
-            factor=factor+cmplx(cos(angle),sin(angle),8)
-          enddo
-          forms(i+1,g)=forms(i+1,g)*factor/m
+          forms(i+1,g)=forms(i+1,g)*axis_factor(b,a)/m
         enddo
       enddo
     enddo
@@ -284,7 +292,21 @@ contains
     enddo
   end subroutine
 
-  subroutine screen_metal_head(values,qmesh,rec,mesh,tolerance,point,average,status,sample_indices)
+  ! Fit q^2 W, retaining both its singular coefficient and regular quadratic
+  ! term. The equal-volume spherical cell has <1/q^2>=3/qc^2 and
+  ! <q_i q_j/q^2>=delta_ij/3. In a metal the regular term must survive A->0.
+  subroutine screen_q2_head(values,qmesh,rec,mesh,tolerance,qc,coefficient,average,status,sample_indices)
+    implicit none
+    complex(8),intent(in) :: values(:,:,:)
+    integer,intent(in) :: qmesh(3),mesh(3)
+    real(8),intent(in) :: rec(3,3),tolerance,qc
+    complex(8),intent(out) :: coefficient(:,:),average(:,:)
+    integer,intent(out) :: status
+    integer,intent(in),optional :: sample_indices(:)
+    call screen_metal_head(values,qmesh,rec,mesh,tolerance,coefficient,average,status,sample_indices,qc)
+  end subroutine
+
+  subroutine screen_metal_head(values,qmesh,rec,mesh,tolerance,point,average,status,sample_indices,q2_radius)
     use, intrinsic :: iso_fortran_env, only: error_unit
     implicit none
     complex(8),intent(in)::values(:,:,:)
@@ -293,15 +315,20 @@ contains
     complex(8),intent(out)::point(:,:),average(:,:)
     integer,intent(out)::status
     integer,optional,intent(in)::sample_indices(:)
+    real(8),optional,intent(in)::q2_radius
     integer,allocatable::sites(:,:),valid(:),idx(:),lookup(:)
     real(8),allocatable::q(:,:),r2(:),sorted(:),design(:,:),s(:),rwork(:),eval(:)
     complex(8),allocatable::a(:,:),b(:,:),work(:),pred(:,:,:),target(:,:,:),av(:,:,:),fit(:,:,:),check(:,:)
-    real(8)::radius,scale,cov(3,3),moment(10),error,errmax,norm,detrec
+    real(8)::radius,scale,cov(3,3),moment(10),error,errmax,norm,detrec,data_scale,matrix_tolerance
     integer::nq,na,nvalid,i,j,l,m,pass,rank,info,counts(2),lw
     status=1;nq=product(qmesh);na=size(values,1)
     if(any(qmesh<6).or.any(mesh<qmesh).or.tolerance<=0d0.or.tolerance>=1d0)return
     if(size(values,2)/=na.or.na<1)return
     if(.not.screen_finite(rec).or..not.screen_finite([tolerance]))return
+    if(present(q2_radius))then
+      if(.not.screen_finite([q2_radius]))return
+      if(q2_radius<=0d0)return
+    endif
     detrec=rec(1,1)*(rec(2,2)*rec(3,3)-rec(3,2)*rec(2,3)) &
       -rec(1,2)*(rec(2,1)*rec(3,3)-rec(3,1)*rec(2,3)) &
       +rec(1,3)*(rec(2,1)*rec(3,2)-rec(3,1)*rec(2,2))
@@ -354,7 +381,10 @@ contains
       enddo
     enddo
     moment=[1d0,0d0,0d0,0d0,cov(1,1),cov(2,2),cov(3,3),cov(1,2),cov(1,3),cov(2,3)]
-    counts=[26,52];errmax=0d0
+    if(present(q2_radius))moment=[3d0/q2_radius**2,0d0,0d0,0d0, &
+      1d0/(3d0*scale**2),1d0/(3d0*scale**2),1d0/(3d0*scale**2),0d0,0d0,0d0]
+    if(.not.screen_finite(moment))return
+    counts=[26,52];errmax=0d0;data_scale=0d0
     do pass=1,2
       radius=sorted(counts(pass))*(1d0+1d-10)
       m=count(r2(valid(:nvalid))<=radius)
@@ -368,7 +398,15 @@ contains
       a=cmplx(design(idx,:),0d0,8);b=0d0
       do i=1,m
         b(i,:)=reshape(values(:,:,lookup(idx(i))),[na*na])
+        if(present(q2_radius))b(i,:)=b(i,:)*r2(idx(i))
       enddo
+      if(.not.screen_finite(b))return
+      if(present(q2_radius))then
+        do i=1,m
+          data_scale=max(data_scale,sqrt(sum(abs(b(i,:))**2)))
+        enddo
+        if(.not.screen_finite([data_scale]))return
+      endif
       allocate(work(1))
       status=2
       call zgelss(m,10,na*na,a,m,b,max(m,10),s,-1d0,rank,work,-1,rwork,info)
@@ -384,6 +422,7 @@ contains
       allocate(pred(na,na,m),target(na,na,m))
       do i=1,m
         pred(:,:,i)=reshape(matmul(design(idx(i),:),b(:10,:)),[na,na]);target(:,:,i)=values(:,:,lookup(idx(i)))
+        if(present(q2_radius))target(:,:,i)=target(:,:,i)*r2(idx(i))
       enddo
       call screen_channels(pred,target,error,.true.);errmax=max(errmax,error)
       write(error_unit,'(a,i0,a,i0,a,es16.8)')'HSEX_HEAD_FIT pass=',pass,' samples=',m,' relative_error=',error
@@ -398,19 +437,95 @@ contains
       check=fit(:,:,1)
       if(pass==2)check=av(:,:,1)
       norm=max(sqrt(sum(abs(check)**2)),1d-14)
+      matrix_tolerance=1d-8*norm
+      ! The metallic singular coefficient can be exactly zero. In that case
+      ! fit roundoff scales with the finite-q data, not with the zero result.
+      ! Do not clip a fitted eigenvalue or weaken the ordinary regular-W path.
+      if(present(q2_radius))matrix_tolerance=max(matrix_tolerance,256d0*epsilon(1d0)*data_scale)
+      if(.not.screen_finite([norm,matrix_tolerance]))return
       status=5
-      if(sqrt(sum(aimag(check)**2))>1d-8*norm)return
-      if(sqrt(sum(abs(check-transpose(conjg(check)))**2))>1d-8*norm)return
+      if(sqrt(sum(aimag(check)**2))>matrix_tolerance)return
+      if(sqrt(sum(abs(check-transpose(conjg(check)))**2))>matrix_tolerance)return
       status=6
       call zheev('N','L',na,check,na,eval,work,size(work),rwork,info)
       if(info/=0)return
       status=7
-      if(minval(eval)<-1d-8*norm)then
+      if(minval(eval)<-matrix_tolerance)then
         write(error_unit,'(a,i0,a,2es16.8)')'HSEX_HEAD_NEGATIVE pass=',pass,' eigenvalue/scale ',minval(eval),norm
         return
       endif
     enddo
     point=real(fit(:,:,1),8);average=real(av(:,:,1),8);status=0
+  end subroutine
+
+  ! Translation of the periodic trigonometric interpolant, in cell fractions.
+  ! Complex orbitals use one Nyquist branch and preserve their discrete norm.
+  ! A real field splits its Nyquist coefficient equally between +/- frequencies;
+  ! its cosine interpolation remains real but need not preserve the sampled norm.
+  subroutine screen_shift(mesh,shift,x,y,status,real_field)
+    implicit none
+    integer,intent(in) :: mesh(3)
+    real(8),intent(in) :: shift(3)
+    complex(8),intent(in) :: x(:)
+    complex(8),intent(out) :: y(:)
+    integer,intent(out) :: status
+    logical,intent(in),optional :: real_field
+    complex(8),allocatable :: grid(:,:,:),line(:)
+    complex(8) :: phase
+    real(8) :: angle,scale
+    integer :: axis,i,j,k,m,frequency
+    logical :: is_real
+    status=1;y=0d0;is_real=.false.
+    if(present(real_field))is_real=real_field
+    if(any(mesh<1).or.size(x)/=product(mesh).or.size(y)/=size(x))return
+    if(.not.screen_finite(shift).or..not.screen_finite(x))return
+    scale=max(1d0,maxval(abs(x)))
+    if(is_real)then
+      if(maxval(abs(aimag(x)))>1d-12*scale)return
+    endif
+    allocate(grid(mesh(1),mesh(2),mesh(3)))
+    grid=reshape(x,mesh)
+    do axis=1,3
+      m=mesh(axis);allocate(line(m))
+      do j=1,mesh(mod(axis+1,3)+1)
+        do i=1,mesh(mod(axis,3)+1)
+          select case(axis)
+          case(1)
+            line=grid(:,i,j)
+          case(2)
+            line=grid(j,:,i)
+          case(3)
+            line=grid(i,j,:)
+          end select
+          call fft_line(line)
+          do k=0,m-1
+            frequency=k
+            if(2*k>=m)frequency=k-m
+            angle=2d0*acos(-1d0)*frequency*modulo(shift(axis),1d0)
+            phase=exp(cmplx(0d0,-angle,8))
+            if(is_real.and.mod(m,2)==0.and.k==m/2)phase=cmplx(cos(angle),0d0,8)
+            line(k+1)=line(k+1)*phase
+          enddo
+          line=conjg(line);call fft_line(line);line=conjg(line)/m
+          select case(axis)
+          case(1)
+            grid(:,i,j)=line
+          case(2)
+            grid(j,:,i)=line
+          case(3)
+            grid(i,j,:)=line
+          end select
+        enddo
+      enddo
+      deallocate(line)
+    enddo
+    y=reshape(grid,[size(x)])
+    if(.not.screen_finite(y))return
+    if(is_real)then
+      if(maxval(abs(aimag(y)))>1d-12*scale)return
+      y=cmplx(real(y,8),0d0,8)
+    endif
+    status=0
   end subroutine
 
   subroutine fft_line(x)

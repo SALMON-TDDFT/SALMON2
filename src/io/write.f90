@@ -1949,6 +1949,9 @@ contains
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
     use salmon_global, only: projection_option,nstate,directory_read_data,yn_restart,yn_self_checkpoint
+#ifdef USE_HSE
+    use salmon_global, only: hsex_screen_step,hsex_projection_max_states
+#endif
     use checkpoint_restart_sub, only: read_bin,generate_restart_directory_name
     use initialization_sub, only: init_parallel_dft
     use sendrecv_grid, only: create_sendrecv_neig, init_sendrecv_grid
@@ -1974,6 +1977,13 @@ contains
     integer,dimension(2,3) :: neig
     
     call file_header
+
+#ifdef USE_HSE
+    if(hsex_screen_step>0)then
+      if(nstate>product(lg%num).or.hsex_projection_max_states>product(lg%num)) &
+        error stop 'HSEX projection states exceed grid dimension'
+    endif
+#endif
     
     if(yn_restart=='n') then
       dir_gs = directory_read_data
@@ -2121,12 +2131,16 @@ contains
 
   subroutine projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,psi_t,energy,rt)
     use structures
-    use communication, only: comm_is_root
+    use communication, only: comm_is_root,comm_get_max
     use parallelization, only: nproc_id_global
 #ifdef USE_HSE
+    use, intrinsic :: iso_fortran_env, only: output_unit
     use hamiltonian, only: projection_action
+    use hsex_projection, only: s_hsex_capture,projection_capture,projection_seed
+    use salmon_global, only: hsex_projection_max_states,hsex_projection_capture_tol,nstate
     use kli_hsex, only: hsex_add,hsex_snapshot,hsex_replace_w,hsex_update_internal,hsex_stage,hsex_induced_energy
-    use salmon_global, only: kli_mode,hsex_screen_step,hsex_probe_w,yn_hsex_update_w
+    use salmon_global, only: kli_mode,hsex_screen_step,hsex_screen_interval,hsex_probe_w,yn_hsex_update_w
+    use hsex_update_schedule, only: screen_update_due
 #endif
     use salmon_global, only: projection_option,ncg,nelec,yn_spinorbit,nscf,yn_out_intraband_current,threshold_projection
     use inputoutput, only: t_unit_time
@@ -2150,23 +2164,34 @@ contains
     !
     integer :: nspin,nspin_tmp,no,no0,nk,ik_s,ik_e,io_s,io_e,is(3),ie(3)
     integer :: ix,iy,iz,io1,io2,io,ik,ispin,iter_GS,niter
-    complex(8),dimension(rt%system_proj%no,system%no,system%nspin,system%nk) :: mat
-    real(8) :: coef(rt%system_proj%no,system%nk,system%nspin)
+    complex(8),allocatable :: mat(:,:,:,:)
+    real(8),allocatable :: coef(:,:,:)
     real(8) :: nee, neh, wspin, dE
     complex(8) :: cbox
     real(8) :: old_hsex_energy
     logical :: screen_projection
+#ifdef USE_HSE
+    type(s_hsex_capture) :: capture
+    integer(8) :: screen_started,projection_finished,screen_finished,refresh_finished,screen_rate
+    real(8) :: screen_times(4),screen_max(4)
+#endif
 
     screen_projection=.false.
 #ifdef USE_HSE
-    screen_projection=itt==hsex_screen_step
+    screen_projection=screen_update_due(itt,hsex_screen_step,hsex_screen_interval)
+    if(screen_projection)then
+      call system_clock(screen_started,screen_rate)
+      if(comm_is_root(nproc_id_global))write(*,'(a,i10,es22.12,i10)') &
+        'HSEX_SCREEN_EVENT step/time_au/interval_steps ',itt,dt*itt,hsex_screen_interval
+      if(comm_is_root(nproc_id_global))flush(output_unit)
+    endif
 #endif
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
-    
+
     rt%system_proj%vec_Ac(1:3) = system%vec_Ac(1:3) ! vector potential @ time itt
 
     no0 = rt%system_proj%no ! # of orbitals @ GS
-    
+
     nspin = system%nspin
     no = system%no
     nk = system%nk
@@ -2176,18 +2201,18 @@ contains
     ik_e = info%ik_e
     io_s = info%io_s
     io_e = info%io_e
-    
+
     if(nspin==1) then
       wspin = 2d0
     else if(nspin==2) then
       wspin = 1d0
     end if
-    
+
     nspin_tmp = nspin
     if(yn_spinorbit=='y') then
       nspin_tmp = 1
     end if
-    
+
     if(nscf==0) then
       niter = 10
     else
@@ -2218,43 +2243,59 @@ contains
 !
 
 
-    call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
-    & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
-    dE = energy%E_kin - rt%E_old
-    if(.not.screen_projection.and.abs(dE) < min(threshold_projection,1e-12)) then
-      if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
-    else
-      ! Reference the kinetic energy of this step's starting orbitals (energy%E_kin
-      ! computed just above), not rt%E_old carried over from the previous time step.
-      ! Otherwise the first iteration's dE is measured against the previous step and
-      ! the loop can exit after a single CG step without converging the projection
-      ! orbitals (most likely for large systems / small dt, where E_kin changes
-      ! little per step).
-      rt%E_old = energy%E_kin
-      do iter_GS=1,niter
-        call ssdg(mg,rt%system_proj,rt%info_proj,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,rt%srg_proj)
-        call gscg_zwf(ncg,mg,rt%system_proj,rt%info_proj,stencil,ppg, &
-        & rt%vloc0,rt%srg_proj,rt%tpsi0,rt%htpsi0,rt%ttpsi0,rt%cg)
-        call gram_schmidt(rt%system_proj, mg, rt%info_proj, rt%tpsi0)
-        call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
-        & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
-        dE = energy%E_kin - rt%E_old
+    do ! Re-solve only auxiliary orbitals if the occupied RT space is not captured.
+      no0=rt%system_proj%no
+      call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
+      & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
+      dE = energy%E_kin - rt%E_old
+      if(.not.screen_projection.and.abs(dE) < min(threshold_projection,1e-12)) then
+        if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
+      else
+        ! Reference the kinetic energy of this step's starting orbitals (energy%E_kin
+        ! computed just above), not rt%E_old carried over from the previous time step.
+        ! Otherwise the first iteration's dE is measured against the previous step and
+        ! the loop can exit after a single CG step without converging the projection
+        ! orbitals (most likely for large systems / small dt, where E_kin changes
+        ! little per step).
         rt%E_old = energy%E_kin
-        if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
-        if(screen_projection)then
-          if(projection_residual()<1d-5)exit
-        else if(abs(dE) < threshold_projection)then
-          exit
-        endif
-      end do
-    end if
-    
-    call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < w_{n,k)(t) | u_{m,k}(t) >
+        do iter_GS=1,niter
+          call ssdg(mg,rt%system_proj,rt%info_proj,stencil,rt%tpsi0,rt%htpsi0,ppg,rt%vloc0,rt%srg_proj)
+          call gscg_zwf(ncg,mg,rt%system_proj,rt%info_proj,stencil,ppg, &
+          & rt%vloc0,rt%srg_proj,rt%tpsi0,rt%htpsi0,rt%ttpsi0,rt%cg)
+          call gram_schmidt(rt%system_proj, mg, rt%info_proj, rt%tpsi0)
+          call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
+          & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
+          dE = energy%E_kin - rt%E_old
+          rt%E_old = energy%E_kin
+          if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
+          if(screen_projection)then
+            if(projection_residual()<1d-5)exit
+          else if(abs(dE) < threshold_projection)then
+            exit
+          endif
+        end do
+      end if
 
-    if(yn_spinorbit=='y') then
-      mat(1:no0,1:no,1,1:nk) = mat(1:no0,1:no,1,1:nk) + mat(1:no0,1:no,2,1:nk)
-      mat(1:no0,1:no,2,1:nk) = mat(1:no0,1:no,1,1:nk)
-    end if
+      allocate(mat(no0,no,nspin,nk),coef(no0,nk,nspin))
+      call inner_product(rt%tpsi0,psi_t,mat) ! mat(n,m) = < w_{n,k)(t) | u_{m,k}(t) >
+
+      if(yn_spinorbit=='y') then
+        mat(1:no0,1:no,1,1:nk) = mat(1:no0,1:no,1,1:nk) + mat(1:no0,1:no,2,1:nk)
+        mat(1:no0,1:no,2,1:nk) = mat(1:no0,1:no,1,1:nk)
+      end if
+
+#ifdef USE_HSE
+      if(screen_projection)then
+        call check_projection_capture()
+        if(capture%missing_norm>hsex_projection_capture_tol)then
+          call expand_projection()
+          deallocate(mat,coef)
+          cycle
+        endif
+      endif
+#endif
+      exit
+    enddo
 
     coef=0.d0
     do ispin=1,nspin
@@ -2269,21 +2310,31 @@ contains
     end do
 
 #ifdef USE_HSE
+    if(screen_projection)call system_clock(projection_finished)
     old_hsex_energy=hsex_induced_energy()
-    if(itt==hsex_screen_step.and.yn_hsex_update_w=='y')then
+    if(screen_projection.and.yn_hsex_update_w=='y')then
       call hsex_update_internal(itt,rt%system_proj,mg,rt%info_proj,rt%tpsi0,rt%htpsi0,rt%ttpsi0, &
         energy%esp(:,:,1),coef(:,:,1),rt%vloc0,stencil,rt%srg_proj,ppg)
     endif
-    if(itt==hsex_screen_step.and.hsex_probe_w=='none'.and.yn_hsex_update_w=='n')then
+    if(screen_projection.and.hsex_probe_w=='none'.and.yn_hsex_update_w=='n')then
       call hsex_snapshot(itt,rt%system_proj,mg,rt%info_proj,rt%tpsi0,rt%htpsi0,rt%ttpsi0, &
         energy%esp(:,:,1),coef(:,:,1),rt%vloc0,stencil,rt%srg_proj,ppg)
     endif
-    if(itt==hsex_screen_step.and.hsex_probe_w/='none')then
+    if(screen_projection.and.hsex_probe_w/='none')then
       call hsex_replace_w(hsex_probe_w,itt,rt%system_proj,mg,rt%info_proj,energy%esp(:,:,1),coef(:,:,1))
     endif
-    if(itt==hsex_screen_step.and.(yn_hsex_update_w=='y'.or.hsex_probe_w/='none'))then
+    if(screen_projection)call system_clock(screen_finished)
+    if(screen_projection.and.(yn_hsex_update_w=='y'.or.hsex_probe_w/='none'))then
       call hsex_stage(system,mg,info,psi_t,system%vec_Ac,2)
       energy%E_xc=energy%E_xc-old_hsex_energy+hsex_induced_energy()
+    endif
+    if(screen_projection)then
+      call system_clock(refresh_finished)
+      screen_times=dble([projection_finished-screen_started,screen_finished-projection_finished, &
+        refresh_finished-screen_finished,refresh_finished-screen_started])/screen_rate
+      call comm_get_max(screen_times,screen_max,4,info%icomm_rko)
+      if(comm_is_root(nproc_id_global))write(*,'(a,i10,4es18.8)') &
+        'HSEX_SCREEN_SECONDS step/projection/W/refresh/total ',itt,screen_max
     endif
     nullify(projection_action)
 #endif
@@ -2309,11 +2360,11 @@ contains
       end do
       end do
     end if
-    
+
     if(yn_out_intraband_current=='y') then
       call write_intraband_current
     end if
-    
+
 !        if(action=="proj_last ") then
 !       tconv = t_unit_energy%conv
 !       do ik=1,NK
@@ -2321,9 +2372,106 @@ contains
 !       end do
 
     return
-    
+
   contains
-  
+
+#ifdef USE_HSE
+    subroutine check_projection_capture()
+      use communication, only: comm_summation,comm_get_max
+      implicit none
+      real(8),allocatable :: norms(:,:),total_norms(:,:)
+      integer :: k,b,code
+      allocate(norms(no,nk),total_norms(no,nk));norms=0d0
+      do k=info%ik_s,info%ik_e
+        do b=1,no
+          norms(b,k)=system%hvol*sum(abs(psi_t%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,b,k,1))**2)
+        enddo
+      enddo
+      call comm_summation(norms,total_norms,size(norms),info%icomm_rko)
+      call projection_capture(mat(:,:,1,:),total_norms,system%rocc(:,:,1),system%wtk,nelec/2, &
+        hsex_projection_capture_tol,capture,code)
+      call comm_get_max(code,info%icomm_rko)
+      if(comm_is_root(nproc_id_global))then
+        write(*,'(a,i0,a,i0,a,es16.8)')'HSEX_PROJECTION_CAPTURE states=',no0,' rt_occupied=',no, &
+          ' missing_norm=',capture%missing_norm
+        write(*,'(a,5es19.10)')'HSEX_PROJECTION_POP propagated/projected/lost/electron/hole: ', &
+          capture%propagated_electrons,capture%projected_electrons,capture%lost_electrons, &
+          capture%excited_electrons,capture%holes
+        write(*,'(a,3es19.10)')'HSEX_PROJECTION_A endpoint: ',rt%system_proj%vec_Ac
+      endif
+      if(code/=0)error stop 'invalid nonthermal projection; previous W preserved'
+    end subroutine check_projection_capture
+
+    subroutine expand_projection()
+      use communication, only: comm_get_max
+      use salmon_global, only: yn_scalapack,yn_eigenexa
+      use initialization_sub, only: init_parallel_dft
+      use sendrecv_grid, only: dealloc_cache,create_sendrecv_neig,init_sendrecv_grid
+      implicit none
+      type(s_dft_system) :: next_system
+      type(s_parallel_info) :: next_info
+      type(s_orbital) :: next_orbitals
+      complex(8),allocatable :: old_vectors(:,:),rt_vectors(:,:),expanded(:,:)
+      integer :: old_count,new_count,limit,ngrid,k,code,local_code,neig(2,3)
+      real(8) :: root_dv
+#ifdef USE_OPENACC
+      error stop 'automatic auxiliary growth requires CPU; increase GS nstate for GPU projection'
+#else
+      if(yn_scalapack=='y'.or.yn_eigenexa=='y') &
+        error stop 'automatic auxiliary growth requires LAPACK; increase GS nstate for distributed eigensolvers'
+      old_count=rt%system_proj%no;ngrid=product(ie-is+1)
+      limit=hsex_projection_max_states
+      if(limit==0)limit=min(2*nstate,ngrid)
+      if(old_count>=limit)then
+        if(comm_is_root(nproc_id_global))write(*,'(a,i0,a,es16.8)') &
+          'HSEX_PROJECTION_REJECT cap=',limit,' missing_norm=',capture%missing_norm
+        error stop 'projection capture insufficient; increase hsex_projection_max_states; previous W preserved'
+      endif
+      new_count=min(limit,2*old_count)
+      next_system=rt%system_proj;next_system%no=new_count
+      deallocate(next_system%rocc)
+      allocate(next_system%rocc(new_count,nk,nspin));next_system%rocc=0d0
+      next_system%rocc(:old_count,:,:)=rt%system_proj%rocc
+      next_info=rt%info_proj
+      deallocate(next_info%io_s_all,next_info%io_e_all,next_info%numo_all,next_info%irank_io)
+      call init_parallel_dft(next_system,next_info)
+      call allocate_orbital_complex(nspin,mg,next_info,next_orbitals)
+      allocate(old_vectors(ngrid,old_count),rt_vectors(ngrid,no),expanded(ngrid,new_count))
+      root_dv=sqrt(system%hvol);code=0
+      do k=info%ik_s,info%ik_e
+        old_vectors=reshape(rt%tpsi0%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,:,k,1), &
+          [ngrid,old_count])*root_dv
+        rt_vectors=reshape(psi_t%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,:,k,1),[ngrid,no])*root_dv
+        call projection_seed(old_vectors,rt_vectors,expanded,local_code)
+        code=max(code,local_code)
+        if(local_code==0)next_orbitals%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,:,k,1)= &
+          reshape(expanded,[ie-is+1,new_count])/root_dv
+      enddo
+      call comm_get_max(code,info%icomm_rko)
+      if(code/=0)error stop 'auxiliary projection guesses rejected; previous W preserved'
+      call dealloc_cache(rt%srg_proj)
+      call deallocate_orbital(rt%tpsi0)
+      call deallocate_orbital(rt%htpsi0)
+      call deallocate_orbital(rt%ttpsi0)
+      call deallocate_orbital(rt%cg%pk)
+      call deallocate_orbital(rt%cg%pre_gk)
+      call deallocate_orbital(rt%cg%hpk)
+      rt%system_proj=next_system;rt%info_proj=next_info
+      call move_alloc(next_orbitals%zwf,rt%tpsi0%zwf)
+      rt%tpsi0%update_zwf_overlap=.false.
+      call allocate_orbital_complex(nspin,mg,rt%info_proj,rt%htpsi0)
+      call allocate_orbital_complex(nspin,mg,rt%info_proj,rt%ttpsi0)
+      rt%htpsi0%update_zwf_overlap=.false.;rt%ttpsi0%update_zwf_overlap=.false.
+      call create_sendrecv_neig(neig,rt%info_proj)
+      call init_sendrecv_grid(rt%srg_proj,mg,rt%info_proj%numo*rt%info_proj%numk*nspin, &
+        rt%info_proj%icomm_rko,neig)
+      deallocate(energy%esp);allocate(energy%esp(new_count,nk,nspin))
+      if(comm_is_root(nproc_id_global))write(*,'(a,i0,a,i0,a,i0)')'HSEX_PROJECTION_GROW old=',old_count, &
+        ' new=',new_count,' rt_occupied=',no
+#endif
+    end subroutine expand_projection
+#endif
+
     real(8) function projection_residual() result(residual)
       use communication, only: comm_get_max
       implicit none
@@ -2405,7 +2553,7 @@ contains
       call comm_summation(mat1,mat,no0*no*nspin*nk,info%icomm_rko)
 
     end subroutine inner_product
-    
+
     subroutine write_intraband_current
       use density_matrix, only:calc_current_decomposed
       use inputoutput, only: t_unit_current
@@ -2415,12 +2563,12 @@ contains
       implicit none
       real(8) :: curr_intra(3,nspin)
       real(8) :: curr_decomp(3,nspin,no0,nk)
-      
+
       call calc_current_decomposed(rt%system_proj,mg,stencil,rt%info_proj,rt%srg_proj,rt%tpsi0,ppg,curr_decomp)
 #ifdef USE_HSE
       if(kli_mode=='hsex')call hsex_current_decomposed(rt%system_proj,mg,rt%info_proj,rt%tpsi0,curr_decomp)
 #endif
-      
+
       curr_intra = 0d0
       do ispin=1,nspin_tmp
         do ik=1,nk
@@ -2432,7 +2580,7 @@ contains
           end do
         end do
       end do
-      
+
       if(comm_is_root(nproc_id_global))then
         write(ofl%fh_intra_current, "(F16.8)",advance='no') itt * dt * t_unit_time%conv
         if(nspin_tmp==1) then
@@ -2445,7 +2593,7 @@ contains
         end if
       end if
     end subroutine write_intraband_current
-    
+
   end subroutine projection
 
 !===================================================================================================================================

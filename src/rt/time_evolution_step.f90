@@ -26,7 +26,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #endif
   use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear
 #ifdef USE_HSE
-  use kli_hsex, only: hsex_stage,hsex_current,hsex_xc_energy,hsex_induced_energy
+  use kli_hsex, only: hsex_stage,hsex_current,hsex_xc_energy,hsex_induced_energy,hsex_add
+  use hsex_frozen_adapter, only: frozen_snapshot_probe
+  use kli_hsex, only: hsex_update_frozen,hsex_probe_coherent
   use kli_scf, only: apply_frozen,kli_diagnostics
   use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint,exx_ptcn_report_step
 #endif
@@ -35,6 +37,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use writefield
   use timer
   use salmon_global
+  use hsex_update_schedule, only: screen_update_due
   use taylor_sub
   use const, only: umass
   use sendrecv_grid, only: s_sendrecv_grid
@@ -87,6 +90,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
+  real(8) :: frozen_energy_before
   character(100) :: comment_line
   logical :: rion_update,pbeh_mesh_md,hybrid_mesh_rt
   real(8) :: rion_endpoint(3,system%nion)
@@ -337,7 +341,23 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   endif
 
   call timer_begin(LOG_CALC_PROJECTION)
-  if(projection_option/='no' .and. (itt==1.or.itt==itotNtime.or.itt==hsex_screen_step.or.mod(itt,out_projection_step)==0)) then
+#ifdef USE_HSE
+  if(hsex_w_solver=='frozen'.and.yn_hsex_update_w=='y'.and. &
+      screen_update_due(itt,hsex_screen_step,hsex_screen_interval))then
+    frozen_energy_before=hsex_induced_energy()
+    call hsex_update_frozen(itt,system,mg,info,spsi_out,V_local,stencil,srg,ppg)
+    call hsex_stage(system,mg,info,spsi_out,system%vec_Ac,2)
+    energy%E_xc=energy%E_xc-frozen_energy_before+hsex_induced_energy()
+  else if(hsex_frozen_rank>0.and.hsex_w_solver=='auto'.and.itt==hsex_screen_step)then
+    if(yn_hsex_coherent_optical=='y')then
+      call hsex_probe_coherent(system,mg,info,spsi_out,V_local,stencil,srg,ppg)
+    else
+      call frozen_snapshot_probe(system,mg,info,spsi_out,V_local,stencil,srg,ppg,hsex_add)
+    endif
+  endif
+#endif
+  if(projection_option/='no'.and.(itt==1.or.itt==itotNtime.or. &
+      screen_update_due(itt,hsex_screen_step,hsex_screen_interval).or.mod(itt,out_projection_step)==0))then
     call projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,spsi_out,energy,rt)
   end if
   call timer_end(LOG_CALC_PROJECTION)

@@ -281,7 +281,14 @@ module communication
 #define ABORT_MESSAGE(target,msg) if(target/=COMM_PROC_NULL) call abort_show_message(msg)
 #define UNUSED_VARIABLE(VAR)      if(.false.) call salmon_unusedvar(VAR)
 
+  public :: comm_thread_funneled
+
 contains
+  logical function comm_thread_funneled()
+    implicit none
+    comm_thread_funneled=.true.
+  end function comm_thread_funneled
+
   subroutine comm_init
     implicit none
     ! no operation

@@ -1,0 +1,71 @@
+! Small Gamma smoke test, not converged liquid-water production parameters.
+! Cutoff below is 0.25 Ha in eV; rank0 starts at twice the occupied count.
+! Copy H_rps.dat and O_rps.dat from the SALMON sample pseudopotentials.
+&calculation
+  theory='dft'
+/
+
+&control
+  sysname = 'H2O'
+  write_gs_restart_data='all'
+/
+
+&units
+  unit_system='A_eV_fs'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 5.0d0, 5.0d0, 5.0d0
+  nstate = 8
+  nelec  = 8
+  nelem  = 2
+  natom  = 3
+/
+
+
+&pseudo
+  iZatom(1)=1
+  file_pseudo(1) = './H_rps.dat'
+  Lloc_ps(1)=1
+  iZatom(2)=8
+  file_pseudo(2) = './O_rps.dat'
+  Lloc_ps(2)=1
+/
+
+&functional
+ xc='pz'
+ yn_hsex_prepare_w='y',hsex_w_solver='pdep'
+ hsex_w_qgrid=1,1,1,hsex_w_boxes=2,hsex_w_cutoff=6.802846561497d0
+ hsex_pdep_rank=0,hsex_pdep_tol=1d-6,hsex_pdep_maxiter=40
+ hsex_pdep_basis_write='water-pdep-basis.bin'
+/
+
+&rgrid
+  num_rgrid = 16,16,16
+/
+
+&kgrid
+  num_kgrid=1,1,1
+/
+
+
+&scf
+  nscf = 1000
+ ncg=8
+ nscf_init_no_diagonal=0
+  threshold=1d-13
+/
+
+&atomic_coor
+  'H'      3.55908403      2.48190608      2.50003451  1
+  'H'      2.48189998      3.55908246      2.50002600  1
+  'O'      2.61768087      2.61768023      2.49992927  2
+/
+
+
+&parallel
+ nproc_k=1
+ nproc_ob=4
+ nproc_rgrid=1,1,1
+/

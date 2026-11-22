@@ -28,6 +28,9 @@ use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
 use initialization_rt_sub
+#ifdef USE_HSE
+use hsex_sternheimer_optical, only: sternheimer_optical_probe
+#endif
 use checkpoint_restart_sub
 use jellium, only: check_condition_jm
 use nvtx_wrapper
@@ -79,6 +82,18 @@ call initialization_rt( Mit, system, energy, ewald, rt, md, &
                         spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                         V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                         pp, ppg, ppn, unfold )
+
+#ifdef USE_HSE
+if(yn_hsex_sternheimer_optical=='y')then
+  call sternheimer_optical_probe(lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
+    spsi_in,V_local,fg,poisson)
+  ! Diagnostic-only invocation. The matched physical impulse is a separate
+  ! ordinary RT run, so the probe cannot perturb its initial state or caches.
+  call finalize_xc(xc_func)
+  call timer_end(LOG_TOTAL)
+  return
+endif
+#endif
 
 #ifdef __FUJITSU
 call fapp_start('time_evol',1,0) ! performance profiling

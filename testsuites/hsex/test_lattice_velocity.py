@@ -28,21 +28,28 @@ ROOT = Path(__file__).resolve().parents[2]
 DRIVER = '''program lattice_velocity
 use mpi
 use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital,s_scalar
-use salmon_global, only: num_kgrid,cval
-use kli_hsex, only: hsex_init,hsex_stage,hsex_current_decomposed
+use salmon_global, only: num_kgrid,cval,hsex_w_scale,hsex_screening_w
+use kli_hsex, only: hsex_init,hsex_stage,hsex_current_decomposed,hsex_current,hsex_add, &
+  hsex_induced_energy,hsex_checkpoint,hsex_restore
 implicit none
 type(s_dft_system)::sys
 type(s_rgrid)::mg
 type(s_parallel_info)::info
-type(s_orbital)::orb
+type(s_orbital)::orb,hx
 type(s_scalar)::xc
-real(8)::curr(3,1,1,4),pi
+real(8)::curr(3,1,1,4),pi,total(3),local_action(4),action(4)
+character(32)::argument,mode
 integer::i,j,rank,nproc,ierr,provided
 call MPI_Init_thread(MPI_THREAD_FUNNELED,provided,ierr)
 if(provided<MPI_THREAD_FUNNELED)error stop 'MPI funneled threads unavailable'
 call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
 call MPI_Comm_size(MPI_COMM_WORLD,nproc,ierr)
 if(nproc>4)error stop 'test ranks must not exceed four'
+call get_command_argument(1,argument)
+read(argument,*)hsex_w_scale
+call get_command_argument(2,mode)
+call get_command_argument(3,argument)
+if(len_trim(argument)>0)hsex_screening_w=argument
 sys%no=1;sys%nspin=1;sys%nk=4;sys%nion=1;sys%hvol=1d0
 sys%primitive_a=0d0
 do i=1,3
@@ -66,11 +73,26 @@ allocate(xc%f(1,1,1));xc%f=0d0
 num_kgrid=[4,1,1];cval=1d0
 call hsex_init(sys,mg,info,orb,0d0,.true.,xc)
 call hsex_stage(sys,mg,info,orb,[.13d0,0d0,0d0],2)
+sys%vec_Ac=[.13d0,0d0,0d0]
+if(mode=='write')call hsex_checkpoint('',7,sys,info)
+if(mode=='restore')call hsex_restore('',7,sys,mg,info,orb)
 curr=0d0
 call hsex_current_decomposed(sys,mg,info,orb,curr)
+total=0d0
+call hsex_current(total)
+hx=orb;hx%zwf=0d0
+call hsex_add(sys,mg,info,orb,hx)
+local_action=0d0
+do i=info%ik_s,info%ik_e
+  local_action(i)=real(hx%zwf(1,1,1,1,1,i,1),8)
+enddo
+call MPI_Reduce(local_action,action,4,MPI_DOUBLE_PRECISION,MPI_SUM,0,MPI_COMM_WORLD,ierr)
 if(rank==0)then
   open(11,file='velocity.bin',form='unformatted',access='stream')
   write(11)curr
+  close(11)
+  open(11,file='action-energy.bin',form='unformatted',access='stream')
+  write(11)action,total,hsex_induced_energy()
   close(11)
 endif
 call MPI_Finalize(ierr)
@@ -232,7 +254,7 @@ def run(build, ranks, benchmark=0, threads=(1,), report=None):
             if report is not None:
                 report.write_text(json.dumps(reports,indent=2)+'\n')
             return
-        subprocess.run(['mpiexec','-n',str(ranks),str(tmp/'test')],cwd=tmp,env=env,check=True)
+        subprocess.run(['mpiexec','-n',str(ranks),str(tmp/'test'),'1','write'],cwd=tmp,env=env,check=True)
         actual = np.fromfile(tmp/'velocity.bin',dtype='=f8').reshape(4,3)
         occupations = 1+.2*(-1.)**np.arange(4)
         A = np.array([.13,0,0])
@@ -246,6 +268,68 @@ def run(build, ranks, benchmark=0, threads=(1,), report=None):
         assert np.max(abs(expected[:,0])) > .05
         np.testing.assert_allclose(actual,expected,rtol=1e-8,atol=2e-10)
         print(f'actual HSEX lattice velocity finite difference PASS: {ranks} MPI; max error {np.max(abs(actual-expected)):.3e}')
+        base=np.fromfile(tmp/'action-energy.bin',dtype='=f8')
+        expected_action=np.sqrt(occupations)*(np.exp(1j*(k+A)@R.T)@kernel).real
+        expected_energy=-np.sum(abs(density(A)-density(np.zeros(3)))**2)
+        np.testing.assert_allclose(base[:4],expected_action,atol=2e-12)
+        np.testing.assert_allclose(base[4:7],2*expected.sum(axis=0)/4,atol=2e-10)
+        np.testing.assert_allclose(base[7],expected_energy,atol=2e-12)
+        command=['mpiexec','-n',str(ranks),str(tmp/'test')]
+        source=bytearray((tmp/'hsex-w.bin').read_bytes())
+        source[:4]=b'HXL1'
+        v_offset=40+8*(9+3*4+3)
+        w_offset=v_offset+8*(1+1+3*4)
+        source[v_offset:v_offset+16]=np.array([3.,0.],dtype='=f8').tobytes()
+        source[w_offset:]=(np.frombuffer(source[w_offset:],dtype='=f8')*.7).tobytes()
+        (tmp/'lda.bin').write_bytes(source)
+        subprocess.run([*command,'1','write','lda.bin'],cwd=tmp,env=env,check=True)
+        np.testing.assert_allclose(np.fromfile(tmp/'action-energy.bin',dtype='=f8'),.7*base,atol=2e-12)
+        subprocess.run([*command,'1','restore','lda.bin'],cwd=tmp,env=env,check=True)
+        np.testing.assert_allclose(np.fromfile(tmp/'action-energy.bin',dtype='=f8'),.7*base,atol=2e-12)
+        for offset,value in ((4,2),(40,float('nan')),(v_offset,float('nan')),
+                             (v_offset+8,float('inf')),(v_offset+16,float('nan')),
+                             (w_offset,float('nan')),(w_offset,float('-inf'))):
+            damaged_source=bytearray(source)
+            dtype='=i4' if offset==4 else '=f8'
+            data=np.array([value],dtype=dtype).tobytes()
+            damaged_source[offset:offset+len(data)]=data
+            (tmp/'bad-lda.bin').write_bytes(damaged_source)
+            result=subprocess.run([*command,'1','write','bad-lda.bin'],cwd=tmp,env=env,capture_output=True,timeout=30)
+            assert result.returncode, ('Invalid independent LDA W accepted',offset)
+        original_reference=(tmp/'hsex-w.bin').read_bytes()
+        bad_reference=bytearray(original_reference)
+        bad_reference[v_offset:v_offset+8]=np.array([7.],dtype='=f8').tobytes()
+        (tmp/'hsex-w.bin').write_bytes(bad_reference)
+        result=subprocess.run([*command,'1','write','lda.bin'],cwd=tmp,env=env,capture_output=True,timeout=30)
+        assert result.returncode, 'Independent LDA W bypassed the TB reference check'
+        (tmp/'hsex-w.bin').write_bytes(original_reference)
+        wrong_tag=bytearray(source);wrong_tag[:4]=b'HXT1'
+        (tmp/'bad-lda.bin').write_bytes(wrong_tag)
+        result=subprocess.run([*command,'1','write','bad-lda.bin'],cwd=tmp,env=env,capture_output=True,timeout=30)
+        assert result.returncode, 'Non-LDA W accepted as independent LDA screening'
+        print('HSEX_INDEPENDENT_LDA_REFERENCE_KERNEL_RESTART_REJECTION_PASS',flush=True)
+        for scale in (0.7,0.5,0.):
+            subprocess.run([*command,str(scale),'write'],cwd=tmp,env=env,check=True)
+            scaled=np.fromfile(tmp/'action-energy.bin',dtype='=f8')
+            np.testing.assert_allclose(scaled,scale*base,atol=2e-12)
+            subprocess.run([*command,str(scale),'restore'],cwd=tmp,env=env,check=True)
+            np.testing.assert_array_equal(np.fromfile(tmp/'action-energy.bin',dtype='=f8'),scaled)
+        subprocess.run([*command,'1','write'],cwd=tmp,env=env,check=True)
+        checkpoint=(tmp/'hsex-active.bin').read_bytes()
+        scale_offset=4+3*4+8*(9+6*4+2+1)
+        assert checkpoint[:4]==b'HXC3'
+        legacy=b'HXC2'+checkpoint[4:scale_offset]+checkpoint[scale_offset+8:]
+        (tmp/'hsex-active.bin').write_bytes(legacy)
+        subprocess.run([*command,'1','restore'],cwd=tmp,env=env,check=True)
+        for value,mode in [('0.7','restore'),('nan','write'),('inf','write'),('-0.1','write'),('1.1','write')]:
+            result=subprocess.run([*command,value,mode],cwd=tmp,env=env,capture_output=True,timeout=30)
+            assert result.returncode, (value,mode)
+        damaged=bytearray(checkpoint)
+        damaged[scale_offset:scale_offset+8]=np.array([np.nan],dtype='=f8').tobytes()
+        (tmp/'hsex-active.bin').write_bytes(damaged)
+        result=subprocess.run([*command,'1','restore'],cwd=tmp,env=env,capture_output=True,timeout=30)
+        assert result.returncode, 'Nonfinite checkpoint scale accepted'
+        print('HSEX_SCALE_ACTION_CURRENT_ENERGY_RESTART_PASS',flush=True)
 
 
 if __name__ == '__main__':

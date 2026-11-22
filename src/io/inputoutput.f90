@@ -288,8 +288,19 @@ contains
       & eta_mask
 
     namelist/functional/ &
-      & hsex_screen_step,hsex_probe_w,yn_hsex_update_w,yn_hsex_prepare_w,hsex_w_qgrid,hsex_w_boxes,hsex_w_cutoff, &
-      & hsex_w_eta,hsex_w_head_tol,hsex_w_eta_tol,yn_hsex_head_only, &
+      & hsex_screen_step,hsex_screen_interval,hsex_probe_w,yn_hsex_update_w,yn_hsex_prepare_w, &
+      & hsex_frozen_rank,hsex_frozen_qpoint,hsex_frozen_tol,yn_hsex_frozen_reference,yn_hsex_frozen_optical,hsex_frozen_gamma, &
+      & hsex_frozen_parallel,hsex_frozen_precondition,hsex_frozen_nproc_q,hsex_frozen_closure, &
+      & hsex_frozen_window,hsex_frozen_window_time, &
+      & yn_hsex_coherent_optical,hsex_coherent_omega,hsex_coherent_axis, &
+      & yn_hsex_sternheimer_optical,hsex_sternheimer_kernel, &
+      & hsex_w_qgrid,hsex_w_boxes,hsex_w_cutoff, &
+      & hsex_w_eta,hsex_w_head_tol,hsex_w_eta_tol,hsex_w_scale,hsex_screening_w,hsex_w_solver,yn_hsex_head_only, &
+      & hsex_projection_max_states,hsex_projection_capture_tol, &
+      & hsex_pdep_rank,hsex_pdep_qpoint,hsex_pdep_reference, &
+      & hsex_reduced_target,hsex_reduced_qcount,hsex_reduced_maxrank,hsex_reduced_tol,hsex_reduced_batch, &
+      & yn_hsex_reduced_symmetry,yn_hsex_reduced_reference, &
+      & hsex_pdep_tol,hsex_pdep_maxiter,hsex_pdep_basis_read,hsex_pdep_basis_write, &
       & yn_out_kli_hamiltonian,yn_kli_rt_box_check,kli_mode,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter, &
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, &
@@ -770,7 +781,29 @@ contains
     yn_hsex_head_only='n'
     hsex_w_head_tol=.05d0
     hsex_w_eta_tol=.02d0
-    hsex_screen_step=0
+    hsex_screening_w='none'
+    hsex_w_solver='auto'
+    hsex_pdep_rank=0;hsex_pdep_qpoint=[1,0,0];hsex_pdep_reference='pdep-reference.bin'
+    hsex_reduced_target=0;hsex_reduced_qcount=4;hsex_reduced_maxrank=384
+    hsex_reduced_tol=1d-6;hsex_reduced_batch=4
+    yn_hsex_reduced_symmetry='n';yn_hsex_reduced_reference='n'
+    hsex_pdep_tol=1d-6;hsex_pdep_maxiter=40;hsex_pdep_basis_read='none';hsex_pdep_basis_write='none'
+    hsex_projection_max_states=0
+    hsex_projection_capture_tol=1d-8
+    hsex_w_scale=1d0
+    hsex_screen_step=0;hsex_screen_interval=0
+    hsex_frozen_rank=0;hsex_frozen_qpoint=[1,0,0];hsex_frozen_tol=1d-5;yn_hsex_frozen_reference='n'
+    yn_hsex_frozen_optical='n'
+    hsex_frozen_parallel='legacy'
+    hsex_frozen_precondition='none'
+    hsex_frozen_nproc_q=1
+    hsex_frozen_window='none'
+    hsex_frozen_window_time=.5d0/.024188843265857d0*utime_from_au
+    hsex_frozen_closure='strict'
+    hsex_frozen_gamma='shell'
+    yn_hsex_coherent_optical='n';hsex_coherent_omega=.125d0*uenergy_from_au;hsex_coherent_axis=3
+    yn_hsex_sternheimer_optical='n'
+    hsex_sternheimer_kernel='both'
     hsex_probe_w='none'
     yn_out_kli_hamiltonian='n'
     yn_kli_rt_box_check='n'
@@ -1407,14 +1440,64 @@ contains
     call comm_bcast(yn_hsex_head_only,nproc_group_global)
     call comm_bcast(hsex_w_head_tol,nproc_group_global)
     call comm_bcast(hsex_w_eta_tol,nproc_group_global)
+    call comm_bcast(hsex_w_scale,nproc_group_global)
+    call comm_bcast(hsex_screening_w,nproc_group_global)
+    call comm_bcast(hsex_w_solver,nproc_group_global)
+    call string_lowercase(hsex_w_solver)
+    call comm_bcast(hsex_pdep_tol,nproc_group_global)
+    call comm_bcast(hsex_pdep_maxiter,nproc_group_global)
+    call comm_bcast(hsex_pdep_basis_read,nproc_group_global)
+    call comm_bcast(hsex_pdep_basis_write,nproc_group_global)
+    call comm_bcast(yn_hsex_reduced_reference,nproc_group_global)
+    call comm_bcast(yn_hsex_reduced_symmetry,nproc_group_global)
+    call comm_bcast(hsex_reduced_batch,nproc_group_global)
+    call comm_bcast(hsex_reduced_target,nproc_group_global)
+    call comm_bcast(hsex_reduced_qcount,nproc_group_global)
+    call comm_bcast(hsex_reduced_maxrank,nproc_group_global)
+    call comm_bcast(hsex_reduced_tol,nproc_group_global)
+    call comm_bcast(hsex_pdep_rank,nproc_group_global)
+    call comm_bcast(hsex_pdep_qpoint,nproc_group_global)
+    call comm_bcast(hsex_pdep_reference,nproc_group_global)
+    call comm_bcast(hsex_projection_max_states,nproc_group_global)
+    call comm_bcast(hsex_projection_capture_tol,nproc_group_global)
     hsex_w_cutoff=hsex_w_cutoff*uenergy_to_au
     hsex_w_eta=hsex_w_eta*uenergy_to_au
+    call comm_bcast(hsex_screen_interval,nproc_group_global)
+    call comm_bcast(hsex_frozen_rank,nproc_group_global)
+    call comm_bcast(hsex_frozen_qpoint,nproc_group_global)
+    call comm_bcast(hsex_frozen_tol,nproc_group_global)
+    call comm_bcast(yn_hsex_frozen_reference,nproc_group_global)
+    call comm_bcast(yn_hsex_frozen_optical,nproc_group_global)
+    call comm_bcast(hsex_frozen_parallel,nproc_group_global)
+    call string_lowercase(hsex_frozen_parallel)
+    call comm_bcast(hsex_frozen_precondition,nproc_group_global)
+    call string_lowercase(hsex_frozen_precondition)
+    call comm_bcast(hsex_frozen_nproc_q,nproc_group_global)
+    call comm_bcast(hsex_frozen_window,nproc_group_global)
+    call string_lowercase(hsex_frozen_window)
+    call comm_bcast(hsex_frozen_window_time,nproc_group_global)
+    hsex_frozen_window_time=hsex_frozen_window_time*utime_to_au
+    call comm_bcast(hsex_frozen_closure,nproc_group_global)
+    call string_lowercase(hsex_frozen_closure)
+    call comm_bcast(hsex_frozen_gamma,nproc_group_global)
+    call string_lowercase(hsex_frozen_gamma)
+    call comm_bcast(yn_hsex_coherent_optical,nproc_group_global)
+    call string_lowercase(yn_hsex_coherent_optical)
+    call comm_bcast(yn_hsex_sternheimer_optical,nproc_group_global)
+    call string_lowercase(yn_hsex_sternheimer_optical)
+    call comm_bcast(hsex_sternheimer_kernel,nproc_group_global)
+    call string_lowercase(hsex_sternheimer_kernel)
+    call comm_bcast(hsex_coherent_omega,nproc_group_global)
+    call comm_bcast(hsex_coherent_axis,nproc_group_global)
+    hsex_coherent_omega=hsex_coherent_omega*uenergy_to_au
     call comm_bcast(hsex_screen_step,nproc_group_global)
     call comm_bcast(hsex_probe_w,nproc_group_global)
     call comm_bcast(yn_out_kli_hamiltonian,nproc_group_global)
     call string_lowercase(yn_out_kli_hamiltonian)
     call string_lowercase(yn_hsex_update_w)
     call string_lowercase(yn_hsex_prepare_w)
+    call string_lowercase(yn_hsex_frozen_reference)
+    call string_lowercase(yn_hsex_frozen_optical)
     call string_lowercase(yn_hsex_head_only)
     call comm_bcast(yn_kli_rt_box_check,nproc_group_global)
     call string_lowercase(yn_kli_rt_box_check)
@@ -2561,6 +2644,43 @@ contains
       write(fh_variables_log, *) "# yn_hsex_head_only=",yn_hsex_head_only
       write(fh_variables_log, *) "# hsex_w_head_tol=",hsex_w_head_tol
       write(fh_variables_log, *) "# hsex_w_eta_tol=",hsex_w_eta_tol
+      write(fh_variables_log, *) "# hsex_w_scale=",hsex_w_scale
+      write(fh_variables_log, *) "# hsex_screening_w=",trim(hsex_screening_w)
+      write(fh_variables_log, *) "# hsex_w_solver=",trim(hsex_w_solver)
+      write(fh_variables_log, *) "# hsex_pdep_tol=",hsex_pdep_tol
+      write(fh_variables_log, *) "# hsex_pdep_maxiter=",hsex_pdep_maxiter
+      write(fh_variables_log, *) "# hsex_pdep_basis_read=",trim(hsex_pdep_basis_read)
+      write(fh_variables_log, *) "# hsex_pdep_basis_write=",trim(hsex_pdep_basis_write)
+      write(fh_variables_log, *) "# yn_hsex_reduced_reference=",yn_hsex_reduced_reference
+      write(fh_variables_log, *) "# yn_hsex_reduced_symmetry=",yn_hsex_reduced_symmetry
+      write(fh_variables_log, *) "# hsex_reduced_batch=",hsex_reduced_batch
+      write(fh_variables_log, *) "# hsex_reduced_target=",hsex_reduced_target
+      write(fh_variables_log, *) "# hsex_reduced_qcount=",hsex_reduced_qcount
+      write(fh_variables_log, *) "# hsex_reduced_maxrank=",hsex_reduced_maxrank
+      write(fh_variables_log, *) "# hsex_reduced_tol=",hsex_reduced_tol
+      write(fh_variables_log, *) "# hsex_pdep_rank=",hsex_pdep_rank
+      write(fh_variables_log, *) "# hsex_pdep_qpoint=",hsex_pdep_qpoint
+      write(fh_variables_log, *) "# hsex_pdep_reference=",trim(hsex_pdep_reference)
+      write(fh_variables_log, *) "# hsex_projection_max_states=",hsex_projection_max_states
+      write(fh_variables_log, *) "# hsex_projection_capture_tol=",hsex_projection_capture_tol
+      write(fh_variables_log, *) "# hsex_screen_interval=",hsex_screen_interval
+      write(fh_variables_log, *) "# hsex_frozen_rank=",hsex_frozen_rank
+      write(fh_variables_log, *) "# hsex_frozen_qpoint=",hsex_frozen_qpoint
+      write(fh_variables_log, *) "# hsex_frozen_tol=",hsex_frozen_tol
+      write(fh_variables_log, *) "# yn_hsex_frozen_reference=",yn_hsex_frozen_reference
+      write(fh_variables_log, *) "# yn_hsex_frozen_optical=",yn_hsex_frozen_optical
+      write(fh_variables_log, *) "# hsex_frozen_parallel=",hsex_frozen_parallel
+      write(fh_variables_log, *) "# hsex_frozen_precondition=",hsex_frozen_precondition
+      write(fh_variables_log, *) "# hsex_frozen_nproc_q=",hsex_frozen_nproc_q
+      write(fh_variables_log, *) "# hsex_frozen_window=",hsex_frozen_window
+      write(fh_variables_log, *) "# hsex_frozen_window_time=",hsex_frozen_window_time
+      write(fh_variables_log, *) "# hsex_frozen_closure=",hsex_frozen_closure
+      write(fh_variables_log, *) "# hsex_frozen_gamma=",hsex_frozen_gamma
+      write(fh_variables_log, *) "# yn_hsex_coherent_optical=",yn_hsex_coherent_optical
+      write(fh_variables_log, *) "# yn_hsex_sternheimer_optical=",yn_hsex_sternheimer_optical
+      write(fh_variables_log, *) "# hsex_sternheimer_kernel=",hsex_sternheimer_kernel
+      write(fh_variables_log, *) "# hsex_coherent_omega=",hsex_coherent_omega
+      write(fh_variables_log, *) "# hsex_coherent_axis=",hsex_coherent_axis
       write(fh_variables_log, *) "# hsex_screen_step=",hsex_screen_step
       write(fh_variables_log, *) "# hsex_probe_w=",trim(hsex_probe_w)
       write(fh_variables_log, *) "# yn_out_kli_hamiltonian=",yn_out_kli_hamiltonian
@@ -3166,7 +3286,7 @@ contains
     use misc_routines, only: string_lowercase
     implicit none
     character(len(xc)) :: xc_key
-    logical :: spinor_gs_screen
+    logical :: spinor_gs_screen,gamma_screen
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf,learned_mesh_checkpoint
@@ -3288,38 +3408,289 @@ contains
     call string_lowercase(xc_key)
     call yn_argument_check(yn_out_kli_hamiltonian)
     call yn_argument_check(yn_hsex_update_w)
+    call yn_argument_check(yn_hsex_reduced_reference)
+    if(yn_hsex_reduced_reference=='y'.and.hsex_w_solver/='reduced') &
+      error stop 'same-GS reference W requires reduced solver'
+    call yn_argument_check(yn_hsex_reduced_symmetry)
+    if(yn_hsex_reduced_symmetry=='y'.and.hsex_reduced_target<1.and.hsex_w_solver/='reduced') &
+      error stop 'response symmetry requires the fixed-k diagnostic'
+    if(hsex_reduced_target<0.or.hsex_reduced_qcount<1.or.hsex_reduced_maxrank<1.or.hsex_reduced_batch<1) &
+      error stop 'invalid fixed-k response diagnostic controls'
+    if(.not.ieee_is_finite(hsex_reduced_tol))error stop 'nonfinite reduced response tolerance'
+    if(hsex_reduced_tol<=0d0.or.hsex_reduced_tol>=1d0)error stop 'invalid reduced response tolerance'
+    if(hsex_w_solver=='reduced')then
+#ifdef USE_OPENACC
+      error stop 'reduced screening supports CPU only'
+#endif
+      if(theory/='dft'.or.yn_hsex_prepare_w/='y'.or.spin/='unpolarized'.or.kli_mode/='off'.or. &
+          yn_spinorbit/='n'.or.temperature>=0d0.or.nstate<=nelec/2.or.hsex_reduced_target/=0.or.hsex_pdep_rank/=0) &
+        error stop 'reduced screening requires scalar insulating non-SIC GS preparation'
+      if(product(num_kgrid)<=1.or.any(nproc_rgrid/=1).or.nproc_ob/=1.or.index(yn_symmetry,'y')>0) &
+        error stop 'reduced screening requires full k/grid and k-only MPI'
+    endif
+    if(hsex_reduced_target>0)then
+#ifndef USE_HSE
+      error stop 'fixed-k response diagnostic requires USE_HSE'
+#endif
+#ifdef USE_OPENACC
+      error stop 'fixed-k response diagnostic supports CPU only'
+#endif
+      if(theory/='dft'.or.yn_hsex_prepare_w/='y'.or.hsex_w_solver/='sternheimer'.or.hsex_pdep_rank/=0) &
+        error stop 'fixed-k response diagnostic requires GS sternheimer preparation without PDEP'
+      if(product(num_kgrid)<=1.or.hsex_reduced_target>product(num_kgrid)) &
+        error stop 'fixed-k response target is outside the electronic mesh'
+      if(spin/='unpolarized'.or.yn_spinorbit/='n'.or.kli_mode/='off'.or.temperature>=0d0.or.nstate<=nelec/2) &
+        error stop 'fixed-k response diagnostic requires scalar closed-shell insulating equilibrium GS'
+      if(any(nproc_rgrid/=1).or.nproc_ob/=1.or.index(yn_symmetry,'y')>0) &
+        error stop 'fixed-k response diagnostic requires full grid/full k mesh and k-only MPI'
+      if(yn_hsex_head_only/='n')error stop 'fixed-k response diagnostic is separate from optical head tests'
+    endif
+    if(hsex_pdep_rank< -1)error stop 'PDEP rank: -1 reference, 0 disabled, positive diagnostic rank'
+    gamma_screen=all(num_kgrid==1).and.(hsex_w_solver=='pdep'.or.hsex_w_solver=='sternheimer')
+#ifdef USE_OPENACC
+    if(gamma_screen.and.yn_hsex_prepare_w=='y')error stop 'Gamma screening currently supports CPU only'
+#endif
+    if(gamma_screen.and.yn_hsex_prepare_w=='y')then
+      if(spin/='unpolarized'.or.yn_spinorbit/='n'.or.kli_mode/='off'.or.temperature>=0d0.or.nstate<=nelec/2) &
+        error stop 'Gamma screening requires scalar insulating non-SIC GS with an empty gap probe'
+      if(hsex_w_solver=='sternheimer'.and.hsex_pdep_rank/=0) &
+        error stop 'Gamma full reference uses hsex_pdep_rank=0'
+    endif
+    if(.not.ieee_is_finite(hsex_pdep_tol))error stop 'nonfinite PDEP residual tolerance'
+    if(hsex_pdep_tol<=0d0.or.hsex_pdep_maxiter<1)error stop 'invalid PDEP convergence controls'
+    if(hsex_w_solver=='pdep')then
+#ifdef USE_OPENACC
+      error stop 'Gamma PDEP currently supports CPU only'
+#endif
+      if(.not.gamma_screen.or.nproc_k/=1.or.any(nproc_rgrid/=1).or.index(yn_symmetry,'y')>0) &
+        error stop 'Gamma PDEP requires Gamma-only full grid, no symmetry and orbital MPI'
+      if(theory/='dft'.or.yn_hsex_prepare_w/='y'.or.spin/='unpolarized'.or.kli_mode/='off'.or. &
+          temperature>=0d0.or.nstate<=nelec/2.or.yn_spinorbit/='n'.or.hsex_pdep_rank<0) &
+        error stop 'Gamma PDEP requires closed-shell insulating GS preparation and an empty gap probe'
+      if(hsex_pdep_basis_read/='none'.and.hsex_pdep_basis_read==hsex_pdep_basis_write) &
+        error stop 'PDEP basis output must use a new path'
+    else if(hsex_pdep_basis_read/='none'.or.hsex_pdep_basis_write/='none')then
+      error stop 'PDEP basis files require Gamma pdep solver'
+    endif
+    if(hsex_pdep_rank/=0.and.hsex_w_solver/='pdep')then
+#ifndef USE_HSE
+      error stop 'PDEP diagnostic requires USE_HSE'
+#endif
+#ifdef USE_OPENACC
+      error stop 'PDEP diagnostic currently supports CPU only'
+#endif
+      if(theory/='dft'.or.yn_hsex_prepare_w/='y'.or.hsex_w_solver/='sternheimer') &
+        error stop 'PDEP diagnostic requires GS preparation and sternheimer solver'
+      if(spin/='unpolarized'.or.yn_spinorbit/='n'.or.kli_mode/='off') &
+        error stop 'PDEP diagnostic requires scalar non-SIC equilibrium GS'
+      if(nstate<nelec/2+1.or.temperature>0d0)error stop 'PDEP diagnostic needs insulating GS and one probe empty state'
+      if(any(nproc_rgrid/=1).or.nproc_ob/=1)error stop 'PDEP diagnostic supports k-only MPI'
+      if(len_trim(hsex_pdep_reference)==0)error stop 'PDEP reference path is empty'
+    endif
+    if(.not.ieee_is_finite(hsex_projection_capture_tol))error stop 'nonfinite HSEX projection capture tolerance'
+    if(hsex_projection_capture_tol<=0d0.or.hsex_projection_capture_tol>=1d0) &
+      error stop 'HSEX projection capture tolerance must lie between zero and one'
+    if(hsex_projection_max_states<0)error stop 'HSEX projection maximum must be nonnegative'
+    if(hsex_screen_step>0)then
+      if(hsex_projection_max_states>0.and.hsex_projection_max_states<nstate) &
+        error stop 'HSEX projection maximum must be at least nstate'
+      ! hgs inputs may not have resolved num_rgrid yet. Check the actual grid
+      ! dimension in init_projection, after initialization has completed.
+    endif
+
+    if(.not.ieee_is_finite(hsex_w_scale))error stop 'nonfinite HSEX W scale'
+    if(hsex_w_scale<0d0.or.hsex_w_scale>1d0)error stop 'HSEX W scale must lie between zero and one'
+    if(hsex_w_scale/=1d0.and.kli_mode/='hsex')error stop 'nondefault HSEX W scale requires kli_mode=hsex'
     call yn_argument_check(yn_hsex_prepare_w)
+    call yn_argument_check(yn_hsex_frozen_reference)
+    call yn_argument_check(yn_hsex_frozen_optical)
+    select case(hsex_frozen_parallel)
+    case('legacy')
+      if(hsex_frozen_precondition/='none'.or.hsex_frozen_nproc_q/=1) &
+        error stop 'frozen precondition/q workers require pair MPI'
+    case('pairs')
+      if(hsex_w_solver/='frozen'.or.hsex_frozen_rank<1.or.yn_hsex_frozen_optical/='n') &
+        error stop 'frozen pair MPI requires full frozen W without stationary optical closure'
+      if(nproc_ob/=1.or.any(nproc_rgrid/=1).or.hsex_frozen_nproc_q<1) &
+        error stop 'frozen pair MPI requires k-only parallelism and positive q workers'
+      if(mod(nproc_k,hsex_frozen_nproc_q)/=0)error stop 'frozen q workers must divide k MPI count'
+    case default
+      error stop 'invalid frozen MPI selection'
+    end select
+    select case(hsex_frozen_precondition)
+    case('none','kinetic')
+    case default
+      error stop 'invalid frozen preconditioner'
+    end select
+    if(.not.ieee_is_finite(hsex_frozen_window_time))error stop 'nonfinite frozen window time'
+    if(hsex_frozen_window_time<=0d0)error stop 'positive frozen window time required'
+    select case(hsex_frozen_window)
+    case('none')
+    case('gaussian','exponential')
+      if(hsex_frozen_closure/='hermitian'.or.hsex_frozen_parallel/='pairs'.or. &
+         hsex_w_solver/='frozen'.or.hsex_frozen_rank<1.or.yn_hsex_update_w/='y'.or.kli_mode/='hsex') &
+        error stop 'finite-window W requires Hermitian frozen pair updates'
+      if(yn_restart/='n'.or.hsex_screening_w/='none'.or.yn_hsex_frozen_optical/='n') &
+        error stop 'finite-window reference currently excludes RT restarts, independent W and optical closure'
+    case default
+      error stop 'invalid frozen response window'
+    end select
+    select case(hsex_frozen_closure)
+    case('strict')
+    case('hermitian')
+      if(hsex_w_solver/='frozen'.or.hsex_frozen_rank<1.or.yn_hsex_frozen_optical/='n') &
+        error stop 'Hermitian static projection requires full frozen W without stationary optical closure'
+    case default
+      error stop 'invalid frozen static closure'
+    end select
+    select case(hsex_frozen_gamma)
+    case('shell')
+    case('q2')
+      if(hsex_w_solver/='frozen'.or.hsex_frozen_rank<1.or.yn_hsex_frozen_optical/='n') &
+        error stop 'q2 density Gamma requires frozen W and excludes stationary optical closure'
+    case default
+      error stop 'invalid frozen density Gamma selection'
+    end select
+    call yn_argument_check(yn_hsex_coherent_optical)
+    call yn_argument_check(yn_hsex_sternheimer_optical)
+    if(yn_hsex_sternheimer_optical=='y')then
+      select case(hsex_sternheimer_kernel)
+      case('both','selfconsistent','independent','density','reference')
+      case default
+        error stop 'invalid optical Sternheimer kernel selection'
+      end select
+      if(hsex_sternheimer_kernel=='selfconsistent'.and.yn_fix_func=='y') &
+        error stop 'selfconsistent optical Sternheimer needs variable Hartree/XC'
+      if(hsex_frozen_rank<1.or.kli_mode/='off'.or.xc_key/='tbmbj'.or. &
+          theory/='tddft_response'.or.ae_shape1/='impulse'.or.trans_longi/='tr'.or. &
+          nstate/=nelec/2.or.projection_option/='no'.or.yn_restart/='n'.or. &
+          yn_hsex_coherent_optical/='n'.or.yn_hsex_prepare_w/='n'.or.yn_hsex_update_w/='n'.or. &
+          hsex_screen_step/=0.or.hsex_screen_interval/=0.or.nenergy<1.or.de<=0d0.or.hsex_w_eta<=0d0) &
+        error stop 'optical Sternheimer requires unexcited occupied-only TB-mBJ impulse without HSEX'
+    endif
+    if(.not.ieee_is_finite(hsex_coherent_omega))error stop 'nonfinite coherent optical frequency'
+    if(hsex_coherent_omega<0d0.or.hsex_coherent_axis<1.or.hsex_coherent_axis>3) &
+      error stop 'invalid coherent optical frequency or axis'
+    if(yn_hsex_coherent_optical=='y')then
+      if(hsex_w_solver/='auto'.or.hsex_frozen_rank<1.or.yn_hsex_update_w/='n'.or. &
+          yn_hsex_frozen_optical/='n'.or.yn_hsex_frozen_reference/='n'.or.nstate/=nelec/2.or. &
+          (theory/='tddft_pulse'.and.theory/='tddft_response')) &
+        error stop 'coherent optical probe requires occupied-only RT auto diagnostic without W replacement'
+    endif
+    if(yn_hsex_frozen_optical=='y'.and.(hsex_w_solver/='frozen'.or.hsex_frozen_rank<1)) &
+      error stop 'frozen optical limit requires the full frozen solver'
+    if(hsex_frozen_rank<0.or..not.ieee_is_finite(hsex_frozen_tol))error stop 'invalid frozen response controls'
+    if(hsex_frozen_tol<=0d0)error stop 'positive frozen response tolerance required'
+    if(hsex_frozen_rank>0)then
+      if(nelec<2.or.mod(nelec,2)/=0)error stop 'frozen probe requires positive even electron count'
+#ifndef USE_HSE
+      error stop 'frozen response diagnostic requires USE_HSE'
+#endif
+#ifdef USE_OPENACC
+      error stop 'frozen response diagnostic supports CPU only'
+#endif
+      if(spin/='unpolarized'.or.yn_spinorbit/='n'.or.yn_periodic/='y'.or.temperature>=0d0.or. &
+          nproc_ob/=1.or.any(nproc_rgrid/=1).or.index(yn_symmetry,'y')>0) &
+        error stop 'frozen response diagnostic requires scalar full mesh and k-only MPI'
+      if(hsex_pdep_rank/=0.or.hsex_reduced_target/=0.or.hsex_probe_w/='none') &
+        error stop 'frozen response is separate from other response diagnostics and external W'
+      if(yn_hsex_sternheimer_optical=='y')then
+        if(hsex_w_solver/='auto')error stop 'optical Sternheimer requires auto diagnostic solver'
+      else if(hsex_w_solver=='frozen')then
+        if((theory/='tddft_pulse'.and.theory/='tddft_response').or.yn_hsex_update_w/='y'.or. &
+            yn_hsex_prepare_w/='n'.or.kli_mode/='hsex'.or.xc_key/='tbmbj'.or.projection_option/='no'.or. &
+            nstate/=nelec/2.or.yn_hsex_frozen_reference/='n'.or. &
+            hsex_screen_step<1.or.hsex_screen_step>nt)error stop 'frozen W needs occupied-only TB-mBJ HSEX RT updates'
+      else if(hsex_w_solver/='auto'.or.yn_hsex_update_w/='n'.or.hsex_screen_interval/=0)then
+        error stop 'frozen single-q diagnostics require auto solver without W replacement'
+      else if(theory=='dft')then
+        if(yn_hsex_prepare_w/='y'.or.kli_mode/='off'.or.nstate<=nelec/2) &
+          error stop 'frozen GS probe needs non-SIC preparation with auxiliary GS states'
+      else if(theory=='tddft_pulse'.or.theory=='tddft_response')then
+        if(yn_hsex_prepare_w/='n'.or.kli_mode/='hsex'.or.xc/='tbmbj'.or.projection_option/='no'.or. &
+            hsex_screen_step<1.or.hsex_screen_step>nt)error stop 'frozen RT probe needs HSEX and no eigenstate projection'
+      else
+        error stop 'frozen response supports scalar GS or HSEX RT snapshots'
+      endif
+    else if(yn_hsex_frozen_reference/='n')then
+      error stop 'frozen reference requires a frozen probe'
+    endif
+    if(hsex_screen_interval<0)error stop 'negative screening update interval'
+    if(hsex_screen_interval>0)then
+      if(yn_hsex_update_w/='y'.or.hsex_screen_step<1.or.hsex_probe_w/='none') &
+        error stop 'periodic screening requires internal W update and a positive first step'
+    endif
     if(yn_hsex_update_w=='y')then
       if(hsex_probe_w/='none'.or.hsex_screen_step<1)error stop 'internal W update needs a screen step and no external W'
     endif
     spinor_gs_screen=yn_hsex_prepare_w=='y'.and.spin=='noncollinear'.and.yn_spinorbit=='y'.and. &
       xc_key=='pz'.and.kli_mode=='off'.and.temperature>0d0
     call yn_argument_check(yn_hsex_head_only)
+    select case(hsex_w_solver)
+    case('frozen')
+      if(hsex_frozen_rank<1)error stop 'frozen W requires a positive response rank'
+    case('auto')
+    case('dense')
+      if(spinor_gs_screen)error stop 'dense screening is not supported for SOC GS'
+    case('pdep')
+    case('sternheimer','hybrid','reduced')
+      if(spinor_gs_screen.and.hsex_w_solver=='hybrid')error stop 'hybrid screening is a scalar option'
+#ifdef USE_OPENACC
+      if(hsex_w_solver=='hybrid'.and.yn_hsex_update_w=='y')error stop 'hybrid RT screening supports CPU only'
+#endif
+      if(.not.spinor_gs_screen)then
+        if(.not.((yn_hsex_prepare_w=='y'.and.theory=='dft').or. &
+            (hsex_w_solver=='hybrid'.and.yn_hsex_update_w=='y'.and.kli_mode=='hsex'.and. &
+            (theory=='tddft_pulse'.or.theory=='tddft_response'))).or.spin/='unpolarized') &
+          error stop 'scalar screening needs insulating GS preparation or hybrid RT internal updates'
+      endif
+    case default
+      error stop 'hsex_w_solver must be auto, dense, hybrid, sternheimer, reduced, frozen or pdep'
+    end select
     if(yn_hsex_head_only=='y'.and..not.spinor_gs_screen) &
       error stop 'head-only screening requires finite-temperature PZ SOC GS preparation'
+    if(hsex_screening_w/='none')then
+      if(kli_mode/='hsex'.or.xc_key/='tbmbj'.or. &
+         (theory/='tddft_pulse'.and.theory/='tddft_response').or. &
+         yn_hsex_update_w/='n'.or.hsex_probe_w/='none') &
+        error stop 'independent LDA W requires TB-mBJ HSEX RT without pump W replacement'
+    endif
     if(yn_hsex_prepare_w=='y')then
-      if(theory/='dft'.or..not.(kli_mode=='static'.or.(xc_key=='tbmbj'.and.kli_mode=='off').or. &
-          spinor_gs_screen))error stop 'internal GS screening requires static KLI, TB-mBJ, or finite-temperature PZ SOC GS'
+      if(theory/='dft'.or..not.(kli_mode=='static'.or. &
+          ((xc_key=='tbmbj'.or.xc_key=='pz').and.kli_mode=='off').or.spinor_gs_screen)) &
+        error stop 'internal GS screening requires static KLI, TB-mBJ, PZ LDA, or finite-temperature PZ SOC GS'
       if(hsex_w_boxes<1)error stop 'positive screening box count required'
       if(any(mod(num_rgrid,hsex_w_boxes)/=0))error stop 'screening boxes must divide real-space grid'
     endif
-    if(yn_hsex_update_w=='y'.or.yn_hsex_prepare_w=='y')then
+    if(yn_hsex_update_w=='y'.or.yn_hsex_prepare_w=='y'.or.hsex_frozen_rank>0)then
 #ifndef USE_HSE
       error stop 'internal screening requires USE_HSE'
 #endif
       if((spin/='unpolarized'.and..not.spinor_gs_screen).or.yn_periodic/='y'.or.index(yn_symmetry,'y')>0.or. &
-         nproc_ob/=1.or.any(nproc_rgrid/=1))error stop 'internal screening needs full grid, full k mesh and k MPI'
+         (nproc_ob/=1.and..not.gamma_screen).or.any(nproc_rgrid/=1)) &
+         error stop 'internal screening needs full grid and k MPI, or Gamma orbital MPI'
       if(.not.ieee_is_finite(hsex_w_cutoff).or..not.ieee_is_finite(hsex_w_eta).or. &
          .not.ieee_is_finite(hsex_w_head_tol).or..not.ieee_is_finite(hsex_w_eta_tol)) &
          error stop 'nonfinite screening input'
       if(all(hsex_w_qgrid==0))hsex_w_qgrid=num_kgrid
       if(any(hsex_w_qgrid<1))error stop 'positive screening q grid required'
-      if(any(mod(num_kgrid,hsex_w_qgrid)/=0).or.product(hsex_w_qgrid)<2)error stop 'screening q grid must divide k grid'
+      if(any(mod(num_kgrid,hsex_w_qgrid)/=0))error stop 'screening q grid must divide k grid'
+      if(product(hsex_w_qgrid)<2.and..not.gamma_screen)error stop 'single-q screening requires Gamma solver'
+      if(hsex_frozen_rank>0)then
+        if(hsex_w_solver=='frozen')then
+          if(any(hsex_w_qgrid/=num_kgrid))error stop 'experimental frozen W requires Nq=Nk'
+          if(hsex_frozen_gamma=='q2'.and.any(hsex_w_qgrid<6)) &
+            error stop 'q2 density Gamma needs two nonaliased small-q shells; frozen powers-of-two need Nk>=8'
+        else if(yn_hsex_coherent_optical/='y')then
+          if(all(modulo(hsex_frozen_qpoint,hsex_w_qgrid)==0))error stop 'frozen diagnostic requires nonzero q'
+        endif
+      endif
+      if(gamma_screen.and.nproc_k/=1)error stop 'Gamma screening requires nproc_k=1'
       if(.not.(hsex_w_cutoff>0d0.and.hsex_w_eta>0d0))error stop 'positive screening cutoff and eta required'
       if(.not.(hsex_w_head_tol>0d0.and.hsex_w_head_tol<1d0.and. &
         hsex_w_eta_tol>0d0.and.hsex_w_eta_tol<1d0))error stop 'screening tolerances must lie between zero and one'
     endif
-    if(hsex_screen_step/=0.or.hsex_probe_w/='none')then
+    if((hsex_screen_step/=0.or.hsex_probe_w/='none').and.hsex_frozen_rank==0)then
       if(hsex_screen_step<1.or.hsex_screen_step>nt.or.kli_mode/='hsex'.or.projection_option/='td'.or. &
          xc_key/='tbmbj'.or.nstate<=nelec/2)error stop 'pump screening requires TD projection with conduction bands and TB-mBJ HSEX'
     endif

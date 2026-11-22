@@ -9,6 +9,30 @@ from prepare_w import prepare
 from sternheimer import equilibrium_operator
 from mpi_test_support import shared_fixture,run_mpi
 
+def check_finite_q_log(path, label, ranks, mesh, cell):
+    """Check complete, root-only physical-q diagnostics, including wrapped q."""
+    records=[]
+    for rank in range(ranks):
+        lines=(path/label/f'stdout.rank-{rank}').read_text().splitlines()
+        rows=[line.split()[1:] for line in lines if line.startswith('HSEX_W_FINITE_Q ')]
+        if rank:
+            assert not rows, f'Finite-q diagnostics duplicated on rank {rank}'
+        records.extend(rows)
+    assert len(records)==mesh**3-1, 'Missing finite-q dielectric diagnostics'
+    indices=set()
+    reciprocal=2*np.pi*np.linalg.inv(cell).T
+    shifts=np.indices((5,)*3).reshape(3,-1).T-2
+    for fields in records:
+        assert len(fields)==6, f'Unexpected finite-q record: {fields}'
+        iq=int(fields[0]);indices.add(iq)
+        values=np.array(fields[1:],dtype=float)
+        assert np.isfinite(values).all(), 'Nonfinite dielectric diagnostic'
+        q=values[:3]
+        radius=min(np.linalg.norm(reciprocal@(q+shift)) for shift in shifts)
+        np.testing.assert_allclose(values[3],radius,rtol=2e-9,atol=1e-12)
+        assert values[4]>0, 'Nonpositive inverse dielectric head in passive fixture'
+    assert indices==set(range(2,mesh**3+1)), 'Missing or duplicated q indices'
+
 def main():
     exe=Path(sys.argv[1]);nr=int(sys.argv[2]) if len(sys.argv)>2 else 1
     threads=int(sys.argv[3]) if len(sys.argv)>3 else 1
@@ -33,9 +57,11 @@ def main():
                     for a in (k,eig[:,:nb],occ):np.asarray(a,dtype='f8').tofile(f)
                     psi[:,:nb].astype('c16').tofile(f);h.transpose(0,2,1).astype('c16').tofile(f)
                 run_mpi(exe,nr,threads,path,f'case-{pump}-{qm}')
+                check_finite_q_log(path,f'case-{pump}-{qm}',nr,qm,cell)
                 actual=np.fromfile(path/'pipeline-output.bin','f8')
                 run_mpi(exe, nr, threads, path, f'distributed-{pump}-{qm}',
                         extra_args=('1', 'dense-distributed'))
+                check_finite_q_log(path,f'distributed-{pump}-{qm}',nr,qm,cell)
                 distributed = np.fromfile(path/'pipeline-output.bin', 'f8')
                 np.testing.assert_array_equal(distributed, actual)
                 offset=40+8*(9+3*nk+3+ng+1+3*nk)

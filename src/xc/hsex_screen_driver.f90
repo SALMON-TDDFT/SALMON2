@@ -34,14 +34,19 @@ module hsex_screen_driver
 contains
   subroutine screen_compute(n,mesh,qmesh,boxes,cutoff,cell,k,levels,pop,states,nv,eta,head_tol,eta_tol, &
       nthreads,ik_s,ik_e,icomm,rank,nproc,load_h,first_pair,nlocal,w,status,apply_h,temperature,head_only, &
-      distributed_states,apply_velocity)
+      distributed_states,apply_velocity,apply_optical_h,reduced_rank,reduced_batch,reduced_tolerance, &
+      reduced_symmetry,atoms,species)
     use, intrinsic :: iso_fortran_env, only: error_unit,output_unit
-    use communication, only: comm_summation,comm_bcast,comm_get_max,comm_is_root,comm_alltoallv_complex
+    use communication, only: comm_summation,comm_bcast,comm_get_max,comm_is_root,comm_alltoallv_complex, &
+      comm_thread_funneled
     use hsex_screen_math, only: screen_sites,screen_geometry,screen_assemble,screen_population,screen_channels, &
       screen_metal_head,screen_forms,screen_transform,screen_finite
-    use hsex_q_response, only: hsex_q_solve
+    use hsex_q_response, only: hsex_q_shared,hsex_q_workspace,hsex_q_prepare,hsex_q_release, &
+      hsex_q_worker_prepare,hsex_q_worker_release,hsex_q_one
     use hsex_sternheimer, only: sternheimer_band
     use hsex_longwave, only: longwave_band,longwave_cell
+    use hsex_response_space, only: response_space_solve,s_response_space_stats
+    use hsex_response_symmetry, only: response_q_stars,s_response_stars
     implicit none
     integer,intent(in)::n(3),mesh(3),qmesh(3),boxes,nv,nthreads,ik_s,ik_e,icomm,rank,nproc,first_pair,nlocal
     real(8),intent(in)::cutoff,cell(3,3),k(:,:),levels(:,:),pop(:,:),eta,head_tol,eta_tol
@@ -49,14 +54,22 @@ contains
     procedure(h_loader)::load_h
     procedure(h_action),optional::apply_h
     procedure(velocity_action),optional :: apply_velocity
+    procedure(h_action),optional :: apply_optical_h
     real(8),intent(in),optional::temperature
+    integer,optional,intent(in) :: reduced_rank,reduced_batch,species(:)
+    real(8),optional,intent(in) :: reduced_tolerance,atoms(:,:)
+    logical,optional,intent(in) :: reduced_symmetry
+    logical :: compressed,compressed_symmetry
+    complex(8),allocatable :: occupied_all(:,:,:),occupied_part(:,:,:)
+    integer :: compressed_batch,compressed_capacity
+    real(8) :: compressed_tolerance
     complex(8),allocatable::vertex(:,:),band_response(:,:)
     logical,intent(in),optional::head_only,distributed_states
     logical,allocatable :: active_q(:)
     logical::matrix_free,only_head,distributed
-    integer :: orbital_offset,local_k,k_slots,k_slot,peer,batch_threads
+    integer :: orbital_offset,local_k,k_slots,k_slot,peer,batch_threads,q_regions,q_batches
     integer,allocatable :: ranges(:,:),local_range(:,:),k_owner(:)
-    integer::band
+    integer::band,project_bands
     real(8),intent(out)::w(nlocal,product(mesh))
     integer,intent(out)::status
     type(q_block),allocatable::blocks(:)
@@ -65,6 +78,7 @@ contains
     integer::nk,nq,ng,nreal,ncomponent,component,nb,na,nc,igmax(3),allg,i,j,l,a,b,c,iq,jq,ig,jg,owner,local_error,err,team
     integer::idx(3),shift(3),source,beg,last,batch,mq,mg,nu,slot,nsel,ia,ib,dx,dy,dz,lo(3),vtx(3)
     real(8)::rec(3,3),vol,dv,q(3),q2,head,qhead,einv,qmin,error,rmax,radius,qc,weight,fraction(3),point3(3)
+    real(8) :: spin_weight,solver_temperature
     real(8),allocatable::frac(:,:),d(:),e(:),lev(:,:),occ(:,:),etas(:),residual(:),heads(:),qheads(:),radii(:)
     complex(8),allocatable::h(:,:),original_h(:,:),adj(:,:),u(:,:),tau(:),work(:),hu(:,:),huq(:,:),gram(:,:)
     complex(8),allocatable::psi(:,:,:),phase(:,:,:),response(:,:,:,:),reduced(:,:,:),qvec(:,:),matrix(:,:)
@@ -76,13 +90,28 @@ contains
     integer,allocatable :: optical_g(:,:),optical_reverse(:)
     complex(8),allocatable :: optical_chi(:,:),optical_total(:,:),optical_h(:,:)
     real(8) :: macro(3,3)
-    integer(8)::clock_start,clock_response,clock_assembly,clock_end,clock_rate
+    integer(8)::clock_start,clock_response,clock_assembly,clock_end,clock_rate,clock_phase
     real(8)::timing(3),timing_max(3),max_residual
+    real(8) :: phase_seconds(11),phase_max(11)
     call system_clock(clock_start,clock_rate)
+    phase_seconds=0d0;q_regions=0;q_batches=0
     stage=10
     status=1;w=0d0;nk=product(mesh);nq=product(qmesh);nreal=product(n);nb=size(levels,1);na=boxes**3
     ng=size(states,1)
     local_error=0
+    compressed=present(reduced_rank);compressed_symmetry=.false.
+    compressed_batch=4;compressed_capacity=384;compressed_tolerance=1d-6
+    if(present(reduced_rank))compressed_capacity=reduced_rank
+    if(present(reduced_batch))compressed_batch=reduced_batch
+    if(present(reduced_tolerance))compressed_tolerance=reduced_tolerance
+    if(present(reduced_symmetry))compressed_symmetry=reduced_symmetry
+    if(compressed)then
+      if(compressed_batch<1.or.compressed_capacity<1)local_error=1
+      if(.not.screen_finite([compressed_tolerance]))local_error=1
+      if(compressed_tolerance<=0d0.or.compressed_tolerance>=1d0)local_error=1
+      if(.not.present(apply_h))local_error=1
+      if(compressed_symmetry.and.(.not.present(atoms).or..not.present(species)))local_error=1
+    endif
     distributed=.false.
     if(present(distributed_states))distributed=distributed_states
     local_k=max(0,ik_e-ik_s+1)
@@ -115,13 +144,22 @@ contains
     stage=20
     call screen_geometry(cell,rec,vol,err);local_error=max(local_error,err)
     matrix_free=present(apply_h)
+    if(.not.matrix_free.and.nthreads>1)then
+      if(.not.comm_thread_funneled())then
+        local_error=1
+        if(comm_is_root(rank))write(error_unit,'(a)')'HSEX_W_REJECT: outer q team requires primary MPI_THREAD_FUNNELED'
+      endif
+    endif
     only_head=.false.
     if(present(head_only))only_head=head_only
     if(only_head.and..not.matrix_free)local_error=1
-    if(matrix_free)then
-      if(.not.present(temperature).or.ncomponent/=2) local_error=1
+    spin_weight=dble(3-ncomponent)
+    solver_temperature=1d0
+    if(matrix_free.and.ncomponent==2)then
+      if(.not.present(temperature)) local_error=1
       if(present(temperature))then
         if(.not.screen_finite([temperature]).or.temperature<=0d0) local_error=1
+        solver_temperature=temperature
       endif
       if(any(pop(nb,:)>1d-12)) local_error=1
     endif
@@ -151,6 +189,20 @@ contains
       if(any(pop(:nv,:)/=2d0).or.any(pop(nv+1:,:)/=0d0))local_error=1
       insulating=.true.
     endif
+    if(matrix_free.and.ncomponent==1)then
+      ! Scalar CG currently represents the static, integer-filled insulator.
+      ! An empty target band demonstrates a common positive gap; fractional
+      ! scalar pump screening retains its existing dense/eta treatment.
+      if(pump.or.nb<=nv)then
+        local_error=1
+      else
+        if(any(pop(:nv,:)/=2d0).or.any(pop(nv+1:,:)/=0d0))local_error=1
+        if(minval(levels(nv+1,:))-maxval(levels(nv,:))<=1d-8)local_error=1
+      endif
+    endif
+    project_bands=nb
+    if(matrix_free.and.ncomponent==1)project_bands=nv
+    if(compressed.and.(ncomponent/=1.or.pump.or..not.insulating.or.only_head))local_error=1
     optical=insulating.and.present(apply_velocity)
     if(only_head.and.optical)local_error=1
     if(comm_is_root(rank).and.pump.and.ncomponent==1)then
@@ -294,7 +346,7 @@ contains
         enddo
       enddo
       optical_chi=0d0
-      if(.not.matrix_free)allocate(optical_h(ng,ng))
+      if(.not.matrix_free.and..not.present(apply_optical_h))allocate(optical_h(ng,ng))
     endif
     stage=50
     rmax=0d0
@@ -327,6 +379,28 @@ contains
       endif
       k_slots=maxval(max(0,ranges(2,:)-ranges(1,:)+1))
     endif
+    if(compressed)then
+      allocate(occupied_all(ng,nv,nk),stat=err)
+      local_error=merge(1,0,err/=0);call comm_get_max(local_error,icomm)
+      if(local_error/=0)then
+        status=50
+        return
+      endif
+      if(distributed)then
+        allocate(occupied_part(ng,nv,nk),stat=err)
+        local_error=merge(1,0,err/=0);call comm_get_max(local_error,icomm)
+        if(local_error/=0)then
+          status=50
+          return
+        endif
+        occupied_part=0d0
+        if(ik_e>=ik_s)occupied_part(:,:,ik_s:ik_e)=states(:,:nv,:)
+        call comm_summation(occupied_part,occupied_all,size(occupied_all),icomm)
+        deallocate(occupied_part)
+      else
+        occupied_all=states(:,:nv,:)
+      endif
+    endif
     if(matrix_free)then
       do j=ik_s,ik_e
         gram=matmul(conjg(transpose(states(:,:,j-orbital_offset))),states(:,:,j-orbital_offset))
@@ -340,7 +414,7 @@ contains
         endif
         deallocate(gram)
         allocate(vertex(ng,1))
-        do a=1,nb
+        do a=1,project_bands
           call apply_h(j,states(:,a,j-orbital_offset),vertex(:,1),err)
           if(err/=0.or..not.screen_finite(vertex))then
             write(error_unit,*)'HSEX_STERNHEIMER_ACTION rank/k/band/status',rank,j,a,err
@@ -378,6 +452,17 @@ contains
       if(optical.and.matrix_free.and.j<=ik_e)call accumulate_optical()
       if(distributed)call comm_get_max(local_error,icomm)
       if(local_error/=0)exit
+      if(compressed)then
+        if(j<=ik_e)call compressed_target()
+        if(distributed)call comm_get_max(local_error,icomm)
+        if(local_error/=0)exit
+        cycle
+      endif
+      if(.not.matrix_free)then
+        call dense_q_batches()
+        if(local_error/=0)exit
+        cycle
+      endif
       beg=1
       do while(beg<=nq)
         if(.not.active_q(beg))then
@@ -397,13 +482,16 @@ contains
           response(mg,mg,nc,batch),residual(batch),istat(batch))
         psi=0d0;phase=0d0;occ=0d0
         if(distributed)then
+          call system_clock(clock_phase)
           call exchange_source_batch(err)
+          call record_phase(4,clock_phase)
           if(err/=0)then
             local_error=err
             exit
           endif
         endif
         if(j<=ik_e)then
+          call system_clock(clock_phase)
           do iq=beg,last
             l=iq-beg+1
             source=source_k(j,iq)
@@ -427,38 +515,41 @@ contains
               enddo
             enddo
           enddo
+          call record_phase(5,clock_phase)
           if(local_error==0)then
-            if(matrix_free)then
-              do l=1,batch
-                i=counts(l)
-                allocate(vertex(ng,i),band_response(i,i))
-                response(:,:,:,l)=0d0
-                do band=1,nb
-                  ! Empty source bands still contribute to the explicit occupation difference.
-                  do a=1,i
-                    vertex(:,a)=phase(:,a,l)*psi(:,band,l)
-                  enddo
-                  call sternheimer_band(apply_at_target,states(:,:,j-orbital_offset),levels(:,j),pop(:,j),lev(band,l),occ(band,l), &
-                    temperature,vertex,band_response,err)
-                  if(err/=0)then
-                    write(error_unit,*)'HSEX_STERNHEIMER_SOLVE rank/k/q/band/status',rank,j,beg+l-1,band,err
-                    local_error=1
-                    exit
-                  endif
-                  response(:i,:i,1,l)=response(:i,:i,1,l)+band_response
+            call system_clock(clock_phase)
+            do l=1,batch
+              i=counts(l)
+              allocate(vertex(ng,i),band_response(i,i))
+              response(:,:,:,l)=0d0
+              do band=1,nb
+                ! Integer scalar screening uses Q onto the unoccupied
+                ! complement, like the dense static reference. Empty source
+                ! bands and approximate empty target eigenpairs are unused.
+                if(ncomponent==1.and.occ(band,l)==0d0)cycle
+                ! Empty source bands still contribute to the explicit occupation difference.
+                do a=1,i
+                  vertex(:,a)=phase(:,a,l)*psi(:,band,l)
                 enddo
-                ! The static solution has no eta dependence. The downstream
-                ! metallic closure currently expects two response channels.
-                response(:,:,:,l)=spread(response(:,:,1,l),3,nc)
-                deallocate(vertex,band_response)
-                if(local_error/=0)exit
+                ! The shared solver uses one-spin occupations (0..1).
+                ! Restore scalar spin degeneracy exactly once in chi.
+                call sternheimer_band(apply_at_target,states(:,:project_bands,j-orbital_offset), &
+                  levels(:project_bands,j),pop(:project_bands,j)/spin_weight, &
+                  lev(band,l),occ(band,l)/spin_weight,solver_temperature,vertex,band_response,err)
+                if(err/=0)then
+                  write(error_unit,*)'HSEX_STERNHEIMER_SOLVE rank/k/q/band/status',rank,j,beg+l-1,band,err
+                  local_error=1
+                  exit
+                endif
+                response(:i,:i,1,l)=response(:i,:i,1,l)+spin_weight*band_response
               enddo
-            else
-              call hsex_q_solve(ng,nb,batch,mg,nu,nc,nthreads,merge(1,0,pump),adj,d,e,u,psi,phase,counts,lev,occ, &
-                etas,response,residual,istat,team,merge(1,0,pump),original_h)
-              if(any(istat/=0).or.team/=nthreads)local_error=1
-              rmax=max(rmax,maxval(residual))
-            endif
+              ! The static solution has no eta dependence. The downstream
+              ! metallic closure currently expects two response channels.
+              response(:,:,:,l)=spread(response(:,:,1,l),3,nc)
+              deallocate(vertex,band_response)
+              if(local_error/=0)exit
+            enddo
+            call record_phase(6,clock_phase)
             do iq=beg,last
               l=iq-beg+1;i=counts(l);blocks(iq)%chi=blocks(iq)%chi+response(:i,:i,:,l)
             enddo
@@ -484,6 +575,7 @@ contains
     call system_clock(clock_response)
     timing(1)=rmax;call comm_get_max(timing,timing_max,1,icomm);max_residual=timing_max(1)
     ! Reduce one q block at a time to the common q/-q owner.
+    call system_clock(clock_phase)
     do iq=1,nq
       if(.not.active_q(iq))cycle
       mg=size(blocks(iq)%g,2);allocate(reduced(mg,mg,nc))
@@ -495,6 +587,8 @@ contains
       endif
       deallocate(reduced)
     enddo
+    call record_phase(7,clock_phase)
+    call system_clock(clock_phase)
     stage=60
     heads=0d0;qheads=0d0
     do iq=1,nq
@@ -537,6 +631,15 @@ contains
       call comm_summation(heads,total,nq,icomm);heads=total
       call comm_summation(qheads,total,nq,icomm);qheads=total
     end block
+    if(comm_is_root(rank))then
+      write(output_unit,'(a)')'HSEX_W_FINITE_Q_COLUMNS iq qfrac(1:3) min_abs_q_plus_G[bohr^-1] inverse_head'
+      do iq=1,nq
+        if(qheads(iq)<=0d0)cycle
+        ! HEADS includes local fields; QHEADS is the minimum |q+G| squared.
+        write(output_unit,'(a,1x,i0,5(1x,es24.16))')'HSEX_W_FINITE_Q',iq, &
+          dble(qsites(:,iq))/qmesh,sqrt(qheads(iq)),heads(iq)
+      enddo
+    endif
     qmin=minval(qheads,mask=qheads>0d0);einv=0d0;i=0
     do iq=1,nq
       if(abs(qheads(iq)-qmin)<=1d-8+1d-5*abs(qmin))then
@@ -628,6 +731,8 @@ contains
     endif
     stage=80
     call system_clock(clock_assembly)
+    call record_phase(8,clock_phase)
+    call system_clock(clock_phase)
     allocate(coarse(nlocal,nq),values(nlocal,nk),matrix(na,na))
     do iq=1,nq
       matrix=0d0
@@ -667,7 +772,11 @@ contains
         ia=mod(first_pair+i-2,na)+1;ib=(first_pair+i-2)/na+1;values(i,1)=origin(ia,ib)
       enddo
     endif
+    call record_phase(9,clock_phase)
+    call system_clock(clock_phase)
     call screen_transform(values,mesh)
+    call record_phase(10,clock_phase)
+    call system_clock(clock_phase)
     if(insulating.and..not.optical)then
       qc=(6d0*acos(-1d0)**2/(vol*nk))**(1d0/3d0)
       values=values+12d0*acos(-1d0)*einv/(qc*qc*vol*nk)
@@ -697,32 +806,328 @@ contains
       if(comm_is_root(rank))write(*,'(a,i0,a,i0)')'HSEX_W_REJECT stage=',stage,' error=',err
       return
     endif
+    call record_phase(11,clock_phase)
     w=real(values,8);status=0
     call system_clock(clock_end)
     timing=dble([clock_response-clock_start,clock_assembly-clock_response,clock_end-clock_assembly])/clock_rate
     call comm_get_max(timing,timing_max,3,icomm)
+    call comm_get_max(phase_seconds,phase_max,11,icomm)
     if(comm_is_root(rank))then
       write(*,'(a,3f12.4)')'HSEX_W_SECONDS response/assembly/transform: ',timing_max
+      write(*,'(a,11es14.6)')'HSEX_W_PHASE_SECONDS build/factor/optical/exchange/vertices/solve/'// &
+        'reduce/assemble/redistribute/fft/reciprocity: ',phase_max
       write(*,'(a,i0,a,es12.4)')'HSEX_W_OMP team=',nthreads,' maximum residual=',max_residual
+      if(.not.matrix_free)write(*,'(a,i0,a,i0)')'HSEX_W_Q_PARALLEL regions=',q_regions,' batches=',q_batches
     endif
   contains
+    subroutine record_phase(index,started)
+      implicit none
+      integer,intent(in) :: index
+      integer(8),intent(in) :: started
+      integer(8) :: finished
+      call system_clock(finished)
+      phase_seconds(index)=phase_seconds(index)+dble(finished-started)/dble(clock_rate)
+    end subroutine record_phase
+
+    subroutine compressed_target()
+      implicit none
+      type(s_response_stars) :: stars
+      type(s_response_space_stats) :: statistics
+      integer,allocatable :: all_g(:,:,:),all_counts(:),sources(:),representatives(:),batch_q(:),offsets(:)
+      complex(8),allocatable :: rhs(:,:),solutions(:,:),wave(:),reps_chi(:,:,:),local_chi(:,:)
+      real(8),allocatable :: qfrac(:,:),energies(:),checks(:)
+      integer :: maximum,code,target_q,representative,rep_count,entry,finish,nrhs,p,source_band,g_index,point_index
+      integer :: q_index,column,capacity_batches,capped,actions,validation,grid_wrap(3),q_column
+      real(8) :: position(3),worst
+      integer(8) :: started
+      call system_clock(started)
+      maximum=0
+      do target_q=1,nq
+        maximum=max(maximum,size(blocks(target_q)%g,2))
+      enddo
+      allocate(all_g(3,maximum,nq),all_counts(nq),sources(nq),representatives(nq), &
+        qfrac(3,nq),batch_q(compressed_batch),offsets(compressed_batch), &
+        wave(ng),reps_chi(maximum,maximum,nq),local_chi(maximum,maximum),stat=code)
+      if(code/=0)then
+        local_error=1
+        return
+      endif
+      all_g=0;reps_chi=0d0
+      do target_q=1,nq
+        all_counts(target_q)=size(blocks(target_q)%g,2)
+        all_g(:,:all_counts(target_q),target_q)=blocks(target_q)%g
+        sources(target_q)=source_k(j,target_q)
+        qfrac(:,target_q)=dble(qsites(:,target_q))/qmesh
+      enddo
+      if(compressed_symmetry)then
+        call response_q_stars(n,mesh,qmesh,cell,rec,atoms,species,frac,levels,occupied_all,j, &
+          qfrac,all_g,all_counts,sources,apply_at_target,stars,code)
+        if(code/=0)then
+          local_error=code
+          return
+        endif
+      else
+        allocate(stars%representative(nq),stars%operation(nq),stars%column(maximum,nq),stat=code)
+        if(code/=0)then
+          local_error=1
+          return
+        endif
+        stars%nsym=1;stars%nrep=nq;stars%column=0
+        do target_q=1,nq
+          stars%representative(target_q)=target_q;stars%operation(target_q)=1
+          do g_index=1,all_counts(target_q)
+            stars%column(g_index,target_q)=g_index
+          enddo
+        enddo
+      endif
+      rep_count=0
+      do target_q=1,nq
+        if(stars%representative(target_q)/=target_q)cycle
+        rep_count=rep_count+1;representatives(rep_count)=target_q
+      enddo
+      entry=1;capacity_batches=0;capped=0;actions=stars%h_probes;validation=0;worst=0d0
+      do while(entry<=rep_count)
+        finish=min(rep_count,entry+compressed_batch-1);nrhs=0
+        do column=1,finish-entry+1
+          q_index=representatives(entry+column-1);batch_q(column)=q_index
+          offsets(column)=nrhs+1;nrhs=nrhs+nv*all_counts(q_index)
+        enddo
+        allocate(rhs(ng,nrhs),solutions(ng,nrhs),energies(nrhs),checks(nrhs),stat=code)
+        if(code/=0)then
+          local_error=1
+          return
+        endif
+        do column=1,finish-entry+1
+          q_index=batch_q(column)
+          grid_wrap=nint(frac(:,sources(q_index))+qfrac(:,q_index)-frac(:,j))
+          do g_index=1,all_counts(q_index)
+            if(any(2*abs(all_g(:,g_index,q_index)+grid_wrap)>=n))then
+              local_error=1
+              return
+            endif
+            do point_index=0,nreal-1
+              position=dble([mod(point_index,n(1)),mod(point_index/n(1),n(2)),point_index/(n(1)*n(2))])/n
+              wave(point_index+1)=exp(cmplx(0d0,2d0*acos(-1d0)* &
+                sum(position*(all_g(:,g_index,q_index)+grid_wrap)),8))
+            enddo
+            do source_band=1,nv
+              p=offsets(column)+(source_band-1)*all_counts(q_index)+g_index-1
+              rhs(:,p)=wave*occupied_all(:,source_band,sources(q_index))
+              energies(p)=levels(source_band,sources(q_index))
+            enddo
+          enddo
+        enddo
+        call response_space_solve(apply_at_target,occupied_all(:,:,j),energies,rhs,compressed_capacity, &
+          compressed_tolerance,solutions,checks,statistics,code)
+        if(code/=0.and.code/=2)then
+          local_error=code
+          return
+        endif
+        if(.not.screen_finite(solutions).or..not.screen_finite(checks))then
+          local_error=1
+          return
+        endif
+        capacity_batches=capacity_batches+1
+        if(code==2)capped=capped+1
+        actions=actions+statistics%h_actions;validation=validation+statistics%validation_actions
+        worst=max(worst,maxval(checks))
+        do column=1,finish-entry+1
+          q_index=batch_q(column);q_column=all_counts(q_index)
+          do source_band=1,nv
+            p=offsets(column)+(source_band-1)*q_column
+            call zgemm('C','N',q_column,q_column,ng,(1d0,0d0),rhs(:,p:),ng,solutions(:,p:),ng, &
+              (1d0,0d0),reps_chi(:,:,q_index),maximum)
+          enddo
+        enddo
+        deallocate(rhs,solutions,energies,checks);entry=finish+1
+      enddo
+      do target_q=1,nq
+        q_column=all_counts(target_q);representative=stars%representative(target_q)
+        local_chi(:q_column,:q_column)=reps_chi(stars%column(:q_column,target_q), &
+          stars%column(:q_column,target_q),representative)
+        if(.not.screen_finite(local_chi(:q_column,:q_column)))then
+          local_error=1
+          return
+        endif
+        ! sternheimer_band contributes 0.5 per one-spin occupied source;
+        ! scalar spin_weight=2 restores exactly one copy here. The existing
+        ! downstream k normalization and +/-q assembly remain unchanged.
+        blocks(target_q)%chi(:q_column,:q_column,1)= &
+          blocks(target_q)%chi(:q_column,:q_column,1)+local_chi(:q_column,:q_column)
+      enddo
+      rmax=max(rmax,worst)
+      write(output_unit,'(a,8i9,es15.6)')'HSEX_REDUCED_W_K rank/k/ops/q/rep_q/batches/unfinished/Hpsi/residual ', &
+        rank,j,stars%nsym,nq,rep_count,capacity_batches,capped,actions,worst
+      flush(output_unit)
+      call record_phase(6,started)
+    end subroutine compressed_target
+
+    subroutine dense_q_batches()
+!$    use omp_lib, only: omp_get_num_threads
+      implicit none
+      type(hsex_q_shared) :: shared
+      type(hsex_q_workspace) :: workspace
+      integer :: max_g,entry,code,release_error
+      integer(8) :: started,finished
+      real(8) :: vertex_seconds,solve_seconds
+      logical :: done
+      max_g=0
+      do entry=1,nq
+        if(active_q(entry))max_g=max(max_g,size(blocks(entry)%g,2))
+      enddo
+      if(j<=ik_e)then
+        call hsex_q_prepare(ng,nb,max_g,nu,merge(1,0,pump),merge(1,0,pump),etas,original_h,shared,code)
+        if(code/=0)local_error=1
+      endif
+      if(distributed)call comm_get_max(local_error,icomm)
+      if(local_error/=0)then
+        if(j<=ik_e)call hsex_q_release(shared)
+        return
+      endif
+      beg=1;done=.false.;release_error=0;vertex_seconds=0d0;solve_seconds=0d0;team=1
+      q_regions=q_regions+1
+      !$omp parallel num_threads(nthreads) default(shared) private(workspace,entry,code,started,finished) &
+      !$omp& reduction(max:release_error,vertex_seconds,solve_seconds)
+      vertex_seconds=0d0;solve_seconds=0d0;release_error=0
+      if(j<=ik_e)call hsex_q_worker_prepare(ng,nb,max_g,nu,merge(1,0,pump),merge(1,0,pump),shared,workspace)
+      !$omp master
+!$    team=omp_get_num_threads()
+      if(team/=nthreads)local_error=1
+      if(distributed)call comm_get_max(local_error,icomm)
+      !$omp end master
+      do
+        !$omp master
+        do while(beg<=nq)
+          if(active_q(beg))exit
+          beg=beg+1
+        enddo
+        done=beg>nq.or.local_error/=0
+        if(.not.done)then
+          mg=0;last=beg-1
+          do iq=beg,min(nq,beg+2*batch_threads-1)
+            if(.not.active_q(iq))exit
+            mq=max(mg,size(blocks(iq)%g,2))
+            if(iq>beg.and.16d0*ng*(nb+mq)*(iq-beg+1)>64d0*1024**2)exit
+            mg=mq;last=iq
+          enddo
+          batch=last-beg+1
+          allocate(psi(ng,nb,batch),phase(ng,mg,batch),lev(nb,batch),occ(nb,batch),counts(batch), &
+            response(mg,mg,nc,batch),residual(batch),istat(batch))
+          psi=0d0;phase=0d0;occ=0d0;response=0d0;residual=0d0;istat=0
+          if(distributed)then
+            call system_clock(clock_phase)
+            call exchange_source_batch(code)
+            if(code/=0)local_error=1
+            call record_phase(4,clock_phase)
+            call comm_get_max(local_error,icomm)
+          endif
+          done=local_error/=0
+        endif
+        !$omp end master
+        !$omp barrier
+        if(done)exit
+        !$omp do schedule(dynamic,1)
+        do entry=1,batch
+          if(j>ik_e)cycle
+          call system_clock(started)
+          call dense_vertex(entry,code)
+          call system_clock(finished)
+          vertex_seconds=vertex_seconds+dble(finished-started)/clock_rate
+          if(code/=0)then
+            istat(entry)=1
+            cycle
+          endif
+          call system_clock(started)
+          call hsex_q_one(ng,nb,mg,nu,nc,merge(1,0,pump),merge(1,0,pump),adj,d,e,u,psi(:,:,entry), &
+            phase(:,:,entry),counts(entry),lev(:,entry),occ(:,entry),etas,shared,workspace, &
+            response(:,:,:,entry),residual(entry),istat(entry))
+          call system_clock(finished)
+          solve_seconds=solve_seconds+dble(finished-started)/clock_rate
+        enddo
+        !$omp end do
+        !$omp master
+        if(any(istat/=0))local_error=1
+        rmax=max(rmax,maxval(residual))
+        if(j<=ik_e.and.local_error==0)then
+          do iq=beg,last
+            l=iq-beg+1;i=counts(l)
+            blocks(iq)%chi=blocks(iq)%chi+response(:i,:i,:,l)
+          enddo
+        endif
+        if(distributed)call comm_get_max(local_error,icomm)
+        deallocate(psi,phase,lev,occ,counts,response,residual,istat)
+        q_batches=q_batches+1;beg=last+1;done=local_error/=0
+        !$omp end master
+        ! Workers next wait at the top barrier; only the master touches
+        ! shared batch state before it. No extra bottom barrier is needed.
+      enddo
+      if(j<=ik_e)then
+        call hsex_q_worker_release(workspace,code)
+        release_error=max(release_error,abs(code))
+      endif
+      !$omp end parallel
+      if(allocated(psi))deallocate(psi,phase,lev,occ,counts,response,residual,istat)
+      if(j<=ik_e)call hsex_q_release(shared)
+      local_error=max(local_error,release_error)
+      phase_seconds(5)=phase_seconds(5)+vertex_seconds
+      phase_seconds(6)=phase_seconds(6)+solve_seconds
+    end subroutine dense_q_batches
+
+    recursive subroutine dense_vertex(entry,code)
+      implicit none
+      integer,intent(in) :: entry
+      integer,intent(out) :: code
+      integer :: q_index,source_index,shift_q(3),idx_q(3),g_index,grid_index,spin
+      real(8) :: location(3)
+      code=0;q_index=beg+entry-1
+      source_index=source_k(j,q_index)
+      if(.not.distributed)psi(:,:,entry)=states(:,:,source_index)
+      lev(:,entry)=levels(:,source_index);occ(:,entry)=pop(:,source_index)
+      if(.not.pump)occ(nv+1:,entry)=0d0
+      shift_q=nint(frac(:,source_index)+dble(qsites(:,q_index))/qmesh-frac(:,j))
+      counts(entry)=size(blocks(q_index)%g,2)
+      do g_index=1,counts(entry)
+        idx_q=blocks(q_index)%g(:,g_index)+shift_q
+        if(any(2*abs(idx_q)>=n))then
+          code=1
+          return
+        endif
+        do grid_index=0,nreal-1
+          location=dble([mod(grid_index,n(1)),mod(grid_index/n(1),n(2)),grid_index/(n(1)*n(2))])/n
+          phase(grid_index+1,g_index,entry)=exp(cmplx(0d0,2d0*acos(-1d0)*sum(location*modulo(idx_q,n)),8))
+        enddo
+        do spin=2,ncomponent
+          phase((spin-1)*nreal+1:spin*nreal,g_index,entry)=phase(:nreal,g_index,entry)
+        enddo
+      enddo
+    end subroutine dense_vertex
+
     subroutine prepare_dense_target()
       implicit none
+      integer(8) :: started
+      real(8) :: defect
+      call system_clock(started)
       call load_h(j,h,err)
+      call record_phase(1,started)
       if(err/=0)then
+        write(error_unit,*)'HSEX_DENSE_TARGET_REJECT load rank/k/status',rank,j,err
         local_error=1;return
       endif
       if(.not.screen_finite(h))then
+        write(error_unit,*)'HSEX_DENSE_TARGET_REJECT nonfinite rank/k',rank,j
         local_error=1;return
       endif
-      if(maxval(abs(h-transpose(conjg(h))))>1d-9)then
+      defect=maxval(abs(h-transpose(conjg(h))))
+      if(defect>1d-9)then
+        write(error_unit,*)'HSEX_DENSE_TARGET_REJECT Hermitian rank/k/error',rank,j,defect
         local_error=1;return
       endif
       if(optical)then
-        optical_h=h
+        if(allocated(optical_h))optical_h=h
         call accumulate_optical()
         if(local_error/=0)return
       endif
+      call system_clock(started)
       allocate(hu(ng,merge(nb,nv,pump)),gram(merge(nb,nv,pump),merge(nb,nv,pump)))
       i=size(hu,2)
       call zgemm('N','N',ng,i,ng,cmplx(1d0,0d0,8),h,ng,states(:,:,j-orbital_offset),ng,cmplx(0d0,0d0,8),hu,ng)
@@ -730,9 +1135,17 @@ contains
         cmplx(0d0,0d0,8),gram,i)
       do a=1,i
         gram(a,a)=gram(a,a)-1d0
-        if(sqrt(sum(abs(hu(:,a)-states(:,a,j-orbital_offset)*levels(a,j))**2))>1d-4)local_error=1
+        defect=sqrt(sum(abs(hu(:,a)-states(:,a,j-orbital_offset)*levels(a,j))**2))
+        if(defect>1d-4)then
+          write(error_unit,*)'HSEX_DENSE_TARGET_REJECT eigenpair rank/k/band/residual',rank,j,a,defect
+          local_error=1
+        endif
       enddo
-      if(maxval(abs(gram))>1d-8)local_error=1
+      defect=maxval(abs(gram))
+      if(defect>1d-8)then
+        write(error_unit,*)'HSEX_DENSE_TARGET_REJECT orthogonality rank/k/error',rank,j,defect
+        local_error=1
+      endif
       if(.not.screen_finite(gram))local_error=1
       if(.not.screen_finite(hu))local_error=1
       if(.not.pump)then
@@ -769,6 +1182,7 @@ contains
         local_error=1;return
       endif
       adj=transpose(conjg(adj))
+      call record_phase(2,started)
     end subroutine prepare_dense_target
 
     subroutine apply_longwave_target(vector,action,ierr)
@@ -778,6 +1192,8 @@ contains
       integer,intent(out) :: ierr
       if(matrix_free)then
         call apply_h(j,vector,action,ierr)
+      else if(present(apply_optical_h))then
+        call apply_optical_h(j,vector,action,ierr)
       else
         action=matmul(optical_h,vector)
         ierr=0
@@ -788,7 +1204,9 @@ contains
       implicit none
       complex(8) :: body(ng,size(optical_g,2)),velocity(ng,3),response(size(optical_chi,1),size(optical_chi,2))
       integer :: band,g,site,comp,code
+      integer(8) :: started
       real(8) :: pos(3)
+      call system_clock(started)
       do band=1,nv
         call apply_velocity(j,states(:,band,j-orbital_offset),velocity,code)
         if(code/=0)then
@@ -805,13 +1223,15 @@ contains
         enddo
         call longwave_band(apply_longwave_target,states(:,:nv,j-orbital_offset),levels(band,j),velocity,body,response,code)
         if(code/=0)then
+          write(error_unit,*)'HSEX_OPTICAL_REJECT rank/k/band/status',rank,j,band,code
           local_error=1;return
         endif
         optical_chi=optical_chi+.5d0*pop(band,j)*response
       enddo
+      call record_phase(3,started)
     end subroutine
 
-    integer function source_k(destination,q_index) result(source_index)
+    recursive integer function source_k(destination,q_index) result(source_index)
       implicit none
       integer,intent(in) :: destination,q_index
       integer :: coord(3)

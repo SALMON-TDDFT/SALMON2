@@ -2,8 +2,65 @@
 module hsex_grid_velocity
   implicit none
   private
-  public :: grid_velocity
+  public :: grid_velocity,grid_mass
 contains
+  subroutine grid_mass(sys,mg,ppg,ik,axis,vector,mass,status)
+    use structures, only: s_dft_system,s_rgrid,s_pp_grid
+    use hsex_projected_derivative, only: rank1_second
+    use hsex_screen_math, only: screen_finite
+    implicit none
+    type(s_dft_system),intent(in) :: sys
+    type(s_rgrid),intent(in) :: mg
+    type(s_pp_grid),intent(in) :: ppg
+    integer,intent(in) :: ik,axis
+    complex(8),intent(in) :: vector(:)
+    complex(8),intent(out) :: mass(:)
+    integer,intent(out) :: status
+    integer,allocatable :: indices(:)
+    real(8),allocatable :: r(:)
+    complex(8),allocatable :: beta(:),added(:)
+    integer :: n(3),ng,nc,nchannel,channel,atom,component,j,l,ix,iy,iz,m,code
+    real(8) :: norm
+    status=1;mass=0d0;n=mg%ie-mg%is+1;ng=product(n)
+    if(ng<1.or.axis<1.or.axis>3.or.size(mass)/=size(vector))return
+    nc=size(vector)/ng
+    if(nc<1.or.nc>2.or.size(vector)/=ng*nc.or..not.screen_finite(vector))return
+    mass=vector
+    nchannel=ppg%nlma
+    if(nc==2)nchannel=size(ppg%ia_tbl_so)
+    if(nchannel==0)then
+      status=0;return
+    endif
+    m=maxval(ppg%mps)*nc
+    allocate(indices(m),r(m),beta(m),added(size(vector)),stat=code)
+    if(code/=0)return
+    do channel=1,nchannel
+      if(nc==2)then
+        atom=ppg%ia_tbl_so(channel);norm=ppg%rinv_uvu_so(channel)
+      else
+        atom=ppg%ia_tbl(channel);norm=ppg%rinv_uvu(channel)
+      endif
+      l=0
+      do component=1,nc
+        do j=1,ppg%mps(atom)
+          ix=ppg%jxyz(1,j,atom);iy=ppg%jxyz(2,j,atom);iz=ppg%jxyz(3,j,atom)
+          l=l+1;indices(l)=1+ix-mg%is(1)+n(1)*(iy-mg%is(2)+n(2)*(iz-mg%is(3)))+(component-1)*ng
+          r(l)=ppg%rxyz(axis,j,atom)
+          if(nc==2)then
+            beta(l)=ppg%zekr_uv_so(j,channel,ik,component,1)
+          else
+            beta(l)=ppg%zekr_uv(j,channel,ik)
+          endif
+        enddo
+      enddo
+      call rank1_second(indices(:l),r(:l),beta(:l),norm,vector,added,code)
+      if(code/=0)return
+      mass=mass+added
+    enddo
+    if(.not.screen_finite(mass))return
+    status=0
+  end subroutine
+
   subroutine grid_velocity(sys,mg,stencil,ppg,ik,vector,velocity)
     use structures, only: s_dft_system,s_rgrid,s_stencil,s_pp_grid
     use stencil_sub, only: calc_gradient_psi

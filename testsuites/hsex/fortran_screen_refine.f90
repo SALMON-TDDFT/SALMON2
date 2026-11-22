@@ -4,11 +4,11 @@ program test_refine
   use ieee_arithmetic, only: ieee_is_finite
   implicit none
   integer::rank,np,ierr,n,g,nc,unit,team,i,j,c,bad,total_bad
-  integer::counts(1),status(1)
+  integer::counts(1),status(1),provided
   complex(8),allocatable::h(:,:),b(:,:),adj(:,:),expected(:,:,:),result(:,:,:,:),u(:,:),psi(:,:,:),phase(:,:,:)
   real(8),allocatable::d(:),e(:),etas(:)
   real(8)::level(1,1),occ(1,1),residual(1),ratio,maximum,global_max
-  call MPI_Init(ierr)
+  call MPI_Init_thread(MPI_THREAD_FUNNELED,provided,ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
   call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
   open(newunit=unit,file='oracle.bin',access='stream',form='unformatted',status='old')

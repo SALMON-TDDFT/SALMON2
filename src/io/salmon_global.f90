@@ -128,7 +128,37 @@ module salmon_global
   integer :: hsex_w_qgrid(3),hsex_w_boxes
   character(1) :: yn_hsex_head_only
   real(8) :: hsex_w_cutoff,hsex_w_eta,hsex_w_head_tol,hsex_w_eta_tol
+  real(8) :: hsex_w_scale=1d0
+  integer :: hsex_pdep_rank=0,hsex_pdep_qpoint(3)=[1,0,0]
+  character(256) :: hsex_pdep_reference='pdep-reference.bin'
+  integer :: hsex_reduced_target=0,hsex_reduced_qcount=4,hsex_reduced_maxrank=384
+  integer :: hsex_reduced_batch=4
+  real(8) :: hsex_reduced_tol=1d-6
+  character(1) :: yn_hsex_reduced_symmetry='n',yn_hsex_reduced_reference='n'
+  real(8) :: hsex_pdep_tol=1d-6
+  integer :: hsex_pdep_maxiter=40
+  character(256) :: hsex_pdep_basis_read='none',hsex_pdep_basis_write='none'
+  integer :: hsex_projection_max_states=0
+  real(8) :: hsex_projection_capture_tol=1d-8
+  integer :: hsex_screen_interval=0
+  integer :: hsex_frozen_rank=0,hsex_frozen_qpoint(3)=[1,0,0]
+  real(8) :: hsex_frozen_tol=1d-5
+  character(1) :: yn_hsex_frozen_reference='n'
+  character(1) :: yn_hsex_frozen_optical='n'
+  character(16) :: hsex_frozen_parallel='legacy',hsex_frozen_precondition='none'
+  integer :: hsex_frozen_nproc_q=1
+  character(16) :: hsex_frozen_window='none'
+  real(8) :: hsex_frozen_window_time=20.670686667d0
+  character(16) :: hsex_frozen_closure='strict'
+  character(16) :: hsex_frozen_gamma='shell'
+  character(1) :: yn_hsex_coherent_optical='n'
+  character(1) :: yn_hsex_sternheimer_optical='n'
+  character(16) :: hsex_sternheimer_kernel='both'
+  real(8) :: hsex_coherent_omega=.125d0
+  integer :: hsex_coherent_axis=3
   integer :: hsex_screen_step
+  character(256) :: hsex_screening_w='none' ! Independent LDA kernel; TB RT reference remains unchanged
+  character(16) :: hsex_w_solver='auto' ! Preserve dense scalar / matrix-free SOC defaults.
   character(256) :: hsex_probe_w
   character(1) :: yn_kli_rt_box_check,yn_out_kli_hamiltonian
   character(16) :: kli_mode

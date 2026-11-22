@@ -33,10 +33,33 @@ if(USE_HSE)
     kli_scf.f90
     hsex_velocity.f90
     hsex_grid_velocity.f90
+    hsex_projected_derivative.f90
     hsex_k_fft.f90
     ../../tools/hsex/native/q_response.f90
     hsex_screen_math.f90
+    hsex_projection.f90
+    hsex_pdep.f90
+    hsex_pdep_q.f90
+    hsex_pdep_cache.f90
+    hsex_gamma_pdep.f90
+    hsex_memory.c
     hsex_sternheimer.f90
+    hsex_impulse_resolvent.f90
+    hsex_equilibrium_q.f90
+    hsex_sternheimer_optical.f90
+    hsex_response_space.f90
+    hsex_response_symmetry.f90
+    hsex_reduced_q.f90
+    hsex_frozen_window.f90
+    hsex_frozen_response.f90
+    hsex_coherent_optical.f90
+    hsex_coherent_adapter.f90
+    hsex_frozen_limit.f90
+    hsex_frozen_q.f90
+    hsex_density_gamma.f90
+    hsex_frozen_full.f90
+    hsex_frozen_kinetic.f90
+    hsex_frozen_adapter.f90
     hsex_longwave.f90
     hsex_screen_driver.f90
     hsex_internal.f90

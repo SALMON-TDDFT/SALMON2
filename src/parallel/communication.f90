@@ -301,7 +301,19 @@ module communication
 #define ABORT_MESSAGE(target,msg) if(target/=COMM_PROC_NULL) call abort_show_message(msg)
 #define UNUSED_VARIABLE(VAR)      if(.false.) call salmon_unusedvar(VAR)
 
+  public :: comm_thread_funneled
+
 contains
+  logical function comm_thread_funneled()
+    use mpi, only: MPI_Query_thread,MPI_Is_thread_main,MPI_THREAD_FUNNELED
+    implicit none
+    integer :: provided,ierr
+    logical :: primary
+    MPI_ERROR_CHECK(call MPI_Query_thread(provided,ierr))
+    MPI_ERROR_CHECK(call MPI_Is_thread_main(primary,ierr))
+    comm_thread_funneled=provided>=MPI_THREAD_FUNNELED.and.primary
+  end function comm_thread_funneled
+
   subroutine comm_init
     use mpi, only: MPI_THREAD_FUNNELED,MPI_COMM_WORLD,MPI_Initialized
     implicit none

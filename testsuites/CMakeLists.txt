@@ -317,6 +317,10 @@ if(USE_HSE AND NOT CMAKE_CROSSCOMPILING)
           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_lattice_velocity.py
             --build ${CMAKE_BINARY_DIR} --ranks 1)
         set_tests_properties(hsex_lattice_velocity PROPERTIES LABELS "xc;hsex;integration" TIMEOUT 120)
+        add_test(NAME hsex_exchange_energy_current
+          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_exchange_energy_current.py
+            --build ${CMAKE_BINARY_DIR})
+        set_tests_properties(hsex_exchange_energy_current PROPERTIES LABELS "xc;hsex;integration" TIMEOUT 120 PROCESSORS 4)
         add_test(NAME hsex_grid_velocity
           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_grid_velocity.py
             --build ${CMAKE_BINARY_DIR})
@@ -338,6 +342,10 @@ if(USE_HSE AND NOT CMAKE_CROSSCOMPILING)
           COMMAND ${CMAKE_COMMAND} -E env "FC=${CMAKE_Fortran_COMPILER}" "SCREEN_BLAS=${HSEX_SCREEN_TEST_BLAS}"
             ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/run_fortran_screen_tests.py)
         set_tests_properties(hsex_fortran_screening PROPERTIES LABELS "xc;hsex;mpi" TIMEOUT 300 PROCESSORS 5)
+        add_test(NAME hsex_eigensolver_guard_scope
+          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_eigensolver_guard_scope.py
+            --build ${CMAKE_BINARY_DIR})
+        set_tests_properties(hsex_eigensolver_guard_scope PROPERTIES LABELS "hsex;build" TIMEOUT 20)
       endif()
       execute_process(COMMAND ${Python3_EXECUTABLE} -c "import mpmath"
         RESULT_VARIABLE HSEX_MPMATH_STATUS OUTPUT_QUIET ERROR_QUIET)

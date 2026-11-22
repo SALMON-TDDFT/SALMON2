@@ -59,10 +59,10 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use dip, only: calc_dip
   use sendrecv_grid
 #ifdef USE_HSE
-  use kli_hsex, only: hsex_init,hsex_restore,hsex_induced_energy
+  use kli_hsex, only: hsex_init,hsex_restore,hsex_induced_energy,hsex_update_frozen
   use kli_scf, only: kli_export_hamiltonian,kli_read,apply_frozen,kli_diagnostics
 #endif
-  use salmon_global, only: quiet
+  use salmon_global, only: quiet,hsex_frozen_window
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
@@ -341,6 +341,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 #endif
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 #ifdef USE_HSE
+  if(kli_mode=='hsex'.and.hsex_frozen_window/='none')then
+    if(yn_restart/='n'.or.maxval(abs(system%vec_Ac))>1d-12) &
+      error stop 'window reference requires a fresh zero-A equilibrium initial state'
+    call hsex_update_frozen(0,system,mg,info,spsi_in,V_local,stencil,srg,ppg)
+  endif
   if(yn_out_kli_hamiltonian=='y')call kli_export_hamiltonian(system,mg,info,V_local,stencil,srg,ppg,spsi_out,tpsi)
 #endif
   if(yn_restart=='y')then

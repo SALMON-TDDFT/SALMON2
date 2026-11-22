@@ -1,0 +1,81 @@
+! Adopted Si validation preset. Run in a fresh scratch GS directory.
+&calculation
+  theory='dft'
+/
+
+&control
+  write_gs_restart_data='all'
+ sysname = 'Si'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&parallel
+  nproc_k=8
+  nproc_ob=1
+  nproc_rgrid=1,1,1
+/
+
+&system
+  yn_periodic = 'y'
+  al_vec2 = 0.0, 5.13, 5.13
+  al_vec3 = 5.13, 0.0, 5.13
+  al_vec1 = 5.13, 5.13, 0.0
+  nstate = 8
+  nelec = 8
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = './Si_rps.dat'
+  lmax_ps(1) = 2
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'tbmbj'
+  yn_out_kli_hamiltonian='n'
+ hsex_w_solver='reduced',yn_hsex_reduced_symmetry='y',yn_hsex_reduced_reference='n',
+ hsex_reduced_maxrank=384,hsex_reduced_batch=4,hsex_reduced_tol=1d-6,yn_hsex_prepare_w='y',hsex_w_boxes=6,hsex_w_cutoff=3.0,hsex_w_qgrid=4,4,4
+/
+
+&rgrid
+  num_rgrid = 12, 12, 12
+/
+
+&kgrid
+  num_kgrid = 4, 4, 4
+/
+
+&tgrid
+  nt = 3000
+  dt = 0.16
+/
+
+&scf
+  method_init_wf="random"
+  nscf_init_no_diagonal=0
+  ncg = 4
+  nscf = 1000
+  threshold = 1.d-11
+/
+
+&emfield
+  trans_longi = 'lo'
+  ae_shape1 = 'impulse'
+  epdir_re1 = 0., 0., 1.
+/
+
+&analysis
+  nenergy = 1000
+  de = 0.001
+/
+
+&atomic_coor
+  'Si'	.0	.0	.0	1
+  'Si'	2.565	2.565	2.565	1
+/
