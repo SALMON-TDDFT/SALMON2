@@ -110,7 +110,7 @@ endif
 if(worker_requested()) then
   if(worker_E_requested()) then
     call subdip(info%icomm_r,0,rt,lg,mg,system,rho_s,worker_ne,poisson,energy%E_tot,pp)
-    call worker_reply_E(0,rt%dDp_e(:,0),rt%Dp_e(:,0)+rt%Dp_i(:,0),worker_ne)
+    call worker_reply_E(0,rt%dDp_e(:,0),rt%Dp_e(:,0)+rt%Dp_i(:,0),worker_ne,energy%E_tot,.true.)
   else
   system%vec_Ac=worker_initial_A
   call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
@@ -171,7 +171,8 @@ TE : do itt=Mit+1,nt
     if(worker_E_requested()) then
       ! subdip already integrated the occupied density at this endpoint.
       worker_electron_number=rt%rIe(itt)
-      call worker_reply_E(itt,rt%dDp_e(:,itt),rt%Dp_e(:,itt)+rt%Dp_i(:,itt),worker_electron_number)
+      call worker_reply_E(itt,rt%dDp_e(:,itt),rt%Dp_e(:,itt)+rt%Dp_i(:,itt),worker_electron_number, &
+        energy%E_tot,itt==1.or.itt==nt.or.mod(itt,out_rt_energy_step)==0)
     else
       if(worker_norm_requested())then
         call calc_dip(info%icomm_r,lg,mg,system,rho_s,worker_density_integral)

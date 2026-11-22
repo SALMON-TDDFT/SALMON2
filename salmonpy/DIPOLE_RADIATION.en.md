@@ -191,9 +191,9 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python tools/test_molecula
 The first field interval holds zero current. Electronic time zero follows that
 hold; output records `electronic_time` and the dt offset from field time. Initial
 selected E must be zero to match the worker's E0; increase source separation or
-delay otherwise. Pass predicted endpoint E to the existing worker without another
-Python midpoint average or changes to its integration order. Fortran converts the
-dipole difference into charge current.
+delay otherwise. Fortran averages selected left/predicted-right E and passes that constant interval
+field to the existing worker without changing its integration order. Fortran also
+converts the dipole difference into charge current.
 
 After field rollback and corrected-current advance, validate the actual selected
 endpoint against the predictor. A mismatch rolls fields/electrons back and rejects
@@ -217,4 +217,49 @@ identities. Parent MPI and scheduler allocation IDs remain untouched. This start
 path is tested on this Mac/OpenMPI, not certified for all sites. A general public
 two-way TDDFT driver remains unavailable.
 
-E2 also records measured electron number and checks it during replay. Fortran diagnoses loss: C2H2/LD64-step maximum loss fraction about9.95e-15 versus target1e-5. Retry histories including electron number match continuous execution exactly. This short-run diagnostic is not optical convergence evidence.
+E3 also records measured electron number and checks it during replay. Fortran diagnoses loss: the endpoint-control C2H2/LD64-step maximum loss fraction about9.95e-15 versus target1e-5. Retry histories including electron number match continuous execution exactly. This short-run diagnostic is not optical convergence evidence.
+
+
+Internal-energy/work observation uses E3 and the existing energy cadence. Only
+fresh endpoints participate; no propagation/eigen-energy frequency is changed.
+Fortran separately accumulates held-endpoint work actually seen by TDDFT and
+midpoint-field work. With explicit --isolated-sampling endpoint and source amplitude.1 in this C2H2 development fixture,
+the held-work relative residual is about0.897%, while midpoint work differs by
+about28.49%. The default weak run is dominated by separately measured zero-field
+energy drift; it cannot establish energy accuracy. No automatic background
+subtraction, energy stop gate or full-coupled conservation claim is made.
+
+
+### Molecular/field midpoint timing
+
+The development isolated coupling defaults to `--isolated-sampling midpoint`.
+Fortran averages selected left/predicted-right E after own-source subtraction.
+Only accepted right E becomes the next left boundary; cancellation preserves both
+quantum state and previous left E. Validate the midpoint from accepted fields.
+No automatic endpoint fallback. `--isolated-sampling endpoint` explicitly selects
+the previous numerical control. Standalone IsolatedTDDFTState.step(E) and the
+Fortran solver remain unchanged.
+
+`drive_time` uses the field clock: interval center for midpoint, right boundary
+for endpoint. Electronic state.time is the evolved interval endpoint. Record
+work_applied separately from work_selected_field_midpoint. Total-field and
+own-vacuum-reference work are also separate: selected-work alignment does not
+prove total electromagnetic conservation.
+
+For the C2H2 PZ amplitude.1 comparison, applied work equals selected-field midpoint
+work numerically; internal-energy residual is about0.695%, versus28.49% with the
+endpoint control. Do not subtract zero-field drift. Injected rejection/retry
+matches every continuous history. Full spatial Maxwell/LD/boundary balance is a
+separate remaining task.
+
+## Energy balance through all six box faces (development)
+
+`NativeEHField.energy_observer(lower, upper)` selects an inclusive box in zero-based grid indices, excluding sources, absorbing layers and the outer boundary. All field ranks call in matching order. Retain a pre-step backup, advance the field, then call `observer.sample_step()` before releasing the backup. This read does not advance the field. It uses one reduction within the owning field group, returning a dictionary on its leader and `None` elsewhere. Carry it in an existing exchange packet to avoid another application-wide communication.
+
+Fortran computes six outward face fluxes, the field energy change, LD work and external-current work. LD work includes both stored polarization energy and dissipation. This does not estimate PML heating. Sideways scattered radiation is included in the six-face flux.
+
+The verified profile is vacuum and isotropic LD with background relative permittivity and permeability equal to one and zero conductivity. Unsupported observations, including tensor and subpixel profiles, warn and return `available=False`; the calculation remains usable.
+
+Yee E/H samples differ by half a step. `field_modified_*` uses the cross-product energy preserved by the discrete update; `field_physical_*` uses time-centered H in the conventional energy. Both residuals are retained. Closure of the discrete balance alone does not establish continuum energy accuracy.
+
+With the molecule driven after own-vacuum-field subtraction, add the removed vacuum self-field work to the field change, outward flux, LD work and molecular internal-energy change. Do not subtract zero-field drift. The short C2H2 development test gave an accumulated discrete field residual of about 9.1e-15 Hartree and a joint residual of about 5.9e-8 Hartree, about 0.70% of molecular work. Normalization by the much larger incident field would hide this matter error. This is not a general physical-accuracy certification.

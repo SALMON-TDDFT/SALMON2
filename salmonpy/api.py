@@ -297,6 +297,7 @@ def _field_operations():
         'step_owned': [('points','int','in'),('local_points','int','in'),('J','array','in'),('A','array','in'),('E','array','out')],
         'step_checked': [('points','int','in'),('J','array','in'),('A','array','in'),('E','array','out')],
         'sample_h': [('points','int','in'),('H','matrix','out')],
+        'box_energy_step': [('box','indices','in'),('values','buffer','out')],
         'plane_read': [('axis','int','in'),('offset','int','in'),('values_count','int','in'),('info','buffer','out'),('values','buffer','out')],
         'checkpoint_protocol': [], 'step_transaction_protocol': [],
         'checkpoint': [('path','string','in'),('mode','int','in')],
@@ -321,6 +322,9 @@ def _field_operations():
             entry['atomicity']='use declared protected-step transaction/coordinator; raw call is not universal rollback'
         if name=='step_owned':entry['routing']='J rows follow ascending current-mask rows; local count differs by field rank; A/E retain all mapped rows'
         if name=='current_mask':entry['layout']='int32[points]; rank-local constitutive ownership, overlaps permitted'
+        if name=='box_energy_step':
+            entry['requires']='accepted step with live unconsumed protected-step backup; identical zero-based inclusive box on the field group; read-only, no I/O'
+            entry['layout']='box int32 C(2,3); output float64[17]; modified/physical energy, LD/source work and six-face flux'
         if name=='sample_h':entry['clock']='raw macro-centered H at (n+1/2)dt; accepted step >=1; no time advance'
         if name=='plane_read':
             entry['layout']='info int32[21]; values float64[values_count]; first call count0 queries metadata; axis1..3, local-grid offset'

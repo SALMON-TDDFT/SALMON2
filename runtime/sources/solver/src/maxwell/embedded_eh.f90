@@ -32,7 +32,7 @@ module salmonpy_eh_context
   use parallelization, only: setup_parallel,nproc_group_global
   implicit none
   private
-  public :: sp_eh_init,sp_eh_step,sp_eh_close,sp_eh_sample_h,sp_eh_checkpoint
+  public :: sp_eh_init,sp_eh_step,sp_eh_close,sp_eh_sample_h,sp_eh_checkpoint,sp_eh_box_energy_step
   type :: field_context
     type(s_fdtd_system) :: fs
     type(ls_fdtd_eh) :: fe
@@ -151,6 +151,97 @@ integer(c_int) function sp_eh_step_transaction(mode) bind(C)
   end select
   sp_eh_step_transaction=0
 end function
+
+integer(c_int) function sp_eh_box_energy_step(box,result) bind(C) result(status)
+ use phys_constants,only:cspeed_au
+ use salmon_global,only:dt_em
+ integer(c_int),intent(in)::box(3,2)
+ real(c_double),intent(inout)::result(17)
+ real(8)::local(20),total(20),stats(17)
+ integer::region(3,2),m,d,code
+ local=0d0;stats=0d0;code=0
+ if(.not.allocated(state).or..not.allocated(step_saved))then
+  local(20)=1d0
+ else if(step_restored.or.state%step/=step_saved%step+1)then
+  local(20)=1d0
+ else
+  region=box+spread(state%fs%lg%is,2,2)
+  if(state%fe%tensor_enabled.or.state%fe%subpixel_enabled)local(18)=1d0
+  do m=lbound(state%fe%rep,1),ubound(state%fe%rep,1)
+   if(state%fe%rep(m)/=1d0.or.state%fe%rmu(m)/=1d0.or.state%fe%sig(m)/=0d0)local(18)=1d0
+  enddo
+  do d=1,3
+   if(region(d,1)<state%fs%lg%is(d)+1.or.region(d,2)>state%fs%lg%ie(d)-1)local(18)=1d0
+   if(region(d,1)>region(d,2))local(18)=1d0
+   if(state%fs%a_bc(d,1)=='abc'.and.region(d,1)<=state%fs%lg%is(d)+state%fe%ipml_l)local(18)=1d0
+   if(state%fs%a_bc(d,2)=='abc'.and.region(d,2)>=state%fs%lg%ie(d)-state%fe%ipml_l)local(18)=1d0
+   if(state%fe%inc_num>0)then
+    if(state%fe%inc_dist1/='none'.and.index(state%fe%inc_dist1,achar(iachar('x')+d-1))==0)then
+     if(state%fe%inc_po_id(1,d)>=region(d,1).and.state%fe%inc_po_id(1,d)<=region(d,2))local(18)=1d0
+    endif
+    if(state%fe%inc_num>1.and.state%fe%inc_dist2/='none'.and.index(state%fe%inc_dist2,achar(iachar('x')+d-1))==0)then
+     if(state%fe%inc_po_id(2,d)>=region(d,1).and.state%fe%inc_po_id(2,d)<=region(d,2))local(18)=1d0
+    endif
+   endif
+  enddo
+  if(local(18)==0d0)then
+   code=observe(step_saved%fe,state%fe,state%ld,state%current,region,stats)
+   if(code==1)then
+    local(18)=1d0
+   else if(code/=0)then
+    local(19)=1d0
+   else
+    local(1:17)=stats
+   endif
+  endif
+ endif
+ ! One owning-field-group reduction; bad values never enter MPI buffers.
+ call comm_summation(local,total,20,nproc_group_global)
+ status=14
+ if(total(20)>0d0)return
+ status=1
+ if(total(18)>0d0)return
+ status=4
+ if(total(19)>0d0)return
+ do d=1,17
+  if(.not.ieee_is_finite(total(d)))return
+ enddo
+ result=total(1:17);status=0
+contains
+ integer function observe(before,after,ld,current,region,stats) result(code)
+  use salmonpy_fdtd_energy,only:sp_fdtd_box_energy
+  type(ls_fdtd_eh),target,intent(in)::before,after
+  type(s_ld_state),target,intent(in)::ld
+  integer,intent(in)::region(3,2)
+  real(8),target,intent(in)::current(3,state%fs%mg%is_array(1):state%fs%mg%ie_array(1), &
+   state%fs%mg%is_array(2):state%fs%mg%ie_array(2),state%fs%mg%is_array(3):state%fs%mg%ie_array(3))
+  real(8),intent(out)::stats(17)
+  type(c_ptr)::oldptr(12),newptr(12),jptr(6)
+  integer(c_int)::lo(3),hi(3),poles
+  lo=lbound(before%ex_y);hi=ubound(before%ex_y)
+    oldptr(1)=c_loc(before%ex_y);newptr(1)=c_loc(after%ex_y)
+    oldptr(2)=c_loc(before%ex_z);newptr(2)=c_loc(after%ex_z)
+    oldptr(3)=c_loc(before%ey_z);newptr(3)=c_loc(after%ey_z)
+    oldptr(4)=c_loc(before%ey_x);newptr(4)=c_loc(after%ey_x)
+    oldptr(5)=c_loc(before%ez_x);newptr(5)=c_loc(after%ez_x)
+    oldptr(6)=c_loc(before%ez_y);newptr(6)=c_loc(after%ez_y)
+    oldptr(7)=c_loc(before%hx_y);newptr(7)=c_loc(after%hx_y)
+    oldptr(8)=c_loc(before%hx_z);newptr(8)=c_loc(after%hx_z)
+    oldptr(9)=c_loc(before%hy_z);newptr(9)=c_loc(after%hy_z)
+    oldptr(10)=c_loc(before%hy_x);newptr(10)=c_loc(after%hy_x)
+    oldptr(11)=c_loc(before%hz_x);newptr(11)=c_loc(after%hz_x)
+    oldptr(12)=c_loc(before%hz_y);newptr(12)=c_loc(after%hz_y)
+  poles=0;jptr=c_null_ptr
+  if(ld%enabled)then
+   poles=ld%max_pole_num_ld
+   jptr=[c_loc(ld%rjx_old_ld),c_loc(ld%rjy_old_ld),c_loc(ld%rjz_old_ld), &
+         c_loc(ld%rjx_ld),c_loc(ld%rjy_ld),c_loc(ld%rjz_ld)]
+  endif
+  stats=0d0
+  code=sp_fdtd_box_energy(lo,hi,state%fs%mg%is,state%fs%mg%ie,region,state%fs%hgs, &
+   dt_em,cspeed_au,poles,oldptr,newptr,jptr,c_loc(current),stats)
+ end function
+end function sp_eh_box_energy_step
 
 integer(c_int) function sp_eh_checkpoint_protocol() bind(C)
   sp_eh_checkpoint_protocol=1

@@ -69,8 +69,8 @@ wheelサンプルは計算処理 LDの直接呼出しとの一致と、自作の
 ## 実験的な孤立系計算処理 E接続（ソース作業コピー）
 
 同梱standard計算プログラムに検証用の別プロトコルを追加しました。
-`SALMONPY_TDDFT_WORKER=E2`で`INIT_E dt capacity E0`、`STEP_E Ex Ey Ez`を受け、
-`SALMONPY_TDDFT_E_V2 step delta_dipole[3] total_dipole[3]`を返します。
+`SALMONPY_TDDFT_WORKER=E3`で`INIT_E dt capacity E0`、`STEP_E Ex Ey Ez`を受け、
+`SALMONPY_TDDFT_E_V3 step delta_dipole[3] total_dipole[3]`を返します。
 単位は原子単位、双極子はe·bohrです。電子双極子の変化と全電荷双極子は計算処理の
 rt.dataと同じ定義です。電流密度ではなく、暗黙の時間微分や真空セル体積での除算はしません。
 

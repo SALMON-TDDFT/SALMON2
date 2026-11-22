@@ -35,3 +35,31 @@ Include this scalar in replay snapshots and compare it after rollback/retry.
 Numerical work stays Fortran. Reuse the authorized C2H2 GS; no new SCF campaign.
 Validate finite/NaN rejection, state independence and disk/memory replay, then
 actual C2H2 in the existing field fixture. Norm loss1e-5 is diagnostic, not a stop.
+
+## Follow-up: electronic internal-energy / work observations
+
+Preserve the existing eigen-energy cadence and propagation order. E3 carries
+six dipole values, electron number, field-free electronic energy and a 0/1 fresh
+flag. Only steps0,1,capacity and multiples of out_rt_energy_step are fresh; expose
+None otherwise. Do not force an energy recomputation or add a reduction.
+Update unpublished evidence/checkpoint revisions without old-format fallbacks.
+Fortran accumulates endpoint-held E·delta-p (the actually consumed molecular
+field) and midpoint E·delta-p (field-work convention) separately. Compare both
+against internal energy change only at fresh endpoints. Report residuals without
+claiming conservation or imposing a new energy threshold. Use analytic sign/time
+controls, finite rejection, snapshot/replay and the authorized existing C2H2 GS.
+Keep quantum work distinct from full Maxwell energy and vacuum reaction physics.
+
+## Follow-up: align electronic drive with field midpoint work
+
+Use Fortran to average the selected left/right fields after own-source vacuum
+subtraction. Feed that interval-constant midpoint E to the unchanged isolated
+worker. Keep endpoint-held driving as an explicit numerical comparison option,
+not an automatic fallback. Default the development coupled fixture to midpoint;
+standalone IsolatedTDDFTState.step(E) and all solver update orders stay unchanged.
+Commit the accepted right field only after validating the actual midpoint drive;
+cancellation preserves both quantum state and previous selected field. Report
+work of the actual applied drive separately from field endpoint/midpoint work,
+with raw zero-field drift retained. Verify independent prescribed-drive replay,
+injected reject/restore/retry, and quantum/field work alignment with the existing
+C2H2 GS. Do not claim full-volume Maxwell energy/flux conservation yet.

@@ -19,16 +19,16 @@ for line in sys.stdin:
   n+=1;e=list(map(float,p[1:]));v=[.9*x+dt*e[k%3]+.001*n for k,x in enumerate(v)]
  elif p[0]=='CLOSE':break
  else:continue
- print('SALMONPY_TDDFT_E_V2',n,*v,10.-n*1.e-8,flush=True)
+ print('SALMONPY_TDDFT_E_V3',n,*v,10.-n*1.e-8,-1.+n*.01,1. if n!=2 else 0.,flush=True)
 '''
 
 
 def receipt(binary):
-    return dict(schema='salmonpy.isolated-worker-validation/2',
+    return dict(schema='salmonpy.isolated-worker-validation/3',
                 executable_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
-                protocol='SALMONPY_TDDFT_E_V2',steps=20,interleaved_independence=True,
-                replay_continuation_max_abs_error=0.,repeat_max_abs_error=0.,reference_max_abs_error=0.,
-                capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number'])
+                protocol='SALMONPY_TDDFT_E_V3',steps=20,interleaved_independence=True,
+                replay_continuation_max_abs_error=0.,repeat_max_abs_error=0.,reference_max_abs_error=0.,reference_energy_max_abs_error=0.,
+                capabilities=['isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness'])
 
 
 class IsolatedTDDFTTests(unittest.TestCase):
@@ -131,7 +131,7 @@ class IsolatedTDDFTTests(unittest.TestCase):
             a.save_checkpoint(checkpoint)
             expected=a.step([0.,0.,.007]).dipole
         manifest=json.loads((checkpoint/'manifest.json').read_text())
-        self.assertEqual(manifest['schema'],'salmonpy.isolated-tddft-checkpoint/2')
+        self.assertEqual(manifest['schema'],'salmonpy.isolated-tddft-checkpoint/3')
         self.assertEqual(set(manifest['arrays']),{'E0','observables0','observables','E_history','observable_history'})
         with IsolatedTDDFTInitialState.from_salmon(self.bundle,'rt.inp',runtime=self.runtime,max_steps=25) as rebuilt:
             with rebuilt.new_state(dt=.02) as b:
@@ -172,7 +172,7 @@ class IsolatedTDDFTTests(unittest.TestCase):
         from salmonpy.errors import NumericalError
         a,b=self.state(),self.state()
         mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.])
-        bridge=_IsolatedDipoleTrial(a,mapping)
+        bridge=_IsolatedDipoleTrial(a,mapping,sampling='endpoint')
         drive=np.array([.03,-.01,.02]);own=np.array([.1,.2,.3])
         before=a.observables.dipole.copy()
         current=bridge.propose(drive+own,own)
@@ -232,7 +232,39 @@ class IsolatedTDDFTTests(unittest.TestCase):
         try:
             for bad in ('nan','inf','-inf'):
                 a._engine._events=queue.Queue()
-                a._engine._events.put('SALMONPY_TDDFT_E_V2 1 0 0 0 0 0 0 '+bad)
+                a._engine._events.put('SALMONPY_TDDFT_E_V3 1 0 0 0 0 0 0 '+bad+' -1 1')
                 with self.assertRaises(NumericalError):a._engine._receive(1)
         finally:a._engine._events=events
         self.assertEqual(a.electron_number,expected)
+
+
+    def test_energy_is_explicitly_fresh_and_restores(self):
+        a=self.state()
+        self.assertEqual(a.observables.internal_energy,-1.)
+        a.step([0.,0.,.01]);token=a.snapshot()
+        expected=a.internal_energy
+        a.step([0.,0.,.02])
+        self.assertIsNone(a.internal_energy)
+        a.restore(token)
+        self.assertEqual(a.internal_energy,expected)
+
+
+    def test_midpoint_trial_retains_left_field_on_cancel(self):
+        from salmonpy.dipole_source import DipoleMap,_IsolatedDipoleTrial
+        from salmonpy.errors import NumericalError
+        a,b=self.state(),self.state()
+        bridge=_IsolatedDipoleTrial(a,DipoleMap(('molecule',),(10,),[[1.]],[8.]),sampling='midpoint')
+        bridge.propose([3.,5.,7.],[1.,1.,1.])
+        first=b.step([1.,2.,3.]).dipole.copy()
+        np.testing.assert_array_equal(a.observables.dipole,first)
+        bridge.cancel()
+        self.assertEqual(a.time,0.)
+        bridge.propose([3.,5.,7.],[1.,1.,1.]);bridge.validate([3.,5.,7.],[1.,1.,1.]);bridge.commit()
+        bridge.propose([5.,9.,13.],[1.,1.,1.])
+        expected=b.step([3.,6.,9.]).dipole.copy()
+        np.testing.assert_array_equal(a.observables.dipole,expected)
+        with self.assertRaises(NumericalError):bridge.validate([5.1,9.,13.],[1.,1.,1.])
+        bridge.cancel()
+        np.testing.assert_array_equal(a.observables.dipole,first)
+        bridge.propose([5.,9.,13.],[1.,1.,1.]);bridge.validate([5.,9.,13.],[1.,1.,1.]);bridge.commit()
+        np.testing.assert_array_equal(a.observables.dipole,expected)

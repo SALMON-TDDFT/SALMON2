@@ -5,7 +5,7 @@
   "scope": "single maintained complete solver; ordinary XC/HSE are build settings",
   "source_tree": "sources/solver",
   "source_tree_manifest": "source-trees/solver.json",
-  "source_tree_sha256": "ebc8986f18c05c564c1a07bfd18b4c35d811b9c720bfee548568b9a162295978",
+  "source_tree_sha256": "6765473bad4c8c948e3a059e6dd7af643a4e0f781033e7a4fc37f9fd2bbecbaf",
   "patch_sha256_role": "historical identity only; source_tree_sha256 binds the current complete source",
   "source_profile": "fast-pr",
   "interface_revision": "salmonpy-runtime/2",
@@ -13,7 +13,8 @@
     "native/lorentz_drude.f90": "src/maxwell/lorentz_drude.f90",
     "native/sbe_types.f90": "src/ssbe/sbe_types.f90",
     "native/sbe_velocity_kernel.f90": "src/ssbe/sbe_velocity_kernel.f90",
-    "native/subpixel_smoothing.f90": "src/maxwell/subpixel_smoothing.f90"
+    "native/subpixel_smoothing.f90": "src/maxwell/subpixel_smoothing.f90",
+    "native/fdtd_energy.f90": "src/maxwell/fdtd_energy.f90"
   },
   "integration_commit": "7fb10764",
   "historical_sources": [

@@ -24,7 +24,7 @@ electronic_changeは計算処理の電子双極子変化です。配列は読取
 初期E・時刻はゼロです。new_state(position=...)は場を評価する位置（既定(0,0,0) bohr）を
 指定しますが、分子座標の移動・回転は行いません。
 
-計算プログラム読込みは64 KiB以下のローカル検証記録について、E2プロトコル・対応範囲・
+計算プログラム読込みは64 KiB以下のローカル検証記録について、E3プロトコル・対応範囲・
 比較／独立性／履歴再実行の成功記録と実行ファイルのSHA256を確認します。
 ダウンロード・コンパイル・MPI初期化・worker起動はしません。
 記録はローカル検証の証拠で、電子署名による認証やソース監査の代わりではありません。
@@ -87,9 +87,9 @@ state.save_checkpoint('new-isolated-checkpoint')
 resumed.restore_checkpoint('new-isolated-checkpoint', max_bytes=16*1024*1024)
 ```
 
-形式は `salmonpy.isolated-tddft-checkpoint/2`、非圧縮Zarr v3の限定形式です。
-E0・observables0・observables・E_history・observable_historyを保存します。観測配列は7成分で、
-先頭3成分がelectronic_change、次の3成分が全電荷双極子（単位e*bohr）、最後が実測電子数です。
+形式は `salmonpy.isolated-tddft-checkpoint/3`、非圧縮Zarr v3の限定形式です。
+E0・observables0・observables・E_history・observable_historyを保存します。観測配列は9成分で、
+双極子変化3・全電荷双極子3（単位e*bohr）・実測電子数・内部エネルギー（Hartree）・鮮度フラグです。
 波動関数や後処理archiveではなく、受理済み履歴の再実行用記録です。
 GSと検証済みruntimeは別途必要です。初期ファイル・実行ファイルのハッシュ、dt、容量、
 スレッド数、位置、パッケージ版を照合します。初期モデルのオブジェクトは作り直せます。
@@ -107,9 +107,26 @@ RSS上限ではありません。省略時は設定容量から上限を計算�
 E2では `frame.electron_number` と `state.electron_number` が占有電子密度の積分値を
 返します。入力nelecからの推定ではありません。Fortranの既存双極子観測が計算した値を
 再利用するので、観測のための全体通信は増やしません。応答は双極子変化3成分、全電荷
-双極子3成分、電子数1成分の7値です。読取専用の配列と有限なスカラーとして返します。
-E2の検証記録は `salmonpy.isolated-worker-validation/2`、チェックポイントは
-`salmonpy.isolated-tddft-checkpoint/2`。観測配列の先頭6列は双極子、7列目は電子数です。
+双極子3成分、電子数・内部エネルギー・鮮度の各1成分で9値です。読取専用の配列と有限なスカラーとして返します。
+E2の検証記録は `salmonpy.isolated-worker-validation/3`、チェックポイントは
+`salmonpy.isolated-tddft-checkpoint/3`。観測配列の先頭6列は双極子、7列目は電子数、8列目はエネルギー、9列目は鮮度です。
 旧E1・旧チェックポイントは受け付けません。電子数も履歴再生・復元の照合対象です。
 分子FDTD開発試験はFortranで電子数減少率を評価し、目安1e-5を診断結果へ記録します。
 目安の超過だけでは計算を止めません。値が非有限ならその試行を拒否します。
+
+
+### 内部エネルギーと仕事量
+
+`frame.internal_energy` と `state.internal_energy` は外場の相互作用エネルギーを含まない
+内部エネルギー（Hartree）です。既存の固有値計算が更新された時刻だけ値を返し、その他は
+`None`です。計算を増やすために `out_rt_energy_step` を暗黙に変更しません。
+
+開発用分子FDTD試験では、Fortranで実際に与えた終点Eによる区間一定の仕事
+Σ E[n]·(p[n]−p[n−1]) と、中点Eによる仕事を別々に積算します。内部エネルギーとの差は
+更新済みの時刻だけ比較します。無電場のエネルギードリフトも別に測定し、主結果から
+自動的に差し引きません。仕事の残差は診断であり、有限な計算を閾値で止めません。
+NPZの `internal_energy_raw` は鮮度なしでは使用せず、`energy_fresh` または
+`energy_observation_steps`・`energy_observations` を使って更新済み値を選んでください。
+全電磁エネルギー収支の証明とは区別します。旧E1/E2・旧保存形式は受け付けません。
+
+分子FDTD開発試験の既定は中点E結合です。`step(E)`に渡す区間一定Eを結合側でFortran平均し、単独TDDFTの更新を変えません。終点方式は明示的な比較用です。DIPOLE_RADIATION.mdの時間配置・仕事量・自己場の範囲を参照してください。

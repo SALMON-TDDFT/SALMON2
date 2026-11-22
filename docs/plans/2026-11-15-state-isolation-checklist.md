@@ -14,11 +14,11 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 | 完了 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBE局所試験、MPI2/4、固定Si/PBE比較。今回のソース・バイナリ向け記録も更新。換算定数は変更なし |
 | 完了 | 初期推定の入力準備・保持GSからの受け渡し | 準備と実行を分離し、保持GSの波動関数・占有数を独立コピー。前回実装は8f3a7663までpush済み |
 | 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
-| 完了 | 最新パッケージ・分子接続検証 | ソース版・wheel版とも684件実行、各1件任意スキップ。日英・AI JSON同期。今回許可されたC2H2 GSを保存・再利用し、真空/LDの取消再試行を確認。末尾とisolated-fdtd検証記録を参照 |
+| 完了 | 最新パッケージ・分子接続検証 | ソース版・wheel版とも687件実行、各1件任意スキップ。日英・AI JSON同期。今回許可されたC2H2 GSを保存・再利用し、真空/LDの取消再試行を確認。末尾とisolated-fdtd検証記録を参照 |
 
 ### 残る作業と対象拡大
 
-**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消は履歴再生です。短時間の電子数保存は確認済みです。量子系の仕事量と全電磁エネルギー、一般利用向けドライバは残件です。以下はそれと区別する運用・対象拡大の残件です。
+**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消は履歴再生です。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。全電磁エネルギーと一般利用向けドライバも残件です。以下はそれと区別する運用・対象拡大の残件です。
 
 1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
 2. **大規模化の計測**：マクロ点・ランク・観測間隔に対するメモリ、通信、ファイル数・I/O負荷の測定。集約・バッファ化は測定上の必要に応じて実装する。
@@ -35,7 +35,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
-Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum work, full field energy, physical convergence and a public driver remain separate. Memory budgets warn; SCF nonconvergence retains
+Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum-work observation/comparison and selected-field midpoint timing are verified. Full field energy, physical convergence and a public driver remain separate. Memory budgets warn; SCF nonconvergence retains
 results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
@@ -4119,3 +4119,62 @@ Evidence:canonical calc2026/salmonpy-molecular-centered-20261122/{summary.json,v
 
 Evidence: docs/isolated-electron-number-validation-2026-11-22.md and canonical
 C2H2 campaign's electron-number-summary.json (local OneDrive, cloud sync unconfirmed).
+
+## 2026-11-22 — molecular energy/work diagnostic
+
+- [x] Electron-number work committed/pushed as416b1a83. No manual heavy CI.
+- [x] E3 exposes internal energy and freshness without changing existing energy
+  cadence, physical arithmetic or adding a reduction. None at stale endpoints.
+  Revision3 evidence/replay checkpoints; no old-format fallback.
+- [x] Fortran held-endpoint and midpoint dipole work, sparse energy differences,
+  independent zero-field drift and finite/overflow rejection. Analytic sign/time
+  controls pass. Actual C2H2 reference energy difference<=2.132e-14Hartree.
+- [x] Authorized existing GS reused in MPI4 LD/FDTD. Old E/p/j/Ne arrays unchanged;
+  source continuous/wheel injected reject30/retry histories exactly match, including
+  work/energy. Source/wheel686 tests(one optional skip each); memory/disk replay
+  and freshness/None are checked with actual C2H2. Work-observation follow-up uncommitted.
+- [ ] Energy agreement is NOT closed: default weak signal is below zero-field drift.
+  Explicit amplitude.1 control has0.897% held-work residual, but28.49% midpoint-work
+  residual. Next resolve molecular/field time placement, then full Maxwell/LD/flux
+  energy balance. No automatic background subtraction or residual-based stopping.
+- [ ] Physical convergence/general public two-way driver and broader site/platform
+  evidence remain separate. Electronic restore still replays accepted history.
+  Groups1/2 deferred. No new GS campaign authorized by this diagnostic.
+
+Evidence:docs/isolated-work-validation-2026-11-22.md and canonical C2H2 campaign's
+energy-work-summary.json. Local OneDrive storage; cloud synchronization unconfirmed.
+
+## 2026-11-22 — selected-field midpoint work alignment
+
+- [x] Fortran selected left/right E average; midpoint is the development coupling
+  default, explicit endpoint is the numerical control. Standalone E3/Fortran solver
+  unchanged. No fallback or additional MPI communication.
+- [x] Accept updates left E only after actual-field validation. Cancel preserves
+  left E and quantum state; retry histories exactly match continuous execution.
+  Original endpoint-control physical/energy/work arrays remain bit-identical.
+- [x] Actual authorized C2H2 GS reused, MPI4 vacuum/LD,64 steps,.003au,amplitude.1:
+  applied and selected-field midpoint work numerically equal. Raw internal-energy
+  residual vs selected midpoint work drops28.49%→0.695% (LD),0.688% in vacuum.
+  Zero-field drift not subtracted. Corrected coupled trajectories intentionally
+  change; no claim that midpoint and endpoint results are identical.
+- [x] Total-field/own-vacuum/selected-field source work separately retained. Source
+  continuous vs installed-wheel retry final histories match; independent quantum
+  drive replay matches. Source/wheel687 tests(one optional skip); scalar finite,
+  NaN/Inf and finite-large-average checks pass. Paired guides/AI JSON synchronized.
+- [ ] Remaining: full spatial field/LD/PML/boundary energy balance, accounting for
+  removed own-vacuum work/radiation reaction, and physical convergence/public workflow.
+  Point-work alignment alone is not a total electromagnetic conservation certificate.
+  Electronic restore still replays accepted history. Groups1/2 stay deferred.
+
+Evidence:docs/isolated-midpoint-validation-2026-11-22.md and canonical C2H2 campaign
+midpoint-work-summary.json. Follow-up still uncommitted; no manual heavy CI.
+
+## 2026-11-22 六面エネルギー収支の接続
+
+- [x] Fortranの読み取り専用観測：六面流束、場の離散／時刻中心化エネルギー、LD・外部電流の仕事。人工解で符号・領域分割の加法性と非有限値拒否を確認。
+- [x] C2H2＋等方LDの実接続：観測前との全保存配列が完全一致。ステップ30取消・再試行を通した六面収支を取得。自己場仕事と量子エネルギーを含む集計もFortran。
+- [x] この追加観測を含むwheel導入・実結合試験。ソース・wheelとも688件実行、各1件任意スキップ。連続／ステップ30取消再試行の全保存配列・六面観測が完全一致。
+- [ ] 実FDTDの複数場ランクでの面境界検証。人工解での領域分割加法性とは区別。
+- [ ] テンソル・界面平滑化・任意の背景誘電率への観測拡張。現状は警告して観測不可を返し、計算は継続可能。
+
+今回の実測は量子仕事の約0.70%の残差を残す短時間開発検証。通常の時刻中心化エネルギーの残差も保存し、離散保存量と区別する。一般利用の分子結合ドライバ・広い物理条件の検証は引き続き残件。

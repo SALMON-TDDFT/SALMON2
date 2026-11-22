@@ -12,7 +12,7 @@ from .tddft import TDDFTInitialState, TDDFTState, _digest
 
 __all__ = ['IsolatedRuntime','load_isolated_runtime','DipoleObservables',
            'IsolatedTDDFTInitialState','IsolatedTDDFTState']
-_CAPABILITIES = {'isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number'}
+_CAPABILITIES = {'isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness'}
 
 
 def _receipt(payload, executable):
@@ -26,13 +26,13 @@ def _receipt(payload, executable):
         return result
     try:
         data = json.loads(payload, object_pairs_hook=unique)
-        valid = (data['schema']=='salmonpy.isolated-worker-validation/2'
-                 and data['protocol']=='SALMONPY_TDDFT_E_V2'
+        valid = (data['schema']=='salmonpy.isolated-worker-validation/3'
+                 and data['protocol']=='SALMONPY_TDDFT_E_V3'
                  and data['executable_sha256']==executable.sha256
                  and type(data['steps']) is int and data['steps']>=20
                  and data['interleaved_independence'] is True
                  and set(data['capabilities'])==_CAPABILITIES)
-        for key in ('repeat_max_abs_error','replay_continuation_max_abs_error','reference_max_abs_error'):
+        for key in ('repeat_max_abs_error','replay_continuation_max_abs_error','reference_max_abs_error','reference_energy_max_abs_error'):
             value=data[key]
             valid = valid and type(value) in (int,float) and np.isfinite(value) and 0 <= value <= 1.e-10
     except (KeyError, TypeError, ValueError, RecursionError) as exc:
@@ -43,7 +43,7 @@ def _receipt(payload, executable):
 
 @dataclass(frozen=True, slots=True)
 class IsolatedRuntime:
-    """Locally validated E2 binary; a receipt is evidence, not a signature or audit."""
+    """Locally validated E3 binary; a receipt is evidence, not a signature or audit."""
     executable: SalmonExecutable
     validation: bytes = field(repr=False)
 
@@ -54,7 +54,7 @@ class IsolatedRuntime:
 
 
 def load_isolated_runtime(executable, validation):
-    """Verify local E2 validation JSON and exact executable hash; never build/download."""
+    """Verify local E3 validation JSON and exact executable hash; never build/download."""
     binary = Path(executable).expanduser().resolve(strict=True)
     path = Path(validation).expanduser()
     with path.open('rb') as stream:
@@ -68,20 +68,23 @@ class DipoleObservables:
     electronic_change: object
     dipole: object
     electron_number: float
+    internal_energy: object
 
     def __post_init__(self):
         object.__setattr__(self,'time',float(_real(self.time,(),'time')))
         object.__setattr__(self,'electronic_change',_real(self.electronic_change,(3,),'electronic dipole change'))
         object.__setattr__(self,'dipole',_real(self.dipole,(3,),'total charge dipole'))
         object.__setattr__(self,'electron_number',float(_real(self.electron_number,(),'electron number')))
+        if self.internal_energy is not None:
+            object.__setattr__(self,'internal_energy',float(_real(self.internal_energy,(),'internal energy')))
 
 
 class _EEngine(TDDFTState):
-    _worker_mode = 'E2'
-    _reply_prefix = 'SALMONPY_TDDFT_E_V2 '
+    _worker_mode = 'E3'
+    _reply_prefix = 'SALMONPY_TDDFT_E_V3 '
     _init_command = 'INIT_E'
     _step_command = 'STEP_E'
-    _reply_size = 7
+    _reply_size = 9
     _snapshot_kind = 'isolated-TDDFT-E-dipole-replay'
 
     def __init__(self,model,dt,position):
@@ -90,12 +93,14 @@ class _EEngine(TDDFTState):
 
     @property
     def current(self):
-        # Private transport hook: seven raw observables, never exposed as current.
-        return _real(self._current,(7,),'dipole/electron observables')
+        # Private transport hook: nine raw observables, never exposed as current.
+        return _real(self._current,(9,),'dipole/electron/energy observables')
 
     def _receive(self,index):
         try:
-            return super()._receive(index)
+            values=super()._receive(index)
+            if values[8] not in (0.,1.):raise InputError('invalid energy freshness flag')
+            return values
         except InputError as exc:
             raise NumericalError('isolated worker returned nonfinite observables') from exc
 
@@ -146,10 +151,13 @@ class IsolatedTDDFTState:
     @property
     def observables(self):
         values=self._engine.current
-        return DipoleObservables(self.time,values[:3],values[3:6],values[6])
+        return DipoleObservables(self.time,values[:3],values[3:6],values[6],values[7] if values[8]==1. else None)
 
     @property
     def electron_number(self): return self.observables.electron_number
+
+    @property
+    def internal_energy(self): return self.observables.internal_energy
 
     def step(self,E):
         E=_real(E,(3,),'E')

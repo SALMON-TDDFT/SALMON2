@@ -23,14 +23,14 @@ contains
     character(8) :: value
     integer :: status
     call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
-    worker_requested=worker_embedded.or.(status==0.and.(trim(value)=='1'.or.trim(value)=='E2'))
+    worker_requested=worker_embedded.or.(status==0.and.(trim(value)=='1'.or.trim(value)=='E3'))
   end function
 
   logical function worker_E_requested()
     character(8) :: value
     integer :: status
     call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
-    worker_E_requested=.not.worker_embedded.and.status==0.and.trim(value)=='E2'
+    worker_E_requested=.not.worker_embedded.and.status==0.and.trim(value)=='E3'
   end function
 
   subroutine worker_configure()
@@ -163,19 +163,21 @@ contains
     endif
     flush(output_unit)
   end subroutine
-  subroutine worker_reply_E(step,delta_dipole,total_dipole,electron_number)
+  subroutine worker_reply_E(step,delta_dipole,total_dipole,electron_number,internal_energy,energy_fresh)
     use iso_fortran_env, only: output_unit
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     integer,intent(in) :: step
-    real(8),intent(in) :: delta_dipole(3),total_dipole(3),electron_number
+    real(8),intent(in) :: delta_dipole(3),total_dipole(3),electron_number,internal_energy
+    logical,intent(in)::energy_fresh
     integer :: i
     do i=1,3
       if(.not.ieee_is_finite(delta_dipole(i)).or..not.ieee_is_finite(total_dipole(i))) &
         error stop 'SALMONpy: nonfinite dipole'
     end do
     if(.not.ieee_is_finite(electron_number))error stop 'SALMONpy: nonfinite electron number'
-    write(output_unit,'(a,1x,i0,7(1x,es26.17e3))') 'SALMONPY_TDDFT_E_V2', &
-      step,delta_dipole,total_dipole,electron_number
+    if(.not.ieee_is_finite(internal_energy))error stop 'SALMONpy: nonfinite internal energy'
+    write(output_unit,'(a,1x,i0,9(1x,es26.17e3))') 'SALMONPY_TDDFT_E_V3', &
+      step,delta_dipole,total_dipole,electron_number,internal_energy,merge(1d0,0d0,energy_fresh)
     flush(output_unit)
   end subroutine
 end module

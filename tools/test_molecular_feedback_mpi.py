@@ -66,9 +66,9 @@ def isolated_loop(world, field, args):
     """Private E-worker coupling; no quantum energy-balance claim.
 
     Field time = electronic time + dt after the explicit first hold. Initial
-    selected E must be zero, matching the existing worker's initial E. The worker
-    receives endpoint E and retains its own integration order without averaging
-    it again in Python. Restoring electrons currently replays accepted history.
+    selected E must be zero, matching the existing worker's initial E. The unchanged worker
+    receives a constant selected interval E, with midpoint or explicit endpoint
+    sampling chosen by this coupling layer in Fortran. Restoring electrons currently replays accepted history.
     """
     from salmonpy.native_steps import _NativeBackup
     from salmonpy.dipole_source import DipoleMap, _IsolatedDipoleTrial, _selected_molecular_field
@@ -76,9 +76,17 @@ def isolated_loop(world, field, args):
     from contextlib import ExitStack
     backup=None if field is None else _NativeBackup(field,field.context.solver_comm,
         'sp_eh_step_transaction',field.directory,('A','E','step_index','failed','closed'))
+    observer=None if field is None or args.energy_box is None else field.energy_observer(args.energy_box[:3],args.energy_box[3:])
+    def packet():
+        if field is None:return None
+        return (field.E[0].copy(),None if observer is None else observer.sample_step())
     zero=np.zeros((1,3))
+    token=None if observer is None else backup.capture()
     if field is not None:field.advance(zero)
-    initial=world.gather(None if field is None else field.E[0].copy(),root=0)
+    gathered=world.gather(packet(),root=0)
+    if token is not None:backup.release(token)
+    initial=None if world.rank else [None if x is None else x[0] for x in gathered]
+    budgets=[] if world.rank else [[gathered[0][1],gathered[2][1]]]
     with ExitStack() as stack:
         bridge=None
         if world.rank==0:
@@ -91,8 +99,9 @@ def isolated_loop(world, field, args):
                 max_steps=args.steps,threads=1))
             state=stack.enter_context(model.new_state(dt=args.dt,position=(-1.,1.,1.)))
             mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.])
-            bridge=_IsolatedDipoleTrial(state,mapping)
+            bridge=_IsolatedDipoleTrial(state,mapping,sampling=args.isolated_sampling,initial_field=selected)
             ps=[state.observables.dipole.copy()];js=[];drives=[];norms=[state.electron_number]
+            energies=[state._engine.current[7]];fresh=[state._engine.current[8]]
             fields=[[initial[0],initial[2],selected]]
         n=1
         rejected=False
@@ -109,7 +118,8 @@ def isolated_loop(world, field, args):
                 backup.release(token)
                 token=backup.capture()
             if field is not None:field.advance(current)
-            accepted=world.gather(None if field is None else field.E[0].copy(),root=0)
+            accepted_packet=world.gather(packet(),root=0)
+            accepted=None if world.rank else [None if x is None else x[0] for x in accepted_packet]
             injected=args.inject_reject_step==n and not rejected
             error=None
             if world.rank==0:
@@ -127,10 +137,12 @@ def isolated_loop(world, field, args):
                     continue
                 raise ValueError(error)
             if world.rank==0:
+                budgets.append([accepted_packet[0][1],accepted_packet[2][1]])
                 provided=bridge._drive.copy()
                 bridge.commit()
                 selected=_selected_molecular_field(accepted[0],accepted[2])
                 ps.append(state.observables.dipole.copy());js.append(current[0].copy());norms.append(state.electron_number)
+                energies.append(state._engine.current[7]);fresh.append(state._engine.current[8])
                 drives.append(provided);fields.append([accepted[0],accepted[2],selected])
             if backup is not None:backup.release(token)
             n+=1
@@ -140,16 +152,47 @@ def isolated_loop(world, field, args):
             for E,p,Ne in zip(drives,ps[1:],norms[1:]):
                 np.testing.assert_array_equal(control.step(E).dipole,p)
                 np.testing.assert_equal(control.electron_number,Ne)
+            from salmonpy.dipole_source import _energy_work
+            work=_energy_work(np.vstack((np.zeros(3),drives)),ps,energies,fresh)
+            field_work=_energy_work(np.asarray(fields)[:,2,:],ps,energies,fresh)
+            total_work=_energy_work(np.asarray(fields)[:,0,:],ps,energies,fresh)[:,:2]
+            own_work=_energy_work(np.asarray(fields)[:,1,:],ps,energies,fresh)[:,:2]
+            last=int(np.flatnonzero(work[:,5])[-1])
+            control.close()
+            with model.new_state(dt=args.dt,position=(-1.,1.,1.)) as free:
+                free_energies=[free._engine.current[7]];free_fresh=[free._engine.current[8]]
+                for _ in range(args.steps-1):
+                    free.step(np.zeros(3))
+                    free_energies.append(free._engine.current[7]);free_fresh.append(free._engine.current[8])
+            zero_work=_energy_work(np.zeros((args.steps,3)),np.zeros((args.steps,3)),free_energies,free_fresh)
             np.savez(args.output/'history.npz',fields=fields,p=ps,j=js,drive=drives,electron_number=norms,
+                internal_energy_raw=energies,energy_fresh=fresh,energy_work=work,selected_field_energy_work=field_work,total_source_work=total_work,vacuum_reference_work=own_work,zero_field_energy_work=zero_work,
+                drive_time=(np.arange(args.steps-1)+(1.5 if args.isolated_sampling=='midpoint' else 2.))*args.dt,
+                energy_observation_steps=np.flatnonzero(fresh),
+                energy_observations=np.asarray(energies)[np.asarray(fresh,dtype=bool)],
                 E_time=np.arange(1,args.steps+1)*args.dt,
                 p_time=np.arange(1,args.steps+1)*args.dt,
                 electronic_time=np.arange(args.steps)*args.dt,
                 j_time=(np.arange(len(js))+1.5)*args.dt)
-            from salmonpy.convergence import _norm_report
+            from salmonpy.convergence import _norm_report,_comparison
+            held_error=_comparison([work[last,2]],[work[last,0]],0.,0.)
+            midpoint_error=_comparison([work[last,2]],[field_work[last,1]],0.,0.)
+            drive_error=_comparison([work[last,0]],[field_work[last,1]],0.,0.)
             norm_report=_norm_report(norms,norms[0],0.,1.e-5)
             report=dict(mode='feedback',schedule='centered-trial-rollback',
                 norm_diagnostic=norm_report,norm_loss_target=1.e-5,
-                dt=args.dt,steps=args.steps,material_environment=args.environment,
+                energy_work_at_electronic_step=last,
+                work_applied=float(work[last,0]),work_selected_field_endpoint=float(field_work[last,0]),work_selected_field_midpoint=float(field_work[last,1]),
+                work_total_field_midpoint=float(total_work[last,1]),work_own_reference_midpoint=float(own_work[last,1]),
+                internal_energy_change=float(work[last,2]),
+                applied_work_residual=float(work[last,3]),selected_field_midpoint_work_residual=float(field_work[last,4]),
+                zero_field_energy_drift=float(zero_work[last,2]),
+                energy_freshness_preserves_existing_cadence=True,
+                applied_relative_residual=held_error['relative_error'],
+                selected_field_midpoint_relative_residual=midpoint_error['relative_error'],
+                applied_selected_midpoint_relative_difference=drive_error['relative_error'],
+                molecular_sampling=args.isolated_sampling,
+                dt=args.dt,steps=args.steps,material_environment=args.environment,source_amplitude=args.source_amplitude,
                 library_sha256=field.manifest['library_sha256'],
                 isolated_executable_sha256=runtime.executable.sha256,
                 TDDFT_attached=not json.loads(args.isolated_validation.read_text()).get('synthetic',False),
@@ -163,6 +206,31 @@ def isolated_loop(world, field, args):
                 isolated_input_sha256=hashlib.sha256((args.isolated_bundle/args.isolated_input).read_bytes()).hexdigest(),
                 isolated_validation_sha256=hashlib.sha256(args.isolated_validation.read_bytes()).hexdigest(),
                 script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
+            if args.energy_box is not None:
+                import ctypes as c
+                from salmonpy._sbe_handles import default_api
+                from salmonpy.coupled import _BoxEnergyObserver
+                fn=default_api().library.sp_fdtd_box_summary
+                fn.argtypes=[c.c_int,c.c_void_p,c.c_double,c.c_double,c.c_double,c.c_void_p]
+                fn.restype=c.c_int
+                if any(not row[0]['available'] for row in budgets):
+                    report['box_energy']=dict(available=False)
+                else:
+                    accepted=np.array([[row[0][key] for key in _BoxEnergyObserver._names]
+                        for row in budgets[:last+1]],dtype=np.float64,order='C')
+                    result=np.zeros(10)
+                    code=fn(last+1,accepted.ctypes.data,float(work[last,2]),
+                        float(own_work[last,1]),float(total_work[last,1]),result.ctypes.data)
+                    if code:raise ValueError('box energy summary failed: '+str(code))
+                    names=('field_modified_change','ld_work','external_current_work','outward_energy',
+                        'field_modified_residual','field_max_step_residual','joint_modified_residual',
+                        'point_grid_work_difference','field_physical_change','joint_physical_residual')
+                    report['box_energy']=dict(available=True,units='hartree',
+                        through_field_step=last+1,quantum_energy_drift_not_subtracted=True,
+                        **dict(zip(names,map(float,result))))
+                (args.output/'box-energy.json').write_text(json.dumps(dict(
+                    box=args.energy_box,steps=budgets,
+                    scope='source-free inner box; six outward faces; LD work includes storage and dissipation'),indent=2)+'\n')
             (args.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
             print('PASS isolated-feedback interface; physical convergence not tested',flush=True)
 
@@ -176,13 +244,17 @@ def main():
     parser.add_argument('--isolated-validation',type=Path)
     parser.add_argument('--isolated-bundle',type=Path)
     parser.add_argument('--isolated-input',default='rt.inp')
+    parser.add_argument('--isolated-sampling',choices=('midpoint','endpoint'),default='midpoint',help='midpoint aligns molecular driving with field work; endpoint is an explicit numerical control')
     parser.add_argument('--inject-reject-step',type=int,help='isolated development test: reject once and retry this interval')
     parser.add_argument('--trajectory',type=Path,help='accepted centered history for a single-pass current replay')
     parser.add_argument('--environment',choices=('vacuum','ld'),default='vacuum')
     parser.add_argument('--schedule',choices=('held','centered'),default='centered',help='held is an explicit old-algorithm control, not a fallback')
+    parser.add_argument('--source-amplitude',type=float,default=.001,help='explicit pulse amplitude for diagnostic signal/background comparisons')
+    parser.add_argument('--energy-box',nargs=6,type=int,metavar=('LX','LY','LZ','UX','UY','UZ'),help='inclusive inner box; opt-in field energy observation')
     parser.add_argument('--dt',type=float,default=.003)
     parser.add_argument('--steps',type=int,default=64)
     args=parser.parse_args()
+    if not np.isfinite(args.source_amplitude):parser.error('finite source amplitude required')
     if not np.isfinite(args.dt) or args.dt<=0 or args.steps<2:parser.error('positive dt and steps>=2 required')
     from mpi4py import MPI
     from salmonpy.coupled import NativeEHField
@@ -209,7 +281,8 @@ def main():
             control=json.loads((args.baseline/'report.json').read_text())
             runtime=json.loads(args.build.read_text())
             if (control['mode']!='external' or control['dt']!=args.dt or control['steps']!=args.steps
-                    or control['library_sha256']!=runtime['sha256'] or control['environment']!=args.environment):
+                    or control['library_sha256']!=runtime['sha256'] or control['environment']!=args.environment
+                    or control['source_amplitude']!=args.source_amplitude):
                 raise ValueError('baseline mode/dt/steps/library/environment mismatch')
         except Exception as exc:error=str(exc)
     replay_current=replay_field=None
@@ -219,6 +292,7 @@ def main():
             original=json.loads((args.trajectory/'report.json').read_text())
             if (original['schedule']!='centered-trial-rollback' or original['dt']!=args.dt
                     or original['steps']!=args.steps or original['material_environment']!=args.environment
+                    or original['source_amplitude']!=args.source_amplitude
                     or original['library_sha256']!=json.loads(args.build.read_text())['sha256']):
                 raise ValueError('replay declaration mismatch')
             with np.load(args.trajectory/'history.npz',allow_pickle=False) as saved:
@@ -244,7 +318,7 @@ def main():
                         shapes=(Shape('box',(6.,12.,12.),(6.,0.,0.)),)
                         materials=(LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[0.],damping=[2.]),)
                     calculation=FDTD(Geometry(grid,shapes),materials,dt,steps,
-                        source=PlaneWave(AcosPulse(.001 if pair==0 else 0.,20.,.15),0,-16.),
+                        source=PlaneWave(AcosPulse(args.source_amplitude if pair==0 else 0.,20.,.15),0,-16.),
                         observations=((-1.,1.,1.),))
                     field=NativeEHField(context,calculation,args.build,args.output/('field-'+str(pair)),
                         points={10:(19,20,20)},grid=(1,1,1))
@@ -264,7 +338,7 @@ def main():
                         if args.environment=='ld':assert feedback_max>1e-20,'material feedback must be nonzero'
                         assert totals[3]<1e-12 and abs(totals[4])<1e-12
                         assert max(totals[8:11])<1e-10
-                        report=dict(mode='feedback',schedule='centered-trial-rollback',dt=dt,steps=steps,
+                        report=dict(mode='feedback',schedule='centered-trial-rollback',dt=dt,steps=steps,source_amplitude=args.source_amplitude,
                             initial_hold=dt,policy='environment_scattered_only',omega=omega,cell_volume=volume,
                             library_sha256=field.manifest['library_sha256'],
                             oscillator_balance_max=float(totals[3]),temporal_splitting_work=float(totals[4]),
@@ -318,7 +392,7 @@ def main():
                     current=world.bcast(current if world.rank==0 else None,root=0)
                 if world.rank==0:
                     records=np.asarray(records)
-                    report=dict(mode=args.mode,environment=args.environment,dt=dt,steps=steps,initial_hold=dt,
+                    report=dict(mode=args.mode,environment=args.environment,dt=dt,steps=steps,source_amplitude=args.source_amplitude,initial_hold=dt,
                                 full_field_energy_balance=False,physical_validation=False,
                                 library_sha256=field.manifest['library_sha256'])
                     if args.mode=='replay':

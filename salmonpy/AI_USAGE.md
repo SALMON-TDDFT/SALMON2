@@ -499,7 +499,7 @@ MPIのA/E/H転送は後述の明示的なpacket経路を使います。磁気物
 
 ## 孤立系E-workerの現在の範囲
 
-FIELD_INPUT.mdの検証用E2プロトコルは、ソースから明示的にビルドしたstandard runtimeで
+FIELD_INPUT.mdの検証用E3プロトコルは、ソースから明示的にビルドしたstandard runtimeで
 PZ・固定イオン・中点伝播の双極子を比較する開発用接続です。結晶のTDDFTInitialStateにEを
 渡したり、検証用driverを公開初期状態ローダーとして案内したりしないでください。
 公開入口はISOLATED_TDDFT.mdのload_isolated_runtimeとIsolatedTDDFTInitialStateです。

@@ -28,7 +28,7 @@ current. Initial E and time are zero. Spatial position defaults to (0,0,0) bohr
 and can be set with new_state(position=...); it labels the uniform field sample,
 not a translation/rotation of molecular coordinates.
 
-Runtime loading checks an explicit local validation record bounded to 64 KiB, its E2
+Runtime loading checks an explicit local validation record bounded to 64 KiB, its E3
 protocol/capabilities, successful comparison/isolation/replay evidence, and exact
 binary SHA256. It performs no download, compilation, MPI initialization or worker
 launch. validation records are local evidence, not cryptographic certification or a source
@@ -98,10 +98,10 @@ state.save_checkpoint('new-isolated-checkpoint')
 resumed.restore_checkpoint('new-isolated-checkpoint', max_bytes=16*1024*1024)
 ```
 
-`salmonpy.isolated-tddft-checkpoint/2` stores E0, observables0, observables, E_history
+`salmonpy.isolated-tddft-checkpoint/3` stores E0, observables0, observables, E_history
 and observable_history in the strict uncompressed Zarr v3 subset. Observation vectors
-have seven components: electronic_change3, total charge dipole3 (e*bohr), then measured
-electron number1.
+have nine components: electronic_change3, total charge dipole3 (e*bohr), measured
+electron number1, internal energy1 (Hartree), and freshness1.
 It is a replay record, not a wavefunction checkpoint or postprocessing archive.
 GS files and the validated runtime must be supplied separately. Initial file
 hashes, executable hash, dt, capacity, threads, position and package version must
@@ -118,14 +118,32 @@ plan extra capacity in your own run when further propagation is required.
 
 ### Measured electron number
 
-E2 exposes `frame.electron_number` and `state.electron_number`: the integral of
+E3 exposes `frame.electron_number` and `state.electron_number`: the integral of
 occupied electron density, not an estimate from input nelec. Reuse the result
 already calculated by Fortran dipole observation; no additional global reduction.
-Replies contain seven values: electronic dipole change3, total charge dipole3,
-then electron number1. Arrays are read-only and the scalar must be finite.
-Evidence uses `salmonpy.isolated-worker-validation/2`; checkpoints use
-`salmonpy.isolated-tddft-checkpoint/2`. Observation arrays have six dipole columns
-followed by measured electron number. Old E1/checkpoints are rejected.
+Replies contain nine values: electronic dipole change3, total charge dipole3,
+electron number1, internal energy1 and energy freshness1. Arrays are read-only and the scalar must be finite.
+Evidence uses `salmonpy.isolated-worker-validation/3`; checkpoints use
+`salmonpy.isolated-tddft-checkpoint/3`. Observation arrays have six dipole columns
+followed by measured electron number, internal energy and a 0/1 freshness flag. Old E1/checkpoints are rejected.
 Electron number participates in replay/restore comparisons. The molecular FDTD
 fixture diagnoses loss in Fortran with target1e-5; exceeding the target alone does
 not stop a calculation. Nonfinite values reject the trial.
+
+
+### Internal energy and work
+
+`frame.internal_energy` and `state.internal_energy` return internal energy in
+Hartree, excluding external-field interaction energy, only when the existing
+endpoint eigen-energy evaluation is fresh. Other endpoints return `None`.
+Never silently change out_rt_energy_step or force additional evaluations.
+
+The development molecular FDTD fixture accumulates the actual held-endpoint work
+Σ E[n]·(p[n]−p[n−1]) and midpoint-field work separately in Fortran. Compare internal
+energy only at fresh endpoints. A zero-field drift control is measured separately
+and is not silently subtracted. Finite residuals are diagnostics, not stop gates.
+In NPZ output, internal_energy_raw needs energy_fresh; alternatively select
+energy_observation_steps/energy_observations. This is distinct from full Maxwell
+energy balance. Old E1/E2 and old checkpoint formats are rejected.
+
+The molecular FDTD fixture defaults to midpoint-E coupling. Its Fortran average supplies the constant interval E to unchanged standalone step(E). Endpoint driving is an explicit numerical control. See DIPOLE_RADIATION.en.md for clocks, work and own-field scope.

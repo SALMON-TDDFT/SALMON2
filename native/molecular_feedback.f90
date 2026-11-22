@@ -157,4 +157,64 @@ integer(c_int) function sp_molecular_map(mode,np,nm,dt,weights,volume,p,old,resu
  enddo
  status=0
 end function
+! Work histories use actually consumed endpoint-held fields; midpoint is
+! reported separately and never substituted for the electronic Hamiltonian.
+integer(c_int) function sp_molecular_energy_work(n,fields,dipoles,energies,fresh,result) bind(C) result(status)
+ integer(c_int),value::n
+ real(c_double),intent(in)::fields(3,n),dipoles(3,n),energies(n),fresh(n)
+ real(c_double),intent(inout)::result(6,n)
+ real(c_double),allocatable::staged(:,:)
+ real(c_double)::held,mid,delta(3)
+ integer::i,k,ios
+ status=1
+ if(n<1)return
+ do k=1,n
+  if(.not.ieee_is_finite(energies(k)).or..not.ieee_is_finite(fresh(k)))return
+  if(fresh(k)/=0d0.and.fresh(k)/=1d0)return
+  do i=1,3
+   if(.not.ieee_is_finite(fields(i,k)).or..not.ieee_is_finite(dipoles(i,k)))return
+  enddo
+ enddo
+ if(fresh(1)/=1d0)return
+ status=2
+ allocate(staged(6,n),stat=ios)
+ if(ios/=0)return
+ staged=0d0;held=0d0;mid=0d0
+ do k=1,n
+  if(k>1)then
+   delta=dipoles(:,k)-dipoles(:,k-1)
+   held=held+dot_product(fields(:,k),delta)
+   mid=mid+dot_product(.5d0*(fields(:,k)+fields(:,k-1)),delta)
+  endif
+  staged(1,k)=held;staged(2,k)=mid
+  if(fresh(k)==1d0)then
+   staged(3,k)=energies(k)-energies(1)
+   staged(4,k)=staged(3,k)-held;staged(5,k)=staged(3,k)-mid
+   staged(6,k)=1d0
+  endif
+ enddo
+ status=4
+ do k=1,n
+ do i=1,6
+  if(.not.ieee_is_finite(staged(i,k)))return
+ enddo
+ enddo
+ result=staged;status=0
+end function
+integer(c_int) function sp_molecular_interval_field(left,right,selected) bind(C) result(status)
+ real(c_double),intent(in)::left(3),right(3)
+ real(c_double),intent(inout)::selected(3)
+ real(c_double)::staged(3)
+ integer::i
+ status=1
+ do i=1,3
+  if(.not.ieee_is_finite(left(i)).or..not.ieee_is_finite(right(i)))return
+ enddo
+ staged=.5d0*left+.5d0*right
+ status=4
+ do i=1,3
+  if(.not.ieee_is_finite(staged(i)))return
+ enddo
+ selected=staged;status=0
+end function
 end module

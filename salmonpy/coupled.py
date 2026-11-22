@@ -233,6 +233,15 @@ class NativeEHField:
                 'E':SampledField('E',[self.step_index*self.dt],self.sample_positions,
                                  self.E[None,:,:],'E:au')}
 
+    def energy_observer(self,lower,upper):
+        """Create an opt-in closed inner-box observer; this never advances a field.
+
+        Collective setup on the field group. sample_step() reads only a live
+        accepted-attempt backup before its release. Scalar vacuum/isotropic LD,
+        epsilon_inf=mu=1,sigma=0; unsupported profiles warn and report unavailable.
+        """
+        return _BoxEnergyObserver(self,lower,upper)
+
     def sample_planes(self,*,output_directory=None):
         """Collective explicit read: immutable planes on field rank0, None elsewhere.
 
@@ -813,3 +822,58 @@ class PacketCoupledStepper:
                     'current_time':(self.step_index+self.timing['current_offset'])*r.dt,
                     'samples':samples,'J_previous':previous,'J_charge':current.copy()}
         return None
+
+
+class _BoxEnergyObserver:
+    _names=('field_modified_old','field_modified_new','field_modified_change',
+        'field_physical_old','field_physical_new','field_physical_change',
+        'ld_work','external_current_work','out_x_lower','out_x_upper',
+        'out_y_lower','out_y_upper','out_z_lower','out_z_upper',
+        'outward_energy','modified_residual','physical_residual')
+
+    def __init__(self,field,lower,upper):
+        error=None;box=None
+        try:
+            box=np.asarray([lower,upper])
+            if box.shape!=(2,3) or box.dtype.kind not in 'iu':
+                raise InputError('integer lower/upper triples required')
+            counts=np.asarray(field.calculation.geometry.grid.counts)
+            if np.any(box[0]<0) or np.any(box[1]>=counts) or np.any(box[0]>box[1]):
+                raise InputError('ordered inclusive box must lie inside the field grid')
+            field.native._live()
+            from .api import _bind_field_operations
+            _bind_field_operations(field.lib,('sp_eh_box_energy_step',))
+        except Exception as exc:error=str(exc)
+        records=field.context.solver_comm.allgather((error,None if box is None else box.tolist()))
+        if any(e for e,_ in records):raise InputError('energy observer setup: '+str(records))
+        if any(b!=records[0][1] for _,b in records):raise InputError('energy boxes differ across field ranks')
+        self.field=field;self.box=np.array(box,dtype=np.int32,order='C')
+        self.box.setflags(write=False);self._warned=False
+
+    def sample_step(self):
+        """Read-only field-group scalar reduction; leader result, otherwise None.
+
+        All field ranks must call in matching order with their live step guard.
+        There is no I/O scope or application-wide communication in this query.
+        """
+        field=self.field
+        field.native._live()
+        guard=getattr(field,'_step_guard',None)
+        if guard is None or not guard.active:
+            raise InputError('energy observation requires an unconsumed accepted-step backup')
+        values=np.zeros(17)
+        code=field.lib.sp_eh_box_energy_step(self.box,values.ctypes.data)
+        if code==14:raise InputError('energy observation requires a fresh accepted-attempt backup')
+        if not field.context.is_leader:return None
+        if code:
+            reason={1:'box/profile unsupported: exclude source, PML and outer boundary; scalar epsilon_inf=mu=1, sigma=0 required',
+                    4:'nonfinite energy observation; no physical state was modified'}.get(code,'energy observation status '+str(code))
+            if not self._warned:
+                import warnings
+                warnings.warn(reason+'; calculation remains available',RuntimeWarning,stacklevel=2)
+                self._warned=True
+            return dict(available=False,reason=reason)
+        values.setflags(write=False)
+        return dict(available=True,step=field.step_index,units='hartree',
+                    lower=self.box[0].tolist(),upper=self.box[1].tolist(),
+                    **{name:float(value) for name,value in zip(self._names,values)})

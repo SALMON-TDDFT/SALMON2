@@ -1,7 +1,7 @@
 """One-way charge-dipole sources, in atomic units, for native E/H fields."""
 from dataclasses import dataclass
 import numpy as np
-from .errors import InputError, NumericalError
+from .errors import InputError, NumericalError, RuntimeFailure
 from .field_input import _real
 
 __all__ = ['DipoleMap', 'drive_native_dipoles', 'MolecularDrive', 'select_molecular_field']
@@ -272,19 +272,24 @@ def _mapped_dipoles(mapping,p,old,*,dt,mode,name):
 
 
 class _IsolatedDipoleTrial:
-    """Private single-molecule endpoint-E transaction for the FDTD fixture.
+    """Private single-molecule interval-E transaction for the FDTD fixture.
 
-    The isolated worker owns its length-gauge integration and endpoint-E history.
+    The isolated worker owns its length-gauge integration and applied-E history.
     Cancellation uses its supported replay restore, not direct electronic restore.
     Field backups and collective acceptance belong to the caller. No mutation of
     the molecule is allowed between propose and commit/cancel.
     """
-    def __init__(self, state, mapping):
+    def __init__(self, state, mapping, *, sampling='midpoint', initial_field=(0.,0.,0.)):
         from .isolated_tddft import IsolatedTDDFTState
         if not isinstance(state, IsolatedTDDFTState):
             raise InputError('isolated E-driven TDDFT state required')
         if not isinstance(mapping, DipoleMap) or len(mapping.molecule_ids) != 1:
             raise InputError('single-molecule dipole map required')
+        if sampling not in ('midpoint','endpoint'):
+            raise InputError('explicit midpoint or endpoint molecular sampling required')
+        self.sampling = sampling
+        self._left = _real(initial_field,(3,),'initial selected E')
+        self._accepted_right = None
         self.state = state
         self.mapping = mapping
         self._saved = None
@@ -294,7 +299,9 @@ class _IsolatedDipoleTrial:
     def propose(self, total, own):
         if self._saved is not None:
             raise InputError('finish the pending molecular trial first')
-        drive = _selected_molecular_field(total, own)
+        right = _selected_molecular_field(total, own)
+        drive = _interval_field(self._left,right) if self.sampling=='midpoint' else right
+        self._accepted_right = None
         old = self.state.observables.dipole
         self._saved = self.state.snapshot()
         self._drive = drive
@@ -309,14 +316,18 @@ class _IsolatedDipoleTrial:
         if self._saved is None:
             raise InputError('no pending molecular trial')
         self._validated = False
-        actual = _selected_molecular_field(total, own)
+        right = _selected_molecular_field(total, own)
+        actual = _interval_field(self._left,right) if self.sampling=='midpoint' else right
         if not np.allclose(actual, self._drive, rtol=1.e-10, atol=1.e-14):
-            raise NumericalError('accepted molecular E differs from predicted endpoint; cancel and retry')
+            raise NumericalError('accepted molecular interval E differs from prediction; cancel and retry')
+        self._accepted_right = right
         self._validated = True
 
     def commit(self):
         if self._saved is None or not self._validated:
             raise InputError('validate the accepted molecular endpoint before commit')
+        self._left = self._accepted_right
+        self._accepted_right = None
         self._saved = None
         self._drive = None
         self._validated = False
@@ -326,6 +337,38 @@ class _IsolatedDipoleTrial:
             raise InputError('no pending molecular trial')
         # Keep the token if replay itself fails; the caller can retry restoration.
         self.state.restore(self._saved)
+        self._accepted_right = None
         self._saved = None
         self._drive = None
         self._validated = False
+
+
+def _energy_work(fields,dipoles,energies,fresh):
+    """Fortran cumulative held/midpoint work and fresh internal-energy residuals."""
+    import ctypes as c
+    fields=np.asarray(fields)
+    if fields.ndim!=2 or fields.shape[1]!=3 or not len(fields):
+        raise InputError('nonempty endpoint E history required')
+    n=len(fields)
+    arrays=[np.ascontiguousarray(_real(a,shape,name)) for a,shape,name in (
+        (fields,(n,3),'E history'),(dipoles,(n,3),'dipole history'),
+        (energies,(n,),'energy history'),(fresh,(n,),'energy freshness'))]
+    out=np.empty((n,6))
+    fn=_molecular_function('sp_molecular_energy_work',[c.c_int]+[c.c_void_p]*5)
+    status=fn(n,*[a.ctypes.data for a in arrays],out.ctypes.data)
+    if status==1:raise InputError('invalid energy/work input or initial energy not fresh')
+    if status==2:raise RuntimeFailure('energy/work buffer allocation failed')
+    if status:raise NumericalError('energy/work arithmetic overflow')
+    return _real(out,out.shape,'energy/work history')
+
+
+def _interval_field(left,right):
+    """Fortran interval-average selected E; the solver still receives constant E."""
+    import ctypes as c
+    left=np.ascontiguousarray(_real(left,(3,),'left selected E'))
+    right=np.ascontiguousarray(_real(right,(3,),'right selected E'))
+    out=np.empty(3)
+    fn=_molecular_function('sp_molecular_interval_field',[c.c_void_p]*3)
+    status=fn(left.ctypes.data,right.ctypes.data,out.ctypes.data)
+    if status:raise NumericalError('invalid interval field')
+    return out

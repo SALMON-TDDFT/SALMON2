@@ -31,6 +31,8 @@ def main():
                     np.testing.assert_array_equal(b.observables.dipole,before)
                     np.testing.assert_array_equal(frame.dipole,reference[n,3:6])
                     np.testing.assert_equal(frame.electron_number,reference[n,6])
+                    if reference[n,8]==1.:np.testing.assert_equal(frame.internal_energy,reference[n,7])
+                    else:assert frame.internal_energy is None
                     np.testing.assert_array_equal(b.step(v).dipole,frame.dipole)
             saved=a.snapshot()
             a.save_checkpoint(output/'checkpoint')
@@ -38,6 +40,7 @@ def main():
             model.close()
             a.restore(saved)
             np.testing.assert_equal(a.electron_number,reference[10,6])
+            np.testing.assert_equal(a.internal_energy,reference[10,7])
             actual=np.array([a.step(v).dipole for v in E[10:]])
             np.testing.assert_array_equal(actual,expected)
             # Public step recovers accepted history after a lost child.
@@ -54,6 +57,7 @@ def main():
         with rebuilt.new_state(dt=dt) as resumed:
             resumed.restore_checkpoint(output/'checkpoint')
             np.testing.assert_equal(resumed.electron_number,reference[10,6])
+            np.testing.assert_equal(resumed.internal_energy,reference[10,7])
             disk_actual=np.array([resumed.step(v).dipole for v in E[10:]])
             np.testing.assert_array_equal(disk_actual,expected)
             np.testing.assert_equal(resumed.electron_number,reference[-1,6])

@@ -19,7 +19,7 @@ class IsolatedWorker:
         self.timeout = timeout
         self._events = queue.Queue()
         env = dict(os.environ)
-        env.update(SALMONPY_TDDFT_WORKER='E2', OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
+        env.update(SALMONPY_TDDFT_WORKER='E3', OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
                    MKL_NUM_THREADS='1', VECLIB_MAXIMUM_THREADS='1')
         self._proc = subprocess.Popen([str(executable)], cwd=directory, env=env,
                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -30,7 +30,7 @@ class IsolatedWorker:
                     for line in self._proc.stdout:
                         log.write(line)
                         log.flush()
-                        if line.startswith('SALMONPY_TDDFT_E_V2 '):
+                        if line.startswith('SALMONPY_TDDFT_E_V3 '):
                             self._events.put(line)
             finally:
                 self._proc.stdout.close()
@@ -71,7 +71,7 @@ class IsolatedWorker:
         if line is None:
             raise RuntimeError('E-worker stopped; inspect worker.log')
         fields = line.split()
-        if len(fields) != 9 or int(fields[1]) != step:
+        if len(fields) != 11 or int(fields[1]) != step:
             raise RuntimeError('invalid E-worker reply')
         values = np.asarray([float(v) for v in fields[2:]])
         if not np.isfinite(values).all():

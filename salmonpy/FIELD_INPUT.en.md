@@ -81,8 +81,8 @@ E/H delivery. Local solver SBE/direct parity is covered by tests. Isolated solve
 ## Experimental isolated solver E connection (source checkout)
 
 The bundled standard runtime now has a separate validation-only
-`SALMONPY_TDDFT_WORKER=E2` protocol: `INIT_E dt capacity E0`, `STEP_E Ex Ey Ez`,
-and replies `SALMONPY_TDDFT_E_V2 step delta_dipole[3] total_dipole[3]`.
+`SALMONPY_TDDFT_WORKER=E3` protocol: `INIT_E dt capacity E0`, `STEP_E Ex Ey Ez`,
+and replies `SALMONPY_TDDFT_E_V3 step delta_dipole[3] total_dipole[3]`.
 Values use atomic units; dipoles use e·bohr. The electronic dipole change and total
 charge dipole match solver `rt.data` conventions. They are not current density.
 Do not infer a dipole derivative or divide by the vacuum-cell volume implicitly.

@@ -79,3 +79,44 @@ class DipoleSourceTests(unittest.TestCase):
         vectors[0][:]=1e300
         self.assertEqual(fn(.01,2.,8.,*(a.ctypes.data for a in vectors+outputs)),4)
         for out in outputs:np.testing.assert_array_equal(out,np.full(out.shape,-7.))
+
+
+class MolecularEnergyWorkTests(unittest.TestCase):
+    def test_held_work_fresh_energy_and_sign(self):
+        from salmonpy.dipole_source import _energy_work
+        fields=[[0.,0.,0.],[2.,0.,0.],[4.,0.,0.]]
+        dipoles=[[0.,0.,0.],[1.,0.,0.],[2.,0.,0.]]
+        result=_energy_work(fields,dipoles,[10.,999.,16.],[1,0,1])
+        np.testing.assert_array_equal(result[-1],[6.,4.,6.,0.,2.,1.])
+        np.testing.assert_array_equal(result[1,2:],[0.,0.,0.,0.])
+        reversed_result=_energy_work(-np.array(fields),dipoles,[10.,999.,16.],[1,0,1])
+        self.assertEqual(reversed_result[-1,3],12.)
+
+        import ctypes as c
+        from salmonpy.dipole_source import _molecular_function
+        fn=_molecular_function('sp_molecular_energy_work',[c.c_int]+[c.c_void_p]*5)
+        E=np.array(fields,dtype=float);p=np.array(dipoles,dtype=float)
+        energy=np.array([10.,999.,16.]);fresh=np.array([1.,0.,1.])
+        out=np.full((3,6),123.)
+        for bad in (float('nan'),float('inf'),-float('inf')):
+            energy[1]=bad
+            self.assertNotEqual(fn(3,E.ctypes.data,p.ctypes.data,energy.ctypes.data,fresh.ctypes.data,out.ctypes.data),0)
+            np.testing.assert_array_equal(out,123.)
+        energy[1]=999.;E[-1,0]=1.e308;p[-1,0]=1.e308
+        self.assertEqual(fn(3,E.ctypes.data,p.ctypes.data,energy.ctypes.data,fresh.ctypes.data,out.ctypes.data),4)
+        np.testing.assert_array_equal(out,123.)
+
+        mean=_molecular_function('sp_molecular_interval_field',[c.c_void_p]*3)
+        left=np.full(3,1.e308);right=np.full(3,1.e308);selected=np.empty(3)
+        self.assertEqual(mean(left.ctypes.data,right.ctypes.data,selected.ctypes.data),0)
+        np.testing.assert_array_equal(selected,1.e308)
+        for bad in (float('nan'),float('inf'),-float('inf')):
+            left[-1]=bad;selected[:]=123.
+            self.assertNotEqual(mean(left.ctypes.data,right.ctypes.data,selected.ctypes.data),0)
+            np.testing.assert_array_equal(selected,123.)
+
+        total=_energy_work([[1.,0.,0.],[3.,0.,0.],[5.,0.,0.]],dipoles,[10.,999.,16.],[1,0,1])
+        own=_energy_work([[1.,0.,0.]]*3,dipoles,[10.,999.,16.],[1,0,1])
+        self.assertEqual(total[-1,1],6.)
+        self.assertEqual(own[-1,1],2.)
+        self.assertEqual(result[-1,1],4.)
