@@ -668,3 +668,38 @@ padding before unchanged coordinate/halo arithmetic. Serial/MPI2 currents, field
 and point outputs match the prior build; complete checkpoint files now match on
 every rank after protected/direct restore. The padding difference above records
 the pre-fix validation, not an unresolved issue in the new runtime.
+
+
+## Common operations: arguments, lifetime and failure
+
+`native_contract(component, route=...)['host_operations']` describes the six
+common operations below. The same declaration sets Python's C argument/return
+types. All required symbols are resolved before any operation executes; a missing
+symbol on one solver rank rejects the group before attachment. This uses the
+existing admission agreement and adds no timestep communication. Custom backends
+keep their own contracts. Describing a signature does not inspect machine code
+or certify every operation of a solver. Use authenticated builds and host tests.
+
+| C entry | Arguments → result | Communication / precondition | Effect and failure |
+|---|---|---|---|
+| `sp_attach` | `int64_t MPI_Fint` → `int` | collective on supplied live intracommunicator; no attachment | duplicates communicator; 0 success, −1 handle width/range, otherwise MPI status |
+| `sp_detach` | none → `int` | solver-group collective; close all owned states first | frees duplicates; never finalizes host MPI; 0 or MPI status |
+| `sp_info` | `int* rank, int* size` → void | local; attached | writes caller buffers; no returned error status |
+| `sp_barrier` | none → void | solver-group collective; attached | same call order on every rank; no returned error status |
+| `sp_sum` | `double` → `double` | solver-group collective; attached | sum returned to every group member; no returned error status |
+| `sp_library` | `char* buffer, int capacity, int* active` → void | local; allowed before attachment | capacity ≥1; truncated NUL-terminated MPI text; active=1 only while MPI is initialized and not finalized |
+
+Every call is sequential on the main thread. All pointers must be valid and
+owned by the caller; buffers are not retained after return. Keep the supplied
+communicator live through attachment. Info/sum/barrier do not change field or
+electronic state. Arbitrary MPI/process failures and invalid pointers are outside
+the rollback guarantee; void/value-returning entries cannot report recoverable
+errors. The Python context rejects operations after close and repeated close is
+a Python no-op; raw C detach still requires a live attachment.
+
+The current solver-specific operation declarations remain in
+`standard_tddft_handles.h`, `standard_tddft_models.h` and `fast_hse_handles.h`:
+creation/register/spawn, step/info, checkpoint/transaction and close have their
+own collective order, token, current-sign and profile requirements. The common
+operation table does not replace or certify those contracts. Full operation and
+platform coverage remains on the task list.

@@ -6,7 +6,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | 時間更新用作業領域まで `f4841bcd` でcommit／push済み。共通ホスト契約の変更は未コミット |
+| 先に整理 | 最新の検証済み変更のcommit／push | 共通ホスト契約まで `26dca23c` でcommit／push済み。操作別の共通呼び出し契約は検証中 |
 | 完了した範囲 | 主要LD初期化・時間更新の作業配列 | 入力・係数・格子配列と時間更新の明示的な大規模領域を対応。全ての小さな確保・画像用配列は対象にしない |
 | 1 | 現行C/Fortran呼び出し契約の確定 | 呼び出し規約の安定化と、残る操作・実行環境での確認。旧版との後方互換は対象外 |
 | 2 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
@@ -3848,3 +3848,18 @@ allocation remain bounded R3 work,then R4 and group3 in the agreed order.
 - [ ] R4 remaining: operation-specific signature/lifetime guarantees and wider profile/platform evidence. The common descriptor is not blanket stable solver ABI certification. New changes remain uncommitted; no optional CI dispatched.
 
 Continue bounded R4 operation contracts,then group3 NLCC runtime certification/unit audit. Groups1/2 and molecular work remain deferred. Multinode/Fujitsu/GPU and full HSE physical validation are not established by these local tests.
+
+
+## 2026-11-22 — common host operation contracts
+
+- [x] Common descriptor changes committed/pushed as `26dca23c` to independent SALMONpy.
+- [x] One operation declaration supplies exact ctypes signatures and detached `native_contract(...)["host_operations"]` documentation for attach/detach/info/barrier/sum/library. Resolve all six symbols before executing any operation; missing functions leave binding declarations untouched. Custom backends remain unconstrained.
+- [x] Public C header now declares all six common operations and states communicator/buffer ownership, collective/local scope, main-thread ordering, lifetime and returned-error limitations. No Fortran arithmetic, solver initialization, timestep reduction or checkpoint payload changed.
+- [x] Local source/installed MPI6 groups1/2/3 reject one-rank missing operation symbols before attachment, then attach/reattach and compute manufactured independent A/J responses successfully.
+- [x] Audited C host against ordinary and fast-PR HSE runtime: MPI1/2/3 range rejection, duplicate attach rejection, rank/size, sum, barrier, truncated MPI text, detach/reattach and surviving host MPI pass. Query-only C/Fortran probes pass without MPI initialization. No GS data collected.
+- [x] Japanese/English API and AI JSON synchronized. Source679 tests,one optional skip,pass. Wheel-based normal/direct-resume LD/FDTD scalar/diagonal/tensor MPI1/2 match prior bytes.
+- [ ] Solver-specific operation signatures, all state/transaction error guarantees and broader platforms are not certified by the common operation suite; continue bounded R4 then group3 NLCC certification/unit audit. No arbitrary MPI/process failure recovery claim.
+
+Final installed validation details are recorded in canonical calc2026
+`salmonpy-host-operations-20261122/summary.json`. These operation-contract changes
+are uncommitted; groups1/2 and molecular work remain deferred. No heavy CI dispatch.

@@ -18,6 +18,27 @@ extern "C" {
  */
 enum { SALMONPY_HOST_ABI_VERSION=1, SALMONPY_HOST_ABI_WORDS=10 };
 int sp_host_abi(int capacity,int64_t *values);
+/* Common host operations: all calls are main-thread and sequential. The caller
+ * owns all pointers/buffers; no buffer is retained. Raw MPI_Comm is never used.
+ * attach is collective on the supplied intracommunicator: host MPI must be live,
+ * no attachment may exist; duplicates communicator, returns0 on success,-1 for
+ * handle range/width, otherwise MPI status. Host retains its communicator.
+ * detach is collective: close all owned states first. Frees duplicates only;
+ * never MPI_Finalize. Returns0 or MPI status; no general MPI failure recovery.
+ * info is local after attachment; writes rank/size to valid int pointers.
+ * barrier/sum are collective after attachment, same call order on every rank.
+ * sum returns the sum to every group rank. Neither modifies electronic/field
+ * state. The void/value-returning calls have no recoverable error status.
+ * library is local, allowed before attach, with valid buffer, capacity>=1 and
+ * initialized pointer. Writes NUL-terminated (possibly truncated) MPI version
+ * and1 iff host MPI is initialized/not finalized. Does not initialize MPI.
+ */
+int sp_attach(int64_t fortran_communicator);
+int sp_detach(void);
+void sp_info(int *rank,int *size);
+void sp_barrier(void);
+double sp_sum(double value);
+void sp_library(char *buffer,int capacity,int *initialized);
 /* Current directory protocol3 is required. Query does not initialize/attach MPI.
  * Enter an existing absolute POSIX work directory on the main thread, then
  * leave after that call. Nested enter is rejected; never leave another owner's

@@ -112,14 +112,9 @@ class NativeParallelContext:
             path=Path(library).resolve()
             if hashlib.sha256(path.read_bytes()).hexdigest()!=sha256: raise InputError('bridge checksum mismatch')
             lib=c.CDLL(str(path))
-            from .api import query_host_abi
+            from .api import query_host_abi, _bind_host_operations
             self.host_abi=query_host_abi(lib)
-            lib.sp_attach.argtypes=[c.c_int64];lib.sp_attach.restype=c.c_int
-            lib.sp_detach.argtypes=[];lib.sp_detach.restype=c.c_int
-            lib.sp_info.argtypes=[c.POINTER(c.c_int),c.POINTER(c.c_int)];lib.sp_info.restype=None
-            lib.sp_barrier.argtypes=[];lib.sp_barrier.restype=None
-            lib.sp_sum.argtypes=[c.c_double];lib.sp_sum.restype=c.c_double
-            lib.sp_library.argtypes=[c.POINTER(c.c_char),c.c_int,c.POINTER(c.c_int)];lib.sp_library.restype=None
+            _bind_host_operations(lib)
             text=c.create_string_buffer(8192);active=c.c_int()
             lib.sp_library(text,len(text),c.byref(active))
             if not active.value or text.value.decode().strip()!=MPI.Get_library_version().rstrip('\x00').strip():

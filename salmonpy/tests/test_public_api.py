@@ -50,6 +50,29 @@ class PublicAPI(unittest.TestCase):
         with self.assertRaises(RuntimeFailure):query_host_abi(SimpleNamespace(sp_host_abi=probe))
         with self.assertRaisesRegex(RuntimeFailure,'host ABI'):query_host_abi(SimpleNamespace())
         self.assertFalse(native_contract('fast_hse',route='legacy')['known'])
+        from salmonpy.api import _bind_host_operations
+        operations=native_contract('fdtd',route='single')['host_operations']
+        self.assertEqual(set(operations),{'sp_attach','sp_detach','sp_info','sp_sum','sp_barrier','sp_library'})
+        self.assertEqual(operations['sp_sum']['collective'],'solver group')
+        self.assertEqual(operations['sp_info']['collective'],'local')
+        self.assertEqual(operations['sp_detach']['requires'],'attached; all owned states closed')
+        operations['sp_sum']['arguments'].append('host edit')
+        self.assertNotIn('host edit',native_contract('fdtd',route='single')['host_operations']['sp_sum']['arguments'])
+        class Function:
+            def __call__(self,*args):raise AssertionError('binding must not execute operations')
+        functions={name:Function() for name in operations}
+        for missing in functions:
+            partial=SimpleNamespace(**{k:v for k,v in functions.items() if k!=missing})
+            with self.subTest(missing=missing),self.assertRaisesRegex(RuntimeFailure,missing):
+                _bind_host_operations(partial)
+            self.assertFalse(any(hasattr(f,'argtypes') for f in functions.values()))
+        complete=SimpleNamespace(**functions);_bind_host_operations(complete)
+        import ctypes as c
+        self.assertEqual(complete.sp_attach.argtypes,[c.c_int64])
+        self.assertEqual(complete.sp_info.argtypes,[c.POINTER(c.c_int),c.POINTER(c.c_int)])
+        self.assertIsNone(complete.sp_library.restype)
+        self.assertEqual(complete.sp_sum.restype,c.c_double)
+
         from unittest.mock import patch
         from salmonpy.doctor import probe_native_protocols
         with patch('subprocess.run', side_effect=AssertionError('child must not run')):

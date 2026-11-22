@@ -122,6 +122,57 @@ PUBLIC_API = MappingProxyType({'salmonpy.subpixel': ('SubpixelSmoothing','effect
                      'check_loop')})
 
 
+
+# One declaration supplies documentation and ctypes bindings. Tokens describe
+# C value/pointer types, not Python-owned buffers or Fortran derived objects.
+_HOST_OPERATIONS = (
+    ('sp_attach', ('int64',), 'int', 'solver group', 'host MPI initialized; valid intracommunicator; no attachment',
+     'duplicates communicator; host retains original', '0 success; -1 handle width/range; otherwise MPI status'),
+    ('sp_detach', (), 'int', 'solver group', 'attached; all owned states closed',
+     'releases duplicated communicators; never finalizes host MPI', '0 success; otherwise MPI status'),
+    ('sp_info', ('int*', 'int*'), 'void', 'local', 'attached',
+     'writes rank and size to caller buffers', 'no returned status; valid output pointers required'),
+    ('sp_barrier', (), 'void', 'solver group', 'attached',
+     'synchronizes attached solver group', 'no returned status; MPI failure recovery not guaranteed'),
+    ('sp_sum', ('double',), 'double', 'solver group', 'attached',
+     'returns sum on every solver rank; does not modify solver state', 'no returned status; MPI failure recovery not guaranteed'),
+    ('sp_library', ('char*', 'int', 'int*'), 'void', 'local', 'valid buffers; capacity >= 1; query before attach allowed',
+     'writes truncated NUL-terminated MPI library text and initialized/not-finalized flag',
+     'no returned status; invalid pointer/capacity is outside contract'),
+)
+
+
+def _host_operations():
+    return {name: {'arguments': list(args), 'returns': result,
+                   'collective': collective, 'requires': requires,
+                   'effect': effect, 'failure': failure,
+                   'thread': 'main thread, sequential',
+                   'buffer_lifetime': 'caller owns buffers; not retained after return'}
+            for name, args, result, collective, requires, effect, failure in _HOST_OPERATIONS}
+
+
+def _bind_host_operations(library):
+    """Bind the complete common operation set without executing native calls.
+
+    Resolve all symbols first so missing functions cannot leave partially bound
+    declarations. A ctypes declaration is not proof of a binary's implementation;
+    the authenticated build, host descriptor and host probes remain required.
+    """
+    import ctypes as c
+    from .errors import RuntimeFailure
+    functions = []
+    for name, args, result, *_ in _HOST_OPERATIONS:
+        function = getattr(library, name, None)
+        if function is None:
+            raise RuntimeFailure('runtime lacks required host operation ' + name)
+        functions.append((function, args, result))
+    types = {'int64': c.c_int64, 'int': c.c_int, 'double': c.c_double,
+             'int*': c.POINTER(c.c_int), 'char*': c.POINTER(c.c_char), 'void': None}
+    for function, args, result in functions:
+        function.argtypes = [types[arg] for arg in args]
+        function.restype = types[result]
+
+
 def native_contract(component, *, route):
     """Describe a built-in execution contract without loading a native library.
 
@@ -145,6 +196,7 @@ def native_contract(component, *, route):
         return report
     report.update(known=True, status='experimental', abi_stability='experimental',
                   host_abi_version=1,host_abi_query='sp_host_abi',
+                  host_operations=_host_operations(),
                   host_thread='main thread, sequential calls',
                   host_owns_mpi_initialization_and_finalization=True,
                   attachment='one native attachment per process; close owned states before detach',

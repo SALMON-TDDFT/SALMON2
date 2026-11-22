@@ -40,7 +40,8 @@ with d.ParallelContext.create(world,plan) as ctx:
     class Function:
         def __init__(self,fn):self.fn=fn
         def __call__(self,*args):return self.fn(*args)
-    for variant in ('missing','version','width','status'):
+    for variant in ('missing','version','width','status',
+                    'sp_attach','sp_detach','sp_info','sp_barrier','sp_sum','sp_library'):
         attached=[]
         def attach(handle):
             attached.append(handle)
@@ -60,6 +61,7 @@ with d.ParallelContext.create(world,plan) as ctx:
             sp_detach=Function(lambda:0),sp_info=Function(lambda *a:None),
             sp_barrier=Function(lambda:None),sp_sum=Function(lambda x:x),sp_library=Function(library))
         if variant=='missing' and ctx.solver_comm.rank==ctx.solver_comm.size-1:del fake.sp_host_abi
+        if variant.startswith('sp_') and ctx.solver_comm.rank==ctx.solver_comm.size-1:delattr(fake,variant)
         with patch('ctypes.CDLL',return_value=fake):
             try:d.NativeParallelContext(ctx,sys.argv[1],sys.argv[2])
             except ValueError:pass

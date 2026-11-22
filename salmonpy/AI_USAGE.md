@@ -1482,3 +1482,15 @@ ABI mismatch before attach; no old-version fallback or automatic build. Use
 single/shared/registry, not legacy. Unknown user backends remain unverified and
 retain their own contract. This descriptor is not operation/profile/convergence
 or checkpoint certification; use the corresponding current queries.
+
+## Common operation contracts
+
+Read `native_contract(component, route=...)['host_operations']` before calling
+the built-in host bridge. It declares exact C argument/return tokens, collective
+scope, lifetime preconditions, buffer ownership and error limits. Python binds
+all six required symbols before executing any of them; missing symbols reject
+the solver group at admission. This adds no per-step communication. A declaration
+is not machine-code validation or full solver ABI certification. Never interpret
+void/value-returning operations as recoverable error-code APIs. Keep solver-specific
+state/token/checkpoint/profile contracts separate. User backends keep their own
+contracts; do not impose this built-in symbol set on them.
