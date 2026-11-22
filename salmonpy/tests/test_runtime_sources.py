@@ -12,6 +12,9 @@ class RuntimeSources(unittest.TestCase):
   profile=json.loads((root/'runtime/source.json').read_text())
   self.assertEqual(profile['source_tree'],'sources/solver')
   self.assertEqual(profile['source_profile'],'fast-pr')
+  from salmonpy._runtime_capabilities import NLCC_SOURCE_TREE_SHA256
+  self.assertEqual(NLCC_SOURCE_TREE_SHA256,profile['source_tree_sha256'],
+                   'maintained solver changed: refresh NLCC evidence before advancing the capability identity')
   for name in ('hse-rt-state.json','hse-explicit-routing.json'):
    other=json.loads((root/'runtime'/name).read_text())
    self.assertEqual(other['source_tree'],profile['source_tree'])

@@ -1428,3 +1428,38 @@ Only terminal nonconvergence pauses for review. The calculation object remains l
 for diagnosis or saving. All solver ranks must agree on `allow_unconverged`.
 Numerical update order and SCF thresholds are unchanged. This replaces the old
 policy of automatically proceeding after an unconverged-SCF warning.
+
+## Use a retained GS as a new SCF initial guess
+
+`session.run(model, initial_guess=source, steps=2, ...)` copies wavefunctions and
+occupations by value from a live GS in the same session. Atomic positions may
+change; cell, grid, k mesh, electron/band counts, XC, pseudopotentials and MPI
+layout must match. Density and potentials are recomputed; mixing history and
+fast-PR HSE resources start fresh. This is not exact mixing-history restart.
+Source and receiver are independent: the receiver can continue after its source
+advances or closes. The temporary seed is freed after initialization, but include
+it in peak initialization memory.
+
+```python
+from dataclasses import replace
+positions = model.fractional_positions.copy()
+positions[0, 0] += 0.001
+shifted = replace(model, fractional_positions=positions)
+# Explicit compute-node session and an already retained source are required.
+target = session.run(shifted, initial_guess=source, steps=2,
+                     material_id="shifted")
+```
+
+This does not approve unconverged final iterates: the normal residual-review
+policy remains. Only the short developer regression uses the explicit
+`--allow-unconverged-fixture` option. No interpolation across grids/k meshes,
+cross-session, GPU or arbitrary-XC validation is claimed. NLCC forces from a new
+source build still need validation evidence bound to that binary.
+
+NLCC evidence was refreshed for the source containing retained-GS initial guesses:
+local variation/force tests cover PZ, Libxc-PZ and Libxc-PBE, with MPI force tests
+at2/4 ranks ×1/2 threads. Against the fixed Si PBE reference, energy difference
+was0 and maximum force difference9.773e-16 Hartree/bohr. No wavefunction, density
+or restart datasets were retained. This evidence belongs only to that CPU binary;
+explicitly load its validation record and do not reuse it for rebuilt binaries
+or GPUs. It does not certify physical grid/k convergence.

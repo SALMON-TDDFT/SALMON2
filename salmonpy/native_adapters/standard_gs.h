@@ -19,6 +19,12 @@ int sp_gs_cartesian_force_protocol(void);
  * Standard profile: create computes SCF; fast import-only profile returns2. Unconverged SCF still succeeds and retains the last iterate.
  * Handles retain numerical/XC/MPI owners, with unique tokens invalidated at close. */
 int sp_gs_create(const char *filename,int64_t *token);
+/* Direct wavefunction/occupation seed, no mixing/HSE resource copy or GS I/O.
+ * Same live attachment/model/layout (positions may change). Caller verifies PP
+ * contents; Python authenticates model metadata. steps0 full SCF,positive budget.
+ * Source token remains unchanged; target owns independent arrays/resources. */
+int sp_gs_guess_protocol(void);
+int sp_gs_create_from_gs(const char *filename,int64_t source,int steps,int64_t *token);
 /* Additive active-SCF1: CPU periodic nonsymmetric scalar PZ/Libxc-PZ/PBE, fast-PR HSE06.
  * HSE needs its explicit compute profile; Gamma orbital GS additionally requires sp_gs_hse_orbital_protocol()==1. Imports, symmetry,
  * SOC, +U, DC and ionic evolution are outside this entry.

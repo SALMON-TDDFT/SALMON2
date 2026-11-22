@@ -8,6 +8,13 @@ import unittest
 class NativeGSTests(unittest.TestCase):
 
     def test_closed_rank_cannot_skip_collective_close(self):
+        import inspect
+        from salmonpy.native_gs import NativeGSSession
+        self.assertIn('initial_guess',inspect.signature(NativeGSSession.run).parameters)
+        from salmonpy.api import native_contract
+        guess=native_contract('gs',route='single')['gs_operations']
+        self.assertEqual(guess['sp_gs_guess_protocol']['collective'],'local')
+        self.assertEqual(guess['sp_gs_create_from_gs']['arguments'],['string','int64','int','int64*'])
         from salmonpy.api import native_contract, _bind_gs_operations
         from salmonpy.errors import InputError
         from types import SimpleNamespace

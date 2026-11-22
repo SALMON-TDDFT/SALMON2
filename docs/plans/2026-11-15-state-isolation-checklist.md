@@ -3980,3 +3980,22 @@ Source/wheel suite and package details are recorded in canonical calc2026
 `salmonpy-guess-preparation-20261122/summary.json`. Current changes uncommitted.
 Site/other-platform/scale validation,Ag fit,optional formats/GPU remain separate;
 groups1/2 and molecular work deferred. No optional heavy CI dispatch.
+
+
+## 2026-11-22 — retained GS / fast-PR HSE initial guess
+
+- [x] Preparation-only work committed/pushed as `4d6c2b59`.
+- [x] Common GS C contract and Python `initial_guess` copy only wavefunctions/occupations from a live owner. Target density/potentials, mixing and HSE resources start independently; temporary seed storage is released after initialization.
+- [x] Same-session/model/layout checks permit atomic displacement; source and siblings remain unchanged on rejection, target continuation, and source close. This is not exact SCF restart or changed-grid interpolation.
+- [x] Git-only export: all728 solver inventory entries tracked and matching; source/object eigensolver audits and fast-HSE build passed.
+- [x] Final source/wheel679 tests each passed (one optional skip each). Final PZ/fast-HSE k2 MPI6 and Gamma PZ MPI3/fast-HSE spatial MPI6 passed; wheel PZ/HSE MPI6 passed. Normal cold-start arrays match prior runtime exactly; source/siblings and receiver-after-source-close checks pass. C typed declaration/link/query passes. Evidence: canonical calc2026/salmonpy-gs-direct-guess-20261122/summary.json. No GS datasets collected; finite developer fixture is not physical convergence. Current direct-handoff changes remain uncommitted.
+- [ ] Archive/custom-backend initial-guess handoff remains separate. New-binary NLCC recertification, site/multinode/other-platform/scale work and optional formats/GPU remain separate. Groups1/2 and molecules remain deferred.
+
+
+## 2026-11-22 — NLCC evidence for retained-GS initial guesses
+
+- [x] Current source/binary NLCC consistency: XC variation maximum3.061e-10, core-force variation5.951e-8;2/4-rank×1/2-thread replication maximum5.552e-17. Source/object eigensolver audits passed before linking each native test.
+- [x] Fixed Si PBE whole-application comparison: energy difference0;maximum force difference9.773e-16 Hartree/bohr. Only input/scalar reports retained; no wavefunction/density/restart data. Native records and binary-bound receipt saved under canonical calc2026/salmonpy-gs-guess-nlcc-20261122; validated-runtime holds identical executable bytes for explicit reuse.
+- [x] Advance the NLCC source identity only after these checks; existing source-inventory test now detects a stale capability identity. Identity mismatch reproduced before update; focused source/receipt tests pass afterward. Numerical formulas/constants/reference values unchanged. Daily CI checks identity/integrity only; no material calculation added.
+- [x] Final source/wheel679 tests each pass(one optional skip each). Installed wheel loads the byte-identical saved executable and current receipt; real NLCC UPF ASE force admission passes without another SCF. Evidence:canonical calc2026/salmonpy-gs-guess-nlcc-20261122/summary.json. Fixed Si SCF converged at72 iterations,residual7.60746e-12<threshold1e-11. No optional CI dispatch. Current changes remain uncommitted.
+- [ ] Archive/custom-backend initial guesses and broader site/platform/scale/GPU evidence remain separate; groups1/2 and molecules deferred.

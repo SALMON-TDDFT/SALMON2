@@ -502,7 +502,7 @@ class NativeGSSession:
         finally:
             if boundary is not None:self._check(boundary(1))
 
-    def run(self,calculation,*,scf=None,material_id='material',steps=None,restart=None,repartition=False,compatible_runtime=False,allow_unconverged=False):
+    def run(self,calculation,*,scf=None,material_id='material',steps=None,restart=None,repartition=False,compatible_runtime=False,allow_unconverged=False,initial_guess=None):
         from .dft import DFT,SCFSettings
         from .config import _identifier
         self._live();error=None
@@ -539,6 +539,16 @@ class NativeGSSession:
                 raise InputError("compatible_runtime requires restart and must be False, True or 'declared'")
             if type(repartition) is not bool or (repartition and restart is None):
                 raise InputError('repartition is an explicit boolean option requiring restart')
+            if initial_guess is not None:
+                if restart is not None:raise InputError('initial_guess and exact SCF restart are distinct choices')
+                if not isinstance(initial_guess,NativeGSState):raise InputTypeError('initial_guess must be a retained NativeGSState')
+                if initial_guess.session is not self or initial_guess.closed:raise InputError('initial_guess must be live in this GS session')
+                if initial_guess.calculation is None:raise InputError('initial_guess requires explicit source model metadata')
+                if calculation._restart_signature()!=initial_guess.calculation._restart_signature():
+                    raise InputError('initial_guess requires matching physical model/layout; atomic positions may change')
+                from .api import _bind_gs_operations
+                _bind_gs_operations(self.lib,('sp_gs_guess_protocol','sp_gs_create_from_gs'))
+                if self.lib.sp_gs_guess_protocol()!=1:raise InputError('unsupported retained GS guess protocol')
             if restart is not None and steps is not None:
                 raise InputError('restart loads the saved boundary; call continue_scf separately')
             if restart is not None:
@@ -592,7 +602,9 @@ class NativeGSSession:
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)
         token=c.c_int64()
-        if restart is not None:
+        if initial_guess is not None:
+            code=self._gs_call(work,self.lib.sp_gs_create_from_gs,b'gs.inp',initial_guess._token,0 if steps is None else steps,c.byref(token))
+        elif restart is not None:
             code=self._gs_call(work,self.lib.sp_gs_scf_bootstrap,b'gs.inp',c.byref(token))
         elif steps is None:
             code=self._gs_call(work,self.lib.sp_gs_create,b'gs.inp',c.byref(token))

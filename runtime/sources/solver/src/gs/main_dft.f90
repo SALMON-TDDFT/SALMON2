@@ -140,7 +140,7 @@ subroutine gs_input_config(value)
  value%max_iterations=nscf;value%threshold=threshold
  value%pre_scf_threshold=exx_pre_scf_threshold;value%pre_scf_steps=exx_pre_scf_steps
 end subroutine
-subroutine gs_run(ctx,status,config,import_only,disk_bootstrap)
+subroutine gs_run(ctx,status,config,import_only,disk_bootstrap,initial_guess)
 use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 use exx_functional,only:is_hybrid
 use math_constants, only: pi, zi
@@ -184,6 +184,7 @@ integer,intent(out)::status
 type(s_gs_run_config),optional,intent(in)::config
 type(s_gs_run_config)::selected
 logical,optional,intent(in)::import_only,disk_bootstrap
+type(s_gs_seed),optional,intent(inout)::initial_guess
 logical::reading_only
 #ifdef USE_HSE
  integer :: gs_hse_status
@@ -337,6 +338,36 @@ if(present(disk_bootstrap))then
  endif
 endif
 
+if(present(initial_guess))then
+ status=0
+ if(any(initial_guess%grid/=ctx%lg%num).or. &
+    any(initial_guess%core_start/=ctx%mg%is).or.any(initial_guess%core_end/=ctx%mg%ie))status=11
+ if(any(initial_guess%decomposition/=[ctx%info%npk,ctx%info%nporbital,ctx%info%nprgrid]))status=11
+ if(initial_guess%orbital_start/=ctx%info%io_s.or.initial_guess%orbital_end/=ctx%info%io_e)status=11
+ if(initial_guess%k_start/=ctx%info%ik_s.or.initial_guess%k_end/=ctx%info%ik_e)status=11
+ if(allocated(initial_guess%psi%rwf).neqv.allocated(ctx%spsi%rwf))status=11
+ if(allocated(initial_guess%psi%zwf).neqv.allocated(ctx%spsi%zwf))status=11
+ if(allocated(ctx%spsi%rwf))then
+  if(allocated(initial_guess%psi%rwf))then
+   if(any(shape(initial_guess%psi%rwf)/=shape(ctx%spsi%rwf)))status=11
+  endif
+ endif
+ if(allocated(ctx%spsi%zwf))then
+  if(allocated(initial_guess%psi%zwf))then
+   if(any(shape(initial_guess%psi%zwf)/=shape(ctx%spsi%zwf)))status=11
+  endif
+ endif
+ call comm_get_max(status,nproc_group_global)
+ if(status/=0)then
+  call timer_end(LOG_INIT_GS)
+  call timer_end(LOG_TOTAL)
+#ifdef USE_MPI
+  if(ctx%mpi_child_owner>0)call comm_end_children(ctx%mpi_child_owner)
+#endif
+  return
+ endif
+endif
+
 call initialization2_dft( Miter, nspin, rion_update,  &
                           ctx%system, ctx%energy, ctx%ewald, ctx%stencil, ctx%fg, ctx%poisson,&
                           ctx%lg, ctx%mg, ctx%info,   &
@@ -344,7 +375,13 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           ctx%rho, ctx%rho_jm, ctx%rho_s, ctx%vh,ctx%v_local, ctx%vpsl, ctx%vxc,  &
                           ctx%spsi, ctx%shpsi, ctx%sttpsi,  &
                           ctx%pp, ctx%ppg, ctx%ppn,   &
-                          ctx%xc_func, ctx%mixing )
+                          ctx%xc_func, ctx%mixing, initial_guess )
+! The destination now owns independent arrays; drop only the temporary value copy.
+if(present(initial_guess))then
+ if(allocated(initial_guess%psi%rwf))deallocate(initial_guess%psi%rwf)
+ if(allocated(initial_guess%psi%zwf))deallocate(initial_guess%psi%zwf)
+ if(allocated(initial_guess%occupations))deallocate(initial_guess%occupations)
+endif
 
 
 ! Import through the original initialization without entering SCF or GS output.
@@ -1123,7 +1160,22 @@ integer(c_int) function sp_gs_import(path,token) bind(C)
  integer(c_int64_t),intent(out)::token
  sp_gs_import=create_gs(path,token,.true.)
 end function
-integer(c_int) function create_gs(path,token,reading_only,steps)
+integer(c_int) function sp_gs_guess_protocol() bind(C)
+ sp_gs_guess_protocol=1
+end function
+integer(c_int) function sp_gs_create_from_gs(path,source,steps,token) bind(C)
+ character(c_char),intent(in)::path(*)
+ integer(c_int64_t),value::source
+ integer(c_int),value::steps
+ integer(c_int64_t),intent(out)::token
+ token=0
+ if(steps==0)then
+  sp_gs_create_from_gs=create_gs(path,token,.false.,guess_token=source)
+ else
+  sp_gs_create_from_gs=create_gs(path,token,.false.,steps,source)
+ endif
+end function
+integer(c_int) function create_gs(path,token,reading_only,steps,guess_token)
  use inputoutput,only:read_input,s_input_parser
  use salmon_global,only:yn_symmetry,calc_mode
  use plusU_global,only:read_Hubbard_parameters
@@ -1134,6 +1186,9 @@ integer(c_int) function create_gs(path,token,reading_only,steps)
  use timer,only:timer_initialize
  logical,intent(in)::reading_only
  integer,optional,intent(in)::steps
+ integer(c_int64_t),optional,intent(in)::guess_token
+ type(s_gs_seed)::guess
+ type(s_model_inputs)::guess_inputs
  character(c_char),intent(in)::path(*)
  integer(c_int64_t),intent(out)::token
  type(s_input_parser)::parser
@@ -1173,7 +1228,22 @@ integer(c_int) function create_gs(path,token,reading_only,steps)
   call timer_initialize
   gs_host_initialized=.true.
  endif
+ if(present(guess_token))then
+  call gs_seed_from_handle(guess_token,guess,status)
+  if(status/=0)then
+   create_gs=status;return
+  endif
+ endif
  call read_input(trim(filename),parser)
+ if(present(guess_token))then
+  call guess_inputs%capture()
+  status=0
+  if(.not.guess%inputs%guess_compatible(guess_inputs).or..not.scf_supported())status=15
+  call comm_get_max(status,group)
+  if(status/=0)then
+   create_gs=status;return
+  endif
+ endif
  call read_Hubbard_parameters
  allocate(candidate)
  candidate%scf_capable=scf_supported()
@@ -1193,7 +1263,9 @@ integer(c_int) function create_gs(path,token,reading_only,steps)
  call timer_context_swap(host_timers)
  call timer_context_swap(candidate%timers)
  call timer_initialize
- if(present(steps))then
+ if(present(guess_token))then
+  call gs_run(candidate,status,initial_guess=guess)
+ else if(present(steps))then
   call gs_run(candidate,status,import_only=reading_only,disk_bootstrap=steps==0)
  else
   call gs_run(candidate,status,import_only=reading_only)

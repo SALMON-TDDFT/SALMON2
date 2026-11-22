@@ -524,12 +524,31 @@ module salmonpy_model_inputs
     character(1) :: yn_exx_dc_mlwf
     character(1) :: yn_hse_wannier
   contains
+    procedure :: guess_compatible => model_guess_compatible
     procedure :: parallel_from => copy_model_parallel
     procedure,pass(value) :: disk_io => scf_io_s_model_inputs
     procedure :: capture => capture_model_inputs
     procedure :: activate => activate_model_inputs
   end type
 contains
+  logical function model_guess_compatible(self,other) result(ok)
+    class(s_model_inputs),intent(in)::self
+    type(s_model_inputs),intent(in)::other
+    ! Atomic positions and SCF controls may change; ownership/physical layout may not.
+    ok=self%ready.and.other%ready
+    if(.not.ok)return
+    ok=all(self%al==other%al).and.all(self%al_vec1==other%al_vec1).and. &
+       all(self%al_vec2==other%al_vec2).and.all(self%al_vec3==other%al_vec3).and. &
+       all(self%dl==other%dl).and.all(self%num_rgrid==other%num_rgrid).and. &
+       all(self%num_kgrid==other%num_kgrid).and.all(self%dk_shift==other%dk_shift).and. &
+       self%yn_gamma_centered==other%yn_gamma_centered.and.self%spin==other%spin.and. &
+       self%iperiodic==other%iperiodic.and.self%nstate==other%nstate.and.self%nelec==other%nelec.and. &
+       self%nelem==other%nelem.and.self%natom==other%natom.and.self%xc==other%xc.and. &
+       self%cval==other%cval.and.all(self%izatom==other%izatom).and. &
+       all(self%lloc_ps==other%lloc_ps).and.all(self%file_pseudo==other%file_pseudo).and. &
+       self%nproc_k==other%nproc_k.and.self%nproc_ob==other%nproc_ob.and. &
+       all(self%nproc_rgrid==other%nproc_rgrid)
+  end function
   subroutine copy_model_parallel(self,source)
     class(s_model_inputs),intent(inout)::self
     type(s_model_inputs),intent(in)::source

@@ -19,6 +19,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ('build','baseline','output'):p.add_argument(name,type=Path)
     p.add_argument('--allow-unconverged-fixture',action='store_true',help='Explicitly accept finite, deliberately unphysical 8-iteration regression states; not production convergence')
+    p.add_argument('--initial-guess',action='store_true',help='interleave independent retained-GS wavefunction seeds; never export GS arrays')
     p.add_argument('--size',type=int,default=2)
     p.add_argument('--split',choices=('orbital','spatial','k','mixed'),default='orbital')
     p.add_argument('--decomposition',type=int,nargs=5)
@@ -118,6 +119,28 @@ def main():
             assert state.scf_status['paused'] and state.scf_status['initializations']==1
             assert state.scf_status['executed_iterations']==3
             cut3=frame(state);snap3=state.snapshot()
+            if args.initial_guess:
+                positions=np.array(a.fractional_positions,copy=True);positions[0,0]+=.001
+                warm_model=replace(a,fractional_positions=positions)
+                warm_a=session.run(warm_model,scf=scf,material_id='warm-A',steps=2,initial_guess=state)
+                warm_b=session.run(warm_model,scf=scf,material_id='warm-B',steps=2,initial_guess=state)
+                warm_cut=frame(warm_b)
+                for q,value in frame(warm_a).items():np.testing.assert_array_equal(value,warm_cut[q])
+                for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+                warm_a.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                warm_future=frame(warm_a)
+                for q,value in frame(warm_b).items():np.testing.assert_array_equal(value,warm_cut[q])
+                warm_b.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                for q,value in frame(warm_b).items():np.testing.assert_array_equal(value,warm_future[q])
+                for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+                with np.testing.assert_raises(InputError):
+                    session.run(replace(warm_model,grid=(10,10,10)),scf=scf,steps=1,initial_guess=state)
+                rejected=c.c_int64()
+                bad_steps=-1 if comm.rank==0 else 1
+                code=session._gs_call(state.directory,session.lib.sp_gs_create_from_gs,b'gs.inp',state._token,bad_steps,c.byref(rejected))
+                assert code==11 and rejected.value==0
+                for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+
             owner_timing=state.timing_seconds if args.timer_ownership else None
             sibling=session.run(b,scf=scf,material_id='B',steps=2)
             if args.timer_ownership:
@@ -237,6 +260,9 @@ def main():
             for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
             snap3.close();snap5.close();sibling_snapshot.close();sibling.close()
             assert state.scf_status['snapshots']==0
+            if args.initial_guess:
+                for warm in (warm_a,warm_b):
+                    for q,value in frame(warm).items():np.testing.assert_array_equal(value,warm_future[q])
             for q in ('wfn.bin','occupation.bin'):assert not list(work.rglob(q))
         else:
             state=session.run(a,scf=scf,material_id='A',allow_unconverged=args.allow_unconverged_fixture)
@@ -270,10 +296,20 @@ def main():
                 if g==0:assert state.scf_status==counters
             finally:response.close();model.close()
         state.close()
+        if args.initial_guess and g==0:
+            before=session.resources()
+            with np.testing.assert_raises(InputError):
+                session.run(warm_model,scf=scf,steps=1,initial_guess=state)
+            assert session.resources()==before
+            for warm in (warm_a,warm_b):warm.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+            for q,value in frame(warm_a).items():np.testing.assert_array_equal(value,frame(warm_b)[q])
+            assert warm_a.scf_status['initializations']==warm_b.scf_status['initializations']==1
+            warm_a.close();warm_b.close()
         full_check=full_k_control(session)
         assert Path.cwd()==anchor
     if world.rank==0:
-        result={'status':'pass','size':args.size,'split':args.split,'xc':args.xc,'initial_no_mix':args.initial_no_mix,
+        result={'status':'pass','initial_guess_direct':args.initial_guess,'seed_source_and_siblings_unchanged':args.initial_guess,
+                'seed_target_continues_after_source_closed':args.initial_guess,'size':args.size,'split':args.split,'xc':args.xc,'initial_no_mix':args.initial_no_mix,
                 'continuous_arrays_exact':True,'new_runtime_host_chdir_forbidden':args.no_chdir,'state_owned_GS_timers_checked':args.timer_ownership,
                 'continuous_new_and_previous_exact':args.build.resolve()!=args.baseline.resolve() and (args.symmetry=='none' or values[2*args.size][2]),
                 'previous_equivalent_with_cartesian_force_units':args.build.resolve()!=args.baseline.resolve(),

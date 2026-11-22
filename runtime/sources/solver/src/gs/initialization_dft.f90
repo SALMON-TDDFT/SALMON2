@@ -157,7 +157,8 @@ subroutine initialization2_dft( Miter, nspin, rion_update,  &
                                 rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
                                 spsi,shpsi,sttpsi,  &
                                 pp,ppg,ppn,  &
-                                xc_func,mixing )
+                                xc_func,mixing,initial_guess )
+use salmonpy_gs_seed,only:s_gs_seed
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -205,6 +206,7 @@ type(s_pp_nlcc) :: ppn
 type(s_dft_energy) :: energy
 type(s_ewald_ion_ion) :: ewald
 type(s_mixing) :: mixing
+type(s_gs_seed),optional,intent(in)::initial_guess
 
 logical :: rion_update
 integer :: Miter,jspin, nspin,i,ix,iy,iz
@@ -222,7 +224,14 @@ real(8) :: rNe0,rNe
   if(yn_dc=='n') call init_mixing(nspin,mg,mixing)
 
   ! restart from binary
-  if (yn_restart == 'y') then
+  if(present(initial_guess))then
+     Miter=0
+     system%rocc=initial_guess%occupations
+     if(allocated(spsi%rwf))spsi%rwf=initial_guess%psi%rwf
+     if(allocated(spsi%zwf))spsi%zwf=initial_guess%psi%zwf
+     spsi%update_zwf_overlap=.false.
+     call calc_density(system,rho_s,spsi,info,mg)
+  else if (yn_restart == 'y') then
      call restart_gs(lg,mg,system,info,spsi,Miter,mixing=mixing)
      if(read_gs_restart_data=='wfn') then
         call calc_density(system,rho_s,spsi,info,mg)
