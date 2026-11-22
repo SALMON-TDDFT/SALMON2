@@ -1101,6 +1101,30 @@ The test-only `--tensor-grid-allocation-failures` option injects failures in the
 5D coupling weights,4D diagonal coefficients and4D integer material indices.
 Production libraries do not contain the fault-injection hook.
 
+### Workspaces for off-diagonal LD time updates
+
+Fortran allocates the large tensor-solver workspaces once at entry to an update
+call and reuses them during iteration. The call owns this storage; physical
+state, checkpoints and restore candidates do not contain it. Subpixel cases
+without off-diagonal coupling do not allocate unused coupling buffers.
+
+For Python stepwise calls, allocation status joins the existing field-group
+input agreement. Partial failure returns24 on every rank before modifying E/H,
+LD, clocks or outputs, releasing all partial scratch allocations. Python raises
+`RuntimeFailure` while `field.failed` remains false. Release memory and retry
+with the same J. This is distinct from `NumericalError`. No collective, formula,
+update-order or checkpoint-format change is introduced. Budget excess still warns.
+
+Coverage is limited to explicit tensor-update scratch allocation. It does not
+promise recovery from physical-state backup allocation, compiler-generated
+temporaries, arbitrary memory exhaustion, OS termination or MPI failure.
+Standalone SALMON process execution stops on failed workspace allocation.
+Observation/image allocation handling is not expanded indiscriminately.
+
+The test-only `--tensor-workspace-failures` option fails one rank during drive,
+solver and coupling-buffer allocation at early, intermediate and later updates,
+checking unchanged state and retry. Production has no fault-injection hook.
+
 ### Optional point-observation I/O failures
 
 Fortran checks open/write/close status for headers and time-series appends to

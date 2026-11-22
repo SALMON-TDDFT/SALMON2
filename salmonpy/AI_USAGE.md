@@ -1457,3 +1457,14 @@ at the original point. No new collective or arithmetic-order change. Release
 partial ownership before retry; budget excess only warns. Do not apply this
 coverage claim to subpixel allocations, tensor propagation workspaces, optional
 observation/image workspaces or OS/MPI failure. No old-version fallback is added.
+
+### Tensor-update workspace failure
+
+Current Python stepwise E/H calls allocate explicit tensor-update workspaces
+before physical mutation, using the existing input agreement for field-group
+status. Known agreed24 plus the recovery protocol raises RuntimeFailure without
+setting field.failed or advancing E/H, LD, time or outputs. Release memory and
+retry the same J; do not replay history or change dt automatically. Workspaces
+are call-owned, reused during iteration and excluded from snapshots/checkpoints.
+No extra collective; budgets only warn. This is not arbitrary OOM/backup-allocation,
+OS/MPI or observation-buffer recovery. Standalone processes stop on failure.

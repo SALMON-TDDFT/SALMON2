@@ -28,6 +28,17 @@ module fdtd_eh
     real(8),allocatable :: buffer(:,:,:)
   end type s_eh_plane_output
 
+  ! Call-owned scratch, excluded from physical snapshots and checkpoints.
+  type s_tensor_off_workspace
+    real(8),allocatable :: edge(:,:,:,:),node(:,:,:,:)
+  end type
+  type s_tensor_step_workspace
+    real(8),allocatable :: drive(:,:,:,:,:)
+    real(8),allocatable :: pred(:,:,:,:),old(:,:,:,:),b(:,:,:,:),x(:,:,:,:),res(:,:,:,:)
+    real(8),allocatable :: z(:,:,:,:),direction(:,:,:,:),ad(:,:,:,:),temp(:,:,:,:),product(:,:,:,:)
+    type(s_tensor_off_workspace) :: off
+  end type
+
   type ls_fdtd_eh
     type(s_eh_plane_output),allocatable :: plane_output(:)
     logical :: tensor_enabled=.false.,tensor_failed=.false.,subpixel_enabled=.false.
@@ -4630,7 +4641,67 @@ contains
   != calculate eh-FDTD =======================================================================
   ! Adjoint paired edge->node and node->edge means. Projection is by material
   ! ownership, never by numeric material-ID priority. This leaves diagonal paths exact.
-  subroutine eh_tensor_off(fs,fe,pole,v,out)
+  subroutine eh_prepare_tensor_step(fs,fe,num_poles,work,status,failure_slot)
+    use structures,only:s_fdtd_system
+    implicit none
+    type(s_fdtd_system),intent(in)::fs
+    type(ls_fdtd_eh),intent(in)::fe
+    integer,intent(in)::num_poles
+    type(s_tensor_step_workspace),intent(out)::work
+    integer,intent(out)::status
+    integer,optional,intent(in)::failure_slot
+    integer::lo(3),hi(3),ios,slot
+    logical::needs_off
+    status=0;slot=0
+    if(.not.fe%tensor_enabled)return
+    lo=fs%mg%is_array;hi=fs%mg%ie_array
+    call start_allocation(ios)
+    if(ios==0)allocate(work%drive(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),num_poles),stat=ios)
+    call allocation_result(ios)
+    call allocate_vector(work%pred)
+    call allocate_vector(work%old)
+    call allocate_vector(work%b)
+    call allocate_vector(work%x)
+    call allocate_vector(work%res)
+    call allocate_vector(work%z)
+    call allocate_vector(work%direction)
+    call allocate_vector(work%ad)
+    call allocate_vector(work%temp)
+    call allocate_vector(work%product)
+    needs_off=.true.
+    if(fe%subpixel_enabled)needs_off=any(fe%subpixel_cross)
+    if(needs_off)then
+      call allocate_vector(work%off%edge)
+      call allocate_vector(work%off%node)
+    endif
+  contains
+    subroutine start_allocation(ios)
+      integer,intent(out)::ios
+      slot=slot+1;ios=0
+#ifdef SALMONPY_RECOVERY_TESTING
+      if(present(failure_slot))then
+        if(slot==failure_slot)ios=1
+      endif
+#endif
+    end subroutine
+    subroutine allocation_result(ios)
+      integer,intent(in)::ios
+      if(ios/=0)then
+        status=24
+        write(*,'(A,I0,A,I0)')'SALMONPY_TENSOR_WORKSPACE_ALLOCATION_ERROR slot=',slot,' stat=',ios
+      endif
+    end subroutine
+    subroutine allocate_vector(values)
+      real(8),allocatable,intent(out)::values(:,:,:,:)
+      integer::ios
+      if(status/=0)return
+      call start_allocation(ios)
+      if(ios==0)allocate(values(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=ios)
+      call allocation_result(ios)
+    end subroutine
+  end subroutine eh_prepare_tensor_step
+
+  subroutine eh_tensor_off(fs,fe,pole,v,out,scratch)
     use structures,only:s_fdtd_system
     use sendrecv_grid,only:update_overlap_real8
     implicit none
@@ -4641,15 +4712,22 @@ contains
       fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
     real(8),intent(out)::out(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
       fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
-    real(8),allocatable::edge(:,:,:,:),node(:,:,:,:)
+    type(s_tensor_off_workspace),optional,target,intent(inout)::scratch
+    real(8),allocatable,target::local_edge(:,:,:,:),local_node(:,:,:,:)
+    real(8),pointer::edge(:,:,:,:),node(:,:,:,:)
     real(8)::mean(3)
     integer::lo(3),hi(3),m,a,ix,iy,iz,next(3),nmodes
     lo=fs%mg%is_array;hi=fs%mg%ie_array;out=0d0
     if(fe%subpixel_enabled)then
       if(.not.fe%subpixel_cross(pole))return
     endif
-    allocate(edge(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
-      node(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+    if(present(scratch))then
+      edge=>scratch%edge;node=>scratch%node
+    else
+      allocate(local_edge(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+        local_node(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+      edge=>local_edge;node=>local_node
+    endif
     nmodes=ubound(fe%tensor_corr,4)
     if(fe%subpixel_enabled)nmodes=1
     do m=1,nmodes
@@ -4693,7 +4771,7 @@ contains
     enddo
   end subroutine eh_tensor_off
 
-  subroutine eh_calc(fs,fe,ld,external_current,step_guard)
+  subroutine eh_calc(fs,fe,ld,external_current,step_guard,tensor_workspace)
     use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
     use salmon_global,   only: dt_em,obs_num_em,obs_samp_em,yn_obs_plane_em,yn_obs_plane_integral_em,&
                                base_directory,nt_em,yn_periodic,ek_dir1,t1_t2,t1_start,              &
@@ -4727,11 +4805,19 @@ contains
     integer            :: is5(5),ie5(5)
     real(8)            :: elapsed_time
     character(256)     :: save_name,tmp_name
-    real(8),allocatable::tensor_drive(:,:,:,:,:)
+    type(s_tensor_step_workspace),optional,target,intent(inout)::tensor_workspace
+    type(s_tensor_step_workspace),target::local_work
+    type(s_tensor_step_workspace),pointer::work
+    integer::work_status
     if(fe%tensor_enabled)then
-      allocate(tensor_drive(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
-        fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3),ld%max_pole_num_ld))
-      tensor_drive=0d0
+      if(present(tensor_workspace))then
+        work=>tensor_workspace
+      else
+        call eh_prepare_tensor_step(fs,fe,ld%max_pole_num_ld,local_work,work_status)
+        if(work_status/=0)call stop_em('Required tensor step workspace allocation failed.')
+        work=>local_work
+      endif
+      work%drive=0d0
     endif
     !time-iteration
     do iter=fe%iter_sta,fe%iter_end
@@ -4790,7 +4876,7 @@ contains
       !update lorentz-drude
       if(fe%tensor_enabled)then
         call ld_update(ld,fs%mg%is_array,fs%mg%ie_array,fs%mg%is,fs%mg%ie,dt_em, &
-          fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y,tensor_drive)
+          fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y,work%drive)
       else
       if(ld%enabled) call ld_update(ld,fs%mg%is_array,fs%mg%ie_array,fs%mg%is,fs%mg%ie,dt_em, &
         fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y)
@@ -5347,22 +5433,20 @@ contains
     return
   contains
     subroutine eh_tensor_solve
-      real(8),allocatable::pred(:,:,:,:),old(:,:,:,:),b(:,:,:,:),x(:,:,:,:),res(:,:,:,:)
-      real(8),allocatable::z(:,:,:,:),direction(:,:,:,:),ad(:,:,:,:),temp(:,:,:,:)
       real(8)::rho,next_rho,den,alpha,beta,normb,normr
-      integer::lo(3),hi(3),q,k
-      lo=fs%mg%is_array;hi=fs%mg%ie_array
-      allocate(pred(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+      integer::q,k
+      associate(pred=>work%pred,old=>work%old,b=>work%b,x=>work%x,res=>work%res, &
+        z=>work%z,direction=>work%direction,ad=>work%ad,temp=>work%temp)
       pred(1,:,:,:)=fe%ex_y+fe%ex_z
       pred(2,:,:,:)=fe%ey_z+fe%ey_x
       pred(3,:,:,:)=fe%ez_x+fe%ez_y
       old=pred
       old(1,:,:,:)=ld%ex_old_ld;old(2,:,:,:)=ld%ey_old_ld;old(3,:,:,:)=ld%ez_old_ld
       b=fe%tensor_diag*pred;x=pred;res=pred;z=pred;direction=pred;ad=pred;temp=pred
-      call eh_tensor_off(fs,fe,0,old,temp)
+      call eh_tensor_off(fs,fe,0,old,temp,work%off)
       b=b+temp
       do q=1,ld%max_pole_num_ld
-        call eh_tensor_off(fs,fe,q,old,temp)
+        call eh_tensor_off(fs,fe,q,old,temp,work%off)
         b=b-2d0*acos(-1d0)*dt_em*temp
       enddo
       call tensor_product(x,ad)
@@ -5397,10 +5481,11 @@ contains
         fe%ez_y=fe%ez_y+.5d0*(x(3,:,:,:)-pred(3,:,:,:))
         old=old+x
         do q=1,ld%max_pole_num_ld
-          call eh_tensor_off(fs,fe,q,old,temp)
-          tensor_drive(:,:,:,:,q)=temp
+          call eh_tensor_off(fs,fe,q,old,temp,work%off)
+          work%drive(:,:,:,:,q)=temp
         enddo
       endif
+      end associate
     end subroutine eh_tensor_solve
 
     subroutine tensor_product(v,out)
@@ -5408,15 +5493,15 @@ contains
         fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
       real(8),intent(out)::out(3,fs%mg%is_array(1):fs%mg%ie_array(1), &
         fs%mg%is_array(2):fs%mg%ie_array(2),fs%mg%is_array(3):fs%mg%ie_array(3))
-      real(8),allocatable::temp(:,:,:,:)
       integer::q
-      allocate(temp,mold=v)
-      call eh_tensor_off(fs,fe,0,v,temp)
+      associate(temp=>work%product)
+      call eh_tensor_off(fs,fe,0,v,temp,work%off)
       out=fe%tensor_diag*v+temp
       do q=1,ld%max_pole_num_ld
-        call eh_tensor_off(fs,fe,q,v,temp)
+        call eh_tensor_off(fs,fe,q,v,temp,work%off)
         out=out+2d0*acos(-1d0)*dt_em*temp
       enddo
+      end associate
     end subroutine tensor_product
 
     real(8) function tensor_dot(a,b)result(value)

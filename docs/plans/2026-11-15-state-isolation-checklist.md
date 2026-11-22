@@ -6,10 +6,10 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | LD係数用一時配列まで `5f255105` でpush済み。今回の非対角LD格子係数の失敗処理は未コミット |
-| 1 | 残る作業配列・補助I/Oの失敗処理 | LDの主要な初期化配列は対応済み。時間更新用、subpixel用、観測・画像用などから実用上必要な箇所を選ぶ。全ての小さな確保の網羅は目標にしない |
-| 2 | 現行C/Fortran呼び出し契約の確定 | 呼び出し規約の安定化と、残る操作・実行環境での確認。旧版との後方互換は対象外 |
-| 3 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
+| 先に整理 | 最新の検証済み変更のcommit／push | 非対角LD格子係数まで `46589f24` でpush済み。今回の時間更新用作業領域は未コミット |
+| 完了した範囲 | 主要LD初期化・時間更新の作業配列 | 入力・係数・格子配列と時間更新の明示的な大規模領域を対応。全ての小さな確保・画像用配列は対象にしない |
+| 1 | 現行C/Fortran呼び出し契約の確定 | 呼び出し規約の安定化と、残る操作・実行環境での確認。旧版との後方互換は対象外 |
+| 2 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
 
 再開読込処理と文書改善は `23cb1342` でpush済みです。今回のLD初期化と後方互換分岐削除も、source／wheel各679テスト（各1件スキップ）で検証済みです。MPI1／2のLD＋FDTD・直接保存復元は修正前とビット一致し、自作バックエンドの事前検査はMPI3で確認しました。HSEはビルド・C/Fortran照会・MPI1／2の明示所有を確認しましたが、今回の削除後に実材料のHSE計算を再実行したわけではありません。日英文書・AI JSONは同期済みで、最終文書/API16テストも通っています。
 
@@ -24,6 +24,18 @@ results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
 ### Completed and verified
+
+- [x] Practical tensor-update workspaces: call-owned drive/solver/off-diagonal
+  buffers allocate before physical mutation and reuse the existing input gate.
+  Known24 returns RuntimeFailure with the live field still usable; no E/H,LD,
+  clock,output or checkpoint mutation/replay. No extra collective or physical
+  checkpoint payload. GNU MPI1/2 source failure/retry controls pass at early,
+  middle and later steps. Production/testing results and direct midpoint data
+  match the previous library. Standalone32-step tensor/subpixel MPI2 results
+  match the previous executable. Source/wheel679-test suites pass(one optional
+  skip each); two independent2-rank groups also pass workspace failure/retry.
+  No blanket backup/OS/MPI failure guarantee.
+  Record: calc2026/salmonpy-tensor-step-workspace-recovery-20261122.
 
 - [x] Off-diagonal LD grid coefficient storage:5D weights,4D diagonal values and
   integer material indices allocate before the existing material-vector gate;
@@ -238,8 +250,9 @@ results/residual diagnostics and pauses the downstream workflow for user review
 - [x] Directional LD allocation recovery and backward-compatibility removal
   were published as e3666160.
 - [x] LD coefficient scratch recovery was published as5f255105.
-- [ ] Pending integration: off-diagonal LD grid-coefficient allocation recovery
-  remains uncommitted.
+- [x] Off-diagonal LD grid-coefficient allocation recovery published as46589f24.
+- [ ] Pending integration: tensor-update call-owned workspace recovery remains
+  uncommitted.
   Commit/push when requested; retain required lightweight source/packaging checks
   and do not dispatch optional heavy CI.
 - [x] Latest source/installed suites:679 executed,one optional skip,no failures.
@@ -254,21 +267,14 @@ results/residual diagnostics and pauses the downstream workflow for user review
 
 ### Next work after this reconciliation
 
-1. **Group5 R3:** bounded remaining initialization/IO work, not a conversion
-   of every standalone STOP in every legacy mode. Early1101–1104 native/Python
-   retry classification is now reconciled and tested below; other unhandled
-   startup returns must be evaluated against the supported profile, not assumed safe.
-   Core material/field3D allocation1118 and initial owned LD-state allocation1119
-   and material/boundary vectors1120 are now covered below. Remaining separate
-   work is selected initialization/helper I/O (supported legacy EM readers,native
-   saves,batch writers and directory creation verified above) and selected auxiliary
-   allocations (tensor solver workspaces,
-   subpixel/observation and snapshot staging buffers; directional LD material-input,
-   coefficient scratch and ordinary off-diagonal grid coefficient arrays are
-   already covered by1120) in
-   supported paths; owned file numbers alone do not establish IO-error recovery.
-   Do not add restrictions on valid/custom inputs or promise recovery from
-   arbitrary STOP, OS OOM, trapped FP, broken MPI or process termination.
+1. **Group5 R3 — selected practical scope completed:** supported input/read/save
+   returns and principal LD initialization/tensor-update allocation paths are
+   verified above. Do not keep extending this task to every small allocation or
+   standalone STOP. Remaining subpixel initialization/reconfiguration, observation
+   staging, compiler temporaries and state-backup allocation are outside the
+   selected guarantee; revisit only for an identified practical need. Arbitrary
+   OS OOM, trapped FP, broken MPI and process termination are not recoverable
+   contracts. No restriction on valid/custom inputs or budget-based hard stop.
 2. **Group5 R4:** stable native ABI/version negotiation and remaining host
    operations/profile/platform conformance. Existing C/Fortran lifecycle tests
    are completed evidence, not a blanket stable ABI declaration.

@@ -17,6 +17,7 @@ exercise reader rejection, public lifetime release and valid-input retry.
 --material-allocation-failures tests partial LD tensor-input array allocation failures.
 --ld-coefficient-allocation-failures tests LD material-list and coefficient scratch failures.
 --tensor-grid-allocation-failures tests partial off-diagonal LD grid coefficient allocation.
+--tensor-workspace-failures tests pre-step tensor workspace failure and retry.
 --point-output-failure MODE --point-output-reference FILE checks optional point I/O and repair.
 --integral-output-failure MODE uses the same faults for xy integrals; --integrals-only enables all integral controls.
 --info-output-failure open|write tests optional final metadata failure and cleanup.
@@ -36,7 +37,7 @@ from salmonpy.fdtd import FDTD,PlaneWave
 from salmonpy.fields import AcosPulse
 from salmonpy.geometry import Grid,Geometry,Shape
 from salmonpy.ld import LorentzDrude,TensorLorentzDrude
-from salmonpy.errors import NumericalError
+from salmonpy.errors import NumericalError,RuntimeFailure
 
 
 def main():
@@ -626,15 +627,18 @@ def main():
                     assert save('scalar-'+which+'-'+label+'-after')==before
                     assert files()==outputs and f.step_index==step-1
                     cases.append(('scalar-admission',which,label))
-        if not baseline and step in (1,12,32):
+        if (not baseline or '--tensor-workspace-failures' in sys.argv) and step in (1,12,32):
             attempts=list(range(20,24)) if faults else []
+            if '--tensor-workspace-failures' in sys.argv:attempts.extend((40,41,42))
             for stage in attempts:
                 A=f.A.copy();E=f.E.copy();before=save(f'{step}-{stage}-before');outputs=files()
                 fn=f.lib.sp_eh_test_fault;fn.argtypes=[c.c_int,c.c_int];fn.restype=c.c_int
                 assert fn(stage,comm.size-1)==0
                 try:f.advance(J)
-                except NumericalError:pass
-                else:raise AssertionError('numerical error not returned')
+                except (NumericalError,RuntimeFailure) as exc:
+                    if stage>=40:assert isinstance(exc,RuntimeFailure) and 'allocation' in str(exc),exc
+                    else:assert isinstance(exc,NumericalError),exc
+                else:raise AssertionError('step failure not returned')
                 assert not f.failed and f.step_index==step-1
                 np.testing.assert_array_equal(f.A,A);np.testing.assert_array_equal(f.E,E)
                 assert save(f'{step}-{stage}-after')==before

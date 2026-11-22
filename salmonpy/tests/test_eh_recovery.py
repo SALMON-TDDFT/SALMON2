@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 import numpy as np
 from salmonpy.coupled import NativeEHField
-from salmonpy.errors import NumericalError,InputError
+from salmonpy.errors import NumericalError,InputError,RuntimeFailure
 
 
 class Function:
@@ -22,6 +22,8 @@ class FieldRecoveryTests(unittest.TestCase):
         f.lib=SimpleNamespace(sp_eh_step_checked=Function(step),sp_eh_recovery_protocol=Function(lambda:1))
         f._call=lambda fn,*args:fn(*args)
         with self.assertRaises(NumericalError):f.advance(np.ones((1,3)))
+        status[0]=24
+        with self.assertRaisesRegex(RuntimeFailure,'allocation'):f.advance(np.ones((1,3)))
         self.assertFalse(f.failed);self.assertEqual(f.step_index,1)
         np.testing.assert_array_equal(f.A,0);np.testing.assert_array_equal(f.E,0)
         status[0]=0

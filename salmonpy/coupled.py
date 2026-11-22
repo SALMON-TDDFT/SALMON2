@@ -3,7 +3,7 @@
 E is at native time n*dt. Electronic local time n*dt corresponds to field clock
 (n+1/2)*dt; native saved H is centered at E time, not the raw H endpoint.
 """
-from .errors import InputError, InputTypeError, NumericalError
+from .errors import InputError, InputTypeError, NumericalError, RuntimeFailure
 from pathlib import Path
 import ctypes as c
 import json
@@ -393,6 +393,7 @@ class NativeEHField:
         values=[item[1] for item in checks]
         if any(v!=values[0] for v in values):
             raise InputError('field currents differ across ranks')
+        workspace_rejected=False
         try:
             checked=getattr(self.lib,'sp_eh_step_checked',None)
             if owned:
@@ -419,7 +420,10 @@ class NativeEHField:
                 integration_error=f'{type(exc).__name__}: {exc}'
             outcomes=comm.allgather((int(code),finite_E,finite_A,integration_error))
             native_outcomes=[(status,valid_E) for status,valid_E,_,_ in outcomes]
-            if embedded._admission_rejected(self.lib,native_outcomes,allowed=(20,21,22,23),query_name='sp_eh_recovery_protocol'):
+            if embedded._admission_rejected(self.lib,native_outcomes,allowed=(20,21,22,23,24),query_name='sp_eh_recovery_protocol'):
+                if int(code)==24:
+                    workspace_rejected=True
+                    raise RuntimeFailure('FDTD tensor workspace allocation failed before state update; release memory and retry')
                 raise NumericalError('native field numerical state restored without replay; retry permitted: '+str(native_outcomes))
             if any(status or not valid_E for status,valid_E,_,_ in outcomes):
                 raise InputError('native field advance failed')
@@ -430,6 +434,7 @@ class NativeEHField:
         except NumericalError:
             raise
         except BaseException as exc:
+            if workspace_rejected:raise
             self.failed=True
             self.manifest['failure']=str(exc)
             raise

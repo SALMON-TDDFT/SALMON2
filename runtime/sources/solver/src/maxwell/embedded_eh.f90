@@ -24,7 +24,7 @@ module salmonpy_eh_context
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use iso_c_binding
   use structures, only: s_fdtd_system
-  use fdtd_eh, only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize
+  use fdtd_eh, only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize,s_tensor_step_workspace,eh_prepare_tensor_step
   use lorentz_drude, only: s_ld_state,ld_finalize
   use sendrecv_grid, only: dealloc_cache
   use communication, only: comm_summation,comm_bcast,comm_get_max,comm_begin_children, &
@@ -292,7 +292,7 @@ end function
   integer(c_int) function sp_eh_test_fault(stage,rank) bind(C)
     integer(c_int),value :: stage,rank
     sp_eh_test_fault=1
-    if(stage<20.or.stage>39.or.rank<0)return
+    if(stage<20.or.stage>42.or.rank<0)return
     fault_stage=stage;fault_rank=rank;sp_eh_test_fault=0
   end function
 #endif
@@ -392,6 +392,9 @@ end function
 
   integer function step_checked_impl(npoints,J,E,A,owned) result(status)
     use salmon_global,only:dt_em,obs_samp_em
+#ifdef SALMONPY_RECOVERY_TESTING
+    use parallelization,only:nproc_id_global
+#endif
     use communication,only:comm_get_max
     integer,intent(in) :: npoints
     real(8),intent(in) :: J(3,npoints)
@@ -399,6 +402,10 @@ end function
     logical,intent(in),optional :: owned
     real(8),intent(out) :: E(3,npoints)
     type(restore_candidate) :: before
+    type(s_tensor_step_workspace),target :: tensor_work
+#ifdef SALMONPY_RECOVERY_TESTING
+    integer::workspace_failure
+#endif
     real(8) :: local_E(3,npoints),reference(3,npoints)
     integer :: p,d,side,index(3),i,jj,k,error,mode
     logical :: finite_input,local_current
@@ -442,6 +449,27 @@ end function
       call comm_bcast(reference,nproc_group_global)
       if(any(reference/=A))error=11
     endif
+    if(error==0)then
+#ifdef SALMONPY_RECOVERY_TESTING
+      workspace_failure=0
+      if(fault_stage>=40.and.fault_stage<=42)then
+        if(nproc_id_global==fault_rank)then
+          select case(fault_stage)
+          case(40)
+            workspace_failure=1
+          case(41)
+            workspace_failure=7
+          case(42)
+            workspace_failure=13
+          end select
+        endif
+        fault_stage=0;fault_rank=-1
+      endif
+      call eh_prepare_tensor_step(state%fs,state%fe,state%ld%max_pole_num_ld,tensor_work,error,workspace_failure)
+#else
+      call eh_prepare_tensor_step(state%fs,state%fe,state%ld%max_pole_num_ld,tensor_work,error)
+#endif
+    endif
     call comm_get_max(error,nproc_group_global)
     if(error/=0)then
       status=error;return
@@ -462,7 +490,7 @@ end function
     enddo
     state%step=state%step+1
     state%fe%iter_sta=state%step;state%fe%iter_end=state%step
-    call eh_calc(state%fs,state%fe,state%ld,state%current,guard)
+    call eh_calc(state%fs,state%fe,state%ld,state%current,guard,tensor_workspace=tensor_work)
     if(error/=0)then
       state%fe=before%fe;state%ld=before%ld
       call move_alloc(before%current,state%current)
