@@ -50,6 +50,23 @@ class PublicAPI(unittest.TestCase):
         with self.assertRaises(RuntimeFailure):query_host_abi(SimpleNamespace(sp_host_abi=probe))
         with self.assertRaisesRegex(RuntimeFailure,'host ABI'):query_host_abi(SimpleNamespace())
         self.assertFalse(native_contract('fast_hse',route='legacy')['known'])
+        from salmonpy.api import _bind_field_operations
+        field_ops=native_contract('fdtd',route='single')['field_operations']
+        self.assertEqual(field_ops['sp_eh_plane_read']['collective'],'local')
+        self.assertEqual(field_ops['sp_eh_current_mask']['collective'],'local')
+        self.assertEqual(field_ops['sp_eh_sample_h']['collective'],'solver group')
+        self.assertEqual(field_ops['sp_eh_checkpoint']['modes'][2],'stage')
+        class FieldFunction:
+            def __call__(self,*args):raise AssertionError('binding must not advance the field')
+        fns={name:FieldFunction() for name in field_ops}
+        for missing in fns:
+            with self.subTest(field_operation=missing),self.assertRaisesRegex(RuntimeFailure,missing):
+                _bind_field_operations(SimpleNamespace(**{k:v for k,v in fns.items() if k!=missing}),tuple(fns))
+            self.assertFalse(any(hasattr(f,'argtypes') for f in fns.values()))
+        _bind_field_operations(SimpleNamespace(**fns),tuple(fns))
+        self.assertEqual(len(fns['sp_eh_step_owned'].argtypes),5)
+        self.assertEqual(len(fns['sp_eh_plane_read'].argtypes),5)
+
         from salmonpy.api import _bind_host_operations
         operations=native_contract('fdtd',route='single')['host_operations']
         self.assertEqual(set(operations),{'sp_attach','sp_detach','sp_info','sp_sum','sp_barrier','sp_library'})

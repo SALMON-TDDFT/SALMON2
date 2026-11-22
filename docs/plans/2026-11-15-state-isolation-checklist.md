@@ -6,7 +6,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | 共通6操作の契約まで `a2411deb` でcommit／push済み。TDDFT・高速HSEの状態操作契約は未コミット |
+| 先に整理 | 最新の検証済み変更のcommit／push | 電子状態の操作契約まで `ab987567` でcommit／push済み。FDTD操作契約は未コミット |
 | 完了した範囲 | 主要LD初期化・時間更新の作業配列 | 入力・係数・格子配列と時間更新の明示的な大規模領域を対応。全ての小さな確保・画像用配列は対象にしない |
 | 1 | 現行C/Fortran呼び出し契約の確定 | 呼び出し規約の安定化と、残る操作・実行環境での確認。旧版との後方互換は対象外 |
 | 2 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
@@ -275,9 +275,11 @@ results/residual diagnostics and pauses the downstream workflow for user review
    selected guarantee; revisit only for an identified practical need. Arbitrary
    OS OOM, trapped FP, broken MPI and process termination are not recoverable
    contracts. No restriction on valid/custom inputs or budget-based hard stop.
-2. **Group5 R4:** stable native ABI/version negotiation and remaining host
-   operations/profile/platform conformance. Existing C/Fortran lifecycle tests
-   are completed evidence, not a blanket stable ABI declaration.
+2. **Group5 R4:** current common-host, electronic-state and FDTD operation contracts
+   are organized and locally verified. Next bounded implementation: GS operation
+   declarations/bindings. Optional diagnostics and wider profile/platform/site
+   evidence stay separate; do not require exhaustive certification to use valid
+   supported/custom calculations. Existing tests are not a blanket stable ABI claim.
 3. **Then group3:** maintained-runtime NLCC force capability certification and
    legacy SALMON eV/Hartree versus Python CODATA audit; preserve existing results
    until any numerical change is explicitly justified. New GS campaigns need
@@ -3878,3 +3880,51 @@ are uncommitted; groups1/2 and molecular work remain deferred. No heavy CI dispa
 Final source/distribution checks and installed matrix are recorded in that
 directory's summary.json. This state-contract work remains uncommitted; no
 optional heavy CI dispatched.
+
+
+## 2026-11-22 — FDTD operation contract and next queue
+
+- [x] TDDFT/fast-HSE state contracts committed/pushed as `ab987567`.
+- [x] Added current `field_operations` report with ordered names/types/directions, C/Fortran layout, current sign/time normalization, local vs collective scope and checkpoint/transaction modes. New `native_fdtd.h` ships with sdist/wheel. Python creation/update/routing/H/plane reads and protected-step/restore entry bindings use the same declaration. Optional features stay checked at use; custom backends are unchanged.
+- [x] Explicit distinctions: one-based int32 grid triples vs Python zero-based; C (points,3) float64 equals Fortran (3,points); J parameter is physical charge j, no cell-volume multiplier. current_mask/plane_read are local; H sampling and stepping/save/restore are collective. Field transaction mode3 is no-op, not electronic stream reopening.
+- [x] Source and installed679 tests each pass,one optional skip. Both source and wheel run scalar/diagonal/off-diagonal LD at MPI1/2 with normal/direct-midpoint resume; all compared fields/output/checkpoint payloads match prior controls byte-for-byte. No solver arithmetic/update order/state format changed; no extra MPI collectives.
+- [x] New header compiled with -Wall/-Werror; typed references to all current operations link against the hash-verified audited runtime. Protocol query host runs without field/MPI initialization. This link/query test does not certify every optional observation profile.
+- [x] Paired API manuals/AI JSON synchronized; final wheel bytes match current source. First matrix's tensor setup failures came from a missing test-only LD kernel link before setup, not the field update; logs preserved. Prepared link and fresh v2 source/wheel matrix pass. No GS collection, no heavy CI dispatch.
+
+Record:canonical calc2026 `salmonpy-field-operation-contracts-v2-20261122/summary.json`.
+Changes here are uncommitted. Next bounded R4 task is GS operation declarations/
+bindings,then group3 maintained NLCC certification and unit audit. Broader
+platform/site/optional-profile proof remains an operational queue; do not extend
+this into every small allocation or add restrictions on usable/custom inputs.
+Groups1/2 and molecular work remain deferred; TTM remains deleted.
+
+
+## 2026-11-22 — GS operation contracts
+
+- [x] Current GS create/import/info/array/close, active SCF, numerical snapshots, candidate, disk bootstrap/read and explicit repartition declarations organized in `native_contract("gs",route="single")["gs_operations"]`. Python core/SCF/disk/candidate/repartition/import/format bindings share those declarations. Single names the interface, not a one-state restriction. Preserve optional capability queries and custom backends.
+- [x] GS info/read are collective because gs_lookup agrees tokens; resource counts and pure protocol/format queries are local. Named argument types/directions, Fortran array extents, snapshot ownership and candidate/disk modes documented in Japanese/English/AI guides. No Fortran arithmetic or format changes.
+- [x] Source679 tests pass,one optional skip. C header compiles/links with audited host object and unchanged verified runtime; protocol/format query runs without MPI/GS initialization.
+- [x] Source PZ/fast-PR HSE internal MPI1/2 comparison, mixing-history snapshot restore, sibling preservation and protected candidate failure/retry pass; MPI2 scalar result reports equal prior installed frontend. No wavefunction/density/restart files collected. This is an8-iteration regression, not physical convergence.
+- [x] Existing regression tool now has explicit `--allow-unconverged-fixture`; default production residual-review pause remains. Initial nonconvergence pauses retained as evidence.
+- [ ] Installed-wheel SCF numerical matrix awaits explicit permission: auto-review rejected it under the current GS-collection restriction. Actual test trees contain standard GS scalar outputs (eigenvalues/forces/residual/logs), even though wavefunction/density/restart writing is disabled. Do not describe these tests as producing no GS-related output. Preserve existing evidence; do not bypass rejection.
+
+Installed unit/query/package evidence is recorded separately from the blocked
+SCF matrix. GS contract changes and the preceding FDTD contract remain
+uncommitted. Once the authorized installed matrix finishes, proceed to bounded
+NLCC certification/unit audit; broader platform/site proof is separate.
+
+
+### GS wheel validation completed after explicit output permission
+
+2026-11-22:user authorized eigenvalue/force/residual/log saving for this wheel
+validation. The previously blocked installed matrix now passes PZ and fast-PR
+HSE,internal MPI2 ×3 groups. Source/installed reports agree exactly;numerical
+arrays,mixing history and snapshot restore equal continuous execution. Late
+restore failure preserves originals and retry matches;restored iterations0.
+File inventory contains prepared input/PP and authorized standard outputs/reports.
+Wavefunction/density/GS restart files absent;created restart directories are empty.
+This closes the preceding pending installed matrix. Preserve initial rejection
+as historical evidence;no broader future GS-saving permission is inferred.
+Summary/inventory:canonical calc2026 `salmonpy-gs-operation-contracts-20261122`.
+This short deliberately unconverged regression is not physical-convergence
+certification. FDTD/GS contracts remain uncommitted. Next:bounded NLCC/unit audit.

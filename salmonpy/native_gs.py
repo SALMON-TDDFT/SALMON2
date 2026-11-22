@@ -25,30 +25,14 @@ def _agree(comm,error):
 
 
 def _configure(lib):
-    specs={'protocol':[], 'create':[c.c_char_p,c.POINTER(c.c_int64)],
-           'info':[c.c_int64,c.c_void_p,c.c_void_p],
-           'array_info':[c.c_int64,c.c_int,c.POINTER(c.c_int),c.c_void_p,c.c_void_p],
-           'read':[c.c_int64,c.c_int,c.c_void_p,c.c_void_p,c.c_int64],
-           'close':[c.c_int64], 'resources':[c.c_void_p]}
-    for name,args in specs.items():
-        fn=getattr(lib,'sp_gs_'+name,None)
-        if fn is None:raise InputError('retained GS protocol missing; explicitly build a matching runtime')
-        fn.argtypes=args;fn.restype=c.c_int
+    from .api import _bind_gs_operations, _GS_CORE
+    _bind_gs_operations(lib,tuple('sp_gs_'+name for name in _GS_CORE))
     if lib.sp_gs_protocol()!=1:raise InputError('unsupported retained GS protocol')
 
 
 def _configure_scf(lib):
-    specs={'scf_protocol':[],
-           'start':[c.c_char_p,c.c_int,c.POINTER(c.c_int64)],
-           'continue':[c.c_int64,c.c_int],
-           'scf_info':[c.c_int64,c.c_void_p],
-           'scf_snapshot':[c.c_int64,c.POINTER(c.c_int64)],
-           'scf_restore':[c.c_int64,c.c_int64],
-           'scf_snapshot_close':[c.c_int64,c.c_int64]}
-    for name,args in specs.items():
-        fn=getattr(lib,'sp_gs_'+name,None)
-        if fn is None:raise InputError('active SCF protocol unavailable; explicitly use/build a matching runtime')
-        fn.argtypes=args;fn.restype=c.c_int
+    from .api import _bind_gs_operations, _GS_SCF
+    _bind_gs_operations(lib,tuple('sp_gs_'+name for name in _GS_SCF))
     if lib.sp_gs_scf_protocol()!=1:raise InputError('unsupported active SCF protocol')
 
 
@@ -58,10 +42,8 @@ def _scf_disk_api(lib):
     probe.argtypes=[];probe.restype=c.c_int
     if probe()!=1:raise InputError('unsupported SCF disk protocol')
     if _scf_candidate_function(lib) is None:raise InputError('SCF disk restart requires protected publication support')
-    lib.sp_gs_scf_bootstrap.argtypes=[c.c_char_p,c.POINTER(c.c_int64)]
-    lib.sp_gs_scf_bootstrap.restype=c.c_int
-    lib.sp_gs_scf_disk.argtypes=[c.c_int64,c.c_char_p,c.c_int]
-    lib.sp_gs_scf_disk.restype=c.c_int
+    from .api import _bind_gs_operations
+    _bind_gs_operations(lib,('sp_gs_scf_bootstrap','sp_gs_scf_disk'))
     return lib.sp_gs_scf_disk
 
 
@@ -73,7 +55,8 @@ def _scf_k_repartition_api(lib,*,hse=False):
     if version not in (1,2) or (hse and version<2):
         raise InputError('fast HSE k repartition requires protocol2' if hse else 'unsupported SCF k repartition protocol')
     fn=lib.sp_gs_scf_k_repartition
-    fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
+    from .api import _bind_gs_operations
+    _bind_gs_operations(lib,('sp_gs_scf_k_repartition',))
     return fn
 
 
@@ -85,7 +68,8 @@ def _scf_o_repartition_api(lib,*,hse=False):
     if version not in (1,2) or (hse and version<2):
         raise InputError('fast HSE orbital repartition requires protocol2' if hse else 'unsupported SCF orbital repartition protocol')
     fn=lib.sp_gs_scf_o_repartition
-    fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
+    from .api import _bind_gs_operations
+    _bind_gs_operations(lib,('sp_gs_scf_o_repartition',))
     return fn
 
 
@@ -97,7 +81,8 @@ def _scf_r_repartition_api(lib,*,hse=False):
     if version not in (1,2) or (hse and version<2):
         raise InputError('fast HSE spatial repartition requires protocol2' if hse else 'unsupported SCF spatial repartition protocol')
     fn=lib.sp_gs_scf_r_repartition
-    fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
+    from .api import _bind_gs_operations
+    _bind_gs_operations(lib,('sp_gs_scf_r_repartition',))
     return fn
 
 
@@ -108,7 +93,8 @@ def _scf_m_repartition_api(lib,*,hse=False,kspace=False):
     version=probe()
     if version not in (1,2,3) or (hse and version<2) or (kspace and version<3):raise InputError('unsupported SCF mixed repartition protocol')
     fn=lib.sp_gs_scf_m_repartition
-    fn.argtypes=[c.c_int64,c.c_char_p,c.c_int,c.c_void_p];fn.restype=c.c_int
+    from .api import _bind_gs_operations
+    _bind_gs_operations(lib,('sp_gs_scf_m_repartition',))
     return fn
 
 
@@ -193,7 +179,8 @@ def _scf_runtime_contract(session):
     probe.argtypes=[];probe.restype=c.c_int
     if probe()!=1:return None
     fn=session.lib.sp_gs_scf_format_signature
-    fn.argtypes=[c.c_void_p,c.c_void_p];fn.restype=c.c_int
+    from .api import _bind_gs_operations
+    _bind_gs_operations(lib,('sp_gs_scf_format_signature',))
     kinds=np.zeros(8,dtype=np.int32);payload=np.zeros(128,dtype=np.int8)
     if fn(kinds.ctypes.data,payload.ctypes.data)!=0:raise InputError('native SCF stream representation unavailable')
     abi=hashlib.sha256(json.dumps(kinds.tolist()).encode()+payload.tobytes()).hexdigest()
@@ -320,7 +307,8 @@ def _scf_candidate_function(lib):
     probe.argtypes=[];probe.restype=c.c_int
     if probe()!=1:raise InputError('unsupported native SCF candidate protocol')
     fn=lib.sp_gs_scf_candidate
-    fn.argtypes=[c.c_int64,c.c_int64,c.c_int];fn.restype=c.c_int
+    from .api import _bind_gs_operations
+    _bind_gs_operations(lib,('sp_gs_scf_candidate',))
     return fn
 
 
@@ -707,7 +695,8 @@ class NativeGSSession:
             if any(len(line)>256 for line in text.splitlines()):raise InputError('import input line exceeds native 256-character limit')
             fn=getattr(self.lib,'sp_gs_import',None)
             if fn is None:raise InputError('existing-GS import requires a matching runtime')
-            fn.argtypes=[c.c_char_p,c.POINTER(c.c_int64)];fn.restype=c.c_int
+            from .api import _bind_gs_operations
+            _bind_gs_operations(self.lib,('sp_gs_import',))
             descriptor=(material_id,text,initial.manifest,tuple((n,hashlib.sha256(d).hexdigest()) for n,d in assets))
         except Exception as exc:error=str(exc)
         _agree(self.comm,error)

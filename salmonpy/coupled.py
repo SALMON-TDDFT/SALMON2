@@ -109,11 +109,8 @@ class NativeEHField:
             if 'salmonpy-subpixel.dat' in assets and b'SALMONPY_SUBPIXEL_REFERENCE_V2' not in library.read_bytes():
                 raise InputError('native field lacks reference-frequency subpixel module; explicitly rebuild it')
             lib=c.CDLL(str(library))
-            ints=np.ctypeslib.ndpointer(dtype=np.int32,ndim=2,flags='C_CONTIGUOUS')
-            floats=np.ctypeslib.ndpointer(dtype=np.float64,ndim=2,flags='C_CONTIGUOUS')
-            lib.sp_eh_init.argtypes=[c.c_char_p,c.c_int,ints];lib.sp_eh_init.restype=c.c_int
-            lib.sp_eh_step.argtypes=[c.c_int,floats,floats];lib.sp_eh_step.restype=c.c_int
-            lib.sp_eh_close.argtypes=[];lib.sp_eh_close.restype=c.c_int
+            from .api import _bind_field_operations
+            _bind_field_operations(lib)
             self.directory=Path(directory).expanduser().resolve()
             descriptor=(text,indices.tolist(),sha,str(self.directory))
         except Exception as exc:error=str(exc)
@@ -199,8 +196,8 @@ class NativeEHField:
                 raise InputError(f'{reason} (native statuses {init_codes})')
             query=getattr(lib,'sp_eh_current_mask',None)
             if query is not None and getattr(lib,'sp_eh_step_owned',None) is not None:
-                query.argtypes=[c.c_int,np.ctypeslib.ndpointer(dtype=np.int32,ndim=1,flags='C_CONTIGUOUS')]
-                query.restype=c.c_int
+                from .api import _bind_field_operations
+                _bind_field_operations(lib,('sp_eh_current_mask',))
                 mask=np.empty(len(self.point_ids),dtype=np.int32)
                 code=self._call(query,len(self.point_ids),mask)
                 _agree(comm,'native current ownership query failed' if code else None)
@@ -254,7 +251,8 @@ class NativeEHField:
             self.native._live()
             fn=getattr(self.lib,'sp_eh_plane_read',None)
             if fn is None:raise InputError('runtime lacks read-only embedded plane ABI; explicitly rebuild')
-            fn.argtypes=[c.c_int,c.c_int,c.c_int,c.c_void_p,c.c_void_p];fn.restype=c.c_int
+            from .api import _bind_field_operations
+            _bind_field_operations(self.lib,('sp_eh_plane_read',))
             for monitor in self.calculation.planes:
                 info=np.empty(21,dtype=np.int32);dummy=np.empty(0,dtype=np.float64)
                 offset=int(np.argmin(abs(self.calculation.geometry.grid.coordinates[monitor.axis]-monitor.position)))
@@ -340,8 +338,8 @@ class NativeEHField:
             fn=getattr(self.lib,'sp_eh_sample_h',None)
             if fn is None:raise InputError('runtime lacks sp_eh_sample_h; explicitly build an H-enabled runtime')
             self.native._live()
-            fn.argtypes=[c.c_int,np.ctypeslib.ndpointer(dtype=np.float64,ndim=2,flags='C_CONTIGUOUS')]
-            fn.restype=c.c_int
+            from .api import _bind_field_operations
+            _bind_field_operations(self.lib,('sp_eh_sample_h',))
             H=np.empty_like(self.A)
         except Exception as exc:error=f'{type(exc).__name__}: {exc}'
         _agree(comm,error)
@@ -397,14 +395,13 @@ class NativeEHField:
         try:
             checked=getattr(self.lib,'sp_eh_step_checked',None)
             if owned:
-                floats=np.ctypeslib.ndpointer(dtype=np.float64,flags='C_CONTIGUOUS')
+                from .api import _bind_field_operations
+                _bind_field_operations(self.lib,('sp_eh_step_owned',))
                 fn=self.lib.sp_eh_step_owned
-                fn.argtypes=[c.c_int,c.c_int,floats,floats,floats];fn.restype=c.c_int
                 code=self._call(fn,len(self.point_ids),len(self.current_rows),J,self.A,E)
             elif checked is not None:
-                floats=np.ctypeslib.ndpointer(dtype=np.float64,flags='C_CONTIGUOUS')
-                checked.argtypes=[c.c_int,floats,floats,floats]
-                checked.restype=c.c_int
+                from .api import _bind_field_operations
+                _bind_field_operations(self.lib,('sp_eh_step_checked',))
                 code=self._call(checked,len(self.point_ids),J,self.A,E)
             else:
                 code=self._call(self.lib.sp_eh_step,len(self.point_ids),J,E)

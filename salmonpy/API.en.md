@@ -749,3 +749,69 @@ still require separate evidence.
 Each entry also records ordered `parameters` with name/type/in-or-out.
 `decomposition_order` is k/orbital/grid-x/grid-y/grid-z. Standard single-state
 C output is explicitly named `J_matter`, distinguishing it from charge j.
+
+## FDTD field operations
+
+`native_contract('fdtd', route='single')['field_operations']` describes current
+FDTD arguments/directions, layout, communication scope and restore/transaction
+modes. Python uses the same declarations; C prototypes ship in `native_fdtd.h`.
+Only init/step/close are required at field creation. Ownership routing, H and plane
+sampling, checkpoint and protected-step entries are checked when used; they do
+not restrict custom backends or unused optional features.
+
+Field arrays are C-contiguous float64 `(points,3)` (Fortran `(3,points)`). Init
+indices are int32 one-based global triples; Python converts zero-based indices.
+The C argument named J contains physical charge-current density j at the previous
+half-step, in atomic units; no sign reversal or cell-volume multiplier. Checked
+steps also receive accepted A/c. Owned steps pack J in ascending current-mask
+row order; A/E still contain every mapped point. Fields, LD and update order are
+unchanged. Use COUPLED's E/H/A time-placement contract.
+
+All state calls are sequential on the main thread. Init/step/close, H sampling,
+checkpoint and transactions are field-group collectives. `current_mask` is local,
+and `plane_read` is a local read of committed sampled data: axis1..3, local-grid
+offset, int32 info[21], first call with count0 for metadata, then float64 values.
+Protocol queries are local and do not initialize MPI or the field.
+
+Checkpoint modes0/1/2/3/4 mean save/load/stage/commit/cancel, with distinct paths
+per rank. The caller validates build/input/topology and coordinates publication;
+raw save is not a multi-file atomic publish. Field transaction modes0/1/2/3 mean
+capture/rollback/release/no-op, unlike electronic stream-reopening transactions.
+Unsupported observation/output profiles return15 for protected-step capture.
+Buffers remain caller-owned; consume outputs only on success. No guarantee covers
+arbitrary process/MPI/OOM failure.
+
+## GS and SCF operation contracts
+
+`native_contract('gs',route='single')['gs_operations']` describes required and
+optional GS entries with ordered names/types/directions, ownership and modes.
+Python bindings use the same declaration. `single` selects the GS interface,
+not a one-state limit: every live GS/snapshot has its own owning token. Close
+snapshots/owners before detaching. Pure protocol/format and resource-count queries
+are local; state info and array reads are collective because tokens are agreed.
+
+Create runs SCF; start/continue preserve initialization and true mixing history.
+An unconverged final iterate is retained, but Python pauses automatic continuation
+for residual review by default. `allow_unconverged=True` is an explicit reviewed
+choice; the finite 8-iteration developer fixture has its own explicit CLI flag.
+It does not demonstrate physical convergence. Import reads existing GS without
+SCF; unavailable convergence/forces must not be invented. Bootstrap for direct
+SCF restart initializes static resources while skipping numerical initialization
+and SCF iterations.
+
+array_info returns ndim and int64 shape/lower[7]; read buffers are float64 in
+Fortran order, can include local halos, and must match the queried extent. info
+uses int32 stats[4], float64 values[3] (Hartree energy/residual/tolerance);
+scf_info uses int32[6] including lifetime initialization/execution counters.
+In-memory snapshots belong to the same live owner: restore copies numerical/XC/
+mixing/HSE history without replay, but does not rewind text logs or lifetime
+counters and is not a portable disk archive.
+
+Candidate modes2/3/4 stage/publish/discard; publish/discard use snapshot0. The
+host must agree before publication. Disk mode0 writes a new rank-local file,
+mode2 stages a read; candidate(state,0,3) publishes only after authentication.
+Repartition entries require their own layout-specific capability versions and
+ordered old-rank bounds. No unused feature is required and no new hard stop is
+added for valid/custom calculations. Optional timers/GS-to-RT bridges still use
+separate queries. `doctor --component gs --route single` checks only the common
+host descriptor and GS protocol, without starting SCF or certifying all operations.

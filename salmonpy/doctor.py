@@ -99,8 +99,10 @@ def probe_native_protocols(build_record, *, component, route):
               'contract': declaration, 'errors': []}
     if not declaration['known']:
         return report
-    prefix = {'tddft': 'sp_tddft_', 'fast_hse': 'sp_fast_hse_', 'fdtd': 'sp_eh_'}[component]
-    if component == 'fdtd':
+    prefix = {'tddft': 'sp_tddft_', 'fast_hse': 'sp_fast_hse_', 'fdtd': 'sp_eh_', 'gs':'sp_gs_'}[component]
+    if component == 'gs':
+        names=['protocol']
+    elif component == 'fdtd':
         names = ['checkpoint_protocol', 'recovery_protocol']
     elif route == 'single':
         names = ['error_protocol' if component == 'tddft' else 'recovery_protocol']
@@ -171,7 +173,7 @@ def main():
     parser.add_argument('--executable', help='External SALMON path (not executed)' if english else '外部SALMONのパス（起動しません）')
     parser.add_argument('--sha256', help='SHA256 of the audited executable' if english else '監査済み実行ファイルのSHA256')
     parser.add_argument('--native-build', help='Explicit trusted audited library build record; loads native code in a child')
-    parser.add_argument('--component', help='Built-in tddft, fast_hse, fdtd; custom names remain unverified')
+    parser.add_argument('--component', help='Built-in tddft, fast_hse, fdtd, gs; custom names remain unverified')
     parser.add_argument('--route', help='Explicit single, shared or registry route')
     args = parser.parse_args()
     if args.native_build is not None:

@@ -286,10 +286,155 @@ def _bind_state_operations(library, component, *, route):
         function.argtypes=[types[arg] for arg in args];function.restype=c.c_int
 
 
+
+def _field_operations():
+    specs = {
+        'init': [('path','string','in'),('points','int','in'),('indices','indices','in')],
+        'step': [('points','int','in'),('J','matrix','in'),('E','matrix','out')],
+        'close': [],
+        'current_mask': [('points','int','in'),('mask','mask','out')],
+        'step_owned': [('points','int','in'),('local_points','int','in'),('J','array','in'),('A','array','in'),('E','array','out')],
+        'step_checked': [('points','int','in'),('J','array','in'),('A','array','in'),('E','array','out')],
+        'sample_h': [('points','int','in'),('H','matrix','out')],
+        'plane_read': [('axis','int','in'),('offset','int','in'),('values_count','int','in'),('info','buffer','out'),('values','buffer','out')],
+        'checkpoint_protocol': [], 'step_transaction_protocol': [],
+        'checkpoint': [('path','string','in'),('mode','int','in')],
+        'step_transaction': [('mode','int','in')],
+    }
+    result = {}
+    for name,parameters in specs.items():
+        query=name.endswith('_protocol')
+        local=query or name in ('current_mask','plane_read')
+        entry={'parameters':[{'name':n,'type':t,'direction':d} for n,t,d in parameters],
+               'arguments':[t for _,t,_ in parameters], 'returns':'int',
+               'collective':'local' if local else 'solver group',
+               'required_at_initialization':name in ('init','step','close'),
+               'requires':'none' if query else 'main thread, sequential; live field attachment; matching collective order',
+               'ownership':'caller buffers, not retained; one field lifetime per process',
+               'failure':'protocol version' if query else '0 success; nonzero operation-specific status; consume outputs only on success'}
+        if name in ('init','step','step_checked','step_owned','sample_h'):
+            entry['layout']='C contiguous (points,3), equivalent to Fortran (3,points); int32 indices, float64 fields'
+        if name=='init':entry['indices']='one-based global grid triples in requested point order; Python converts zero-based indices'
+        if name in ('step','step_checked','step_owned'):
+            entry['current']='physical charge-current density j in atomic units (C parameter named J); previous half-step; no volume multiplier or sign conversion'
+            entry['atomicity']='use declared protected-step transaction/coordinator; raw call is not universal rollback'
+        if name=='step_owned':entry['routing']='J rows follow ascending current-mask rows; local count differs by field rank; A/E retain all mapped rows'
+        if name=='current_mask':entry['layout']='int32[points]; rank-local constitutive ownership, overlaps permitted'
+        if name=='sample_h':entry['clock']='raw macro-centered H at (n+1/2)dt; accepted step >=1; no time advance'
+        if name=='plane_read':
+            entry['layout']='info int32[21]; values float64[values_count]; first call count0 queries metadata; axis1..3, local-grid offset'
+            entry['requires']='committed usable field; no pending restore; sampled step; no native MPI communication'
+        if name=='checkpoint':
+            entry['modes']={0:'save',1:'fresh load',2:'stage',3:'commit',4:'cancel'}
+            entry['ownership']='distinct path per rank; caller validates input/runtime/topology and publishes multi-file save atomically'
+            entry['atomicity']='coordinated stage/vote/commit/cancel required for whole-session protected restore'
+        if name=='step_transaction':
+            entry['modes']={0:'capture',1:'rollback',2:'release',3:'no-op'}
+            entry['scope']='supported field/LD numerical state only; unsupported output modes return15; no arbitrary MPI/process/allocator recovery'
+        result['sp_eh_'+name]=entry
+    return result
+
+
+def _bind_field_operations(library, names=('sp_eh_init','sp_eh_step','sp_eh_close')):
+    """Bind requested FDTD entries, leaving optional operations opt-in."""
+    import ctypes as c
+    import numpy as np
+    from .errors import RuntimeFailure
+    specs=_field_operations();functions=[]
+    for name in names:
+        if name not in specs:raise RuntimeFailure('unknown built-in field operation '+str(name))
+        fn=getattr(library,name,None)
+        if fn is None:raise RuntimeFailure('runtime lacks required field operation '+name)
+        functions.append((fn,specs[name]['arguments']))
+    types={'string':c.c_char_p,'int':c.c_int,'buffer':c.c_void_p,
+           'indices':np.ctypeslib.ndpointer(dtype=np.int32,ndim=2,flags='C_CONTIGUOUS'),
+           'mask':np.ctypeslib.ndpointer(dtype=np.int32,ndim=1,flags='C_CONTIGUOUS'),
+           'matrix':np.ctypeslib.ndpointer(dtype=np.float64,ndim=2,flags='C_CONTIGUOUS'),
+           'array':np.ctypeslib.ndpointer(dtype=np.float64,flags='C_CONTIGUOUS')}
+    for fn,args in functions:
+        fn.argtypes=[types[a] for a in args];fn.restype=c.c_int
+
+
+
+_GS_CORE=('protocol','create','info','array_info','read','close','resources')
+_GS_SCF=('scf_protocol','start','continue','scf_info','scf_snapshot','scf_restore','scf_snapshot_close')
+
+
+def _gs_operations():
+    specs={
+        'protocol':[], 'create':[('path','string'),('state','int64*')],
+        'import':[('path','string'),('state','int64*')],
+        'info':[('state','int64'),('stats','buffer'),('values','buffer')],
+        'array_info':[('state','int64'),('quantity','int'),('ndim','int*'),('shape','buffer'),('lower','buffer')],
+        'read':[('state','int64'),('quantity','int'),('real','buffer'),('imag','buffer'),('length','int64')],
+        'close':[('state','int64')], 'resources':[('counts','buffer')],
+        'scf_protocol':[], 'start':[('path','string'),('steps','int'),('state','int64*')],
+        'continue':[('state','int64'),('steps','int')], 'scf_info':[('state','int64'),('values','buffer')],
+        'scf_snapshot':[('state','int64'),('snapshot','int64*')],
+        'scf_restore':[('state','int64'),('snapshot','int64')],
+        'scf_snapshot_close':[('state','int64'),('snapshot','int64')],
+        'scf_bootstrap':[('path','string'),('state','int64*')],
+        'scf_disk':[('state','int64'),('path','string'),('mode','int')],
+        'scf_candidate':[('state','int64'),('snapshot','int64'),('mode','int')],
+        'scf_format_signature':[('kinds','buffer'),('bytes','buffer')],
+    }
+    for axis in ('k','o','r','m'):
+        specs['scf_'+axis+'_repartition']=[('state','int64'),('directory','string'),('old_size','int'),('bounds','buffer')]
+    result={}
+    for name,parameters in specs.items():
+        local=name in ('protocol','scf_protocol','resources','scf_format_signature')
+        entry={'arguments':[t for _,t in parameters], 'returns':'int',
+               'parameters':[{'name':n,'type':t,'direction':'out' if n in ('stats','values','ndim','shape','lower','real','imag','counts','kinds','bytes') or t=='int64*' else 'in'} for n,t in parameters],
+               'collective':'local' if local else 'solver group',
+               'requires':'main thread, sequential; live attachment and matching token/order for state calls',
+               'ownership':'caller owns buffers; not retained; state/snapshot tokens own resources until explicit close',
+               'failure':'query version' if name.endswith('protocol') else '0 success; nonzero operation-specific status; outputs valid only on success'}
+        if name in ('create','start','import','scf_bootstrap'):
+            entry['input']='immutable input/assets; call inside selected model I/O directory'
+            entry['effect']={'create':'initialize and run SCF; retain last iterate even if unconverged',
+                             'start':'initialize once, run requested main-iteration budget, retain mixing/history',
+                             'import':'read existing GS; no SCF or GS writes; convergence/forces unavailable',
+                             'scf_bootstrap':'prepare static resources for restart, no initial orbitals/density/mixing or SCF iterations'}[name]
+        if name=='info':entry['layout']='stats int32[4]: iterations/converged/atoms/bands; values float64[3]: Hartree energy/residual/tolerance; import uses unknown convergence and profile-specific absent values'
+        if name=='array_info':entry['layout']='ndim int32; shape/lower int64[7]; quantity1 density,2 occupation,3 eigenvalue,4 force,5 orbitals,6 SCF history'
+        if name=='read':entry['layout']='float64 real/imag arrays of length; Fortran order; use array_info first; local arrays can include halos'
+        if name=='resources':entry['layout']='int32[3]: states/live child communicators/slot high-water; rank-local'
+        if name=='scf_info':entry['layout']='int32[6]: paused/iterations/total cap/initializations/executed main iterations/live snapshots'
+        if name in ('scf_snapshot','scf_restore','scf_snapshot_close'):
+            entry['scope']='same live GS owner; numerical/mixing/HSE history only; no portable files or text-output rewind; restore does not rewind lifetime execution/init counters'
+        if name=='scf_candidate':
+            entry['modes']={2:'stage snapshot',3:'publish',4:'discard'}
+            entry['scope']='one pending numerical payload; snapshot0 for publish/discard; host votes before publication; no arbitrary allocation/process/MPI rollback guarantee'
+        if name=='scf_disk':
+            entry['modes']={0:'save new rank-local file',2:'stage disk read'}
+            entry['scope']='host authenticates current runtime/input/topology; publish with candidate(state,0,3); no multi-file atomic publication'
+        if name.endswith('repartition'):
+            entry['bounds']='old ranks in order; k/orbital2, spatial6, mixed10 int32 values per old rank; explicit layout-specific capability query required'
+        if name=='scf_format_signature':entry['layout']='int32 kinds[8], int8 bytes[128]; query only, no GS initialization'
+        result['sp_gs_'+name]=entry
+    return result
+
+
+def _bind_gs_operations(library,names):
+    """Resolve requested GS entries before binding; optional APIs remain opt-in."""
+    import ctypes as c
+    from .errors import InputError
+    specs=_gs_operations();functions=[]
+    for name in names:
+        if name not in specs:raise InputError('unknown built-in GS operation '+str(name))
+        fn=getattr(library,name,None)
+        if fn is None:raise InputError('runtime lacks required GS operation '+name)
+        functions.append((fn,specs[name]['arguments']))
+    types={'string':c.c_char_p,'int':c.c_int,'int64':c.c_int64,'buffer':c.c_void_p,
+           'int*':c.POINTER(c.c_int),'int64*':c.POINTER(c.c_int64)}
+    for fn,args in functions:
+        fn.argtypes=[types[a] for a in args];fn.restype=c.c_int
+
+
 def native_contract(component, *, route):
     """Describe a built-in execution contract without loading a native library.
 
-    Explicit names: tddft/fast_hse with single/shared/registry; fdtd with single.
+    Explicit names: tddft/fast_hse with single/shared/registry; fdtd/gs with single.
     This is declared documentation, not a runtime capability check or a stable
     C ABI promise. Unknown/custom components return unverified, never a refusal
     to execute them. Their backend owns its separate contract.
@@ -301,9 +446,10 @@ def native_contract(component, *, route):
     definitions = {
         'tddft': ('native_context.h', 'standard_tddft_handles.h', 'standard_tddft_models.h'),
         'fast_hse': ('native_context.h', 'fast_hse_handles.h',),
-        'fdtd': ('native_context.h',)}
+        'fdtd': ('native_context.h','native_fdtd.h'),
+        'gs': ('native_context.h','standard_gs.h')}
     if (component not in definitions or route not in ('single', 'shared', 'registry')
-            or (component == 'fdtd' and route != 'single')):
+            or (component in ('fdtd','gs') and route != 'single')):
         report['status'] = 'unverified'
         report['limitations'].append('Use the custom backend contract; this description imposes no execution restriction.')
         return report
@@ -311,17 +457,22 @@ def native_contract(component, *, route):
                   host_abi_version=1,host_abi_query='sp_host_abi',
                   host_operations=_host_operations(),
                   state_operations=_state_operations(component,route),
+                  field_operations=_field_operations() if component=='fdtd' else {},
+                  gs_operations=_gs_operations() if component=='gs' else {},
                   host_thread='main thread, sequential calls',
                   host_owns_mpi_initialization_and_finalization=True,
                   attachment='one native attachment per process; close owned states before detach',
                   collective_order='collective operations must match on the solver communicator; query locality is entry-point specific',
-                  multiple_live_states=route != 'single',
+                  multiple_live_states=component=='gs' or route != 'single',
                   model_settings_owner=('single field lifetime' if component == 'fdtd' else
+                                        'explicit GS state' if component=='gs' else
                                         'explicit single-state settings' if route == 'single' else
                                         'explicit model'),
                   headers=['salmonpy/native_adapters/'+name for name in definitions[component]],
                   failure_guarantee='Only declared numerical/transaction failures; not arbitrary STOP, allocation or MPI failure recovery')
-    if component != 'fdtd':
+    if component=='gs':
+        report['boundary']='atomic units; Hartree energy, Cartesian forces; array_info defines local Fortran layout'
+    elif component != 'fdtd':
         report['boundary'] = 'Cartesian A/c and physical charge-current density j, atomic units'
         report['native_current'] = ('SALMON matter J=-j; Python adapter returns charge j'
                                     if component == 'tddft' and route == 'single' else

@@ -18,6 +18,7 @@ from salmonpy.errors import InputError
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ('build','baseline','output'):p.add_argument(name,type=Path)
+    p.add_argument('--allow-unconverged-fixture',action='store_true',help='Explicitly accept finite, deliberately unphysical 8-iteration regression states; not production convergence')
     p.add_argument('--size',type=int,default=2)
     p.add_argument('--split',choices=('orbital','spatial','k','mixed'),default='orbital')
     p.add_argument('--decomposition',type=int,nargs=5)
@@ -164,9 +165,9 @@ def main():
             try:state.restore(sibling_snapshot)
             except InputError:pass
             else:raise AssertionError('cross-owner snapshot accepted')
-            state.continue_scf(steps=2);assert state.iterations==5
+            state.continue_scf(steps=2,allow_unconverged=args.allow_unconverged_fixture);assert state.iterations==5
             snap5=state.snapshot()
-            state.continue_scf(steps=3)
+            state.continue_scf(steps=3,allow_unconverged=args.allow_unconverged_fixture)
             assert state.iterations==8 and not state.scf_status['paused']
             linear=state.scf_status
             assert linear['executed_iterations']==8 and linear['initializations']==1
@@ -177,7 +178,7 @@ def main():
                     from salmonpy.checkpointing import CheckpointTarget,AtomicRestoreError
                     targets={'A':state.checkpoint_target(saved),'B':sibling.checkpoint_target(sibling_snapshot)}
                     if n==3:
-                        sibling.continue_scf(steps=1)
+                        sibling.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
                         state.restore(snap5)
                         originals=frame(state),frame(sibling)
                         counts=state.scf_status,sibling.scf_status
@@ -196,7 +197,7 @@ def main():
                         for owner,frame0,final in ((state,originals[0],False),(sibling,originals[1],False)):
                             for q,value in frame(owner,final).items():np.testing.assert_array_equal(value,frame0[q])
                         # Continue the preserved mixing/HSE state before retrying the restore.
-                        state.continue_scf(steps=3)
+                        state.continue_scf(steps=3,allow_unconverged=args.allow_unconverged_fixture)
                         assert state.info==info
                         for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
                         before=state.scf_status['executed_iterations']
@@ -220,25 +221,25 @@ def main():
                 assert state.scf_status['initializations']==1
                 if n==3:
                     for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
-                state.continue_scf(steps=remaining)
+                state.continue_scf(steps=remaining,allow_unconverged=args.allow_unconverged_fixture)
                 assert state.info==info
                 for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
             for q,value in frame(sibling).items():np.testing.assert_array_equal(value,sibling_cut[q])
             owner_timing=state.timing_seconds if args.timer_ownership else None
-            sibling.continue_scf(steps=1)
+            sibling.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
             if args.timer_ownership:assert state.timing_seconds==owner_timing
             sibling_future=frame(sibling);sibling_work=sibling.scf_status['executed_iterations']
             sibling.restore(sibling_snapshot)
             assert sibling.iterations==2 and sibling.scf_status['executed_iterations']==sibling_work
             assert sibling.scf_status['initializations']==1
-            sibling.continue_scf(steps=1)
+            sibling.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
             for q,value in frame(sibling).items():np.testing.assert_array_equal(value,sibling_future[q])
             for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
             snap3.close();snap5.close();sibling_snapshot.close();sibling.close()
             assert state.scf_status['snapshots']==0
             for q in ('wfn.bin','occupation.bin'):assert not list(work.rglob(q))
         else:
-            state=session.run(a,scf=scf,material_id='A')
+            state=session.run(a,scf=scf,material_id='A',allow_unconverged=args.allow_unconverged_fixture)
             expected=frame(state,True);info=state.info
             linear=None
         query=getattr(session.lib,'sp_gs_cartesian_force_protocol',None)

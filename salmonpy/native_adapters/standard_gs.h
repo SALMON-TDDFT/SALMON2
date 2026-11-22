@@ -2,9 +2,16 @@
 #ifndef SALMONPY_STANDARD_GS_H
 #define SALMONPY_STANDARD_GS_H
 #include <stdint.h>
+#include "native_context.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
+/* State operations are collective and main-thread/sequential, including info
+ * and array reads (token agreement communicates). resources and pure protocol/
+ * format queries are local. Caller owns buffers and authenticates disk records;
+ * no pointers retained. Output buffers are valid only on successful status0.
+ * Metadata declaration is not blanket numerical/allocator/MPI-failure recovery.
+ */
 int sp_gs_protocol(void);
 /* Optional1 confirms Cartesian force output after symmetry averaging. */
 int sp_gs_cartesian_force_protocol(void);
@@ -113,8 +120,8 @@ int sp_gs_resources(int counts[3]);
 int sp_gs_timer_protocol(void);
 int sp_gs_timers(int64_t token, double seconds[4]);
 
-/* Optional directory scope1/2/3 resolves relative native I/O without host chdir.
- * Protocol2 covers TDDFT; protocol3 additionally covers FDTD paths. Enter/leave on the main thread around one call; not concurrent solver support. */
+/* Current directory protocol3: main-thread enter/leave around one call,
+ * no host chdir; not concurrent solver support. No old-version fallback. */
 int sp_io_directory_protocol(void);
 int sp_io_directory_enter(const char *absolute_directory);
 void sp_io_directory_leave(void);

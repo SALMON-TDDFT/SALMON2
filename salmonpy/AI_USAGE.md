@@ -1509,3 +1509,24 @@ alone does not. Optional diagnostics/retained-GS capabilities and custom backend
 keep separate contracts.
 
 Use ordered `parameters` names/directions as well as argument types; old_A and new_A share a type. Standard single C current is `J_matter`; decomposition order is k/orbital/grid-x/grid-y/grid-z.
+
+## FDTD operation contracts
+
+Read `native_contract('fdtd',route='single')['field_operations']` and
+`native_fdtd.h`. Init grid triples are one-based; Python inputs are zero-based.
+The C parameter J is physical charge j, atomic units, no volume multiplier/sign
+flip. current_mask/plane_read are local; H sampling and stepping/checkpoint/
+transactions are field-group collective. Field transaction mode3 is no-op, not
+electronic stream reopening. Keep optional capability checks at use; do not
+require unused features or impose this ABI on custom backends.
+
+## GS operation contracts
+
+Use `native_contract('gs',route='single')['gs_operations']`. Single is the entry
+family, not a one-state restriction. State info/read are collective (token
+agreement), resources/format queries local. Snapshots retain numerical/mixing/
+HSE state only within a live owner, not text logs or lifetime execution counts.
+Candidate2/3/4 stage/publish/discard; disk0 save,disk2 stage read then candidate3
+publish. Authenticate records and coordinate before publication. Keep default
+unconverged-SCF review; an explicit developer-fixture acceptance is not physical
+convergence. Never require unused optional capabilities or constrain user backends.

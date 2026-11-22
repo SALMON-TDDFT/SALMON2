@@ -90,7 +90,11 @@ class _NativeBackup:
         probe.argtypes=[];probe.restype=c.c_int
         if probe()!=1:raise InputError('unsupported native whole-step transaction protocol')
         self.fn=getattr(owner.lib,symbol)
-        self.fn.argtypes=[c.c_int];self.fn.restype=c.c_int
+        if symbol=='sp_eh_step_transaction':
+            from .api import _bind_field_operations
+            _bind_field_operations(owner.lib,(symbol,))
+        else:
+            self.fn.argtypes=[c.c_int];self.fn.restype=c.c_int
 
     def _check(self,error,*,admission=False):
         errors=self.comm.allgather(error)

@@ -8,6 +8,24 @@ import unittest
 class NativeGSTests(unittest.TestCase):
 
     def test_closed_rank_cannot_skip_collective_close(self):
+        from salmonpy.api import native_contract, _bind_gs_operations
+        from salmonpy.errors import InputError
+        from types import SimpleNamespace
+        spec=native_contract('gs',route='single')
+        self.assertTrue(spec['known']);self.assertTrue(spec['multiple_live_states'])
+        operations=spec['gs_operations']
+        self.assertEqual(operations['sp_gs_info']['collective'],'solver group')
+        self.assertEqual(operations['sp_gs_resources']['collective'],'local')
+        self.assertEqual(operations['sp_gs_scf_candidate']['modes'][3],'publish')
+        class Fn:
+            def __call__(self,*args):raise AssertionError('binding must not initialize or evolve GS')
+        functions={name:Fn() for name in operations}
+        for missing in functions:
+            with self.subTest(missing=missing),self.assertRaisesRegex(InputError,missing):
+                _bind_gs_operations(SimpleNamespace(**{n:f for n,f in functions.items() if n!=missing}),tuple(functions))
+            self.assertFalse(any(hasattr(f,'argtypes') for f in functions.values()))
+        _bind_gs_operations(SimpleNamespace(**functions),tuple(functions))
+        self.assertEqual(len(functions['sp_gs_read'].argtypes),5)
         from types import SimpleNamespace
         from salmonpy.native_gs import NativeGSState
         from salmonpy.errors import InputError
