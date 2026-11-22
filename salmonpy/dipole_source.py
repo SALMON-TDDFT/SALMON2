@@ -468,6 +468,289 @@ class MolecularFeedback:
         self._bridge=None;self._needs_rollback=False
         self._backup=backup
 
+    def _field_step_indices(self):
+        from .api import _bind_field_operations
+        _bind_field_operations(self.field.lib,('sp_eh_step_indices',))
+        values=np.empty(2,dtype=np.int32)
+        if self.field._call(self.field.lib.sp_eh_step_indices,values):
+            raise RuntimeFailure('cannot query actual Fortran FDTD step indices')
+        return tuple(int(v) for v in values)
+
+    def _bundle_rows(self, *, saving):
+        import json,hashlib
+        from .fdtd import FDTDMPI
+        row=None;error=None
+        try:
+            if self.failed or (saving and not self.started):
+                raise InputError('save requires an accepted usable feedback state')
+            if self._backup is not None and self._backup.active:
+                raise InputError('finish the pending field update before checkpointing')
+            if self._bridge is not None and self._bridge._saved is not None:
+                raise InputError('finish the pending molecular update before checkpointing')
+            field=self.field
+            contract=dict(rank=self.comm.rank,roots=[self.total_root,self.reference_root],
+                dt=self.dt,capacity=self.capacity,molecules=list(self.mapping.molecule_ids),
+                points=list(self.mapping.point_ids),weights=self.mapping.weights.tolist(),
+                volumes=self.mapping.cell_volumes.tolist(),field=None,molecule=None)
+            row=dict(contract=contract,session_step=self.step_index,started=self.started,field_step=None,molecular_step=None)
+            if field is not None:
+                if field.closed or field.failed or field.step_index!=self.step_index:
+                    raise InputError('field and feedback accepted step indices differ')
+                from .api import _bind_field_operations
+                _bind_field_operations(field.lib,('sp_eh_step_indices','sp_eh_checkpoint'))
+                if getattr(field,'_restore_candidate',None) is not None:
+                    raise InputError('field restore candidate already pending')
+                assets=field.calculation.input_assets()
+                specification=dict(input=FDTDMPI(field.checkpoint_decomposition).input_text(field.calculation),
+                    assets=assets,library=field.manifest['library_sha256'],
+                    indices=field.manifest['grid_indices'],positions=field.manifest['sample_positions_bohr'],
+                    sample=field.manifest['sample_map'],deposit=field.manifest['deposit_map'],
+                    decomposition=list(field.checkpoint_decomposition),
+                    observer=None if self.observer is None else self.observer.box.tolist())
+                contract['field']=hashlib.sha256(json.dumps(specification,sort_keys=True).encode()).hexdigest()
+                row.update(field_step=field.step_index,A=field.A.tolist(),E=field.E.tolist(),leader=field.context.is_leader)
+            if self.state is not None:
+                if not self.state.usable or self.state._engine._savepoint is not None:
+                    raise InputError('usable molecule without a pending savepoint required')
+                statistics=self.state.worker_statistics()
+                contract['molecule']=self.state._engine._snapshot_settings()
+                row['molecular_step']=statistics['step']
+                if self.started and statistics['step']!=self.step_index-1:
+                    raise InputError('molecule must be one step behind the accepted FDTD step')
+                row['left']=None if self._bridge is None else self._bridge._left.tolist()
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        records=self.comm.allgather((error,row))
+        if any(e for e,_ in records):raise InputError('molecular checkpoint admission: '+str([e for e,_ in records]))
+        # All ranks passed local admission before any owning-field-group query.
+        error=None
+        try:
+            if self.field is not None:
+                actual,pending=self._field_step_indices()
+                if actual!=self.field.step_index or pending!=-1:
+                    raise InputError('Fortran field step differs or a restore is pending')
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        errors=self.comm.allgather(error)
+        if any(errors):raise InputError('molecular checkpoint field indices: '+str(errors))
+        rows=[v for _,v in records]
+        if len({v['started'] for v in rows})!=1:raise InputError('feedback acceptance phases differ across ranks')
+        if len({v['session_step'] for v in rows})!=1:raise InputError('feedback step numbers differ across ranks')
+        if self.started:
+            _check_molecular_steps(rows[self.total_root]['field_step'],rows[self.reference_root]['field_step'],
+                                   rows[self.total_root]['molecular_step'])
+        return rows
+
+    def save_checkpoint(self, directory, *, history=None):
+        """Collectively save both FDTD groups, their LD state and the molecule.
+
+        Call after accepting a step. Optional JSON frame history belongs only on
+        total_root. Writes a new directory; no update, replay or hidden SCF.
+        """
+        import json,os,tempfile,shutil
+        from pathlib import Path
+        from .tddft import _digest
+        from .api import _bind_field_operations
+        rows=self._bundle_rows(saving=True)
+        destination=Path(directory).expanduser().absolute()
+        paths=self.comm.allgather(str(destination))
+        if any(v!=paths[0] for v in paths):raise InputError('shared checkpoint destination required')
+        prepared=None
+        if self.comm.rank==self.total_root:
+            try:
+                if destination.exists() or destination.is_symlink():raise InputError('checkpoint destination exists')
+                if history is not None and (not isinstance(history,list) or len(history)!=self.step_index):
+                    raise InputError('optional history needs one frame per accepted FDTD step')
+                json.dumps(history,allow_nan=False)
+                destination.parent.mkdir(parents=True,exist_ok=True)
+                prepared=(None,tempfile.mkdtemp(prefix='.molecular-bundle-',dir=destination.parent))
+            except Exception as exc:prepared=(str(exc),None)
+        error,temporary=self.comm.bcast(prepared,root=self.total_root)
+        if error:raise InputError(error)
+        root=Path(temporary);files={};error=None
+        try:
+            if self.field is not None:
+                _bind_field_operations(self.field.lib,('sp_eh_checkpoint',))
+                path=root/('field-'+str(self.comm.rank)+'.bin')
+                if self.field._call(self.field.lib.sp_eh_checkpoint,os.fsencode(path),0):
+                    raise RuntimeFailure('FDTD direct save failed')
+                files[path.name]=_digest(path)
+                if self.field.context.is_leader:
+                    stream=root/('streams-'+str(self.comm.rank));stream.mkdir()
+                    for path in self.field.directory.glob('*.data'):
+                        if path.is_symlink() or not path.is_file():raise InputError('regular private field stream required')
+                        target=stream/path.name;shutil.copyfile(path,target)
+                        files[target.relative_to(root).as_posix()]=_digest(target)
+            if self.state is not None:
+                self.state.save_direct_checkpoint(root/'molecule')
+                for path in (root/'molecule').iterdir():
+                    files[path.relative_to(root).as_posix()]=_digest(path)
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        reports=self.comm.allgather((error,files))
+        error=None
+        if self.comm.rank==self.total_root:
+            try:
+                if any(e for e,_ in reports):raise RuntimeFailure(str([e for e,_ in reports]))
+                inventory={k:v for _,part in reports for k,v in part.items()}
+                record=dict(schema='salmonpy.molecular-feedback-direct/1',field_step=self.step_index,
+                    molecular_step=self.step_index-1,rows=rows,files=inventory,history=history)
+                (root/'complete.json').write_text(json.dumps(record,allow_nan=False,indent=2)+'\n')
+                root.rename(destination)
+            except Exception as exc:
+                error=type(exc).__name__+': '+str(exc)
+                shutil.rmtree(root,ignore_errors=True)
+        error=self.comm.bcast(error,root=self.total_root)
+        if error:raise RuntimeFailure('molecular checkpoint save: '+error)
+
+    def restore_checkpoint(self, directory):
+        """Collectively stage all three calculations before publishing any state.
+
+        Returns saved history/indices on total_root, None elsewhere. Requires the
+        same inputs/runtime/MPI layout. Never calls start() or elapsed step().
+        """
+        import json
+        from pathlib import Path, PurePosixPath
+        from .tddft import _digest
+        from ._native_checkpoint import NativeRestoreCandidate
+        from .isolated_tddft import _EEngine
+        rows=self._bundle_rows(saving=False)
+        root=Path(directory).expanduser().absolute()
+        paths=self.comm.allgather(str(root))
+        if any(v!=paths[0] for v in paths):raise InputError('shared checkpoint source required')
+        payload=None
+        if self.comm.rank==self.total_root:
+            try:
+                record=json.loads((root/'complete.json').read_text())
+                if record['schema']!='salmonpy.molecular-feedback-direct/1':raise InputError('unsupported molecular checkpoint')
+                _check_molecular_steps(record['field_step'],record['field_step'],record['molecular_step'])
+                if len(record['rows'])!=self.comm.size:raise InputError('saved MPI layout differs')
+                for current,saved in zip(rows,record['rows']):
+                    if current['contract']!=saved['contract']:raise InputError('saved model/runtime/MPI configuration differs')
+                    if saved['session_step']!=record['field_step']:raise InputError('saved session step differs')
+                    if saved['field_step'] is not None and saved['field_step']!=record['field_step']:
+                        raise InputError('saved FDTD step differs')
+                _check_molecular_steps(record['rows'][self.total_root]['field_step'],
+                    record['rows'][self.reference_root]['field_step'],record['rows'][self.total_root]['molecular_step'])
+                history=record['history']
+                if history is not None and (not isinstance(history,list) or len(history)!=record['field_step']):
+                    raise InputError('saved history count differs from the accepted field step')
+                if not isinstance(record['files'],dict) or not record['files']:raise InputError('missing payload inventory')
+                required={'molecule/manifest.json'}
+                required.update('field-'+str(i)+'.bin' for i,row in enumerate(rows) if row['field_step'] is not None)
+                if not required.issubset(record['files']):raise InputError('required numerical payload missing')
+                for name in record['files']:
+                    path=PurePosixPath(name)
+                    if path.is_absolute() or '..' in path.parts or str(path)!=name or '\\' in name:
+                        raise InputError('unsafe checkpoint path')
+                    if any((root/Path(*path.parts[:i])).is_symlink() for i in range(1,len(path.parts)+1)):
+                        raise InputError('checkpoint symlinks unsupported')
+                    if not (root/name).is_file():raise InputError('regular checkpoint payload required')
+                if set(record['files'])!={p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file() and p!=root/'complete.json'}:
+                    raise InputError('checkpoint payload inventory differs')
+                payload=(None,record)
+            except Exception as exc:payload=(type(exc).__name__+': '+str(exc),None)
+        error,record=self.comm.bcast(payload,root=self.total_root)
+        if error:raise InputError('molecular checkpoint metadata: '+error)
+        error=None
+        try:
+            for index,(name,sha) in enumerate(sorted(record['files'].items())):
+                if index%self.comm.size==self.comm.rank and _digest(root/name)!=sha:
+                    raise InputError('checkpoint checksum mismatch: '+name)
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        errors=self.comm.allgather(error)
+        if any(errors):raise InputError('molecular checkpoint integrity: '+str(errors))
+        field_candidate=molecule_candidate=streams=bridge=None
+        error=None
+        saved=record['rows'][self.comm.rank]
+        try:
+            if self.field is not None:
+                field_candidate=NativeRestoreCandidate(self.field,'sp_eh_checkpoint',root/('field-'+str(self.comm.rank)+'.bin'))
+                field_candidate.stage()
+                _,pending=self._field_step_indices()
+                if pending!=record['field_step']:raise InputError('staged Fortran FDTD step differs from manifest')
+                A=_real(saved['A'],self.field.A.shape,'saved A')
+                E=_real(saved['E'],self.field.E.shape,'saved E')
+                if self.field.context.is_leader:
+                    streams=_MolecularStreams(self.field,root/('streams-'+str(self.comm.rank)))
+            if self.state is not None:
+                engine=self.state._engine
+                molecule_candidate=_EEngine(engine._model,engine.dt,engine._position)
+                molecule_candidate.restore_direct_checkpoint(root/'molecule')
+                stats=molecule_candidate.worker_statistics()
+                if stats['step']!=record['molecular_step'] or stats['updates']!=0:
+                    raise InputError('molecular restore step differs or performed propagation')
+                left=_real(saved['left'],(3,),'saved selected E')
+                selected=_selected_molecular_field(record['rows'][self.total_root]['E'][0],
+                                                   record['rows'][self.reference_root]['E'][0])
+                if not np.array_equal(left,selected):raise InputError('saved selected E differs from the two field samples')
+                bridge=_IsolatedDipoleTrial(self.state,self.mapping,initial_field=left)
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        errors=self.comm.allgather(error)
+        if not any(errors):
+            try:
+                if streams is not None:streams.publish()
+            except Exception as exc:error=type(exc).__name__+': '+str(exc)
+            errors=self.comm.allgather(error)
+        if any(errors):
+            cleanup=[]
+            for candidate,method in ((field_candidate,'discard'),(molecule_candidate,'close'),(streams,'rollback')):
+                if candidate is not None:
+                    try:getattr(candidate,method)()
+                    except Exception as exc:cleanup.append(str(exc))
+            if streams is not None:
+                try:streams.close()
+                except Exception as exc:cleanup.append(str(exc))
+            failures=self.comm.allgather(cleanup)
+            if any(failures):self.failed=True
+            from .checkpointing import AtomicRestoreError
+            if any(failures):
+                raise RuntimeFailure('molecular restore cleanup failed; preservation not guaranteed: '+str(failures))
+            raise AtomicRestoreError('molecular candidate restore failed: '+str(errors))
+        # All I/O and native payload reads finished before this publication phase.
+        error=None
+        try:
+            if field_candidate is not None:field_candidate.publish()
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        errors=self.comm.allgather(error)
+        if any(errors):
+            self.failed=True
+            if molecule_candidate is not None:molecule_candidate.close()
+            if streams is not None:streams.close()
+            raise RuntimeFailure('native field publication failed after preparation; preservation not guaranteed: '+str(errors))
+        if self.field is not None:
+            self.field.A=np.array(A,copy=True);self.field.E=np.array(E,copy=True)
+            self.field.step_index=record['field_step']
+        retired=None
+        if self.state is not None:
+            retired=self.state._engine;self.state._engine=molecule_candidate
+            self._bridge=bridge
+        self.step_index=record['field_step'];self.started=True
+        cleanup=[]
+        for resource in (streams,retired):
+            if resource is not None:
+                try:resource.close()
+                except Exception as exc:cleanup.append(str(exc))
+        error=None;verified=dict(rank=self.comm.rank,field_step=None,molecular_step=None)
+        try:
+            if self.field is not None:
+                actual,pending=self._field_step_indices()
+                if actual!=self.step_index or pending!=-1:raise RuntimeFailure('published Fortran field step differs')
+                verified['field_step']=actual
+            if self.state is not None:
+                statistics=self.state.worker_statistics()
+                if statistics['step']!=record['molecular_step'] or statistics['updates']!=0:
+                    raise RuntimeFailure('published molecule step differs or advanced during restore')
+                verified.update(molecular_step=statistics['step'],molecular_updates=statistics['updates'])
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        checked=self.comm.allgather((error,verified,cleanup))
+        if any(e for e,_,_ in checked):
+            self.failed=True
+            raise RuntimeFailure('published step verification failed: '+str(checked))
+        cleanup_errors=[e for _,_,errors in checked for e in errors]
+        if cleanup_errors and self.comm.rank==self.total_root:
+            import warnings
+            warnings.warn('checkpoint restored; retired resource cleanup: '+str(cleanup_errors),RuntimeWarning)
+        return dict(field_step=self.step_index,molecular_step=record['molecular_step'],
+                    verified_steps=[v for _,v,_ in checked],history=record['history']) if self.comm.rank==self.total_root else None
+
     def _capture(self):
         self._needs_rollback=False
         token=None;error=None
@@ -596,3 +879,47 @@ class MolecularFeedback:
         if self._backup is not None:self._backup.release(token)
         self.step_index+=1
         return frame
+
+
+def _check_molecular_steps(total_step, reference_step, molecular_step):
+    """Accepted FDTD n and molecular n-1; never infer or shift a saved index."""
+    if (any(type(v) is not int for v in (total_step,reference_step,molecular_step))
+            or total_step < 1 or reference_step != total_step or molecular_step != total_step-1):
+        raise InputError('accepted steps must be total FDTD n, reference FDTD n, molecule n-1')
+    return total_step,molecular_step
+
+
+class _MolecularStreams:
+    """Stage closed-per-update FDTD point streams; retain originals until commit."""
+    def __init__(self, field, source):
+        import tempfile
+        import shutil
+        from pathlib import Path
+        self.root=field.directory
+        self.work=Path(tempfile.mkdtemp(prefix='.molecular-streams-',dir=self.root))
+        self.changed=False
+        try:
+            self.originals={p.name:p.read_bytes() for p in self.root.glob('*.data')}
+            self.incoming={p.name:p.read_bytes() for p in source.glob('*.data')} if source.exists() else {}
+            for name,raw in self.incoming.items():(self.work/name).write_bytes(raw)
+        except BaseException:
+            shutil.rmtree(self.work,ignore_errors=True)
+            raise
+
+    def publish(self):
+        import os
+        self.changed=True
+        for name in self.incoming:os.replace(self.work/name,self.root/name)
+        for name in self.originals.keys()-self.incoming.keys():(self.root/name).unlink()
+
+    def rollback(self):
+        import os
+        if not self.changed:return
+        for name,raw in self.originals.items():
+            path=self.work/name;path.write_bytes(raw);os.replace(path,self.root/name)
+        for name in self.incoming.keys()-self.originals.keys():(self.root/name).unlink(missing_ok=True)
+        self.changed=False
+
+    def close(self):
+        import shutil
+        shutil.rmtree(self.work)

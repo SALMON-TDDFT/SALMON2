@@ -299,6 +299,7 @@ def _field_operations():
         'sample_h': [('points','int','in'),('H','matrix','out')],
         'box_energy_step': [('box','indices','in'),('values','buffer','out')],
         'plane_read': [('axis','int','in'),('offset','int','in'),('values_count','int','in'),('info','buffer','out'),('values','buffer','out')],
+        'step_indices': [('values','mask','out')],
         'checkpoint_protocol': [], 'step_transaction_protocol': [],
         'checkpoint': [('path','string','in'),('mode','int','in')],
         'step_transaction': [('mode','int','in')],
@@ -321,6 +322,7 @@ def _field_operations():
             entry['current']='physical charge-current density j in atomic units (C parameter named J); previous half-step; no volume multiplier or sign conversion'
             entry['atomicity']='use declared protected-step transaction/coordinator; raw call is not universal rollback'
         if name=='step_owned':entry['routing']='J rows follow ascending current-mask rows; local count differs by field rank; A/E retain all mapped rows'
+        if name=='step_indices':entry['layout']='int32[2]: accepted step and staged candidate step; -1 means absent; read-only'
         if name=='current_mask':entry['layout']='int32[points]; rank-local constitutive ownership, overlaps permitted'
         if name=='box_energy_step':
             entry['requires']='accepted step with live unconsumed protected-step backup; identical zero-based inclusive box on the field group; read-only, no I/O'

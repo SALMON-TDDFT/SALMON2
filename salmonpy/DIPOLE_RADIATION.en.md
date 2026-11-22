@@ -36,6 +36,60 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 \
 
 Its grid and duration are C2H2 wiring-test settings, not converged parameters for arbitrary molecules.
 
+## Direct bundle restart: total field, own-vacuum field and molecule
+
+Call `MolecularFeedback.save_checkpoint(directory, history=...)` collectively after
+acceptance. Both FDTD groups must be at step n and the molecule at step n-1.
+The field indices are read from Fortran. Do not save an unaccepted prediction.
+
+```python
+# First job; retain records only on total_root.
+first = coupling.start()
+records = [first.record()] if world.rank == total_root else None
+while coupling.step_index < 30:
+    frame = coupling.step()
+    if world.rank == total_root:
+        records.append(frame.record())
+coupling.save_checkpoint('new-bundle', history=records)
+# Close states and exit this MPI job.
+```
+
+```python
+# A new job creates the same FDTD/molecular objects and coupling.
+# Do not call start(); load the saved step indices directly.
+saved = coupling.restore_checkpoint('new-bundle')
+records = saved['history'] if world.rank == total_root else None
+while coupling.step_index < steps:
+    frame = coupling.step()
+    if world.rank == total_root:
+        records.append(frame.record())
+```
+
+`salmonpy.molecular-feedback-direct/1` stores both fields' E/H, LD, PML and
+current buffers per field rank in Fortran, plus the molecular direct checkpoint.
+It also retains sampled A/E, the saved E used by the next molecular update and
+output streams. Optional caller-owned JSON `history` must be a list with one item
+per accepted FDTD step, supplied only on total_root. Restore returns field_step,
+molecular_step, per-owner verified_steps and history on total_root; peers get None.
+
+Require the same runtimes, GS/input, dt, capacity, materials, boundaries, grid,
+sampling and MPI decomposition. Verify hashes and configuration, stage both
+fields and the molecule independently, verify pending Fortran indices and zero
+molecular evolutions, then publish. Candidate-preparation failures preserve live
+states and are reported collectively. Arbitrary OS/MPI failure or fatal allocation
+failure during publication is outside this guarantee. A new directory and shared
+filesystem are required. Normal updates gain no communication. Original states and candidates coexist
+during restore; allow additional memory and output staging space. This entry needs
+the field library's sp_eh_step_indices and revision5 molecular worker evidence.
+Loading performs no build, SCF or elapsed propagation replay.
+
+The complete examples/molecular_feedback.py supports
+`--stop-after 30 --checkpoint NEW_CHECKPOINT`, then a separate MPI invocation
+with `--resume NEW_CHECKPOINT`. Keep --steps (capacity), inputs and rank layout
+identical; use a new output directory each time. --ld --field-grid 2 1 1 uses
+MPI6. Measured molecular scope is PZ, fixed ions and one internal worker rank.
+
+
 ## One-way radiation sources
 
 Use physical charge dipoles p in laboratory axes, in e·bohr. `DipoleMap` conserves

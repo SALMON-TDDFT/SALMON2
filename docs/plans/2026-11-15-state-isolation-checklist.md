@@ -14,11 +14,11 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 | 完了 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBE局所試験、MPI2/4、固定Si/PBE比較。今回のソース・バイナリ向け記録も更新。換算定数は変更なし |
 | 完了 | 初期推定の入力準備・保持GSからの受け渡し | 準備と実行を分離し、保持GSの波動関数・占有数を独立コピー。前回実装は8f3a7663までpush済み |
 | 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
-| 完了 | 最新パッケージ・分子接続検証 | 六面収支・x/y/z各2分割まで5d6892c7へpush済み。単一分子の公開結合API・公開保存点・直接取消は3af42587へpush済み。分子の直接ディスク保存／再開も実装済み。ソース・wheelとも691件実行、各1件任意スキップ。末尾の最新記録を参照 |
+| 完了 | 最新パッケージ・分子接続検証 | 六面収支・x/y/z各2分割まで5d6892c7へpush済み。単一分子の公開結合API・公開保存点・直接取消は3af42587へpush済み。分子単体の直接ディスク再開は54c43c2bへpush済み。二つのFDTDを含む一括再開も実装済み。ソース・wheelとも692件実行、各1件任意スキップ。末尾の最新記録を参照 |
 
 ### 残る作業と対象拡大
 
-**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消はワーカー内保存点から直接復元します。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。光源・吸収層を除いた内側の箱について、六面流束を含む場・等方LD・分子の離散エネルギー収支と実MPI2分割を確認済みです。単一分子用の一般利用向け入口はMolecularFeedbackとして実装済みです。結合全体の直接ディスク再開への分子状態接続、テンソル・界面平滑化・任意の背景誘電率への観測拡張、広い物理条件での収束確認は残件です。以下はそれと区別する運用・対象拡大の残件です。
+**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消はワーカー内保存点から直接復元します。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。光源・吸収層を除いた内側の箱について、六面流束を含む場・等方LD・分子の離散エネルギー収支と実MPI2分割を確認済みです。単一分子用の一般利用向け入口はMolecularFeedbackとして実装済みです。テンソル・界面平滑化・任意の背景誘電率への観測拡張、広い物理条件での収束確認は残件です。以下はそれと区別する運用・対象拡大の残件です。
 
 1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
 2. **大規模化の計測**：マクロ点・ランク・観測間隔に対するメモリ、通信、ファイル数・I/O負荷の測定。集約・バッファ化は測定上の必要に応じて実装する。
@@ -35,7 +35,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
-Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum-work observation/comparison and selected-field midpoint timing are verified. Six-face inner-box energy balance is verified for scalar LD, including real two-partition FDTD tests along x/y/z. Tensor/subpixel/arbitrary-background energy observation and physical convergence remain open. MolecularFeedback, live direct cancellation and process-exit molecular direct disk restart are implemented and verified in the latest entries below. Coordinated disk persistence of both fields and the molecular/coupling state remains open. Memory budgets warn; SCF nonconvergence retains
+Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum-work observation/comparison and selected-field midpoint timing are verified. Six-face inner-box energy balance is verified for scalar LD, including real two-partition FDTD tests along x/y/z. Tensor/subpixel/arbitrary-background energy observation and physical convergence remain open. MolecularFeedback, live direct cancellation and process-exit molecular direct disk restart are implemented and verified in the latest entries below. Coordinated direct disk persistence of both fields, the molecule and explicit accepted step indices is now verified for MPI6/same-layout C2H2 PZ; see the latest entry. Memory budgets warn; SCF nonconvergence retains
 results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
@@ -307,9 +307,9 @@ permission; prior grants remain campaign-specific.
 
 The active molecular stage resumed2026-11-22. MolecularFeedback, the PZ isolated
 worker, live direct rollback and molecular-only direct disk restart are now verified
-within the latest recorded scope. Next: coordinated durable restart of the total
-field, own-vacuum reference field, molecular state and accepted field/electronic step indices; tensor/
-subpixel/background energy-observation coverage; physical convergence. Other
+within the latest recorded scope. Coordinated direct restart of both fields, the molecule and accepted step indices
+is now verified for the recorded MPI6 scope. Next: tensor/subpixel/background
+energy-observation coverage and physical convergence. Other
 operational work remains site-MPI/multinode/receipt filesystem evidence, scale
 and observation I/O, Ag fit refinement, optional storage/GPU and wider physical
 profiles. Preparation-only DFT/TDDFT/FDTD and customizable launcher construction
@@ -4270,3 +4270,22 @@ midpoint-work-summary.json. Follow-up still uncommitted; no manual heavy CI.
 一括保存／再開の次段階では、受理完了後の両FDTDと分子のステップ番号、
 次の更新で参照する保存済み電場を揃えて扱う。未受理の予測途中と区別する。
 これは現行処理の説明であり、一括ディスク再開の実装完了を意味しない。
+
+## 2026-11-22 二つのFDTD・分子の一括直接保存／再開
+
+54c43c2b（分子単体の直接ディスク再開）は独立SALMONpyへpush済み。
+以下はその後の実装で、未コミット。
+
+- [x] MolecularFeedback.save_checkpoint／restore_checkpoint。本計算FDTD n・自己真空参照FDTD n・分子 n−1を保存し、両場と分子の候補を検査後に切替。次の分子更新で使う電場、A/E採取値、出力ファイル、任意の呼出元記録も保持。
+- [x] Fortranの読み取り専用sp_eh_step_indicesで、現在と候補の実ステップ番号を確認。保存・復元時だけ利用し、通常更新の通信は変更しない。
+- [x] 許可済みC2H2 GS・PZ固定イオン、MPI6（各FDTD群2ランク）。30／30／29で保存して元ジョブを終了し、別ジョブで30／30／29へ直接復元。分子の追加時間発展0回、残り34更新だけで最終64／64／63へ到達。
+- [x] 連続実行・変更前の場ライブラリ・最終wheel再開の全64フレームと六面収支が完全一致。最終FDTDのE/H・LD・PML・電流の全ランク保存バイナリと点出力ファイルも完全一致。
+- [x] 分子の波動関数・密度等の有効な保存配列と観測値は一致。独立ジョブ間では未使用Qp_e、一時軌道の更新フラグ、Poisson作業配列の未使用末尾にバイト差があることを明示。保存ファイル全体の一致とは区別して記録。
+- [x] FDTD5／分子4まで進んだ復元先へ参照場準備失敗・分子準備失敗・保存番号とFortran候補番号の不一致を注入。全ランクで元の数値状態の全バイトと番号を保持し、再試行後の結果は連続実行と完全一致。復元中は場・分子の更新呼出を禁止した検証でも成功。
+- [x] Git追跡ファイルだけから準備・ビルド、ソースと全アプリケーションオブジェクトの禁止ソルバー監査。NLCC XC・力MPI1/2とGS不要のC／Fortran問い合わせ確認。ソース・最終wheel各692件、各1件任意スキップ。日英ガイド・AI JSON・サンプルの収録バイトも照合。
+- [ ] 次の主な残件：テンソル・界面平滑化・任意背景誘電率への六面収支観測拡張、分子結合の物理条件の収束確認。施設・多ノード・大規模化・他環境配布・Agフィット改善は既存の別枠。
+
+記録：docs/molecular-bundle-checkpoint-validation-2026-11-22.md、既存キャンペーンの
+molecular-bundle-summary.jsonとmolecular-bundle-artifacts。追加SCF・物理CIの手動起動なし。
+同一入力／実行ファイル／ライブラリ／容量／MPI分割の範囲であり、任意のOS・MPI障害や
+切替時の致命的確保失敗への原子性、レイアウト変更、他の分子XCまでの証明ではない。

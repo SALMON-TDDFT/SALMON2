@@ -32,6 +32,7 @@ module salmonpy_eh_context
   use parallelization, only: setup_parallel,nproc_group_global
   implicit none
   private
+  public :: sp_eh_step_indices
   public :: sp_eh_init,sp_eh_step,sp_eh_close,sp_eh_sample_h,sp_eh_checkpoint,sp_eh_box_energy_step
   type :: field_context
     type(s_fdtd_system) :: fs
@@ -242,6 +243,16 @@ contains
    dt_em,cspeed_au,poles,oldptr,newptr,jptr,c_loc(current),stats)
  end function
 end function sp_eh_box_energy_step
+
+integer(c_int) function sp_eh_step_indices(values) bind(C)
+ integer(c_int),intent(out)::values(2)
+ values=-1
+ sp_eh_step_indices=1
+ if(.not.allocated(state))return
+ values(1)=state%step
+ if(allocated(pending))values(2)=pending%step
+ sp_eh_step_indices=0
+end function
 
 integer(c_int) function sp_eh_checkpoint_protocol() bind(C)
   sp_eh_checkpoint_protocol=1

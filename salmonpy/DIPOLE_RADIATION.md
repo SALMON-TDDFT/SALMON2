@@ -36,6 +36,61 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 \
 
 この例の格子・時間長はC2H2の接続検証用です。任意分子の収束済み条件ではありません。
 
+## 本計算・自己真空参照・分子の一括保存／再開
+
+全ランクで`MolecularFeedback.save_checkpoint(directory, history=...)`を呼びます。
+時間更新の受理後だけ保存し、本計算FDTDと自己真空参照FDTDはステップn、
+分子TDDFTはステップn−1であることを確認します。予測更新の途中は保存しません。
+FDTDの実ステップ番号はFortranから読みます。
+
+```python
+# 初回のジョブ。recordsはtotal_rootにだけ置く。
+first = coupling.start()
+records = [first.record()] if world.rank == total_root else None
+while coupling.step_index < 30:
+    frame = coupling.step()
+    if world.rank == total_root:
+        records.append(frame.record())
+coupling.save_checkpoint('new-bundle', history=records)
+# 各状態を終了し、MPIジョブを終了してよい。
+```
+
+```python
+# 別のジョブで同じ入力・配置からFDTDと分子、couplingを新規作成する。
+# start()は呼ばず、保存した番号へ直接復元する。
+saved = coupling.restore_checkpoint('new-bundle')
+records = saved['history'] if world.rank == total_root else None
+while coupling.step_index < steps:
+    frame = coupling.step()
+    if world.rank == total_root:
+        records.append(frame.record())
+```
+
+保存形式は`salmonpy.molecular-feedback-direct/1`。二つのFDTDのE/H・LD・PML・
+電流状態を各場ランクがFortranで直接保存し、分子は直接ディスク保存APIを使います。
+採取したA/E、次の分子更新に使う保存済み電場、出力ファイルも保持します。
+`history`は任意の呼出元のJSON記録です。指定する場合は受理済みFDTDステップ数と
+同じ長さのリストをtotal_rootだけから渡します。復元結果はtotal_rootだけに返り、
+`field_step`、`molecular_step`、各担当ランクの`verified_steps`と`history`を含みます。
+
+同じ実行ファイル／ライブラリ・GS入力・dt・容量・物質・境界・格子・採取位置・
+MPI分割で再開します。SHA256と各設定を照合後、両FDTDと分子を独立した候補へ読み、
+Fortranの候補ステップ番号と分子の更新回数0を確認してから切り替えます。
+候補の準備失敗は全ランクへ伝え、元の状態を保持します。
+任意のOS／MPI障害や切替時の致命的な確保失敗まで回復を保証するものではありません。
+保存は新規ディレクトリのみで、既存保存を上書きしません。共有ファイルシステムが必要です。
+通常の時間更新には通信を追加せず、保存／復元時だけ照合します。
+復元中は元の状態と候補が同時に存在するため、追加のメモリと出力退避領域が必要です。
+この機能には`sp_eh_step_indices`を持つ場のライブラリと、revision5の分子ワーカー検証記録が必要です。
+読込み時にビルド・SCF・過去ステップの再計算は行いません。
+
+完全サンプル`examples/molecular_feedback.py`に
+`--stop-after 30 --checkpoint NEW_CHECKPOINT`を指定して保存・終了し、
+別のMPIジョブで`--resume NEW_CHECKPOINT`を指定して再開できます。
+両方とも同じ`--steps`（容量）・入力・MPI数を使い、出力先はそれぞれ新規にします。
+`--ld --field-grid 2 1 1`ではMPI6です。分子はPZ・固定イオン・内部1ランクの実測範囲です。
+
+
 ## 一方向の放射源
 
 分子の物理的な電荷双極子pを実験室座標、e·bohr単位で渡します。

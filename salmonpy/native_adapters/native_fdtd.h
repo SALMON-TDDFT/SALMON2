@@ -27,6 +27,8 @@ int sp_eh_sample_h(int points,double *H);
 /* Local only. info int[21]; values double[count]. count0 queries metadata.
  * axis1..3, local-grid offset; committed sampled field, no pending restore. */
 int sp_eh_plane_read(int axis,int offset,int count,int *info,double *values);
+/* Read-only: values[0] is accepted step; values[1] is pending step or -1. */
+int sp_eh_step_indices(int values[2]);
 int sp_eh_checkpoint_protocol(void);
 /* Each rank has a distinct path; caller validates input/runtime/topology.
  * Modes0 save,1 load,2 stage,3 commit,4 cancel. No multi-file atomic publication. */

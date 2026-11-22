@@ -1566,3 +1566,12 @@ mixing-history SCF resume or general HSE/live/custom-backend seed support.
 GSは初期化で読み込むがSCFしない。保存は新規ディレクトリのみ。復元候補の失敗時は
 元の状態を維持する。既存のsave_checkpointは明示的な履歴再生形式なので混同しない。
 分子だけの保存をFDTD結合全体の保存と案内しない。直接形式には現行revision5検証記録が必要。
+
+分子と二つの場の一括保存は`MolecularFeedback.save_checkpoint`／`restore_checkpoint`。
+受理後の本計算FDTD n・自己真空参照FDTD n・分子 n−1を明記する。
+次のジョブで同じ入力・ライブラリ・GS・dt・容量・MPI分割から作成し、start()を呼ばずに復元する。
+両場のFortran内の番号と、分子の更新回数0をverified_stepsで確認する。
+形式はsalmonpy.molecular-feedback-direct/1。分子単体のsave_direct_checkpointと区別する。
+任意のhistoryはtotal_rootだけが渡す。サンプルは--stop-after／--checkpoint／--resumeを使う。
+準備失敗の原子的拒否と、OS/MPI破損・切替時の致命的確保失敗は区別する。
+通常ステップに通信を増やさず、検証は明示的な保存・再開時に行う。

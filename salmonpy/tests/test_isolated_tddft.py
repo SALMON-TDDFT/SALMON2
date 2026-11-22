@@ -428,3 +428,10 @@ class IsolatedTDDFTTests(unittest.TestCase):
             with patch.object(different._engine,'_spawn',side_effect=AssertionError('reject before spawn')):
                 with self.assertRaises(SnapshotError):
                     different.restore_direct_checkpoint(folder)
+
+    def test_bundle_step_numbers_reject_mismatched_accepted_states(self):
+        from salmonpy.dipole_source import _check_molecular_steps
+        self.assertEqual(_check_molecular_steps(8,8,7), (8,7))
+        for indices in ((8,7,7),(8,8,8),(0,0,-1),(True,1,0)):
+            with self.assertRaises(InputError):
+                _check_molecular_steps(*indices)

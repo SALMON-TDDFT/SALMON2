@@ -24,6 +24,9 @@ def main():
     parser.add_argument('--steps',type=int,default=64)
     parser.add_argument('--dt',type=float,default=.003)
     parser.add_argument('--ld',action='store_true',help='add the verified synthetic Drude box')
+    parser.add_argument('--checkpoint',type=Path,help='new direct bundle directory')
+    parser.add_argument('--resume',type=Path,help='direct bundle to load before updating')
+    parser.add_argument('--stop-after',type=int,help='accepted FDTD step at which to save and exit')
     args=parser.parse_args()
     from mpi4py import MPI
     from salmonpy.distributed import SolverGroup,ParallelPlan,ParallelContext
@@ -76,11 +79,24 @@ def main():
                 coupling=MolecularFeedback(world,field,state=state,
                     mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.]),
                     total_root=0,reference_root=group_size,policy='environment_scattered_only',observer=observer)
-                first=coupling.start()
-                records=[first.record()] if world.rank==0 else None
-                for _ in range(args.steps-1):
+                restored_steps=None
+                if args.resume:
+                    saved=coupling.restore_checkpoint(args.resume)
+                    records=saved['history'] if world.rank==0 else None
+                    error='sample resume requires saved frame history' if world.rank==0 and records is None else None
+                    error=world.bcast(error,root=0)
+                    if error:raise ValueError(error)
+                    restored_steps=saved['verified_steps'] if world.rank==0 else None
+                else:
+                    first=coupling.start()
+                    records=[first.record()] if world.rank==0 else None
+                stop=args.steps if args.stop_after is None else args.stop_after
+                if not coupling.step_index<=stop<=args.steps:raise ValueError('stop-after must be between current FDTD step and capacity')
+                restore_statistics=state.worker_statistics() if world.rank==0 and args.resume else None
+                for _ in range(stop-coupling.step_index):
                     frame=coupling.step()
                     if world.rank==0:records.append(frame.record())
+                if args.checkpoint:coupling.save_checkpoint(args.checkpoint,history=records)
                 statistics=state.worker_statistics() if world.rank==0 else None
             finally:
                 if field is not None:field.close()
@@ -88,7 +104,7 @@ def main():
         if world.rank==0:
             with (args.output/'molecular-feedback.json').open('x') as out:
                 json.dump(dict(policy='environment_scattered_only',field_grid=args.field_grid,
-                    units='atomic',initial_hold=args.dt,frames=records,worker_statistics=statistics),out,indent=2)
+                    units='atomic',initial_hold=args.dt,frames=records,worker_statistics=statistics,restore_statistics=restore_statistics,restored_steps=restored_steps),out,indent=2)
             print(args.output/'molecular-feedback.json')
     finally:local_world.Free()
 
