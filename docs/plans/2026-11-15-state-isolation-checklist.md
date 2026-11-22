@@ -6,9 +6,9 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 | 順序 | 残作業 | 範囲 |
 |---|---|---|
-| 先に整理 | 最新の検証済み変更のcommit／push | LD材料入力配列・後方互換分岐削除は `e3666160` でpush済み。今回のLD係数用一時配列は未コミット |
-| 1 | 初期化・補助入出力・作業配列の失敗処理 | 未対応箇所を実際に使う経路から絞る。検証済みの保存・読込を作り直さない |
-| 2 | C/Fortranから呼ぶ際の版・互換性確認 | 呼び出し規約の安定化と、残る操作・実行環境での確認 |
+| 先に整理 | 最新の検証済み変更のcommit／push | LD係数用一時配列まで `5f255105` でpush済み。今回の非対角LD格子係数の失敗処理は未コミット |
+| 1 | 残る作業配列・補助I/Oの失敗処理 | LDの主要な初期化配列は対応済み。時間更新用、subpixel用、観測・画像用などから実用上必要な箇所を選ぶ。全ての小さな確保の網羅は目標にしない |
+| 2 | 現行C/Fortran呼び出し契約の確定 | 呼び出し規約の安定化と、残る操作・実行環境での確認。旧版との後方互換は対象外 |
 | 3 | NLCC付きの力の認証と単位換算の照合 | 現行の計算プログラムを対象に、既存の数値を黙って変えずに検証 |
 
 再開読込処理と文書改善は `23cb1342` でpush済みです。今回のLD初期化と後方互換分岐削除も、source／wheel各679テスト（各1件スキップ）で検証済みです。MPI1／2のLD＋FDTD・直接保存復元は修正前とビット一致し、自作バックエンドの事前検査はMPI3で確認しました。HSEはビルド・C/Fortran照会・MPI1／2の明示所有を確認しましたが、今回の削除後に実材料のHSE計算を再実行したわけではありません。日英文書・AI JSONは同期済みで、最終文書/API16テストも通っています。
@@ -24,6 +24,19 @@ results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
 ### Completed and verified
+
+- [x] Off-diagonal LD grid coefficient storage:5D weights,4D diagonal values and
+  integer material indices allocate before the existing material-vector gate;
+  values initialize at their original position. Partial STAT failure returns1120
+  after field-group agreement and owned cleanup, allowing constructor retry.
+  No startup/step collective added, arithmetic and disk format unchanged.
+  Source GNU MPI1/2 production/testing controls and repeated partial failures
+  pass; scalar/diagonal/tensor fields and direct midpoint data match5f255105-era
+  controls byte-for-byte. Source/wheel679-test suites pass(one optional skip
+  each). Subpixel normal/direct-restore source/wheel controls also match the
+  previous library on GNU MPI1/2; its allocation-failure coverage is unchanged.
+  Subpixel allocation and tensor propagation workspaces remain separate scopes.
+  Record: calc2026/salmonpy-ld-tensor-grid-allocation-recovery-20261122.
 
 - [x] LD coefficient preparation: material list, six common1D/2D and three
   directional2D/3D arrays now return1120 on partial allocation failure. The
@@ -224,7 +237,9 @@ results/residual diagnostics and pauses the downstream workflow for user review
 - [x] Reader I/O and documentation integration: published as23cb1342.
 - [x] Directional LD allocation recovery and backward-compatibility removal
   were published as e3666160.
-- [ ] Pending integration: LD coefficient scratch recovery remains uncommitted.
+- [x] LD coefficient scratch recovery was published as5f255105.
+- [ ] Pending integration: off-diagonal LD grid-coefficient allocation recovery
+  remains uncommitted.
   Commit/push when requested; retain required lightweight source/packaging checks
   and do not dispatch optional heavy CI.
 - [x] Latest source/installed suites:679 executed,one optional skip,no failures.
@@ -248,8 +263,9 @@ results/residual diagnostics and pauses the downstream workflow for user review
    work is selected initialization/helper I/O (supported legacy EM readers,native
    saves,batch writers and directory creation verified above) and selected auxiliary
    allocations (tensor solver workspaces,
-   subpixel/observation and snapshot staging buffers; directional LD material-input
-   and coefficient scratch arrays are already covered by1120) in
+   subpixel/observation and snapshot staging buffers; directional LD material-input,
+   coefficient scratch and ordinary off-diagonal grid coefficient arrays are
+   already covered by1120) in
    supported paths; owned file numbers alone do not establish IO-error recovery.
    Do not add restrictions on valid/custom inputs or promise recovery from
    arbitrary STOP, OS OOM, trapped FP, broken MPI or process termination.

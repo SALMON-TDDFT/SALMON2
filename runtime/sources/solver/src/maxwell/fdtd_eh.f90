@@ -1210,6 +1210,10 @@ contains
       endif
     end if
     
+    ! Allocate tensor grid storage before the existing material-vector agreement.
+    ! Values are still initialized later, after the scalar coefficients are ready.
+    if(fe%tensor_enabled.and.subpixel_profile%nm==0)call eh_allocate_tensor_weights
+
     !*** set fdtd coeffient and light speed for media ID = 0 **************************************************!
     call eh_allocate_vector(fe%rep,0,media_num)
     call eh_allocate_vector(fe%rmu,0,media_num)
@@ -3931,12 +3935,28 @@ contains
       enddo
     end subroutine eh_tensor_impulse
 
-    subroutine eh_tensor_weights
-      integer::lo(3),hi(3),ix,iy,iz,a,m,q,next(3),pmax,active_lo(3),active_hi(3)
+    subroutine eh_allocate_tensor_weights
+      integer::lo(3),hi(3),pmax,ios
       lo=fs%mg%is_array;hi=fs%mg%ie_array;pmax=ubound(fe%tensor_raw,3)
-      allocate(fe%tensor_weight(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),0:pmax), &
-        fe%tensor_diag(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
-        fe%tensor_owner(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+      if(allocation_status==0)then
+        call eh_material_allocation_start(16,ios)
+        if(ios==0)allocate(fe%tensor_weight(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),0:pmax),stat=ios)
+        call eh_material_allocation_result('fe%tensor_weight',ios,allocation_status,failure_code=1120)
+      endif
+      if(allocation_status==0)then
+        call eh_material_allocation_start(17,ios)
+        if(ios==0)allocate(fe%tensor_diag(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=ios)
+        call eh_material_allocation_result('fe%tensor_diag',ios,allocation_status,failure_code=1120)
+      endif
+      if(allocation_status==0)then
+        call eh_material_allocation_start(18,ios)
+        if(ios==0)allocate(fe%tensor_owner(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=ios)
+        call eh_material_allocation_result('fe%tensor_owner',ios,allocation_status,failure_code=1120)
+      endif
+    end subroutine eh_allocate_tensor_weights
+
+    subroutine eh_tensor_weights
+      integer::ix,iy,iz,a,m,q,next(3),active_lo(3),active_hi(3)
       fe%tensor_weight=0d0;fe%tensor_diag=1d0;fe%tensor_owner=0
       do iz=fs%mg%is(3),fs%mg%ie(3)
       do iy=fs%mg%is(2),fs%mg%ie(2)

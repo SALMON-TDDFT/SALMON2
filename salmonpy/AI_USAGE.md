@@ -1447,3 +1447,13 @@ recovery protocol succeeds. Existing status collectives carry the result; no
 startup or step collective is added. Nonfinite directional coefficients remain1111.
 Budget excess only warns. Do not claim coverage of arbitrary tensor/subpixel or
 observation workspace allocation, OS termination or MPI failure.
+
+### Off-diagonal LD grid-coefficient allocation failures
+
+The1120 initialization-retry contract covers per-grid coupling weights,
+diagonal coefficients and integer material indices. Allocate before the existing
+field-group material-array agreement; initialize values and calculate coefficients
+at the original point. No new collective or arithmetic-order change. Release
+partial ownership before retry; budget excess only warns. Do not apply this
+coverage claim to subpixel allocations, tensor propagation workspaces, optional
+observation/image workspaces or OS/MPI failure. No old-version fallback is added.

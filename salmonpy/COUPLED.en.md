@@ -1081,6 +1081,26 @@ Production has no injection hook. Tensor propagation workspaces, subpixel
 reallocation, observation/image workspaces and OS/MPI failure recovery remain
 outside this bounded support.
 
+### Allocation failures for off-diagonal LD grid coefficients
+
+The per-grid coupling weights, diagonal coefficients and material indices used
+by off-diagonal LD also return1120 on allocation failure. Only allocation moves
+earlier in initialization; value initialization and coefficient arithmetic keep
+their original position and order. Allocation precedes the existing field-group
+material-array agreement, so rank-local partial failure returns collectively
+before use without adding communication. Partial arrays and owned communication
+resources are released, preserving Python's pre-initialization state for retry
+after memory is released. Budget excess remains a warning.
+
+This applies to ordinary off-diagonal LD grid coefficients. Subpixel smoothing
+allocates its own arrays and retains its separate behavior and coverage. Tensor
+propagation workspaces, observation/image workspaces, OS termination and MPI
+failure are outside this support. Formulas and checkpoint formats are unchanged.
+
+The test-only `--tensor-grid-allocation-failures` option injects failures in the
+5D coupling weights,4D diagonal coefficients and4D integer material indices.
+Production libraries do not contain the fault-injection hook.
+
 ### Optional point-observation I/O failures
 
 Fortran checks open/write/close status for headers and time-series appends to
