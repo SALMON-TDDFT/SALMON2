@@ -15,7 +15,7 @@ try:
     frame = coupled.step_protected(targets)
 except StepRecoveryError as error:
     if not error.original_preserved or error.cleanup_errors:
-        raise  # この生存期間では継続しません。
+        raise  # この計算状態は継続して使いません。
     # 受理済み状態を維持しています。原因を確認・修正してから同じステップを再試行します。
     # 拒否された試行でループの時計を進めないでください。
 ```

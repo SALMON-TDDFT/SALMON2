@@ -316,7 +316,7 @@ class LDState(_SnapshotMixin):
         self._config = LDStateConfig(material.config, dt, tuple(map(float, self._field)))
         self._polarization=np.zeros(3);self._current=np.zeros(3)
         self._steps = 0;self._closed=False
-        from ._ld_handles import NativeState
+        from ._material_handles import LDState as NativeState
         self._native_state=NativeState(_handles_api(),material,dt,self._field,execution_mode=execution_mode)
 
     @property
@@ -395,7 +395,7 @@ class LDState(_SnapshotMixin):
 
 
 def _handles_api():
-    from ._ld_handles import default_api
+    from ._material_handles import default_ld_api as default_api
     return default_api()
 
 

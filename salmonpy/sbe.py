@@ -158,12 +158,12 @@ def _native():
 
 
 def _handles_api():
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     return default_api()
 
 
 def _model_handle(initial):
-    from ._sbe_handles import model_for
+    from ._material_handles import model_for
     return model_for(initial,_handles_api())
 
 

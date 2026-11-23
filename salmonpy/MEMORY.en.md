@@ -148,3 +148,53 @@ not a statistically established speedup or physical-convergence result. The
 small synthetic TDDFT/SBE material models are not production material inputs.
 See the active state-isolation checklist for measured numbers and remaining
 multi-node/platform work.
+
+
+## Isolating observation stride and protected-update costs
+
+```sh
+python tools/measure_mixed_performance.py BUILD.json EXISTING_SYNTHETIC_GS NEW_RESULTS \
+  --study observation --repeats 2
+```
+
+This developer tool immediately launches nine-rank compute jobs; use allocated
+compute resources, never a login/management node. It keeps64 macro points,
+1024 steps,dt=.003au,the64³ field grid,two LD regions,16 TDDFT and48 SBE states,
+rank placement and protected-update policy fixed. Only mode and FDTD point-file
+stride1/16 change. The four cases run sequentially in reversed order on the
+second repetition. `--study scaling` retains the separate point-count study.
+Two repeats provide a range, not statistical significance or a speedup guarantee.
+
+Every-step macro-point histories are compared bitwise across modes,strides and
+repetitions. E/H point files are compared at common *step numbers* inferred from
+their recorded times: a stride16 file starts at step16,not step1. TDDFT diagnostic
+streams and the full macro-point archive are not thinned by this field-only flag.
+`io.field_point_bytes` and `io.electronic_data_bytes` separate these sources.
+Logical file sizes and OS block counters do not measure physical filesystem traffic.
+
+The `/2` report additionally assigns exclusive per-rank wall time to `protection`
+(admission,metadata and agreements outside callbacks),`capture`,`release`,
+`rollback`,`coupling`,`field`,`response_transport`,`material` and `history`.
+Nested phases are excluded from their parents,so local phase times approximately
+sum to local loop time. They include waiting and instrumentation overhead; they
+are not isolated CPU times. A material rank waiting for the field may spend time
+in response transport. Do not sum phase maxima from different ranks or interpret
+that waiting as network-only cost.
+
+Python MPI calls are categorized by the same phases and method. Counts sum over
+participants: one collective contributes a call on every participant,not one
+network round trip. Inspect a single leader's `leaders_by_phase` methods for the
+outer orchestration sequence. Counters do not change communication or add a
+per-step collective. They now include Python votes made by native backup objects
+because those objects are created after installing the measurement proxies.
+Raw counts therefore must not be compared directly with the earlier `/1` report.
+Original backend-private communicators and all Fortran-internal MPI remain outside
+this observation. Zero observed calls do not imply no internal communication;
+changing stride may also change Fortran-internal observation traffic.
+
+Clocks/counters/I/O remain optional measurements. `phase_accounting_complete`
+checks that categorized Python calls match their totals. Missing/bad metrics
+mark `resource_measurement_status=partial` without invalidating a successful
+calculation. `SALMONPY_TEST_RESOURCE_FAILURE=1` also exercises missing optional
+phase-clock times; counts and numerical work continue. No state update,backup,
+rollback,release or retry policy is removed by this measurement tool.

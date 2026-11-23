@@ -19,7 +19,7 @@ _AU_TIME_FS = .02418884326505  # SALMON input convention.
 @lru_cache(maxsize=1)
 def _kernel():
     # Existing checksum-verified bundled library; no compilation or fallback.
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     lib=default_api().library
     try:
         lib.sp_convergence_check.argtypes=[c.c_int,c.c_void_p,c.c_int]

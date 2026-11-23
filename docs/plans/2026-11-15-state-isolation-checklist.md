@@ -26,6 +26,8 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 - [x] **別プロセス型高速HSEの経路・必要性の確認**。呼び出し元のプロセス状態を分離する直列CPU入口として維持し、全k点Taylor/PT-CNへ性能モードを接続。縮約k点は従来から初期化不可で、呼び出し元MPI経路を案内。末尾の検証記録を参照。
 - [x] **保護付き混在計算の規模別計測（単一Mac）**。9ランク、32点×512／64点×2048ステップのLD・SBE・TDDFT混在で通常／性能の全履歴一致と時間・RSS・Python通信・出力量を測定。多ノード・実材料の長い物理時間は別件。末尾の範囲を参照。
 
+- [x] **観測間隔だけを変えた比較・保護通信の内訳（単一Mac）**。64点・1024ステップ・9ランクを固定し、通常／性能×観測間隔1／16を反転順で各2回実行。全履歴・共通ステップE/H一致、段階別時間と通信分類を確認。末尾の範囲を参照。
+
 性能モードは明示的に選択し、既定は検査付き。明示的な保護更新は退避・復元を維持する。性能モードの通常更新に同じ異常復帰を約束しない。過去の「次：分子」等は後続の完了記録で更新されている。
 
 ### 残る作業と対象拡大
@@ -4623,3 +4625,77 @@ f4cc1b03はローカルcommit済み・未push。その後の対角背景／非�
   match bitwise. Default unconstrained control coefficients remain exact;
   residual diagnostic roundoff is below1e-15. Package SHA and records are in
   calc2026/salmonpy-ag-refinement-20261123-final/validation.json.
+
+
+### 2026-11-23: controlled observation stride and protected-update profiling
+
+- [x] Extended existing manual tools, not solver kernels. `--study observation`
+  fixes64 points (16 TDDFT/48 SBE),two LD regions,64³ field,dt=.003au,1024 steps,
+  nine local ranks/one thread each. Both modes and strides1/16 run twice,second
+  round in reverse order. No per-step measurement collective was added.
+- [x] All8 every-step A/E/charge-current histories match bitwise, including the
+  earlier1024-step prefix without phase instrumentation. Both LD-region E/H
+  streams match at common step numbers. Stride16 first row is step16,not1.
+- [x] Separate local exclusive wall phases and MPI method/phase counts. Backup
+  objects now retain measured Python communicators,so report format is /2 and
+  raw counts cannot be compared with /1. Original backend-private communicators
+  and Fortran MPI remain unobserved. Participant totals are not round trips.
+
+| Mode | Field stride | Median update seconds | Range (2 runs) |
+| --- | ---: | ---: | --- |
+| checked | 1 | 99.183 | 96.778–101.589 |
+| checked | 16 | 84.326 | 82.414–86.237 |
+| performance | 1 | 93.609 | 92.231–94.988 |
+| performance | 16 | 89.355 | 71.264–107.445 |
+
+- Field point streams332080→21040 bytes (93.664% reduction); TDDFT .data streams
+  remain7301488 bytes and macro histories remain every-step. Total logical regular
+  output decreases about2.253%,with file count52 unchanged. Report JSON and
+  external logs are excluded; values are not disk transfer or I/O bandwidth.
+- Participant-summed Python calls per update: checked2792/performance2678.
+  Protection outside callbacks2266 in both; capture112/release184 in both;
+  outer coupling22/0,field12/0,response transport196/116. No observed calls in
+  performance-field/material callbacks does not imply no internal MPI.
+- A single outer leader records103 protection allgathers/update in both modes;
+  observation stride does not change measured Python calls. From the first
+  checked/stride1 run,field leader wall time is field64.866s,response21.812s,
+  protection6.629s,capture3.073s,release0.308s. Other ranks wait in different
+  phases; do not add cross-rank phase maxima or infer bottlenecks from counts
+  alone. These times include waiting and instrumentation.
+- Runtime evidence is descriptive: two repeats and the large performance-stride16
+  range do not establish a general speedup. No uninstrumented production timing,
+  multi-node filesystem or network benchmark is claimed.1024 steps cover3.072au
+  (~.074fs),not long physical-time/material convergence.
+- [x] Injected missing memory/CPU/optional phase clocks: calculation passes,
+  metrics are partial with null RSS/times,relevant counts still account exactly,
+  and16-point64-step traces match the probe bitwise. Accounting errors are
+  partial measurement errors,not physics failures. Sparse comparison also rejects
+  changed E/H or an incorrectly shifted first observation step.
+- [x] Source suite711 tests:710 passed/one optional skip; manuals and AI JSON
+  synchronized,with search keys for phase/stride reports. Existing installed wheel
+  supplies calculation modules throughout this study. No new compiled kernel,
+  source layout or package dependency. No GS calculation/copy/collection or
+  additional manual CI. Existing GS bytes/input hash remain unchanged.
+- Record: calc2026/salmonpy-mixed-observation-study-20261123/README.md and
+  analysis.json; per-rank reports retain all counts,times and metric status.
+- Next candidate optimizations,not implemented here: selectable TDDFT diagnostic
+  output,then coalesced protection agreements with full rollback/retry evidence.
+  Larger electronic models,long physical times,facility MPI and other platforms
+  remain separate work. OneDrive cloud synchronization is not confirmed.
+
+### CI consolidation (2026-11-23)
+
+- [x] Preserve all 20 OS/Python wheel builds; use one checked sdist. Run full installed suite once per OS on CPython 3.12, core checks on every remaining wheel and the NumPy-only environments. PR/manual full-suite calls reduced 25 to 4; no measured Actions-minute claim.
+- [x] Consolidate worker and runtime workflows, retaining a short Linux-only worker choice. Keep physical campaigns manual, mandatory eigensolver/build audits and distinct MPI/source/unrepaired-wheel checks. Preserve manual runs when superseding stale automatic CI.
+- [x] Local actionlint, five CI policy tests, two preparation tests and 20 actual cibuildwheel identifier/profile selections pass. Final Mac sdist/wheel installed tests: full 710 pass/1 skip; core 51 pass; NumPy-only core 49 pass/2 skip.
+- [ ] New configuration on GitHub and real Linux/Windows/Intel Mac wheel builds remain unexecuted. No remote workflow dispatched in this review.
+- Record: calc2026/salmonpy-ci-consolidation-20261123; docs/ci-consolidation-2026-11-23.md. No GS data collected; OneDrive cloud synchronization not confirmed.
+
+### First calculations and AI explanation (2026-11-23)
+
+- [x] Consolidate AI onboarding into short first-use instructions and topic references; add bilingual input/output/requirements descriptions for seven capability groups. Default manual CLI returns startup guidance; task search returns five concise matches; --full retrieves detailed guides.
+- [x] Installed-wheel quickstart runs one-thread LD and synthetic SBE with automatic output paths, logs and completion record. No MPI, external executable, GS, compiler or network acquisition. Failed/timeout trials stop with records; existing output is preserved.
+- [x] Consolidate private LD/SBE library bindings and source-test runners without compatibility aliases. Keep numerical kernels, separate locking/model ownership and update order unchanged.
+- [x] Final Mac sdist-to-wheel checks:713 tests/712 pass/one skip; core53 pass; NumPy-only51 pass/two skips. First calculations complete in under one second with dependencies installed; LD output and SBE arrays match the prechange wheel. Catalog-driven first-use command also passes.
+- [ ] Other-platform first-use runs and distribution availability remain separate work. No remote CI or GS calculations launched.
+- Record: docs/first-use-review-2026-11-23.md and calc2026/salmonpy-first-calculation-review-20261123/review-summary.json. Cloud sync not confirmed.

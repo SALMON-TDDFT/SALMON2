@@ -17,8 +17,8 @@ def main():
     args,sample_args=parser.parse_known_args()
     if args.kernel:
         from salmonpy import ld,sbe
-        from salmonpy._ld_handles import API
-        from salmonpy._sbe_handles import API as SBEAPI
+        from salmonpy._material_handles import LDAPI as API
+        from salmonpy._material_handles import SBEAPI
         a=API(args.kernel);b=SBEAPI(args.kernel)
         ld._handles_api=lambda:a;ld._native=lambda:a.legacy
         sbe._handles_api=lambda:b;sbe._native=lambda:b.legacy

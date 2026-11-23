@@ -61,7 +61,7 @@ python -m salmonpy.runtime verify my-runtime --require tddft libxc
 
 ## 現在のブランチから取得する
 
-Actionsの **Full runtime bundles** はLinux x86_64・macOS arm64・Intel Mac用のビルドを設定しています。別の場所へ移した実行ファイルでTDDFT接続テストが成功した場合のみ配布物を保存します。設定済みと実行成功は区別してください。これらは単一MPIランク・PZ／TB-mBJ用で、Libxcを含みません。手元で検証したmacOS arm64のLibxc版は別設定です。Windows本体計算プログラムは未提供です（LD／SBEのWindows wheelとは別）。
+Actionsの **Runtime bundles and TDDFT integration** で `scope=bundle` を選ぶと、Linux x86_64・macOS arm64・Intel Mac用のビルド・検証を手動で起動できます。別の場所へ移した実行ファイルでTDDFT接続テストが成功した場合のみ配布物を保存します。設定済みと実行成功は区別してください。これらは単一MPIランク・PZ／TB-mBJ用で、Libxcを含みません。手元で検証したmacOS arm64のLibxc版は別設定です。Windows本体計算プログラムは未提供です（LD／SBEのWindows wheelとは別）。
 
 現在のブランチの成功したActions実行から `salmonpy-runtime-...` を取得します。**Actionsの外側ZIPを展開**し、中の計算プログラムZIPと `catalog.json` を使います。
 
@@ -729,3 +729,5 @@ logical_A_bytes_per_stepは論理的なデータ量で、実ネットワーク�
 オブジェクトファイルだけを渡す場合、利用者側にもリンカーと依存ライブラリが必要になります。通常の利用者には、必要な共有ライブラリを確認した実行ファイルまたは配布パッケージを用意します。
 
 組み込みMPIライブラリはMPI接続前に共通の版・型幅・所有条件を照合します。照会だけでは計算を始めません。[C／Fortran共通照会](API.md)を参照してください。旧版救済はありません。
+
+同じworkflowの `scope=worker` はLinuxだけの短いワーカー比較で、配布物は作りません。どちらも手動起動です。

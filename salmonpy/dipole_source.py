@@ -195,7 +195,7 @@ def select_molecular_field(total, *, molecule_id, policy, provenance,
 
 def _molecular_function(name,arguments):
     import ctypes as c
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     from .errors import RuntimeFailure
     try:
         library=default_api().library;probe=library.sp_molecular_protocol

@@ -6,7 +6,7 @@ import numpy as np
 
 class FieldBoxEnergyTests(unittest.TestCase):
     def test_manufactured_balance_source_sign_partition_and_finite(self):
-        from salmonpy._sbe_handles import default_api
+        from salmonpy._material_handles import default_sbe_api as default_api
         fn=default_api().library.sp_fdtd_box_energy
         fn.argtypes=[c.c_void_p]*6+[c.c_double]*2+[c.c_int]+[c.c_void_p]*5
         fn.restype=c.c_int
@@ -47,7 +47,7 @@ class FieldBoxEnergyTests(unittest.TestCase):
             self.assertNotEqual(status,0);np.testing.assert_array_equal(out,123.)
 
     def test_diagonal_constitutive_storage_balance_partition_and_bad_coefficients(self):
-        from salmonpy._sbe_handles import default_api
+        from salmonpy._material_handles import default_sbe_api as default_api
         fn=default_api().library.sp_fdtd_box_energy_diagonal
         fn.argtypes=[c.c_void_p]*6+[c.c_double]*2+[c.c_int]+[c.c_void_p]*6
         fn.restype=c.c_int
@@ -96,7 +96,7 @@ class FieldBoxEnergyTests(unittest.TestCase):
             code,out=sample();self.assertNotEqual(code,0);np.testing.assert_array_equal(out,123.)
 
     def test_constitutive_cross_energy_boundary_partition_and_rejection(self):
-        from salmonpy._sbe_handles import default_api
+        from salmonpy._material_handles import default_sbe_api as default_api
         fn=default_api().library.sp_fdtd_cross_energy
         fn.argtypes=[c.c_void_p]*11;fn.restype=c.c_int
         shape=(3,4,2,2);size=np.prod(shape)
@@ -138,7 +138,7 @@ class FieldBoxEnergyTests(unittest.TestCase):
         np.testing.assert_array_equal(out,[1,2,3,4,15,15,32,-5,9,40,5,7])
 
     def test_ohmic_loss_excludes_ld_implicit_term_and_preserves_invalid_output(self):
-        from salmonpy._sbe_handles import default_api
+        from salmonpy._material_handles import default_sbe_api as default_api
         fn=default_api().library.sp_fdtd_box_energy_conductive
         fn.argtypes=[c.c_void_p]*6+[c.c_double]*2+[c.c_int]+[c.c_void_p]*6
         fn.restype=c.c_int

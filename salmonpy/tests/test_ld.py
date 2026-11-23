@@ -115,8 +115,8 @@ class LDHandles(unittest.TestCase):
         s=model().new_state(dt=.01)
         self.assertTrue(hasattr(s,'close'),'LD needs an owned persistent state')
         self.addCleanup(s.close)
-        from salmonpy import _ld_handles as handles
-        with patch.object(handles.NativeState,'export',side_effect=AssertionError('pole export on hot path')):
+        from salmonpy import _material_handles as handles
+        with patch.object(handles.LDState,'export',side_effect=AssertionError('pole export on hot path')):
             s.step([.01,.02,.03]);s.current;s.polarization
         native=s._native_state;s.close();s.close();self.assertFalse(native.alive)
         with self.assertRaises(RuntimeFailure):s.step([0,0,0])
@@ -189,7 +189,7 @@ class LDHandles(unittest.TestCase):
         self.assertFalse(raw._native_state.alive)
 
     def test_finalizer_registration_failure_cleanup(self):
-        from salmonpy import _ld_handles as handles
+        from salmonpy import _material_handles as handles
         from salmonpy.ld import _handles_api
         api=_handles_api()
         with patch.object(api,'call',wraps=api.call) as calls:

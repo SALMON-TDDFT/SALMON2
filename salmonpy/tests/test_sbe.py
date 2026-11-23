@@ -107,8 +107,8 @@ class SBEHandles(unittest.TestCase):
         initial=model();a=initial.new_state(dt=.02);b=initial.new_state(dt=.02)
         self.addCleanup(a.close);self.addCleanup(b.close)
         self.assertIs(a._native_state.model,b._native_state.model)
-        from salmonpy import _sbe_handles as handles
-        with patch.object(handles.NativeState,'density',side_effect=AssertionError('step must not export rho')):
+        from salmonpy import _material_handles as handles
+        with patch.object(handles.SBEState,'density',side_effect=AssertionError('step must not export rho')):
             a.step([.01,0,.02]);a.step([.02,0,.03])
         np.testing.assert_array_equal(b.density,np.diag([2.,0.])[:,:,None])
         self.assertFalse(a.density.flags.writeable)
@@ -155,7 +155,7 @@ class SBEHandles(unittest.TestCase):
                 self.assertIsNot(a._native_state.model,b._native_state.model)
 
     def test_finalizer_registration_failure_releases_native_resources(self):
-        from salmonpy import _sbe_handles as handles
+        from salmonpy import _material_handles as handles
         from salmonpy.sbe import _handles_api
         api=_handles_api();initial=model()
         with patch.object(api,'call',wraps=api.call) as calls:

@@ -1,10 +1,34 @@
 name: Native source and host contract
 on:
   push:
-    paths: ['runtime/sources/**', 'runtime/source-trees/**', 'packaging/**', 'pyproject.toml', '.github/workflows/native-contract.yml']
+    paths: &native_paths
+      - '.gitattributes'
+      - 'runtime/sources/**'
+      - 'runtime/source-trees/**'
+      - 'runtime/*.json'
+      - 'packaging/**'
+      - 'pyproject.toml'
+      - 'native/lorentz_drude.f90'
+      - 'native/sbe_types.f90'
+      - 'native/sbe_velocity_kernel.f90'
+      - 'native/subpixel_smoothing.f90'
+      - 'native/fdtd_energy.f90'
+      - 'tests/native/**'
+      - 'tools/build_embedded_tddft.py'
+      - 'tools/prepare_salmon_runtime.py'
+      - 'tools/runtime_sources.py'
+      - 'tools/check_forbidden_eigensolvers.py'
+      - 'tools/test_fdtd_coordinates.py'
+      - 'tools/test_io_ownership.py'
+      - 'salmonpy/tests/test_runtime_sources.py'
+      - '.github/workflows/native-contract.yml'
   pull_request:
-    paths: ['runtime/sources/**', 'runtime/source-trees/**', 'packaging/**', 'pyproject.toml', '.github/workflows/native-contract.yml']
+    paths: *native_paths
   workflow_dispatch:
+concurrency:
+  # Replace obsolete automatic checks, never cancel an explicit manual campaign.
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 permissions:
   contents: read
 jobs:

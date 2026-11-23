@@ -27,8 +27,8 @@ def main():
     args, sample_args=parser.parse_known_args()
     if args.kernel:
         from salmonpy import ld,sbe
-        from salmonpy._ld_handles import API
-        from salmonpy._sbe_handles import API as SBEAPI
+        from salmonpy._material_handles import LDAPI as API
+        from salmonpy._material_handles import SBEAPI
         api=API(args.kernel);ld._handles_api=lambda:api;ld._native=lambda:api.legacy
         sbeapi=SBEAPI(args.kernel);sbe._handles_api=lambda:sbeapi;sbe._native=lambda:sbeapi.legacy
     from salmonpy.examples import mpi_mixed_native as sample

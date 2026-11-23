@@ -67,10 +67,14 @@ their licenses; review release artifacts before public distribution.
 
 ## CI and testing
 
-`.github/workflows/ld-wheels.yml` uses cibuildwheel to build, repair and install
-wheels, then runs all numerical and input-lifecycle tests against the installed
-package. The runner rejects imports from the source checkout. CI stores wheels
-and the sdist as artifacts; it does not publish to PyPI.
+`.github/workflows/ld-wheels.yml` builds a checked source distribution once.
+On PR/manual runs, all four platform jobs build, repair and install CPython
+3.10–3.14 wheels from that same archive. Every interpreter runs the public API,
+LD/SBE and AI-guide tests (`--suite core`); CPython3.12 runs the full suite with
+ASE/plot extras once per OS. A separate CPython3.12 NumPy-only environment runs
+core tests. The runner rejects source-checkout imports and empty selections.
+Ordinary pushes keep the Linux sdist-to-wheel check and full suite. CI stores
+artifacts; it does not publish to PyPI.
 
 Local verification on 2026-11-13: gfortran 15, CPython 3.14, macOS arm64; built
 from sdist, repaired with delocate, installed in a separate venv, and all 13 API
@@ -164,13 +168,19 @@ currently available install commands or APIs.
 
 ## Current CI scope and independent distribution
 
-The worker CI now compares ordinary and interactive execution of the same audited
-current build. It no longer references an unavailable historical commit. This
-checks adapter equivalence, not historical solver regression. A historical
-comparison needs an independently obtainable, audited baseline artifact.
-Wheel CI installs ASE and plotting extras for the full suite, then separately
-checks the CPython 3.12 wheel in an environment without optional dependencies.
-These are configured checks; historical runs above do not certify the current revision.
+The manual `runtime-bundles.yml` workflow owns both runtime distribution and
+ordinary/interactive TDDFT comparison. Choose `scope=worker` for one Linux serial
+build and the ordinary/predictor-corrector worker checks; choose `scope=bundle`
+for relocation/distribution and broader integration. The duplicate standalone
+`tddft-worker.yml` workflow is removed. These comparisons use the same audited
+current source,not an unavailable historical baseline. They establish adapter
+agreement,not historical solver regression. Worker diagnostics upload only logs,
+not generated GS fixture directories.
+
+Wheel extras are installed only for each OS's CPython3.12 full suite; other
+versions still exercise compiled calculation routines and public/sample syntax
+without optional extras. Required Python dependencies remain NumPy only. These
+are configured checks; historical runs do not certify the changed configuration.
 
 SALMONpy is intended for a separate repository, not a merge into the SALMON main
 repository. solver source provenance and full-executable compatibility must be
@@ -196,3 +206,32 @@ runtime builds additionally require FFTW; see runtime/README.md in the checkout.
 ## Required source-integrity CI
 
 Changes to `runtime/sources/**`, `runtime/source-trees/**`, `packaging/**` or `pyproject.toml` must not use `[skip ci]`. `native-contract.yml` checks source inventories with pytest, exports tracked Git files only, prepares/builds the MPI library from that export, and runs GS-free C/Fortran query and explicit-parser contracts. The query itself is short; preparing its full runtime still costs a build. Ordinary pushes also retain the Linux sdist/wheel job. OS wheel matrices remain on PR/manual triggers. Full runtime campaigns, TDDFT solver comparisons and NLCC physics checks are manual-only; real-material observable reproduction is not required CI. This respects the Actions budget without skipping source-integrity checks. No workflow is manually dispatched by input preparation or imports. CI configuration is not evidence that a run passed; attach the actual run result when available.
+
+
+## CI consolidation (2026-11-23)
+
+The PR/manual wheel path previously invoked the full suite25 times:20 platform/
+Python wheels,four minimal environments and one source-built wheel. It now runs
+four full suites,with core checks on every other wheel and minimal environment.
+This is an84% reduction in *full-suite invocations*,not an84% prediction of
+Actions minutes. All20 wheel builds remain,and the unrepaired Linux wheel still
+has its installed-library hash and core tests checked before matrix jobs begin.
+A failed source archive blocks downstream platform builds.
+
+`native-contract.yml` remains distinct: it builds the MPI library from a Git-only
+export and checks C/Fortran query/parser contracts without GS or physical solver
+runs. This does not duplicate the standalone LD/SBE wheel product. Its triggers
+also cover source metadata,shared kernels,build/audit helpers and ABI fixtures.
+NLCC and runtime physics campaigns remain manual; incompatible serial/MPI/Libxc
+build settings are not treated as interchangeable artifacts.
+
+Push and PR checks remain separate because the branch head and proposed merge
+can differ. Newer automatic checks replace obsolete runs for the same workflow/
+branch or PR; explicit manual runs use unique groups and are not canceled by
+this policy. No existing remote job is modified by local validation.
+
+Use `python tools/test_ci_configuration.py` (Python3.12+,PyYAML) and actionlint
+for local configuration checks. Build an sdist and install its wheel outside the
+checkout,then use `tools/test_installed_ld.py SOURCE --suite core` or `--suite full`.
+Do not dispatch expensive physics jobs merely to validate workflow edits. The
+new GitHub configuration must still pass a real run before claiming CI success.

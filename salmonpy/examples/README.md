@@ -1,6 +1,17 @@
 # Pythonサンプル集
 
 [English](README.en.md)
+
+## 最初のテストを終える
+
+```sh
+python -m salmonpy.quickstart
+```
+
+対応するwheel導入後、この一コマンドでLD・合成SBEの短い計算を各1スレッドで完了します。
+追加入力は不要です。`SALMONpy first calculations: PASS` と表示された保存先を確認してください。
+ログと `summary.json` が残ります。以下のSi例は、追加の計算プログラムを準備してから行う次の段階です。
+
 対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、
 [Si入門：wheelから電流まで](../SI_INTRO.md)は、固定の擬ポテンシャル・入力・期待値を同梱し、配布済み計算プログラムを明示して使う手順です。
 
@@ -52,7 +63,7 @@ python -m salmonpy.examples.outputs_roundtrip new-ld-output
 ```
 
 SBEの合成模型はAPI学習用で、実材料のスペクトルを表しません。結晶への入力はA/c、
-出力は電荷電流密度 j です（SALMONの電子物質電流は −j。2026-11-14 以前は物質電流を返していました）。LDはE駆動です。
+出力は電荷電流密度 j です（SALMONの電子物質電流は −j）。LDはE駆動です。
 格子ベクトルはDFTでは行、SBEでは列です。各コード内の単位指定を確認してください。
 
 ## 外部SALMONを使う
@@ -250,7 +261,7 @@ epsilon = dielectric_function(sigma)
 
 混在MPIのA／場パケットは担当点だけへ配ります。Jの場への返却順は同じです。通信の情報はcommunication_reportで確認できます。
 
-担当J配信に対応する計算処理計算プログラムでは、通常のmpi_mixed_native例も場の空間分割に応じてJを配信します。代表ランク以外の結合J配列は担当行だけが有効です。全点の後処理には代表の保存出力を使ってください。詳しくはCOUPLED.mdを参照してください。
+担当領域へのJ配信に対応する計算プログラムでは、通常のmpi_mixed_native例も場の空間分割に応じてJを配信します。代表ランク以外の結合J配列は担当行だけが有効です。全点の後処理には代表の保存出力を使ってください。詳しくはCOUPLED.mdを参照してください。
 
 準備だけ: `python -m salmonpy.examples.prepare_fdtd NEW_DIRECTORY --mpi-grid 2 1 1` はFDTD入力保存で終了し、計算・投入はしません。PREPARATION.mdを参照してください。
 
@@ -258,7 +269,7 @@ epsilon = dielectric_function(sigma)
 
 `fdtd_energy`: 保存済みマクロ点E/j・分離済みE/Hポートから吸収仕事、R/T、収支を診断（ソルバー起動なし）。
 
-`fdtd_periodic_slab --native-planes`: 計算処理所有タイルから横断面を取得・位置合わせして流束を表示。対応計算プログラムが必要で、未対応なら計算結果を保持して警告します。
+`fdtd_periodic_slab --native-planes`: 各MPIプロセスの担当領域から横断面を取得・位置合わせして流束を表示。対応計算プログラムが必要で、未対応なら計算結果を保持して警告します。
 
 混在計算処理サンプルは任意の`--planes-x FRONT BACK --plane-stride 16`で横周期境界の面を確定後だけ取得し、最後にplane-seriesへまとめます。既定は取得しません。
 

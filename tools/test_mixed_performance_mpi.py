@@ -7,6 +7,10 @@ Peak RSS is per process; its sum is not a simultaneous machine peak.
 Communication times include waiting and packing, not pure network latency.
 """
 import hashlib, json, os, shutil, sys, time, resource
+from contextlib import contextmanager
+from dataclasses import replace
+import math
+import salmonpy
 from pathlib import Path
 from unittest.mock import patch
 import numpy as np
@@ -58,23 +62,102 @@ class ModeSBE:
     def new_state(self,**kwargs):
         return self.initial.new_state(**kwargs,execution_mode=mode)
 
+class PhaseMeasurements:
+    """Exclusive local wall times; a clock failure never changes a callback."""
+    names=('protection','capture','release','rollback','coupling','field',
+           'response_transport','material','history')
+
+    def __init__(self):
+        self.current='protection'
+        self.running=False
+        self.seconds={name:0. for name in self.names}
+        self.calls={name:0 for name in self.names}
+        self.errors=[]
+        self.last=None
+
+    def clock(self):
+        try:
+            if os.environ.get('SALMONPY_TEST_RESOURCE_FAILURE')=='1':
+                raise OSError('injected optional phase-clock failure')
+            value=time.perf_counter()
+            if not math.isfinite(value):raise ValueError('nonfinite phase clock')
+            return value
+        except Exception as exc:
+            message=str(exc)
+            if message not in self.errors:self.errors.append(message)
+            return None
+
+    def switch(self,name):
+        old=self.current
+        if self.running:
+            now=self.clock()
+            if now is None or self.last is None or now<self.last:
+                self.seconds[old]=None
+                if now is not None and self.last is not None and now<self.last:
+                    if 'phase clock went backwards' not in self.errors:
+                        self.errors.append('phase clock went backwards')
+            elif self.seconds[old] is not None:
+                self.seconds[old]+=now-self.last
+            self.last=now
+        self.current=name
+        return old
+
+    @contextmanager
+    def phase(self,name):
+        old=self.switch(name)
+        if self.running:self.calls[name]+=1
+        try:yield
+        finally:self.switch(old)
+
+    def wrap(self,name,callback):
+        def measured(*args,**kwargs):
+            with self.phase(name):return callback(*args,**kwargs)
+        return measured
+
+    def start(self):
+        self.running=True
+        self.last=self.clock()
+
+    def stop(self):
+        self.switch(self.current)
+        self.running=False
+
+
 class MeasuredComm:
-    """Observe Python collectives without adding a collective to the loop."""
+    """Observe reachable Python collectives; never add a collective."""
     operations={'allgather','bcast','Bcast','Allreduce','allreduce','Alltoallv',
                 'Gatherv','Scatterv','gather','scatter','Barrier','barrier'}
-    def __init__(self,comm):self.comm=comm;self.calls={};self.seconds={};self.errors=[]
+
+    def __init__(self,comm,phases):
+        self.comm=comm
+        self.phases=phases
+        self.reset()
+
+    def reset(self):
+        self.calls={}
+        self.seconds={}
+        self.by_phase={}
+        self.errors=[]
+
     def __getattr__(self,name):
         method=getattr(self.comm,name)
         if name not in self.operations:return method
         def measured(*args,**kwargs):
-            start=None
-            try:start=time.perf_counter()
-            except Exception as exc:self.errors.append(str(exc))
+            if not self.phases.running:return method(*args,**kwargs)
+            phase=self.phases.current
+            start=self.phases.clock()
             result=method(*args,**kwargs)
-            try:
-                self.calls[name]=self.calls.get(name,0)+1
-                if start is not None:self.seconds[name]=self.seconds.get(name,0.)+time.perf_counter()-start
-            except Exception as exc:self.errors.append(str(exc))
+            end=self.phases.clock()
+            row=self.by_phase.setdefault(phase,{'calls':{},'seconds':{}})
+            for counts in (self.calls,row['calls']):counts[name]=counts.get(name,0)+1
+            for seconds in (self.seconds,row['seconds']):
+                if start is None or end is None or end<start:
+                    seconds[name]=None
+                elif seconds.get(name,0.) is not None:
+                    seconds[name]=seconds.get(name,0.)+end-start
+            if start is not None and end is not None and end<start:
+                if 'MPI clock went backwards' not in self.errors:
+                    self.errors.append('MPI clock went backwards')
             return result
         return measured
 
@@ -90,6 +173,8 @@ def output_inventory(root):
         return dict(regular_files=len(files),bytes=sum(p.stat().st_size for p in files),
                     observation_files=sum(p.suffix=='.data' for p in files),
                     observation_bytes=sum(p.stat().st_size for p in files if p.suffix=='.data'),
+                    field_point_bytes=sum(p.stat().st_size for p in files if p.parent==root/'field' and p.name.endswith('_at_point_rt.data')),
+                    electronic_data_bytes=sum(p.stat().st_size for p in files if p.suffix=='.data' and not p.is_relative_to(root/'field')),
                     excludes='symlink targets, report.json and launcher log; logical file sizes, not disk traffic'),None
     except Exception as exc:return None,str(exc)
 
@@ -131,16 +216,34 @@ try:
             _,sbe=models();bound=bind_material(ModeSBE(sbe),key='synthetic-sbe',identity='two-band-mode-explicit')
             bindings={p:tddft if p<=electronic else bound for p in ids}
             session=ResponseSession(context,bindings,dt=dt,execution_mode=mode)
-            coupled=CoupledStepper(session,field);targets=native_step_targets(coupled)
-            setup=time.perf_counter()-started
-            solver=MeasuredComm(context.solver_comm);context.solver_comm=solver
+            coupled=CoupledStepper(session,field)
+            phases=PhaseMeasurements()
+            solver=MeasuredComm(context.solver_comm,phases);context.solver_comm=solver
             leaders=None
-            if context.is_leader:leaders=MeasuredComm(context.leaders);context.leaders=leaders
+            if context.is_leader:leaders=MeasuredComm(context.leaders,phases);context.leaders=leaders
+            # Construct backups after installing proxies: their private Python
+            # solver-group votes are now included, unlike the original /1 report.
+            targets=native_step_targets(coupled)
+            targets=tuple(replace(t,capture=phases.wrap('capture',t.capture),
+                rollback=phases.wrap('rollback',t.rollback),
+                release=None if t.release is None else phases.wrap('release',t.release)) for t in targets)
+            coupled.step=phases.wrap('coupling',coupled.step)
+            if field is not None:
+                field.advance=phases.wrap('field',field.advance)
+                field.advance_owned=phases.wrap('field',field.advance_owned)
+            session._step=phases.wrap('response_transport',session._step)
+            for adapter in session._adapters.values():
+                adapter.step=phases.wrap('material',adapter.step)
+            setup=time.perf_counter()-started
+            solver.reset()
+            if leaders is not None:leaders.reset()
             pre,pre_error=usage();rss_before,rss_basis=peak_memory()
-            world.Barrier();begin=time.perf_counter()
+            world.Barrier();begin=time.perf_counter();phases.start()
             for i in range(steps):
                 frame=coupled.step_protected(targets)
-                if world.rank==0:history.append(np.stack([frame[k] for k in ('A_over_c','E_at_points','J_charge')]))
+                with phases.phase('history'):
+                    if world.rank==0:history.append(np.stack([frame[k] for k in ('A_over_c','E_at_points','J_charge')]))
+            phases.stop()
             elapsed=time.perf_counter()-begin
             post,post_error=usage();rss_after,rss_basis_after=peak_memory()
             local=dict(rank=world.rank,group=context.group.name,setup_seconds=setup,loop_seconds=elapsed,
@@ -149,7 +252,10 @@ try:
                        measurement_errors=[v for v in (pre_error,post_error) if v],
                        solver_calls=solver.calls,solver_seconds=solver.seconds,
                        leaders_calls=leaders.calls if leaders else {},leaders_seconds=leaders.seconds if leaders else {},
-                       communication_measurement_errors=solver.errors+(leaders.errors if leaders else []))
+                       communication_measurement_errors=solver.errors+(leaders.errors if leaders else []),
+                       phase_seconds=dict(phases.seconds),phase_calls=dict(phases.calls),
+                       phase_measurement_errors=list(phases.errors),
+                       solver_by_phase=solver.by_phase,leaders_by_phase=leaders.by_phase if leaders else {})
             ranks=world.gather(local,root=0)
             communication=session.communication_report()
         finally:
@@ -160,24 +266,38 @@ try:
         values=np.array(history);assert np.isfinite(values).all() and np.max(np.abs(values[:,2]))>0
         np.savez(out/'traces.npz',values=values)
         io,io_error=output_inventory(out)
-        metric_errors=[error for r in ranks for error in r['measurement_errors']+r['communication_measurement_errors']]
+        metric_errors=[error for r in ranks for error in r['measurement_errors']+r['communication_measurement_errors']+r['phase_measurement_errors']]
+        accounting_errors=[]
+        for rank in ranks:
+            for prefix in ('solver','leaders'):
+                classified={}
+                for phase in rank[prefix+'_by_phase'].values():
+                    for name,counted in phase['calls'].items():
+                        classified[name]=classified.get(name,0)+counted
+                if classified!=rank[prefix+'_calls']:
+                    accounting_errors.append(f"rank {rank['rank']} {prefix}: incomplete MPI phase accounting")
+        metric_errors.extend(accounting_errors)
         metric_errors.extend(r['peak_RSS_basis'] for r in ranks if r['peak_RSS_bytes'] is None)
         if io_error:metric_errors.append(io_error)
-        report=dict(schema='salmonpy.mixed-performance-measurement/1',mode=mode,points=count,
+        report=dict(schema='salmonpy.mixed-performance-measurement/2',mode=mode,points=count,
                     tddft_points=electronic,sbe_points=count-electronic,steps=steps,dt=dt,
                     grid=[64]*3,observation_stride=stride,ranks=ranks,communication=communication,io=io,
                     simulated_time_au=steps*dt,
                     component_modes=dict(field=mode,LD_in_field=mode,SBE=mode,TDDFT=mode,outer=mode),
+                    fixture_input_sha256=hashlib.sha256(json.dumps(test_manifest(fixture)).encode()).hexdigest(),
+                    phase_accounting_complete=not accounting_errors,
                     loop_seconds_max=max(r['loop_seconds'] for r in ranks),
                     summed_rank_peak_RSS_bytes=(sum(r['peak_RSS_bytes'] for r in ranks)
                         if all(r['peak_RSS_bytes'] is not None for r in ranks) else None),
                     calculation_status='passed',resource_measurement_status='partial' if metric_errors else 'passed',
                     resource_measurement_errors=metric_errors,
                     GS_collected=False,GS_bytes_unchanged=True,protected_every_step=True,
-                    library_sha256=record_data['sha256'],
+                    library_sha256=record_data['sha256'],python_package=salmonpy.__file__,
                     limitations=['single Mac, nine local ranks; no multi-node claim',
                                  'synthetic PZ/SBE inputs, not physical convergence',
-                                 'Python MPI calls only; Fortran-internal collectives excluded',
+                                 'reachable Python MPI calls only; original backend-private communicators and Fortran-internal collectives excluded',
+                                 'exclusive local phase wall times include waiting; not CPU or pure network time',
+                                 'coverage now includes native backup Python votes; do not compare raw counts with /1',
                                  'sum of rank peaks is not simultaneous physical memory peak'])
         (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
         print('mixed measurement PASS',mode,count,steps,report['loop_seconds_max'],flush=True)

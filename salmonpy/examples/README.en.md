@@ -2,6 +2,18 @@
 
 [日本語](README.md)
 
+## Complete the first test
+
+```sh
+python -m salmonpy.quickstart
+```
+
+After installing a matching wheel, this runs the short LD and synthetic SBE calculations
+with one thread and no additional inputs. Look for `SALMONpy first calculations: PASS`.
+The command prints the output directory and saves both logs and `summary.json`.
+The Si example below is a separate next step requiring an additional solver.
+
+
 [Si starter: wheel to current](../SI_INTRO.en.md) includes a fixed pseudopotential, input and reference, and explicitly selects a prebuilt runtime.
 
 Use the same Python environment in which the wheel was installed. All samples
@@ -261,7 +273,7 @@ Electronic input preparation only: `python -m salmonpy.examples.prepare_electron
 
 `fdtd_energy`: diagnose macro-point work, R/T and energy balance from stored collocated E/j and separated E/H ports; no solver launch.
 
-`fdtd_periodic_slab --native-planes`: calculation object-local plane streams, automatic colocation and integrated flux; unmatched runtime warns without discarding the calculation.
+`fdtd_periodic_slab --native-planes`: plane data from each process’s local field region, automatic colocation and integrated flux; unmatched runtime warns without discarding the calculation.
 
 The mixed solver sample optionally accepts `--planes-x FRONT BACK --plane-stride 16`: transverse-periodic planes captured only after successfully completed steps, saved once as plane-series. Disabled by default.
 

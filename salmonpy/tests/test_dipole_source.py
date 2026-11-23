@@ -18,7 +18,7 @@ class DipoleSourceTests(unittest.TestCase):
 
     def test_conservation_superposition_and_static_offset(self):
         m = self.model()
-        from salmonpy._sbe_handles import default_api
+        from salmonpy._material_handles import default_sbe_api as default_api
         self.assertTrue(callable(default_api().library.sp_molecular_map))
         p = np.array([[1.,2.,3.],[-1.,4.,2.]])
         P = m.polarization(p)
@@ -47,7 +47,7 @@ class DipoleSourceTests(unittest.TestCase):
             with self.assertRaises(InputError):m.polarization(p)
         for dt in (0,-1,np.inf,True):
             with self.assertRaises(InputError):m.current(np.zeros((2,3)),np.ones((2,3)),dt=dt)
-        from salmonpy._sbe_handles import default_api
+        from salmonpy._material_handles import default_sbe_api as default_api
         # Bind via the public map, then check native finite rejection directly.
         m.polarization(np.zeros((2,3)))
         fn=default_api().library.sp_molecular_map
@@ -75,7 +75,7 @@ class DipoleSourceTests(unittest.TestCase):
                 _midpoint_oscillator(p,v,[invalid,0,0],right,dt=.01,omega=2.,volume=8.)
         np.testing.assert_array_equal(p,old_p)
         # Exercise the Fortran IEEE rejection directly, bypassing Python validation.
-        from salmonpy._sbe_handles import default_api
+        from salmonpy._material_handles import default_sbe_api as default_api
         fn=default_api().library.sp_molecular_midpoint
         vectors=[old_p.copy(),old_v.copy(),left.copy(),right.copy(),np.zeros(3),np.zeros(3)]
         outputs=[np.full(3,-7.),np.full(3,-7.),np.full(3,-7.),np.full(8,-7.)]

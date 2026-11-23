@@ -1,6 +1,6 @@
-# 設定済みLD・TDDFTの専用binding
+# 材料設定からLD・TDDFTを接続する
 
-数値・計算プログラムの仕様を守るため、入口を分けます。
+材料設定を、時間発展に使うLDまたはTDDFTの計算へ接続します。以下の関数が接続情報を作ります。
 
 ```python
 from salmonpy.materials import (

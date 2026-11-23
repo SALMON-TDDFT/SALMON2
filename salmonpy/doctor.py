@@ -50,7 +50,7 @@ def diagnose(*, executable=None, sha256=None, lang='ja'):
     if any(v['status'] != 'loadable' for v in native.values()):
         next_steps.append('LD/SBE: 対応OS・Pythonの修復済みwheelを再導入してください。ソース構築はPACKAGING.mdを参照。')
     else:
-        next_steps.append('小さな実行例: python -m salmonpy.examples.ld_response')
+        next_steps.append('最初の計算: python -m salmonpy.quickstart')
     if optional['matplotlib'] == 'missing':
         next_steps.append('描画を使う場合のみMatplotlibを導入してください。')
     if any(optional[n] == 'missing' for n in ('ase', 'f90nml')):
@@ -61,7 +61,7 @@ def diagnose(*, executable=None, sha256=None, lang='ja'):
         if any(v['status'] != 'loadable' for v in native.values()):
             next_steps.append('LD/SBE: reinstall a repaired wheel matching your OS and Python; see PACKAGING.md for source builds.')
         else:
-            next_steps.append('Try: python -m salmonpy.examples.ld_response')
+            next_steps.append('First calculations: python -m salmonpy.quickstart')
         if optional['matplotlib'] == 'missing':
             next_steps.append('Install Matplotlib only if plotting is needed.')
         if any(optional[n] == 'missing' for n in ('ase', 'f90nml')):

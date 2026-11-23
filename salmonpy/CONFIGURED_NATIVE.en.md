@@ -1,4 +1,4 @@
-# Dedicated configured LD and TDDFT bindings
+# Connect material settings to LD and TDDFT
 
 Use separate factories to retain each calculation implementation's numerical and runtime contract:
 

@@ -8,6 +8,17 @@ or to prepare structures, pulses and analysis for an existing calculation.
 - [Installing the calculation programs](salmonpy/RUNTIME.en.md) · [計算プログラムの準備](salmonpy/RUNTIME.md)
 - [Task catalog for AI assistants](salmonpy/manual.json)
 
+With a matching wheel installed, finish the first short LD/SBE calculations with:
+
+```sh
+python -m salmonpy.quickstart
+```
+
+The command needs no additional input and prints `SALMONpy first calculations: PASS`
+with the results directory. See the language guides above for wheel installation.
+For AI assistants: `python -m salmonpy.manual` prints just the first-test instructions;
+search a task afterward instead of reading the entire JSON catalog.
+
 The installation wheel (a Python distribution package) includes the compiled LD/SBE
 libraries. Install a matching wheel to try these calculations without a Fortran compiler.
 DFT, TDDFT, bands and FDTD additionally need a compatible SALMON executable or shared

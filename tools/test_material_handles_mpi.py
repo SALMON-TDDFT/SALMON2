@@ -24,12 +24,12 @@ def main(argv=None):
 
     if model == "ld":
         import salmonpy.ld as module
-        from salmonpy._ld_handles import API
+        from salmonpy._material_handles import LDAPI as API
         from salmonpy.material_response import MaterialBinding, LDMaterialProvider, LDResponseBackend
         state_type = module.LorentzDrude
     else:
         import salmonpy.sbe as module
-        from salmonpy._sbe_handles import API
+        from salmonpy._material_handles import SBEAPI as API
         from salmonpy.materials import bind_material
         from salmonpy.crystal import respond
         state_type = module.SBEInitialState

@@ -182,7 +182,7 @@ def isolated_loop(world, field, args):
                 script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
             if args.energy_box is not None:
                 import ctypes as c
-                from salmonpy._sbe_handles import default_api
+                from salmonpy._material_handles import default_sbe_api as default_api
                 from salmonpy.coupled import _BoxEnergyObserver
                 fn=default_api().library.sp_fdtd_box_summary
                 fn.argtypes=[c.c_int,c.c_void_p,c.c_double,c.c_double,c.c_double,c.c_void_p]
@@ -237,7 +237,7 @@ def main():
     from salmonpy.geometry import Grid,Geometry,Shape
     from salmonpy.ld import LorentzDrude
     from salmonpy.fields import AcosPulse
-    from salmonpy._sbe_handles import default_api
+    from salmonpy._material_handles import default_sbe_api as default_api
     from salmonpy.field_input import FieldValue
     from salmonpy.dipole_source import select_molecular_field
     world=MPI.COMM_WORLD

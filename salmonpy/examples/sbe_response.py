@@ -19,9 +19,9 @@ def main():
     drive = AcosPulse(.001, .2, 10., polarization=(1., 0., 0.)).sample(np.arange(501)*.02)
     result = respond(initial, drive, output_directory=args.directory, execution_mode=args.execution_mode)
     # 同じ初期状態から作る各状態は独立。AはA/c、出力は電荷電流密度 j（SALMONの物質電流は -j）。
-    a = initial.new_state(dt=.02, execution_mode=args.execution_mode)
-    b = initial.new_state(dt=.02, execution_mode=args.execution_mode)
-    print('別々の波形の電流:', a.step([.001, 0., 0.]), b.step([.002, 0., 0.]))
+    with initial.new_state(dt=.02, execution_mode=args.execution_mode) as a, \
+            initial.new_state(dt=.02, execution_mode=args.execution_mode) as b:
+        print('Independent-state currents:', a.step([.001, 0., 0.]), b.step([.002, 0., 0.]))
     print('バッチ計算の最終電流:', result.current[-1])
 
 

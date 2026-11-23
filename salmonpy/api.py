@@ -7,7 +7,7 @@ private names and incidental imports are not public APIs.
 from types import MappingProxyType
 
 __all__ = ['PUBLIC_API', 'native_contract', 'query_host_abi', 'unit_contract']
-PUBLIC_API = MappingProxyType({'salmonpy.subpixel': ('SubpixelSmoothing','effective_material'), 'salmonpy.optical_materials': ('OpticalMaterial','list_materials','load_material','wavelength_to_frequency'),
+PUBLIC_API = MappingProxyType({'salmonpy.quickstart': ('run',), 'salmonpy.subpixel': ('SubpixelSmoothing','effective_material'), 'salmonpy.optical_materials': ('OpticalMaterial','list_materials','load_material','wavelength_to_frequency'),
  'salmonpy.analysis': ('SurfaceFlux', 'surface_flux', 'PortSpectrum', 'absorbed_energy_density', 'reflection_transmission', 'Table', 'read_table', 'Spectrum', 'spectrum', 'OpticalSpectrum',
  'OpticalSensitivity', 'KCurrentContributions', 'optical_sensitivity', 'k_current_contributions', 'LongWavelengthCorrection', 'long_wavelength_correction', 'optical_conductivity', 'dielectric_function', 'dielectric_tensor', 'waveplate_diagnostic', 'optical_linearity', 'optical_sum_rule'),
  'salmonpy.api': ('PUBLIC_API', 'native_contract', 'query_host_abi', 'unit_contract'),

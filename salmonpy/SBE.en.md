@@ -88,7 +88,7 @@ These tests establish neither material physics nor large-system performance.
 Matching wheels contain the new compiled calculation routine; import never builds it. Source
 checkouts with old binaries require an explicit rebuild and never silently fall
 back to stateless stepping. To preserve an existing fixed binary, build/install
-separately and use tools/test_source_sbe_handles.py LIBRARY for validation.
+separately and use tools/test_source_materials.py LIBRARY for validation.
 LD handle migration, multiple TDDFT called directly from Python contexts and a public SBE ABI1 plugin
 remain separate work. Internal sp_sbe_* symbols implement the Python adapter,
 not the public material ABI1 query table.

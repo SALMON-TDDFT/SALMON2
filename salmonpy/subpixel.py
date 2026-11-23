@@ -27,7 +27,7 @@ class SubpixelSmoothing:
 
 
 def _api(name, arguments):
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     try:
         function = getattr(default_api().library, name)
     except AttributeError as exc:

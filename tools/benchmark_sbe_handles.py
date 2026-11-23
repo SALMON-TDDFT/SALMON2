@@ -9,7 +9,7 @@ import numpy as np
 
 
 def worker(args):
-    from salmonpy._sbe_handles import API
+    from salmonpy._material_handles import SBEAPI as API
     import salmonpy.sbe as current
     api=API(args.library);current._handles_api=lambda:api;current._native=lambda:api.legacy
     if args.mode=='legacy':

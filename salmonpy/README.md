@@ -12,23 +12,32 @@ LD、SBE、DFT、TDDFT、FDTDを目的に合わせて使えます。構造や光
 
 初めての場合は最初の行から進めます。追加の計算プログラムは[準備手順](RUNTIME.md)で導入します。対応するビルド済み配布物を優先し、ない場合だけ同梱ソースを明示的にビルドします。別のSALMONリポジトリを取得する必要はありません。
 
-## 最初の使い方
+SALMONpyは、物質中の電子の応答と光の伝播を、単独でも組み合わせても使える計算部品集です。軽い材料模型から第一原理計算まで選べ、自分の電流計算コードも接続できます。入力準備や既存結果の解析だけでも利用できます。
 
-配布された、自分のOS・CPU・Pythonに対応する**配布用wheel**を導入します。
-wheel利用ではFortranコンパイラは不要です。import時のコンパイルも行いません。
+## 最初の計算：二つのコマンド
+
+OS・CPU・Python版に合う配布用wheelを用意します（Python 3.10以上）。
+現在PyPI未公開なので、下のファイル名は実際に受け取ったwheelへ置き換えます。
+ファイルがなければ配布担当者に確認してください。Fortranコンパイラは不要です。
 
 ```sh
-python -m pip install "PATH_TO_COMPATIBLE_WHEEL.whl"
-python -m salmonpy.doctor
-python -m salmonpy.examples.ld_response
+python -m pip install --only-binary=:all: "PATH_TO_COMPATIBLE_WHEEL.whl"
+python -m salmonpy.quickstart
 ```
 
-`PATH_TO_COMPATIBLE_WHEEL.whl` は実際のファイルに置き換えます。`python` は導入先環境の
-Pythonです。Python 3.10以上が必要ですが、wheelのPython・OSタグにも適合する必要があります。
-診断はライブラリの読み込みと依存パッケージの所在を確認します。インストールや計算は行いません。
-追加依存の実動作、外部SALMONの機能対応、計算規模の上限を保証するものではありません。
+`SALMONpy first calculations: PASS` と出れば、二つの計算が完了です。
+ローレンツ＝ドルーデ（LD）模型を1000更新、合成2バンド模型の半導体ブロッホ方程式（SBE）を500更新します。
+各1スレッドで実行し、追加入力・MPI・SALMON実行ファイル・描画ソフトは不要です。計算中の通信もありません。
 
-まずは [LD → SBE → Si電流の3本](examples/README.md#まずこの3本)から始めてください。Si例は動作確認用で、収束した光学物性の例ではありません。
+表示された保存先には `summary.json`、二つの計算ログ、SBEの結果が入ります。
+通常は数秒程度ですが、パッケージの取得・導入時間は環境によります。
+保存場所を選ぶ場合は `--output NEW_DIRECTORY` を付けます。既存フォルダを上書きしません。
+これは導入確認であり、実材料の物性・収束を確認する計算ではありません。
+失敗時はログを読み、別の計算プログラムの構築や導入を自動で始めないでください。
+
+次は下の目的別一覧か[サンプル集](examples/README.md)を使います。
+[Siの電流計算](SI_INTRO.md)には対応する追加の計算プログラムが必要です。最初のテスト完了の条件ではありません。
+導入状態だけを調べる場合は `python -m salmonpy.doctor --json` を使います。
 
 ## 目的から選ぶ
 
@@ -36,7 +45,7 @@ Pythonです。Python 3.10以上が必要ですが、wheelのPython・OSタグ�
 |---|---|---|
 | 材料の誘電率・Eに対するP/J | `salmonpy.LorentzDrude` | wheel |
 | 結晶のA/c→j応答（SBE） | `salmonpy.sbe` | wheel、実材料にはバンド・遷移行列データ |
-| 場の部品（j→A）と物質の結合：tr／lo／薄膜／1次元伝播 | `salmonpy.maxwell` | NumPy、物質側の部品。[FIELDS.md](FIELDS.md) |
+| 場（j→A）と物質の結合：横波／縦波／薄膜／1次元伝播 | `salmonpy.maxwell` | NumPy、物質側の部品。[FIELDS.md](FIELDS.md) |
 | 光パルス・構造・解析・結果読み込み | `fields` / `geometry` / `analysis` / `outputs` | NumPy、描画にはMatplotlib |
 | DFTの基底状態・力 | `salmonpy.dft` | 対応外部SALMON・擬ポテンシャル |
 | 結晶のA/c→j応答（TDDFT） | `salmonpy.tddft` | 対応外部SALMON・整合する基底状態 |
@@ -66,10 +75,10 @@ TDDFT内部MPIとE/H結合には、別入口の[実験的なPythonから直接�
 ## AIに依頼する場合
 
 まず [AI_USAGE.md](AI_USAGE.md) と `manual.json` を読み、既に回答された条件を再利用して、
-不足する「目的・使ってよい総メモリ・CPUコア数」を確認します。
+研究計算の前に不足する「目的・使ってよい総メモリ・CPUコア数」を確認します。最初の合成模型テストには追加の選択は不要です。
 
 ```sh
-python -m salmonpy.manual 初めて
+python -m salmonpy.manual
 python -m salmonpy.manual レーザーによる電子の動き
 python -m salmonpy.doctor --json
 ```

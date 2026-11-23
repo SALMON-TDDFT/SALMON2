@@ -1484,3 +1484,11 @@ shared-model TDDFT states. It runs nine MPI ranks immediately; use allocated
 compute resources. Both modes use explicit protected updates at every step.
 See MEMORY guides for the required fixture, measurement meanings and limitations.
 The observation stride does not thin the every-step macro-point current comparison.
+
+
+For a controlled field-observation test use `measure_mixed_performance.py --study
+observation`: fixed64 points/1024 steps,nine ranks,two repetitions of both modes
+and strides1/16. It runs jobs immediately. All point histories remain every-step;
+compare sparse E/H by common step number,not row index. MEMORY guides explain
+exclusive per-rank phases and participant-summed Python MPI call counts. These
+measurements neither remove protected backups nor alter the coupled algorithm.

@@ -108,7 +108,7 @@ def optical_conductivity(time, current, electric_field, *, current_convention,
     import json
     from .errors import RuntimeFailure
     from .ld import _positive
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     if current_convention != 'charge':
         raise InputError('use charge-current density j; convert SALMON matter current J=-j explicitly')
     if field_kind != 'total':
@@ -166,7 +166,7 @@ def dielectric_function(conductivity):
 
 def _optical_diagnostic(reference, candidate):
     import ctypes as c
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     from .errors import RuntimeFailure
     for result in (reference,candidate):
         if not isinstance(result,OpticalSpectrum) or result.config.get('observable')!='optical_conductivity':
@@ -279,7 +279,7 @@ def dielectric_tensor(time, current, electric_field, *, current_convention,
     """
     import ctypes as c
     import json
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     from .ld import _positive
     from .errors import RuntimeFailure
     if current_convention != 'charge' or field_kind != 'total' or units != 'atomic_gaussian':
@@ -356,7 +356,7 @@ def long_wavelength_correction(observation, *, fit_range, system, units,
     import json
     import warnings
     from .ld import _positive
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     from .errors import RuntimeFailure
     if system != 'gapped_insulator':
         raise InputError('A4 correction requires a declared zero-DC gapped_insulator; retain metal/free-carrier/Hall data')
@@ -467,7 +467,7 @@ def _observed_transform(time, data, frequencies, window):
     """Native requested-frequency transform; Python only arranges storage."""
     import ctypes as c
     import warnings
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     from .errors import RuntimeFailure
     windows={'none':0,'hann':1,'cubic':2}
     if window not in windows:raise InputError('window must be none, hann or cubic')
@@ -502,7 +502,7 @@ def optical_sensitivity(time,current,electric_field,*,frequencies,sample_counts,
     import operator
     from time import perf_counter
     from .ld import _positive
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     if current_convention!='charge' or field_kind!='total' or units!='atomic_gaussian':
         raise InputError('declare charge current, total E and atomic_gaussian units')
     t=_times(time);j=_array(current,'current');e=_array(electric_field,'electric_field')
@@ -569,7 +569,7 @@ def k_current_contributions(decomposed,*,dt,current_convention,units,time0=0.,
     import ctypes as c
     from .outputs import DecomposedCurrent
     from .ld import _positive
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     from .errors import RuntimeFailure
     if not isinstance(decomposed,DecomposedCurrent):raise InputError('pass read_decomposed_current output')
     if current_convention not in ('charge','matter') or units!='atomic_gaussian':
@@ -640,7 +640,7 @@ class PortSpectrum:
 
 def _energy_native(name, signature):
     import ctypes as c
-    from ._sbe_handles import default_api
+    from ._material_handles import default_sbe_api as default_api
     from .errors import RuntimeFailure
     try:
         fn = getattr(default_api().library, name)

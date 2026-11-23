@@ -2,15 +2,20 @@ name: LD wheels
 on:
   workflow_dispatch:
   push:
-    paths: ['.gitattributes', 'salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'native/**', 'runtime/**', '.github/workflows/ld-wheels.yml']
+    paths: &wheel_paths ['.gitattributes', 'salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'native/**', 'runtime/**', '.github/workflows/**']
   pull_request:
-    paths: ['.gitattributes', 'salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'native/**', 'runtime/**', '.github/workflows/ld-wheels.yml']
+    paths: *wheel_paths
+concurrency:
+  # Replace obsolete automatic checks, never cancel an explicit manual campaign.
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 permissions:
   contents: read
 jobs:
   wheels:
-    # Pushes use native-contract plus the lightweight sdist job; keep expensive
-    # platform/physics campaigns available on PR/manual runs.
+    needs: [sdist]
+    # Ordinary pushes keep one Linux installed-wheel suite. PR/manual runs
+    # additionally build/test every platform from the same checked sdist.
     if: github.event_name != 'push'
     strategy:
       fail-fast: false
@@ -22,8 +27,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Verify immutable starter input checkout
-        run: python tools/test_si_intro_checkout.py
+      - name: Download the checked source distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: ld-sdist
+          path: ${{ runner.temp }}/sdist
       - name: Windows Fortran toolchain
         if: runner.os == 'Windows'
         id: msys2
@@ -48,6 +56,8 @@ jobs:
           echo "MACOSX_DEPLOYMENT_TARGET=15.0" >> "$GITHUB_ENV"
       - name: Build, bundle runtimes, install and test
         uses: pypa/cibuildwheel@v3.4.0
+        with:
+          package-dir: ${{ runner.temp }}/sdist/${{ needs.sdist.outputs.archive }}
         env:
           CIBW_ENVIRONMENT_PASS_LINUX: FC
       - name: Verify without optional dependencies
@@ -58,13 +68,15 @@ jobs:
           "$py" -m pip install numpy
           "$py" -m pip install --no-deps --no-index --find-links wheelhouse salmonpy
           cd "$RUNNER_TEMP"
-          "$py" "$GITHUB_WORKSPACE/tools/test_installed_ld.py" "$GITHUB_WORKSPACE"
+          "$py" "$GITHUB_WORKSPACE/tools/test_installed_ld.py" "$GITHUB_WORKSPACE" --suite core
       - uses: actions/upload-artifact@v4
         with:
           name: ld-wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
           if-no-files-found: error
   sdist:
+    outputs:
+      archive: ${{ steps.archive.outputs.name }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -73,17 +85,28 @@ jobs:
           python-version: '3.12'
       - name: Verify immutable starter input checkout
         run: python tools/test_si_intro_checkout.py
-      - run: python -m pip install build
+      - run: python -m pip install build PyYAML
+      - name: Validate CI coverage and deduplication policy
+        run: python tools/test_ci_configuration.py
       - run: python tools/test_ld_packaging.py
       - run: sudo apt-get update && sudo apt-get install -y gfortran libopenblas-dev
       - run: python -m build
+      - name: Record shared sdist filename
+        id: archive
+        shell: bash
+        run: |
+          archive=(dist/*.tar.gz)
+          test "${#archive[@]}" -eq 1
+          test -f "${archive[0]}"
+          echo "name=$(basename "${archive[0]}")" >> "$GITHUB_OUTPUT"
       - name: Verify source-built wheel before repair
         shell: bash
         run: |
           python tools/test_wheel_native_hash.py dist/*.whl
           python -m pip install dist/*.whl
-          python -I tools/test_installed_ld.py "$GITHUB_WORKSPACE"
+          python -I tools/test_installed_ld.py "$GITHUB_WORKSPACE" --suite "${{ github.event_name == 'push' && 'full' || 'core' }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ld-sdist
           path: dist/*.tar.gz
+          if-no-files-found: error

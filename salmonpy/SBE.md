@@ -82,7 +82,7 @@ N=nbands²×nkpointsとすると、状態ごとに密度行列を2枚、計32N b
 通常のwheelは対応した計算処理核を含みます。import時に構築しません。
 古い核しかないソース環境では明示的な再構築が必要で、旧stateless版へ暗黙に戻しません。
 既存の固定バイナリを残す検証では、別のbuild/install先と
-`tools/test_source_sbe_handles.py LIBRARY`を使って新しい核を明示できます。
+`tools/test_source_materials.py LIBRARY`を使って新しい核を明示できます。
 この変更はLDの永続ハンドル化、計算処理TDDFTの複数コンテキスト化、公開C ABIのSBEプラグイン化ではありません。
 内部の`sp_sbe_*`はPython接続用で、公開物質ABI1のqueryテーブルとは区別します。
 

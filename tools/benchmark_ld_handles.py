@@ -9,7 +9,7 @@ import numpy as np
 
 
 def worker(a):
-    from salmonpy._ld_handles import API
+    from salmonpy._material_handles import LDAPI as API
     import salmonpy.ld as current
     api=API(a.library);current._handles_api=lambda:api;current._native=lambda:api.legacy
     if a.mode=='legacy':

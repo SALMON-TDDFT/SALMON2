@@ -78,7 +78,7 @@ Catalogs must come from a trusted publisher: their hashes are not signatures.
 
 ## Current branch artifacts
 
-The **Full runtime bundles** Actions workflow builds macOS arm64, macOS x86_64
+The **Runtime bundles and TDDFT integration** Actions workflow with `scope=bundle` builds macOS arm64, macOS x86_64
 and Linux x86_64 configurations and uploads a bundle only after relocation and solver
 TDDFT tests succeed. A configured runner is not evidence of a passing run. These
 configurations use a single MPI rank and PZ/TB-mBJ; they do not include Libxc. Windows
@@ -793,3 +793,5 @@ For ordinary users, provide a ready-to-run executable or distribution package wi
 its required shared libraries checked.
 
 Built-in MPI libraries validate the common host version, widths and ownership rules before attachment. Querying does not start a calculation; see [the C/Fortran host contract](API.en.md). No old-version rescue is provided.
+
+The same workflow offers `scope=worker` for a short Linux-only worker comparison; that selection does not create runtime distribution artifacts. Both selections are manual.

@@ -16,23 +16,34 @@ Start with the first row. For additional programs, follow the [installation guid
 Prefer a matching prebuilt distribution; explicitly build the bundled sources only when needed.
 A separate upstream SALMON checkout is not required.
 
-## Install and diagnose
+SALMONpy is a set of reusable calculation components for material electron response and light propagation. Use simple material models or first-principles calculations independently, couple them, or connect your own current model. Input preparation and analysis can also be used alone.
 
-Obtain a **distribution wheel** matching your OS, CPU architecture and CPython version.
-Python 3.10+ is required, but the wheel must also match your specific interpreter.
+## First calculation: two commands
+
+Obtain a distribution wheel matching your OS, CPU and Python version (Python 3.10+).
+SALMONpy is not yet on PyPI. Replace the filename below with the actual supplied wheel;
+ask its distributor for the file if it is missing. No compiler is needed.
 
 ```sh
-python -m pip install "PATH_TO_COMPATIBLE_WHEEL.whl"
-python -m salmonpy.doctor --lang en
-python -m salmonpy.examples.ld_response
+python -m pip install --only-binary=:all: "PATH_TO_COMPATIBLE_WHEEL.whl"
+python -m salmonpy.quickstart
 ```
 
-Replace the placeholder with the actual file. Use the Python interpreter belonging
-to the installation environment. Wheels do not require a Fortran compiler;
-importing never compiles anything. Diagnostics load the bundled libraries but do
-not calculate, install software or start the external SALMON executable.
+`SALMONpy first calculations: PASS` means both calculations finished:
+1000 Lorentz–Drude (LD) updates and 500 semiconductor Bloch equation (SBE) updates
+for a synthetic two-band model. Each uses one thread. No additional inputs, MPI,
+SALMON executable, plotting package or network access during calculation is needed.
 
-Start with [LD → SBE → Si current](examples/README.en.md#start-with-these-three). The Si starter checks execution, not converged optical properties.
+The command prints a new output directory containing `summary.json`, both calculation
+logs and SBE results. It normally takes seconds; package download/install time varies.
+Use `--output NEW_DIRECTORY` to retain results in a chosen location. Existing directories
+are never overwritten. These are installation checks, not converged material properties.
+If a calculation fails, read its log; do not automatically compile or install other solvers.
+
+Next, choose a task below or inspect the [examples](examples/README.en.md).
+[Si current](SI_INTRO.en.md) additionally needs a matching calculation program; it is
+not a prerequisite for completing this first test. For diagnosis only:
+`python -m salmonpy.doctor --lang en --json`.
 
 ## Choose a task
 
@@ -40,7 +51,7 @@ Start with [LD → SBE → Si current](examples/README.en.md#start-with-these-th
 |---|---|---|
 | Permittivity and E-driven P/J | `salmonpy.LorentzDrude` | Wheel |
 | Crystalline A/c-to-j response with SBE | `salmonpy.sbe` | Wheel; band/transition data for real materials |
-| Field components (j→A) coupled to matter: tr / lo / thin film / 1D propagation | `salmonpy.maxwell` | NumPy and a matter component; [FIELDS.en.md](FIELDS.en.md) |
+| Fields (j→A) coupled to matter: transverse / longitudinal / thin film / 1D propagation | `salmonpy.maxwell` | NumPy and a matter component; [FIELDS.en.md](FIELDS.en.md) |
 | Pulses, geometry and analysis | `fields`, `geometry`, `analysis`, `outputs` | NumPy; Matplotlib for plots |
 | Ground-state DFT and forces | `salmonpy.dft` | Compatible full SALMON and pseudopotentials |
 | Crystalline A/c-to-j response with TDDFT | `salmonpy.tddft` | Compatible full SALMON and matching GS |
@@ -55,9 +66,9 @@ python -m pip install "matplotlib>=3.6"
 python -m pip install "ase>=3.26,<4" "f90nml>=1.4,<2"
 ```
 
-Install only what your task needs. Full SALMON is **not included** in the wheel.
+Install only what your task needs. The SALMON **executable is not included** in the wheel; its sources are bundled for explicit builds.
 Use its audited executable and recorded SHA256. Do not assume a standard SALMON
-release contains the worker/status interfaces required by this preview.
+release contains the worker/status interfaces required by these interfaces.
 
 ```sh
 python -m salmonpy.doctor --lang en --executable PATH_TO_SALMON --sha256 VALIDATED_SHA256
@@ -86,7 +97,7 @@ Do not nest the batch FDTD launcher inside an MPI job.
 
 - Core APIs use atomic units. Frequencies are angular frequencies; do not pass
   eV or fs directly. Crystalline input is **A/c**, with E = −d(A/c)/dt.
-- SBE/TDDFT return the electric (charge) current density j. SALMON's electronic matter current J = −j stays internal (`state.matter_current`). Until 2026-11-14 they returned J.
+- SBE/TDDFT return the electric (charge) current density j. SALMON's electronic matter current J = −j stays internal (`state.matter_current`).
   LD is E-driven and returns physical P and J, not FDTD's auxiliary Q.
 - DFT cells have row vectors; SBE lattice vectors are columns. ASE uses Å and eV;
   the bridge performs explicit conversion.
@@ -99,19 +110,19 @@ Do not nest the batch FDTD launcher inside an MPI job.
   solver TB-mBJ from a matching converged GS; midpoint propagation only.
 - ASE Calculator: PZ/Libxc-PZ/Libxc-PBE with scalar KY/NC-UPF potentials; energy/forces, opt-in wavefunction warm start, no stress.
   Establish grid, k-point and SCF convergence; egg-box effects affect force checks.
-- FDTD has a batch entry and a separate restricted FDTD updates of E and H step/coupling entry
-  in [COUPLED.en.md](COUPLED.en.md). Periodic boundaries and oblique incidence are not exposed.
+- FDTD has a batch entry and a separate restricted E/H update and coupling entry
+  in [COUPLED.en.md](COUPLED.en.md). Periodic boundaries are available where documented; do not infer oblique-incidence support.
 
 ## Budgets and failures
 
-Before a first calculation, decide the purpose, **total allowed memory** and
+Before research calculations, decide the purpose, **total allowed memory** and
 **total CPU concurrency**. Count all processes, threads and numerical libraries.
-Detected hardware is not permission to use all resources. Capacity estimates and
-hard memory enforcement are not implemented. Start small and measure; resource
+Detected hardware is not permission to use all resources. Memory advice is available for documented calculations; it warns rather than enforcing a hard limit. Start small and measure; resource
 fit does not imply physical convergence. Large spatial outputs are opt-in.
 
 Use new writable output directories; existing results are not overwritten. A
-nonconverged GS is an error. Inspect `native/stdout.log` and the result manifest.
+nonconverged GS pauses the workflow with a warning and residual history for user review.
+Inspect `native/stdout.log` and the result manifest before continuing.
 Output archives require an indexed arrays.npz and matching array names, shapes,
 dtypes and finite values. verify=False skips hashes only, not structural checks.
 Opening reads arrays one at a time, so allow memory for the largest array.
