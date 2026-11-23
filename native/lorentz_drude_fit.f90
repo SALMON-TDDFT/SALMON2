@@ -61,22 +61,23 @@ contains
     ok=.true.
   end function
 
-  integer(c_int) function sp_ld_fit(n,p,fit_eps,drude,maxiter,starts,has_initial,fixed_eps, &
+  integer(c_int) function sp_ld_fit_bounded(n,p,fit_eps,drude,maxiter,starts,has_initial,fixed_eps,minimum_damping, &
                                     omega,target,initial,parameters,stats,details) bind(C) result(status)
     integer(c_int),value::n,p,fit_eps,drude,maxiter,starts,has_initial
-    real(c_double),value::fixed_eps
+    real(c_double),value::fixed_eps,minimum_damping
     real(c_double),intent(in)::omega(*),initial(*)
     complex(c_double_complex),intent(in)::target(*)
     real(c_double),intent(out)::parameters(*),stats(4)
     integer(c_int),intent(out)::details(3)
     real(c_double),allocatable::x(:),weights(:),par(:),trial(:),best(:),r(:),rt(:),jac(:,:),a(:,:),b(:)
     logical,allocatable::free(:)
-    real(c_double)::scale,cost,newcost,bestcost,lambda,h,oldvalue,es,eq,rs,rq,fast,magnitude
+    real(c_double)::scale,cost,newcost,bestcost,lambda,h,oldvalue,es,eq,rs,rq,fast,magnitude,damping_floor
     integer::m,i,j,q,seed,iter,ios,bestiter,bestconv,conv
     logical::ok,columns_ok
     status=1;stats=0d0;details=0
     if(n<2.or.n>huge(n)/2.or.p<1.or.p>(huge(p)-1)/3.or.maxiter<1.or.starts<1)return
     if(.not.ieee_is_finite(fixed_eps).or.fixed_eps<=0d0)return
+    if(.not.ieee_is_finite(minimum_damping).or.minimum_damping<0d0)return
     m=1+3*p;scale=0d0
     ! Reject address-size overflow before workspace products or allocations.
     if(int(m,c_size_t)>huge(0_c_size_t)/8_c_size_t/int(m,c_size_t))return
@@ -89,6 +90,8 @@ contains
       scale=max(scale,omega(i))
     enddo
     if(scale<=0d0)return
+    damping_floor=minimum_damping/scale
+    if(.not.ieee_is_finite(damping_floor))return
     status=3
     allocate(x(n),weights(n),par(m),trial(m),best(m),r(2*n),rt(2*n),jac(2*n,m),a(m,m),b(m),free(m),stat=ios)
     if(ios/=0)return
@@ -120,6 +123,9 @@ contains
       endif
       if(fit_eps==0)par(1)=fixed_eps
       if(drude/=0)par(3)=0d0
+      do q=1,p
+        par(3*q+1)=max(damping_floor,par(3*q+1))
+      enddo
       ok=residuals(n,p,x,target(1:n),weights,par,r,cost)
       if(.not.ok)cycle
       lambda=.01d0;conv=0
@@ -150,6 +156,9 @@ contains
           if(free(1))trial(1)=max(1d-9,trial(1))
           if(.not.free(1))trial(1)=fixed_eps
           if(drude/=0)trial(3)=0d0
+          do q=1,p
+            trial(3*q+1)=max(damping_floor,trial(3*q+1))
+          enddo
           ok=residuals(n,p,x,target(1:n),weights,trial,rt,newcost)
         endif
         if(ok)then

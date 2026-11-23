@@ -20,7 +20,7 @@ print(report['relative_rms_error'], report['optimizer_converged'])
 | ID | Source | Conditions | Candidate poles | Relative epsilon RMS |
 |---|---|---|---:|---:|
 | au-johnson-1972 | Johnson/Christy 1972 | Room temperature | 6 | 4.11% |
-| ag-johnson-1972 | Johnson/Christy 1972 | Room temperature | 12 (needs refinement) | 2.74% |
+| ag-johnson-1972 | Johnson/Christy 1972 | Room temperature | 20 | 2.62% |
 | cu-johnson-1972 | Johnson/Christy 1972 | Room temperature | 6 | 4.60% |
 | al-mcpeak-2015 | McPeak et al. 2015 | Evaporated Al, 150 Å/s, template-stripped from Si | 4 | 0.162% |
 | si-aspnes-1983 | Aspnes/Studna 1983 | Room temperature, <111>, n-type 2.3e14 cm^-3 | 6 | 4.65% |
@@ -38,8 +38,8 @@ retained coefficients as a seed. Each pole-count record keeps the other trials i
 alternative_trials; selection minimizes the weighted fitting objective. Defaults use
 the smallest count with global RMS at most5%, recommended_dt*omega_max at least0.01,
 and measured-point weighted error at most10%. These are screening heuristics.
-Ag improves to global RMS2.74% but local weighted error26.7%; it remains
-needs_refinement without a recommended default. Al4 now has RMS0.162% with a sane
+Ag now uses the20-pole linewidth-constrained candidate described below. The
+old12-pole model (RMS2.74%, local error26.7%) remains an explicit alternative. Al4 now has RMS0.162% with a sane
 internal timescale; its previous stiff candidate is preserved in alternative_trials.
 Si6 is the smallest passing candidate (4.65%); Si8 gives3.53% and is explicitly selectable.
 Inaccurate or unfinished fits warn rather than stopping a runnable calculation.
@@ -72,7 +72,7 @@ Refitting is an explicit offline operation:
 python tools/fit_optical_materials.py NEW_RESULTS --recorded-settings --optimizer scipy
 ```
 
-The installed wheel carries this tool under its runtime SDK. --recorded-settings --optimizer scipy reuses each stored trial setting, including the additional Ag10/12 trials.
+The installed wheel carries this tool under its runtime SDK. --recorded-settings --optimizer scipy reuses each stored trial setting, including the additional Ag10/12/20 trials.
 Omit it and supply --poles/--energy-range to explore a new candidate set. --export-catalog is an
 explicit replacement of the exported library; no network or solver run occurs.
 
@@ -122,6 +122,40 @@ response = LorentzDrude.from_config(tensor)
 FDTD projects the compressed isotropic tensor exactly to the existing coefficients,
 retaining arithmetic and update order. The A-endpoint LD adapter accepts the same
 configuration but returns dispersive-pole current only; the field owns the instantaneous
-background. Scalar APIs remain compatible. The all-modes direction does not mean
-all solvers support general anisotropy: principal-axis diagonal FDTD called directly from Python propagation is supported; off-diagonal field updates, automatic rotations and general tensor fitting are not implemented; standalone/MPI tensor material response is available.
+background. These scalar source tables do not determine general anisotropy.
+Supply independent tensor data for that purpose; see LD and FDTD_MATERIALS guides
+for tensor fitting, rotations and off-diagonal field updates.
 No supplied component is silently dropped.
+
+
+## Ag refinement with an explicit linewidth assumption
+
+The twenty-pole Ag default requests1.5–6 eV (actual included endpoints about
+1.510–5.981 eV). Relative complex-epsilon RMS is2.6184%, weighted RMS2.4506%,
+and maximum measured-point weighted error8.4798%. The unchanged screens are
+5% global RMS,10% maximum weighted error and recommended_dt*omega_max>=0.01.
+The local SciPy optimizer terminated by ftol; this is not a global-optimum claim.
+The full source tables, original six pole-count candidates and their alternatives
+remain available. There are now89 retained trials across the library.
+
+All twenty pole damping parameters were constrained to at least0.002 atomic
+units. This is an explicitly chosen modeling assumption, not a measured
+linewidth. It prevents the almost-zero-width poles found in unconstrained
+refinement trials. Those trials fit the supplied points better but can produce
+large unmeasured inter-point peaks, so they were not adopted. A10001-point
+frequency grid plus every in-band resonance center was evaluated for the chosen
+model: finite passive response, maximum Im epsilon about5.8502 in the fitted
+band. This checks the model, not experimental behavior between measurements.
+Time-domain accuracy and field CFL must still be checked for the actual problem.
+
+Replay the recorded initial model, linewidth floor and optimizer budget explicitly:
+
+```sh
+python tools/fit_optical_materials.py NEW_RESULTS \
+  --materials ag-johnson-1972 --recorded-settings --optimizer scipy
+```
+
+To explore other conditions, use `--minimum-damping VALUE` (atomic units) with
+explicit `--poles`, `--starts` and `--max-iterations`. The floor defaults to0;
+loading a material never fits or changes a user's model. Existing coefficients
+for every other material and all original numerical source files are unchanged.

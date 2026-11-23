@@ -449,6 +449,7 @@ class FitReport:
         from ._version import __version__
         result.update(schema='salmonpy.ld-fit/1',software_version=__version__,units='atomic_gaussian',
                       algorithm=json.loads(self._metadata_json).get('optimizer',{}).get('algorithm','projected LM; forward finite differences; deterministic multistart'),
+                      minimum_damping_au=json.loads(self._metadata_json)['minimum_damping_au'],
                       fitted_background_floor=1e-9,iterations_scope='best start only; SciPy counts function evaluations, not iterations',
                       time_convention='exp(-i omega t)',objective='sum |delta epsilon / max(1,abs(epsilon))|^2',
                       timestep_scope='0.1/fastest active pole/plasma/damping scale: accuracy heuristic only',
@@ -462,7 +463,8 @@ class FitReport:
 
 def fit_lorentz_drude(omega,epsilon=None,*,poles,units,nk=None,drude=True,
                       epsilon_infinity=True,initial=None,max_iterations=300,starts=4,
-                      rtol=.05,source_file=None,reference=None,metadata=None,optimizer="native"):
+                      rtol=.05,source_file=None,reference=None,metadata=None,optimizer="native",
+                      minimum_damping=0.):
     """Passive isotropic LD fitting; native objective with native or optional SciPy optimizer.
 
     poles includes the optional zero-resonance Drude pole. epsilon_infinity=True
@@ -470,6 +472,8 @@ def fit_lorentz_drude(omega,epsilon=None,*,poles,units,nk=None,drude=True,
     Input is epsilon(N,), nk(N,2), or an explicitly masked dielectric OpticalSpectrum.
     Failed or inaccurate fits warn, report diagnostics and never run a solver.
     A returned candidate is passive but is not automatically certified accurate.
+    minimum_damping (AU) explicitly bounds every pole linewidth, including Drude;
+    zero preserves unconstrained fits. This modeling assumption is recorded.
     """
     import ctypes as c
     import json,warnings
@@ -482,10 +486,12 @@ def fit_lorentz_drude(omega,epsilon=None,*,poles,units,nk=None,drude=True,
             raise InputError(name+' must be a positive supported integer')
     poles=int(poles);max_iterations=int(max_iterations);starts=int(starts)
     tol=_positive(rtol,'rtol',zero=True)
+    minimum_damping=_positive(minimum_damping,'minimum_damping',zero=True)
     fit_eps=type(epsilon_infinity) is bool and epsilon_infinity
     fixed_eps=1. if type(epsilon_infinity) is bool else _positive(epsilon_infinity,'epsilon_infinity')
     provenance={} if metadata is None else json.loads(json.dumps(metadata,allow_nan=False))
     if not isinstance(provenance,dict):raise InputError('metadata must be a JSON object')
+    provenance['minimum_damping_au']=minimum_damping
     from .analysis import OpticalSpectrum
     data_kind='epsilon'
     if isinstance(omega,OpticalSpectrum):
@@ -542,17 +548,17 @@ def fit_lorentz_drude(omega,epsilon=None,*,poles,units,nk=None,drude=True,
     digest=hashlib.sha256(b'salmonpy.ld-fit-data/1\0')
     digest.update(w.astype('<f8').tobytes());digest.update(target.astype('<c16').tobytes())
     params=np.empty(1+3*poles);stats=np.zeros(4);details=np.zeros(3,dtype=np.int32)
-    try: fn=lib.sp_ld_fit
+    try: fn=lib.sp_ld_fit_bounded
     except AttributeError as exc:raise RuntimeFailure('native LD fit ABI missing; explicitly rebuild kernels') from exc
-    fn.argtypes=[c.c_int]*7+[c.c_double]+[c.c_void_p]*6;fn.restype=c.c_int
+    fn.argtypes=[c.c_int]*7+[c.c_double]*2+[c.c_void_p]*6;fn.restype=c.c_int
     from time import perf_counter
     started=perf_counter()
     if optimizer == "scipy":
         status,optimizer_record=_scipy_fit(lib,w,target,poles,fit_eps,drude,fixed_eps,
-            seed if initial is not None else None,max_iterations,starts,params,stats,details)
+            seed if initial is not None else None,max_iterations,starts,params,stats,details,minimum_damping)
         provenance['optimizer']=optimizer_record
     else:
-        status=fn(len(w),poles,int(fit_eps),int(drude),max_iterations,starts,int(initial is not None),fixed_eps,
+        status=fn(len(w),poles,int(fit_eps),int(drude),max_iterations,starts,int(initial is not None),fixed_eps,minimum_damping,
                   *(a.ctypes.data for a in (w,target,seed,params,stats,details)))
     elapsed=perf_counter()-started
     messages=[];cfg=None;band=(float(w[0]),float(w[-1]))
@@ -577,7 +583,7 @@ def fit_lorentz_drude(omega,epsilon=None,*,poles,units,nk=None,drude=True,
     return cfg,report
 
 
-def _scipy_fit(lib,w,target,poles,fit_eps,drude,fixed_eps,initial,max_iterations,starts,params,stats,details):
+def _scipy_fit(lib,w,target,poles,fit_eps,drude,fixed_eps,initial,max_iterations,starts,params,stats,details,minimum_damping):
     """SciPy dispatch only: Fortran owns the objective, seeds and diagnostics."""
     import ctypes as c
     try:
@@ -600,6 +606,8 @@ def _scipy_fit(lib,w,target,poles,fit_eps,drude,fixed_eps,initial,max_iterations
     if drude:free[2]=False
     lower=np.zeros(int(np.count_nonzero(free)))
     if fit_eps:lower[0]=1e-9
+    damping_columns=np.isin(np.flatnonzero(free),np.arange(3,len(full),3))
+    lower[damping_columns]=np.divide(minimum_damping,w[-1])
     attempts=[];best=None
     for start in range(1,starts+1):
         if seed_fn(len(w),poles,int(fit_eps),int(drude),start,fixed_eps,w.ctypes.data,target.ctypes.data,full.ctypes.data):

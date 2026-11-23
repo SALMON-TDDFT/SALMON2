@@ -59,8 +59,9 @@ def main():
     p.add_argument('--starts',type=int,default=6)
     p.add_argument('--max-iterations',type=int,default=600)
     p.add_argument('--rtol',type=float,default=.05)
+    p.add_argument('--minimum-damping',type=float,default=0.,help='explicit linewidth floor in atomic units; modeling assumption')
     p.add_argument('--initial-recorded',action='store_true',help='include the retained coefficients as the first start')
-    p.add_argument('--recorded-settings',action='store_true',help='replay each stored trial setting, including Ag10/12')
+    p.add_argument('--recorded-settings',action='store_true',help='replay each stored trial setting, including Ag10/12/20')
     p.add_argument('--energy-range',type=float,nargs=2,default=[1.5,6.])
     a=p.parse_args();a.output.mkdir(parents=True,exist_ok=False)
     low,high=a.energy_range
@@ -83,12 +84,14 @@ def main():
         entry['source_energy_eV_range']=[float(data.energy_eV[0]),float(data.energy_eV[-1])]
         entry['source_samples']=len(data.omega);entry['fit_samples']=int(np.count_nonzero(mask))
         for poles,starts,max_iterations,rtol,recorded_initial in plans:
+            floor=(next(v['report']['minimum_damping_au'] for v in data.fits if v['poles']==poles)
+                   if a.recorded_settings else a.minimum_damping)
             initial=stored.get(poles) if a.initial_recorded else (None if recorded_initial is None else LorentzDrude(**{k:v for k,v in recorded_initial.items() if k!="units"}))
             with warnings.catch_warnings(record=True):
                 warnings.simplefilter('always')
                 cfg,report=fit_lorentz_drude(data.omega[mask],nk=data.nk[mask],poles=poles,
                     units='atomic_gaussian',optimizer=a.optimizer,initial=initial,drude=entry['drude'],starts=starts,max_iterations=max_iterations,
-                    rtol=rtol,source_file=data.source_path,reference=entry['reference'],
+                    rtol=rtol,minimum_damping=floor,source_file=data.source_path,reference=entry['reference'],
                     metadata={'dataset_id':entry['id'],'source_commit':catalog['source_commit'],
                               'doi':entry['doi'],'conditions':entry['conditions'],'license':entry['license'],
                               'energy_eV_requested':[entry_low,entry_high]})
@@ -101,13 +104,13 @@ def main():
             (a.output/(entry['id']+f'-poles-{poles}.json')).write_text(json.dumps(record,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
             print(entry['id'],poles,report.status,report.relative_rms_error,flush=True)
     catalog['curation']={'refitted_materials':a.materials,'optimizer':a.optimizer,'initial_recorded':a.initial_recorded,'recorded_settings':a.recorded_settings,'requested_band_eV':[low,high],'pole_counts':a.poles,'starts':a.starts,
-        'max_iterations':a.max_iterations,'rtol':a.rtol,
+        'max_iterations':a.max_iterations,'rtol':a.rtol,'minimum_damping_au':a.minimum_damping,
         'scope':'scalar nonmagnetic CC0 measurement tables; residual screening, not independent experimental or FDTD validation'}
     summaries=curate(catalog)
     text=json.dumps(catalog,ensure_ascii=False,indent=2)+'\n'
     (a.output/'catalog.json').write_text(text,encoding='utf-8')
     with (a.output/'material_list.csv').open('w',newline='',encoding='utf-8') as f:
-        writer=csv.DictWriter(f,fieldnames=list(summaries[0]));writer.writeheader();writer.writerows(summaries)
+        writer=csv.DictWriter(f,fieldnames=list(summaries[0]),lineterminator="\n");writer.writeheader();writer.writerows(summaries)
     if a.export_catalog:a.export_catalog.write_text(text,encoding='utf-8')
 
 

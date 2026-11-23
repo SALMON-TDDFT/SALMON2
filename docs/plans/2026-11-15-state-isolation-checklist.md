@@ -16,7 +16,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 | 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
 | 完了 | 最新パッケージ・分子接続検証 | 二つのFDTD＋分子の直接再開、非対角背景・テンソルLD・界面平滑化・Ohmic散逸の収支観測、各部品の性能モードを7d27edbaまでcommit/push済み。分子E駆動も通常／性能・直接復元で一致。最新の別プロセスHSE対応はソース／wheel各710件（709成功・任意スキップ1）。CI結果は未確認 |
 
-### 直近の実装残件（2026-11-23 別プロセスHSE検証後）
+### 直近の実装残件（2026-11-23 混在計測・Ag再調整後）
 
 - [x] LD／SBE、直列の場、通常TDDFT、高速PR版HSEの単一／共有／登録状態、周期系・分子の別プロセス型の性能モードを、各検証記録の範囲で実装。
 - [x] 外側A→J MPI結合の性能モード。自作物質モデルで3/5ランク、実E/H＋LD＋2点TDDFTで3/6ランクを確認。後者は96ステップ、通常の連続実行と明示的保護復元・再試行が一致。wheel707件中706成功・1スキップ。
@@ -24,7 +24,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 - [x] **A/E/Hの場の受け渡し・分子の外側性能スケジュール**。A/E/Hは3/6ランク、分子は真空/LD・4/6ランクで通常／性能・明示的復元後の一致をソースとwheelで確認。末尾の範囲を参照。
 - [x] **分子性能モードの公開ランタイム検証記録・一括ディスク再開の実測**。公開ローダー／初期状態を使い、真空/LD・4/6ランク、別MPIプロセスでの再開をソース／wheelで確認。復元直後の時間発展0回。末尾の検証範囲を参照。
 - [x] **別プロセス型高速HSEの経路・必要性の確認**。呼び出し元のプロセス状態を分離する直列CPU入口として維持し、全k点Taylor/PT-CNへ性能モードを接続。縮約k点は従来から初期化不可で、呼び出し元MPI経路を案内。末尾の検証記録を参照。
-- [ ] **保護付き混在計算の規模別計測**。多数点・長時間のメモリ・通信・観測I/O、実際の性能差を測る。
+- [x] **保護付き混在計算の規模別計測（単一Mac）**。9ランク、32点×512／64点×2048ステップのLD・SBE・TDDFT混在で通常／性能の全履歴一致と時間・RSS・Python通信・出力量を測定。多ノード・実材料の長い物理時間は別件。末尾の範囲を参照。
 
 性能モードは明示的に選択し、既定は検査付き。明示的な保護更新は退避・復元を維持する。性能モードの通常更新に同じ異常復帰を約束しない。過去の「次：分子」等は後続の完了記録で更新されている。
 
@@ -35,7 +35,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
 2. **大規模化の計測**：マクロ点・ランク・観測間隔に対するメモリ、通信、ファイル数・I/O負荷の測定。集約・バッファ化は測定上の必要に応じて実装する。
 3. **他環境・配布の検証拡大**：重い計算ライブラリと初期推定経路について、Linux・Intel Mac等および施設環境での構築・配布・実行証拠を追加する。既存LD/SBE wheelの検証とは区別する。
-4. **Agのフィット改善**：局所的な形状誤差と最適化終了を改善し、現状のneeds_refinementを根拠なく解除しない。
+4. **Agのフィット改善（今回の帯域内スクリーニングは完了）**：明示的な減衰下限付き20極を採用。元データ・旧候補を保持し、点間・実際の物性／FDTD検証は区別する。末尾の根拠を参照。
 5. **追加対象の設計・検証**：追加保存形式、GPU、現在の独立状態経路で未検証の物理条件。必要性と対応範囲を決めて進め、全機能への包括的対応を主張しない。
 
 高速HSEの電子数診断と実材料の格子収束調査は利用者指定で後回し、
@@ -4526,3 +4526,100 @@ f4cc1b03はローカルcommit済み・未push。その後の対角背景／非�
 - [ ] 次：実際の多数点・長時間の性能/メモリ/通信/I/O計測。施設MPI/多ノード、他環境配布・実行、Agフィット等は既存の別枠。高速HSE電子数・実材料格子収束は後回しを維持。
 
 本節のコード・検証・文書を今回のコミットに収録。既存GSの読取再利用のみ。新規GS計算・GSコピー・電子状態ディスク収集なし（一時的な時間発展後チェックポイントは試験終了時に削除）。重いCIの追加手動起動なし。
+
+
+### 2026-11-23: many-point protected mixed-mode measurements
+
+- Manual tools: `tools/test_mixed_performance_mpi.py` (one nine-rank job) and
+  `tools/measure_mixed_performance.py` (four sequential paired jobs). No CI job
+  was started. Numerical updates remain in the existing Fortran kernels.
+- One Mac (64 GB, 18 cores), nine MPI ranks, one thread per rank. E/H grid64³
+  with two LD regions uses four ranks. Two two-rank groups own 8/16 independent
+  TDDFT states from shared models; one rank owns 24/48 independent SBE states.
+  Every update explicitly retains protected rollback state in both modes.
+- Every macro-point A/E/current sample and both LD-region E/H point streams
+  match **bitwise** between checked/performance. Smaller/larger point-file
+  strides are1/16, but all macro-point steps are retained for comparison.
+
+| Points × steps | Mode | Update seconds | Sum of rank peak RSS (GiB) | Python MPI calls/step, summed ranks | Logical regular-file MiB |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 32 ×512 | checked | 43.329 | 2.972 | 1368 | 4.408 |
+| 32 ×512 | performance | 40.273 | 2.325 | 1294 | 4.408 |
+| 64 ×2048 | checked | 162.110 | 3.790 | 2504 | 24.341 |
+| 64 ×2048 | performance | 144.086 | 3.147 | 2390 | 24.341 |
+
+- Logical A+J payload totals are0.75/6 MiB. Maximum per-rank measured Python MPI
+  blocking time is42.235/39.181 s (small) and154.651/136.930 s (large), including
+  waiting; it is not pure network time. Internal Fortran MPI is excluded.
+  Protection/contract agreements remain frequent; smaller payload alone does
+  not establish communication efficiency. Instrumentation itself has overhead.
+- Output files36/52; `.data` streams1.903/13.957 MiB; field point streams166192/
+  41776 bytes; external logs about0.425/3.285 MiB. The larger run still writes
+  TDDFT diagnostics every step. These are logical sizes, not physical disk traffic;
+  stride and point count changed together, so this is not a stride-only study.
+- Each mode/size ran once, with mode order reversed in the large case. These
+  timings do not establish a statistical speedup. Summed rank high-water RSS is
+  not a simultaneous job memory peak and may count shared pages repeatedly.
+- dt=.003au,2048 steps=6.144au (~0.149fs): this is repeated-update stress evidence,
+  **not long-physical-time or material-convergence evidence**. Synthetic PZ uses
+  8³ electronic grid,2³ k points,two orbitals; SBE uses a two-band toy model.
+- GS reused through test-only read-only links; original bytes unchanged, no new
+  SCF/GS collection. Library SHA256:
+  `f6a964f52b013f337c85566f28ee15381b97fc65cc109f042fa867219f8fcb2f`.
+- Measurement-only resource failure injection finishes the same16-point64-step
+  calculation with bitwise-identical traces, `calculation_status=passed`,
+  `resource_measurement_status=partial` and null RSS with reasons.
+- Records: `calc2026/salmonpy-mixed-performance-scaling-20261123/analysis.json`.
+  Resource/per-rank details are retained in each case's report; GS link targets
+  are excluded from output inventories. OneDrive synchronization was not verified.
+- Remaining: site MPI/multi-node verification; physically converged larger
+  electronic models and longer physical times; repeated timings for statistical
+  speed claims. These are not silently marked complete by this local campaign.
+
+- Installed-wheel follow-up: nine ranks,16 points×64 steps in performance mode;
+  A/E/current and both LD-region E/H streams match the source checked probe
+  bitwise. Source/wheel suites each710 tests:709 passed,one optional skip.
+  Wheel SHA and exact package path are recorded in `validation.json`.
+
+
+### 2026-11-23: Ag optical fit with an explicit damping floor
+
+- [x] Investigated the old12-pole candidate: global RMS2.7383%, maximum measured
+  weighted error26.6807%, no curated default. Merely increasing to16 poles did
+  not solve the local3.7–4.0 eV mismatch. Reseeding narrow onset poles reduced
+  residuals but produced nearly zero linewidths and unsupported inter-point
+  peaks. Those candidates were not promoted into the package.
+- [x] Added `minimum_damping` (AU, default0) to scalar fitting, both Fortran and
+  SciPy. Fortran owns projected native updates/objective; SciPy applies the same
+  explicit damping bounds. Reports retain the assumption and full initial model.
+  No changes to LD/FDTD time-update equations. Missing new fit ABI requires an
+  explicit rebuild; no legacy symbol/fallback is retained.
+- [x] Chosen20-pole Ag fit: gamma>=0.002au for every pole, including Drude;
+  RMS2.618416%, weighted RMS2.450530%, maximum weighted error8.479842%; local
+  SciPy ftol termination,1024 evaluations, optimality about1.44e-5.
+  recommended_dt0.247381au is an accuracy hint, not a CFL/stability certificate.
+  Original5%/10%/time-resolution screens remain unchanged; quality is now
+  screened_candidate, not physically validated.
+- [x] Checked10001 band-grid frequencies plus each in-band pole center: finite
+  passive response, max Im epsilon5.85018. This checks the fitted model only;
+  no measured values between samples or measured linewidth are invented.
+- [x] Retained all old coefficients/alternative trials and unchanged raw data,
+  source hashes, conditions and license; other materials' coefficients/results
+  unchanged. Primary reports explicitly declare the old0 lower bound. Catalog
+  now retains89 trials. Recorded-settings replay includes the seed and floor.
+- Source records: calc2026/salmonpy-ag-refinement-20261123-final and the baseline,
+  initials, linewidth, fine-linewidth and20poles sibling experiment directories.
+  No GS calculation/collection, source download or manual CI execution.
+- Scope remaining: independent experimental/physical validation, film-condition
+  transfer and actual-problem grid/dt convergence. Do not generalize the local
+  residual screens into universal optical/FDTD accuracy.
+
+- Verification follow-up: source and installed-wheel suites each711 tests,
+  710 passed/one optional skip. Recorded source replay reproduces20-pole
+  coefficients exactly; wheel refit differs by relative spectral norm2.834e-6
+  and still meets the unchanged screens (maximum weighted error8.47966%).
+  Refit coefficients need not be bit-identical across builds. Stored coefficients
+  load unchanged. Scalar/isotropic-tensor4096-step checked/performance responses
+  match bitwise. Default unconstrained control coefficients remain exact;
+  residual diagnostic roundoff is below1e-15. Package SHA and records are in
+  calc2026/salmonpy-ag-refinement-20261123-final/validation.json.

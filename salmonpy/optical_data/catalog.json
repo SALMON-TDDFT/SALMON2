@@ -184,7 +184,8 @@
                   }
                 ],
                 "selected_start": 6
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -199,7 +200,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.3664898868046377,
@@ -643,7 +645,8 @@
                   }
                 ],
                 "selected_start": 4
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -658,7 +661,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.1621435820548853,
@@ -1124,7 +1128,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -1139,7 +1144,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.09818203775291909,
@@ -1626,7 +1632,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -1641,7 +1648,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.06271159803383472,
@@ -2148,7 +2156,8 @@
                   }
                 ],
                 "selected_start": 5
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -2163,7 +2172,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.8057055129750783,
@@ -2607,7 +2617,8 @@
                   }
                 ],
                 "selected_start": 4
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -2622,7 +2633,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.4753053578741383,
@@ -3088,7 +3100,8 @@
                   }
                 ],
                 "selected_start": 6
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -3103,7 +3116,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.39589722963721713,
@@ -3591,7 +3605,8 @@
                   }
                 ],
                 "selected_start": 5
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -3606,7 +3621,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.395896042938867,
@@ -4093,7 +4109,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -4108,7 +4125,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.3926535076944786,
@@ -4727,7 +4745,8 @@
                   }
                 ],
                 "selected_start": 5
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -4742,7 +4761,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.2668069647102165,
@@ -5094,9 +5114,262 @@
               }
             }
           ]
+        },
+        {
+          "poles": 20,
+          "parameters": {
+            "plasma_frequency": 1.0,
+            "strength": [
+              0.11542983023783747,
+              2.3899647990803945e-39,
+              0.0002838913507201091,
+              4.8113626215422804e-05,
+              1.2822014622470224e-05,
+              4.812022468106162e-05,
+              0.000866564176537281,
+              0.013331185913401603,
+              0.00969107134430525,
+              0.007419522196639897,
+              0.001065674931622585,
+              0.001335578460267352,
+              0.002225891004487708,
+              0.0013930267404855803,
+              0.004020598919662013,
+              0.005471127820149157,
+              2.2562685914460997e-05,
+              2.3347093483471664e-43,
+              0.00016823612404020882,
+              0.0005725249676409397
+            ],
+            "resonance": [
+              0.0,
+              0.12921593651493224,
+              0.14412773032416387,
+              0.1471523710857098,
+              0.15116210024017807,
+              0.14715240257794726,
+              0.15533651361078932,
+              0.23210381686564724,
+              0.2146615714722735,
+              0.20017936786751042,
+              0.15953423340862788,
+              0.16747515846381658,
+              0.17165703072314525,
+              0.16383104137507193,
+              0.17811028233006618,
+              0.18771496771362148,
+              0.1342653129248866,
+              0.14080285294554223,
+              0.14715227048939808,
+              0.15116234388457275
+            ],
+            "damping": [
+              0.0020000000000000005,
+              0.004463730593454096,
+              0.0020000000000000005,
+              0.0020000000000000005,
+              0.0020000000000000005,
+              0.0020000000000000005,
+              0.0020000004780221163,
+              0.011241173215969846,
+              0.02272981434275947,
+              0.02045150934669774,
+              0.0020000000000000005,
+              0.0023769267071295512,
+              0.005971030621380832,
+              0.0020000000000000005,
+              0.011246697296384965,
+              0.015854712017393358,
+              0.0020000000000000005,
+              0.0020000000100949536,
+              0.0020000000000000005,
+              0.0020000000000000005
+            ],
+            "units": "atomic_gaussian",
+            "epsilon_infinity": 2.532027273002152,
+            "valid_frequency_range": [
+              0.05549062541612555,
+              0.2197942717278374
+            ]
+          },
+          "report": {
+            "accepted": true,
+            "optimizer_converged": true,
+            "status": "accepted",
+            "relative_rms_error": 0.026184160363675855,
+            "weighted_rms_error": 0.02450529703424059,
+            "rtol": 0.05,
+            "max_iterations": 5000,
+            "kernel_seconds": 1.2396806250326335,
+            "valid_frequency_range": [
+              0.05549062541612555,
+              0.2197942717278374
+            ],
+            "poles": 20,
+            "drude": true,
+            "fitted_background": true,
+            "iterations": 1024,
+            "starts": 1,
+            "recommended_dt": 0.24738054672753612,
+            "data_kind": "nk",
+            "data_sha256": "85b423852578da2d7e92229705f2bba0d72119f2fcdaa2d6631d8e6e360a5553",
+            "source_sha256": "8c79d5e2529e4d3a51e1502b42f2e96e63b3cb49e1036c66b86eb9dbdd0c65a5",
+            "source_name": "ag-johnson-1972.yml",
+            "reference": "P. B. Johnson and R. W. Christy.\nOptical constants of the noble metals.\nPhys. Rev. B 6, 4370-4379 (1972)",
+            "warnings": [],
+            "provenance": {
+              "source_commit": "e6d15e364f70de1cad8a96a20f75689f2fba8b21",
+              "doi": "https://doi.org/10.1103/PhysRevB.6.4370",
+              "conditions": "Room temperature",
+              "license": "CC0-1.0",
+              "dataset_id": "ag-johnson-1972",
+              "energy_eV_requested": [
+                1.5,
+                6.0
+              ],
+              "initial_strategy": "retained sixteen-pole onset seed plus four explicit onset poles",
+              "linewidth_scope": "explicit model assumption, not measured damping or data interpolation",
+              "minimum_damping_au": 0.002,
+              "nk_assumption_mu": 1.0,
+              "initial_model": {
+                "plasma_frequency": 1.0,
+                "strength": [
+                  0.1133349188093332,
+                  2.8508776123730346e-05,
+                  5.536322527648326e-07,
+                  3.8243277694043805e-05,
+                  1.7540905358405004e-05,
+                  5.8110868638974336e-06,
+                  0.004181076165479926,
+                  0.06157941784494111,
+                  0.012321489908915116,
+                  0.010472563569257479,
+                  0.0008013608214844816,
+                  0.001515779594002564,
+                  0.0028608254364553723,
+                  3.1526420270081265e-05,
+                  0.004712059633221757,
+                  0.0069360514682385915,
+                  0.0003,
+                  0.0003,
+                  0.0003,
+                  0.0003
+                ],
+                "resonance": [
+                  0.0,
+                  0.13600115223824236,
+                  0.142211779878895,
+                  0.14662977729968138,
+                  0.14665594428436032,
+                  0.15141900093690902,
+                  0.15570054680866904,
+                  0.27143705763372034,
+                  0.22184417554215233,
+                  0.20433255581354057,
+                  0.16073627386078096,
+                  0.1652010192915482,
+                  0.1704172966673268,
+                  0.1558263683632059,
+                  0.178249312404039,
+                  0.1893889967090226,
+                  0.135,
+                  0.14,
+                  0.145,
+                  0.15
+                ],
+                "damping": [
+                  0.0008020237387519437,
+                  3.232460840064803e-33,
+                  1.0119515092485142e-05,
+                  5.973567360710303e-11,
+                  2.226100601949274e-06,
+                  6.047040551360026e-06,
+                  6.906589759927124e-34,
+                  2.0738154533492144e-33,
+                  0.026957473020324068,
+                  0.0271603075547936,
+                  0.0016776141936244023,
+                  0.005025138163387048,
+                  0.009408573294879978,
+                  4.055128855679452e-08,
+                  0.014866997618032153,
+                  0.021059466862886515,
+                  0.002,
+                  0.002,
+                  0.002,
+                  0.002
+                ],
+                "units": "atomic_gaussian",
+                "epsilon_infinity": 1.306272188765314,
+                "valid_frequency_range": [
+                  0.05549062541612555,
+                  0.2197942717278374
+                ]
+              },
+              "optimizer": {
+                "name": "scipy",
+                "version": "1.18.1",
+                "algorithm": "scipy.optimize.least_squares TRF; native objective; deterministic multistart",
+                "method": "trf",
+                "jacobian": "2-point",
+                "x_scale": "jac",
+                "ftol": 1e-10,
+                "xtol": 1e-10,
+                "gtol": 1e-10,
+                "budget_scope": "max_iterations is max_nfev per start; numerical Jacobian calls are additional",
+                "attempts": [
+                  {
+                    "start": 1,
+                    "status": 2,
+                    "success": true,
+                    "message": "`ftol` termination condition is satisfied.",
+                    "nfev": 1024,
+                    "njev": 873,
+                    "optimality": 1.439331942965083e-05,
+                    "weighted_cost": 0.02221885456124534
+                  }
+                ],
+                "selected_start": 1
+              }
+            },
+            "schema": "salmonpy.ld-fit/1",
+            "software_version": "0.1.0a7",
+            "units": "atomic_gaussian",
+            "algorithm": "scipy.optimize.least_squares TRF; native objective; deterministic multistart",
+            "minimum_damping_au": 0.002,
+            "fitted_background_floor": 1e-09,
+            "iterations_scope": "best start only; SciPy counts function evaluations, not iterations",
+            "time_convention": "exp(-i omega t)",
+            "objective": "sum |delta epsilon / max(1,abs(epsilon))|^2",
+            "timestep_scope": "0.1/fastest active pole/plasma/damping scale: accuracy heuristic only",
+            "timing_scope": "kernel_seconds measures total fitting wall time including optimizer dispatch",
+            "stability_margin": null,
+            "stability_scope": "requires field grid/CFL; not certified by fit",
+            "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
+            "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+          },
+          "validation": {
+            "pointwise_weighted_max": 0.08479842210351106,
+            "scope": "manual measured-point comparison; no experimental matching in required CI",
+            "dense_samples": 10019,
+            "dense_peak_loss": 5.850182747653125,
+            "dense_min_loss": 0.2602558085813421,
+            "dense_peak_abs": 33.58941745826169,
+            "dense_scope": "10001 grid points plus every in-band pole center; no independent interpolated data or physical validation"
+          },
+          "parameters_sha256": "4cf4d66369c5697c4e24b4d9e211ce50134a2098b905280b58d0e7b6bcda108a",
+          "curation": {
+            "resolution_score": 0.05437282710761305,
+            "minimum_resolution_score": 0.01,
+            "pointwise_weighted_max": 0.08479842210351106,
+            "maximum_pointwise_weighted_error": 0.1,
+            "eligible_default": true,
+            "scope": "heuristic time-domain resolution screening, not stability certification"
+          }
         }
       ],
-      "recommended_fit": null,
+      "recommended_fit": 20,
       "fit_band_eV_actual": [
         1.5099768412296328,
         5.980906822641831
@@ -5107,15 +5380,21 @@
       ],
       "source_samples": 49,
       "fit_samples": 37,
-      "best_candidate": 12,
-      "quality": "needs_refinement",
+      "best_candidate": 20,
+      "quality": "screened_candidate",
       "tensor_representation": "isotropic_diagonal_assumption",
       "tensor_axes": [
         "x",
         "y",
         "z"
       ],
-      "tensor_source_scope": "scalar n,k table: isotropic model, not independently measured tensor components"
+      "tensor_source_scope": "scalar n,k table: isotropic model, not independently measured tensor components",
+      "refinement": {
+        "date": "2026-11-23",
+        "scope": "passive twenty-pole model with explicit linewidth floor; original six pole-count candidates retained",
+        "minimum_damping_au": 0.002,
+        "warning": "measurement-point screening and local optimizer termination, not validated material physics or a global optimum"
+      }
     },
     {
       "id": "cu-johnson-1972",
@@ -5293,7 +5572,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -5308,7 +5588,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.23302564094028771,
@@ -5752,7 +6033,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -5767,7 +6049,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.1008748614030399,
@@ -6233,7 +6516,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -6248,7 +6532,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.08103478291827428,
@@ -6735,7 +7020,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -6750,7 +7036,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.0729244115371909,
@@ -7236,7 +7523,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -7251,7 +7539,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.2808115153060433,
@@ -7714,7 +8003,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -7729,7 +8019,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.009744525114486707,
@@ -8192,7 +8483,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -8207,7 +8499,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.0029272190257527753,
@@ -8694,7 +8987,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -8709,7 +9003,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.003374212144561026,
@@ -9216,7 +9511,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -9231,7 +9527,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.4291913599486032,
@@ -9675,7 +9972,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -9690,7 +9988,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.11594287570895075,
@@ -10156,7 +10455,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -10171,7 +10471,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.07322316920571169,
@@ -10659,7 +10960,8 @@
                   }
                 ],
                 "selected_start": 1
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -10674,7 +10976,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.08124050756960864,
@@ -11155,7 +11458,8 @@
                   }
                 ],
                 "selected_start": 4
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -11171,7 +11475,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.0013858507531519502,
@@ -11322,7 +11627,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -11338,7 +11644,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 1.6425095650419933e-05,
@@ -11495,7 +11802,8 @@
                   }
                 ],
                 "selected_start": 6
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -11511,7 +11819,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 9.679432695869801e-06,
@@ -11674,7 +11983,8 @@
                   }
                 ],
                 "selected_start": 5
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -11690,7 +12000,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 3.693282440690288e-05,
@@ -11879,7 +12190,8 @@
                   }
                 ],
                 "selected_start": 4
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -11895,7 +12207,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.002336513802204131,
@@ -12044,7 +12357,8 @@
                   }
                 ],
                 "selected_start": 6
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -12060,7 +12374,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.002336513604576945,
@@ -12217,7 +12532,8 @@
                   }
                 ],
                 "selected_start": 4
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -12233,7 +12549,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.00013352778835295424,
@@ -12396,7 +12713,8 @@
                   }
                 ],
                 "selected_start": 4
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -12412,7 +12730,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.00013252578192250278,
@@ -12603,7 +12922,8 @@
                   }
                 ],
                 "selected_start": 4
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -12619,7 +12939,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.44414476391096985,
@@ -12770,7 +13091,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -12786,7 +13108,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.2668375796235322,
@@ -12944,7 +13267,8 @@
                   }
                 ],
                 "selected_start": 5
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -12960,7 +13284,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.16385324904564721,
@@ -13124,7 +13449,8 @@
                   }
                 ],
                 "selected_start": 6
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -13140,7 +13466,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.13204390440283584,
@@ -13329,7 +13656,8 @@
                   }
                 ],
                 "selected_start": 7
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -13345,7 +13673,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.08988385717508192,
@@ -13540,7 +13869,8 @@
                   }
                 ],
                 "selected_start": 8
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -13556,7 +13886,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.06519768009032934,
@@ -13747,7 +14078,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -13763,7 +14095,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.1872702945142273,
@@ -13912,7 +14245,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -13928,7 +14262,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.06728089231498292,
@@ -14085,7 +14420,8 @@
                   }
                 ],
                 "selected_start": 5
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -14101,7 +14437,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.01396193597579485,
@@ -14262,7 +14599,8 @@
                   }
                 ],
                 "selected_start": 2
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -14278,7 +14616,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.009439732553176795,
@@ -14467,7 +14806,8 @@
                   }
                 ],
                 "selected_start": 5
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -14483,7 +14823,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.062286731103765466,
@@ -14632,7 +14973,8 @@
                   }
                 ],
                 "selected_start": 6
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -14648,7 +14990,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.01444759594674292,
@@ -14803,7 +15146,8 @@
                   }
                 ],
                 "selected_start": 6
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -14819,7 +15163,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.010113709548431497,
@@ -14980,7 +15325,8 @@
                   }
                 ],
                 "selected_start": 3
-              }
+              },
+              "minimum_damping_au": 0.0
             },
             "schema": "salmonpy.ld-fit/1",
             "software_version": "0.1.0a7",
@@ -14996,7 +15342,8 @@
             "stability_scope": "requires field grid/CFL; not certified by fit",
             "constraints": "strength,damping,resonance >= 0; epsilon_infinity > 0",
             "normalization": "nonmagnetic mu=1; plasma_frequency=1; fitted oscillator weight is strength",
-            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256"
+            "source_scope": "source_file is a caller-supplied reference; arrays are identified separately by data_sha256",
+            "minimum_damping_au": 0.0
           },
           "validation": {
             "pointwise_weighted_max": 0.008509059458473812,

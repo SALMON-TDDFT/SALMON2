@@ -1782,3 +1782,29 @@ A/E/H: use a performance ResponseSession with PacketCoupledStepper. Keep metadat
 Molecular performance runtime: require a validation JSON matching the executable SHA256. The measured record declares checked/performance modes and public-entry/direct-restoration evidence; never invent or copy proof flags to a different binary. For coordinated disk resume, use the same executable/input/dt/capacity/MPI layout, preserve the receiving execution mode, and inspect restored_steps plus restore_statistics.updates==0. Saved field step n corresponds to molecular step n-1 because of the first zero-current hold. Frame history is analysis data, not replay input. Validation reuses existing GS through test-only read links; production bundle copying is unchanged. Restart does not require a new SCF. See DIPOLE_RADIATION guides for the separate-job example.
 
 Process-isolated fast-PR HSE is retained for host/process-state isolation. FastHSEResponseBackend(execution_mode="performance") requires explicit MODE_PERFORMANCE negotiation; old workers must reject, never fall back. Full-k Taylor/PT-CN only in this serial route; use NativeFastHSEBackend for reduced-k/internal MPI. Keep explicit checkpoint checks and the receiving mode; no automatic failed-worker restart/replay. The mixed sample forwards hse-execution-mode to either backend independently of the outer mode.
+
+
+Many-point mixed-mode measurements: tools/measure_mixed_performance.py launches
+nine-rank compute jobs immediately; never describe it as management-node input
+validation. Require an existing synthetic periodic PZ rt.inp/data_for_restart,
+a prebuilt SHA-validated host-MPI library and LD/SBE kernels. No SCF or GS collection.
+Use explicit checked/performance modes for all components and retain the same
+protected-update policy. Compare every-step A/E/current and LD E/H observations.
+Separate calculation_status from resource_measurement_status. Missing measurements
+are null/reasons, not failed physics or zero memory. Report RSS high-water-sum,
+Python-only MPI counts/waits, logical payload and logical file sizes with their
+limitations; never call these simultaneous job peak, pure network time, wire
+traffic or physical disk bandwidth. Local synthetic one-run timings do not prove
+multi-node scaling, statistical speedup or physical convergence. MEMORY guides
+and the active checklist contain the measured scope.
+
+
+Scalar LD fitting supports minimum_damping in atomic units (default0) in both
+Fortran and SciPy optimizers. Record the linewidth assumption; never infer it
+from a small discrete-sample residual. Ag's stored20-pole candidate uses0.002au,
+with RMS2.6184% and maximum weighted point error8.4798%; original candidates and
+source tables remain. Unconstrained refined fits with near-zero linewidths were
+rejected because inter-point peaks were not supported by data. Dense sampling
+plus pole-center checks validates only model behavior, not experimental values.
+Use fit_optical_materials.py --recorded-settings for the recorded seed/bounds;
+loading never refits, downloads or runs SALMON. See OPTICAL_DATA guides.

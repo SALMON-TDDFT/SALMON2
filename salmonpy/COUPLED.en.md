@@ -1474,3 +1474,13 @@ Before any update, the worker must accept `MODE_PERFORMANCE` and reply `SALMONPY
 Performance mode omits per-step finite scans, old-A comparison and optional Fortran diagnostic backups through the existing `rt_step(..., checked=...)` interface. Initialization, executable SHA, reply structure/index, shapes, capacity, lifetime and explicit save/restore checks remain. Physical update and learning/output order are unchanged. Failed workers are retired without automatic respawn or history replay; no new operation terminates independent siblings or the caller, but continuation of the failed state is not guaranteed.
 
 Direct restore retains the receiving mode and existing caller-owned checkpoint authentication/A-restoration contract. `mpi_mixed_native --hse-execution-mode performance` selects either the MPI HSE backend or the serial worker. The outer coupling mode remains a separate choice.
+
+
+## Many-point measurements
+
+Use the manual `tools/measure_mixed_performance.py` driver for paired checked/
+performance measurements with real E/H + two LD materials + independent SBE and
+shared-model TDDFT states. It runs nine MPI ranks immediately; use allocated
+compute resources. Both modes use explicit protected updates at every step.
+See MEMORY guides for the required fixture, measurement meanings and limitations.
+The observation stride does not thin the every-step macro-point current comparison.

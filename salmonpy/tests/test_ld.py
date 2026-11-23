@@ -325,6 +325,36 @@ class LDFittingTests(unittest.TestCase):
 
 
 class ScipyFitTests(unittest.TestCase):
+    def test_explicit_fit_damping_floor(self):
+        from salmonpy.ld import fit_lorentz_drude
+        import warnings
+        omega=np.linspace(.03,.4,90)
+        initial=LorentzDrude(plasma_frequency=1.,strength=[.12,.08],
+                            resonance=[0.,.22],damping=[.025,.04],epsilon_infinity=2.)
+        target=initial.permittivity(omega)
+        optimizers=['native']
+        try:
+            import scipy
+            optimizers.append('scipy')
+        except ImportError:
+            pass
+        for optimizer in optimizers:
+            with self.subTest(optimizer=optimizer),warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                default,old=fit_lorentz_drude(omega,target,poles=2,units='atomic_gaussian',
+                    initial=initial,optimizer=optimizer,starts=1)
+                zero,explicit=fit_lorentz_drude(omega,target,poles=2,units='atomic_gaussian',
+                    initial=initial,optimizer=optimizer,starts=1,minimum_damping=0.)
+                self.assertEqual(default,zero)
+                self.assertEqual(old.data_sha256,explicit.data_sha256)
+                constrained,report=fit_lorentz_drude(omega,target,poles=2,units='atomic_gaussian',
+                    initial=initial,optimizer=optimizer,starts=1,minimum_damping=.03)
+                self.assertTrue(all(value>=.03-1e-14 for value in constrained.damping))
+                self.assertEqual(report.as_dict()['minimum_damping_au'],.03)
+        for invalid in (-1.,float('nan'),float('inf')):
+            with self.assertRaises(ValueError):
+                fit_lorentz_drude(omega,target,poles=2,units='atomic_gaussian',minimum_damping=invalid)
+
     def test_scipy_optional_native_objective(self):
         try:
             import scipy

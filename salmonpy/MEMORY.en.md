@@ -91,3 +91,60 @@ This uses four field ranks plus one bookkeeping rank. Grid spacing/dt stay fixed
 `report.json` separates `calculation_status` from `resource_measurement_status`. It records per-rank setup, advance, backup capture/release, observation and final-checkpoint wall times, plus peak RSS from `process_memory()`. Missing RSS stays None with its reason and does not fail the calculation. `--fail-resource-probe` explicitly tests that policy. Summed process high-water RSS is not a simultaneous job peak. File inventory includes checkpoints/static inputs, with point-stream bytes separate; the report itself and external launcher log are excluded.
 
 Timings include MPI waits; pure communication time/traffic is not isolated. Observation communication stays within the field group. Measurement records are gathered application-wide once after computation. This fixture captures old state only for observed updates; it is not an optimization that removes per-step failure recovery from protected coupled calculations. Stored observation maxima depend on sampling interval and must be distinguished from physical state when comparing checkpoint files.
+
+
+## Measuring many-point protected mixed calculations
+
+The manual measurement driver `tools/measure_mixed_performance.py` launches four
+separate jobs, sequentially: checked/performance at 32 points × 512 steps and
+64 points × 2048 steps. It requires exactly nine local ranks: four for a 64³ E/H
+grid containing two LD materials, two two-rank TDDFT groups, and one SBE rank.
+One quarter of the macro points use independent TDDFT states from shared models;
+the others use independent SBE states. All numerical updates use Fortran kernels.
+Every update explicitly retains the state needed for protected restoration in
+both modes. This does not measure unprotected performance-mode updates.
+
+```sh
+python tools/measure_mixed_performance.py BUILD.json EXISTING_SYNTHETIC_GS NEW_RESULTS
+```
+
+Prepare the package, LD/SBE kernels and embedded MPI library beforehand. The
+command neither builds nor downloads them, runs no SCF, and uses test-only
+read-only GS links. The existing GS must contain `rt.inp` and `data_for_restart`
+with the synthetic periodic PZ fixture used by this test. This is a developer
+reproduction tool, not an arbitrary-material input generator or scheduler script.
+Run it on allocated compute resources; it starts MPI jobs immediately. Do not run
+it on a site's login/management node. Site launchers and multi-node layouts need
+separate tests; this driver assumes `mpiexec -n 9`.
+
+Each job writes `report.json` and complete macro-point A/E/current arrays in
+`traces.npz`. The driver compares every stored step and both LD-region E/H point
+outputs. Observation stride is 1 for the smaller case and 16 for the larger case;
+macro-point histories are always retained at every step. Changing stride does
+not change the physical update. This pair is not an isolated stride benchmark.
+
+Report interpretation:
+
+- `loop_seconds_max` is the slowest rank's elapsed update-loop time, including
+  waiting, protected backups and Python history collection. Setup and total
+  launcher time are separate. Communication instrumentation itself has overhead.
+- MPI counts/times cover Python orchestration calls only; Fortran-internal MPI is
+  excluded. Blocking times include waiting and cannot be summed across ranks as
+  network time. Logical A/J bytes omit metadata, protection, repetition and wire
+  protocol overhead. The final measurement gather is outside the timed loop.
+- RSS values are per-process high-water marks. Their sum is not simultaneous
+  job memory, and can count shared pages repeatedly. It is not a hard memory cap.
+- I/O reports regular-file counts and logical sizes, with observation bytes and
+  launcher-log bytes separate. GS symlink targets are excluded. These numbers
+  are neither physical disk traffic nor filesystem throughput. OS block counters
+  are reported in platform block units without guessing a byte conversion.
+- Resource probe failures are recorded separately from calculation failures;
+  unavailable memory remains null. The test-only environment variable
+  `SALMONPY_TEST_RESOURCE_FAILURE=1` exercises missing resource probes without
+  changing numerical work. An actual calculation error still fails the run.
+
+One measured run per mode/size is evidence of reproducibility in that scope,
+not a statistically established speedup or physical-convergence result. The
+small synthetic TDDFT/SBE material models are not production material inputs.
+See the active state-isolation checklist for measured numbers and remaining
+multi-node/platform work.

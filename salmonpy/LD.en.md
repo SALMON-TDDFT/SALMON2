@@ -129,7 +129,7 @@ Install `salmonpy[fit]` explicitly and select `optimizer="scipy"`. SciPy uses bo
 `least_squares(method="trf", x_scale="jac")`; Fortran evaluates the complex residual,
 initial guesses and final error/timestep diagnostics. SciPy controls optimization
 and finite-difference Jacobians. No Python implementation of the LD physics is added.
-The compatibility default remains `optimizer="native"`; missing SciPy raises an
+The default is `optimizer="native"`; missing SciPy raises an
 actionable error, without silent fallback or installation. Stored models need no SciPy.
 
 For SciPy, max_iterations limits function evaluations per start (`max_nfev`); numerical
@@ -241,3 +241,15 @@ coupling drivers.
 
 The installed examples accept `--execution-mode performance`. Compare a checked
 run before using this mode for a new configuration.
+
+
+### Explicit damping floor for scalar fits
+
+`fit_lorentz_drude(..., minimum_damping=0.002)` constrains every pole, including
+Drude, in atomic units. Both the Fortran optimizer and optional SciPy optimizer
+apply the same lower bound. Initial widths below it are projected onto the
+allowed range; the input initial model is not mutated. The default is0, which
+keeps the previous unconstrained calculation. The returned report records
+`minimum_damping_au` and the initial model for reproduction. This is a model
+assumption; a small residual on discrete samples does not validate narrow peaks
+between them. It does not alter existing LD time evolution or loaded models.
