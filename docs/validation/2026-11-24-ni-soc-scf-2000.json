@@ -1,0 +1,58 @@
+{
+  "date": "2026-11-24",
+  "scope": "Ni SOC SCF extension, final zero-field stage limited to 2000; coarse-input convergence only",
+  "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-alignment-2000-20261124",
+  "final_iteration_limit": 2000,
+  "zero_field_start_iteration": 1744,
+  "final_iteration": 3181,
+  "accepted_zero_field_iterations": 1437,
+  "native_charge_converged": true,
+  "residual": 9.92913807787193e-06,
+  "threshold": 1e-05,
+  "energy_hartree": -167.66144535580693,
+  "last_actual_iteration": {
+    "energy_change_hartree": 5.239106712906505e-06,
+    "moment_change_muB": 1.095313589161151e-05,
+    "sample_interval": 1.0,
+    "moment_norm_muB": 0.4973629219002577,
+    "mx_muB": 0.2819348986770854,
+    "my_muB": 0.2871576333563092,
+    "mz_muB": 0.29227227476157724
+  },
+  "field_ramp_targets_met": true,
+  "zero_control_converged": false,
+  "raw_overall_status": "SCF review required",
+  "note": "Overall raw status includes unresolved zero-control. Raw history/result retain a duplicate convergence-confirmation sample with interval zero; last_actual_iteration above excludes it. Runner updated to retain genuine changes on no-advance confirmation.",
+  "MPI_ranks": 2,
+  "threads_per_rank": 4,
+  "mixing_rate": 0.15,
+  "temperature_k": 300,
+  "electrons": 18,
+  "states": 36,
+  "kmesh": [
+    2,
+    2,
+    2
+  ],
+  "runtime_sha256": "a0f9b9339079e289f1e76158f624e0ed303356b38861bef1923cf385c7606f30",
+  "elapsed_seconds": 855.2473219580716,
+  "electronic_datasets_saved": false,
+  "TDDFT_started": false,
+  "physical_grid_k_convergence_verified": false,
+  "hashes": {
+    "configuration.json": "6aae646b8e9a60b591579e00647271380fba93f7ccf0ada757ecc526168aab65",
+    "result.json": "1e607def57eeea1a929fe337823b77b7720c2d0d4bed152ee26e88bf30762098",
+    "history.csv": "3818207eb18b5e205a74b14169104b0959bbd5ef2b0c2369abd5510701342b98",
+    "run.log": "807e9b7e98f76705590ed2a5674d53c61b7c71344992b7896d86ff1988a18314"
+  },
+  "previous_run_overlap": {
+    "samples": 976,
+    "max_absolute_differences": {
+      "residual": 5.2450520665538354e-11,
+      "energy_hartree": 8.742802037886577e-09,
+      "mx_muB": 3.335342557697629e-10,
+      "my_muB": 3.5800890030301957e-10,
+      "mz_muB": 4.84372819631318e-10
+    }
+  }
+}

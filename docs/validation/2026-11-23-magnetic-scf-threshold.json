@@ -1,0 +1,93 @@
+{
+  "date": "2026-11-23",
+  "scope": "Explicit magnetic SCF preset and coarse Ni SOC stability diagnostic; not physical convergence certification",
+  "record_directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-alignment-magnetic-20261123",
+  "runtime_sha256": "a0f9b9339079e289f1e76158f624e0ed303356b38861bef1923cf385c7606f30",
+  "MPI_ranks": 2,
+  "threads_per_rank": 4,
+  "electrons": 18,
+  "states": 36,
+  "temperature_k": 300,
+  "kmesh": [
+    2,
+    2,
+    2
+  ],
+  "general_tolerance": 1e-09,
+  "magnetic_preset_tolerance": 1e-05,
+  "charge_tolerance_override_supported": true,
+  "result_status": "SCF review required",
+  "final_zero_field": {
+    "stage": 3,
+    "field_au": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "start_iteration": 1744,
+    "end_iteration": 2744,
+    "charge_converged": false,
+    "moment_stable_over_last_sample": true,
+    "stage_target_met": false,
+    "preliminary_stage": false,
+    "residual_target": 1e-05,
+    "moment_change_target_muB": 0.0001,
+    "energy_change_hartree": 1.3513886528926378e-05,
+    "energy_change_target_hartree": 1e-05,
+    "moment_change_muB": 2.1936864020688507e-05,
+    "sample_interval": 1,
+    "info": {
+      "energy_hartree": -167.6614495885718,
+      "residual": 1.969146322179034e-05,
+      "tolerance": 1e-05,
+      "iterations": 2744,
+      "converged": false,
+      "atoms": 1,
+      "bands": 36
+    },
+    "spin": {
+      "field_au": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "zeeman_energy_hartree": 0.0,
+      "spin_magnetic_moment_muB": [
+        0.2763368540491416,
+        0.28543780569180005,
+        0.29922085705128476
+      ],
+      "energy_without_auxiliary_hartree": -167.6614495885718
+    },
+    "mixing": {
+      "rate": 0.15,
+      "min_rate": 0.01,
+      "growth": 1.2,
+      "best_residual": 1.8993052141948524e-05,
+      "enabled": true,
+      "patience": 3,
+      "cooldown": 20,
+      "remaining": 0,
+      "streak": 0,
+      "changes": 0,
+      "last_iteration": 0,
+      "coefficient": "mixrate"
+    }
+  },
+  "electronic_datasets_saved": false,
+  "installed_wheel_tests": {
+    "total": 729,
+    "passed": 684,
+    "skipped": 45
+  },
+  "related_DFT_SOC_tests": 18,
+  "MPI_independence_restore_regression": "PASS",
+  "source_checkout_test_attempt": "112 errors caused by missing native library checksum records; complete installed-wheel suite passed",
+  "remote_CI_dispatched": false,
+  "hashes": {
+    "configuration.json": "f1bf725f4c5500a447a831083275c648495478e341ca28a9729b0d64158edf5e",
+    "result.json": "5b600f00006f5b51d49370b85667c11326290efd26ef6e06f1f713248105e1d8",
+    "history.csv": "08192d46c9ee77070ebfe3362873f33038597157512c70b97bb23a47b3b82e1f",
+    "run.log": "022682bec657ef17401700318ac491aa5e1350c8043f7e4e7de15323200c07ed"
+  }
+}

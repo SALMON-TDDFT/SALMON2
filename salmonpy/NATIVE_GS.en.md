@@ -1640,3 +1640,9 @@ independent states, memory restore and exact fresh-process direct resume.
 Longer fixed-input Ni trials also show alignment and staged removal, but final
 zero-field residual remains about5.9e-6, unconverged. This does not establish grid/k
 or physical-material convergence. See the observations in NICKEL_SOC.en.md.
+
+### Magnetic-material SCF threshold
+
+Explicitly select `SCFSettings.for_magnetic(max_iterations=4000)` to start with a residual tolerance of `1e-5`. Override it with `tolerance=`. Ordinary `SCFSettings()` retains `1e-9`; SOC does not automatically imply magnetism.
+
+Inspect energy and magnetic-moment changes as well as the residual. Reduce mixing progressively when oscillations persist. The Ni diagnostic uses mixing 0.15 for the final zero-field stage, energy change `1e-5 Ha`, and maximum moment-component change `1e-4 μB` between observations. These configurable diagnostics depend on the input and sampling interval and do not certify physical accuracy. Native SCF stops at its charge threshold; unsettled observables are reported for review rather than labeled converged.

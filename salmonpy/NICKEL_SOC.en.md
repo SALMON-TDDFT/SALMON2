@@ -163,7 +163,7 @@ run it explicitly in a calculation environment or allocated job.
 ```sh
 OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=1 mpiexec -n 2 python tools/test_nickel_scf_mpi.py \
   BUILD_JSON NEW_OUTPUT --potential PINNED_NI_UPF --size 2 \
-  --alignment-study --stage-limit 1000
+  --alignment-study --stage-limit 1000 --final-stage-limit 2000
 ```
 
 The fixed case uses18 electrons,36 spinors,300 K,16^3 points and SALMON's2x2x2
@@ -171,15 +171,15 @@ k mesh. It explicitly selects `simple_dm`, coefficient0.3 and downward adaptatio
 Seed0 initial arrays are compared with recorded tolerances/differences; threading
 can introduce roundoff. The auxiliary schedule is Bz=0.002,0.0005,0.0001,0 (au),
 up to1000 iterations per stage; the zero-field control has a1000-iteration budget.
-The zero-field control and final zero-field stage require charge tolerance1e-9
-and moment-component changes up to1e-5 mu_B since the last sample. Preliminary
-nonzero-field stages use residual1e-5 and moment changes up to1e-3 mu_B to prepare
-alignment, configurable with `--preliminary-residual` and `--preliminary-moment-change`.
-Meeting a preliminary target is not recorded as final SCF convergence. Sample intervals are recorded. Sampling
-is every25 iterations, switching to every iteration below residual1e-6.
-A stage that misses its own targets does not advance automatically. The final
-zero-field criteria are not relaxed. `--control-record PATH_TO_ZERO_CONTROL_STAGES_JSON`
-explicitly reuses a matching control after checking its input, potential and run configuration; provenance is recorded.
+The current magnetic residual target is1e-5, configurable with `--charge-tolerance`.
+Final zero-field observation changes use1e-4 mu_B for moment components and1e-5 Ha for energy,
+configurable with `--moment-tolerance` and `--energy-tolerance`. Preliminary nonzero-field stages
+use residual1e-5 and moment changes1e-3 mu_B (`--preliminary-residual`, `--preliminary-moment-change`).
+Final mixing is0.15 (`--final-mixing-rate`); `--final-stage-limit` sets its iteration budget.
+Sampling switches from25 iterations to every iteration below ten times the stage residual target.
+A convergence-confirmation call with no accepted iteration retains the last genuine changes.
+A stage that misses its targets does not advance. `--control-record PATH_TO_ZERO_CONTROL_STAGES_JSON`
+explicitly reuses a matching control after checking its input, potential and configuration; provenance is recorded.
 
 Outputs include `history.csv`, `progress.json`, stage JSON, residual CSV/optional
 plots, `scf-alignment.png` and `result.json`. Wavefunctions, density and restart
@@ -187,7 +187,7 @@ state remain only in RAM and are not retained for another process.
 This studies SCF stability on a fixed coarse input, not grid/k convergence or a
 certified Ni property. The long calculation is excluded from required CI.
 
-### Fixed-input observations on2026-11-23
+### Historical observations with the strict1e-9 target (2026-11-23)
 
 With MPI2 and4 threads per rank, the zero-field control had residual about3.0e-2
 at iteration1001, versus about4.0e-6 for fixed auxiliary Bz=0.002 at iteration1001.
@@ -199,3 +199,25 @@ Alignment and staged removal were observed; final zero-field SCF convergence was
 Downward adaptation reached0.01 in the zero-field control and0.15 after the ramp,
 so this compares the complete strategies, not an isolated field-only effect.
 Residual stagnation needs diagnosis rather than declaring completion by raising the iteration budget.
+
+### Magnetic-material SCF threshold
+
+Explicitly select `SCFSettings.for_magnetic(max_iterations=4000)` to start with a residual tolerance of `1e-5`. Override it with `tolerance=`. Ordinary `SCFSettings()` retains `1e-9`; SOC does not automatically imply magnetism.
+
+Inspect energy and magnetic-moment changes as well as the residual. Reduce mixing progressively when oscillations persist. The Ni diagnostic uses mixing 0.15 for the final zero-field stage, energy change `1e-5 Ha`, and maximum moment-component change `1e-4 μB` between observations. These configurable diagnostics depend on the input and sampling interval and do not certify physical accuracy. Native SCF stops at its charge threshold; unsettled observables are reported for review rather than labeled converged.
+
+2026-11-23: MPI2 × 4 threads reached all three auxiliary-field stage targets. After 1000 final zero-field iterations, residual was 1.97e-5, energy change 1.35e-5 Ha and maximum moment-component change 2.19e-5 μB over the last iteration. Residual and energy targets remained unmet; review is required. No electronic datasets were saved and no TDDFT was started.
+
+2026-11-24: Extending the final zero-field limit to 2000 reached convergence after 1437 accepted zero-field iterations (3181 total), retaining mixing 0.15. Residual was 9.929e-6; the last actual iteration changed energy by 5.239e-6 Ha and moment components by at most 1.095e-5 μB. The auxiliary-field-free control remained unconverged.
+
+### TDDFT from the converged GS
+
+Add `--rt-steps 8` to pass the successful final zero-field GS directly from memory to TDDFT.
+Fortran explicitly flushes observation streams, which are read after closing the calculation. Charge current covers all eight updates; default spin observations cover steps0,1,8.
+Checked and performance states receive three-component A/c; charge current, electron number,
+magnetization and Pauli spin current are compared. Capture a memory backup midway, run the second half,
+roll back and compare repeated values with `rtol=2e-12, atol=2e-14`; byte equality is recorded separately. No SCF replay or electronic disk checkpoint is used.
+TDDFT is not started if final SCF targets are unmet. This short connection/recovery check does not
+certify spectra or timestep accuracy.
+
+Converged-GS trial on2026-11-24: internal MPI2 × 4 threads passed mode and step4 direct-memory rollback comparisons. Maximum current/electron-number difference was3.55e-15; flushed observation files, including magnetization and spin current, also agreed within the declared tolerance. This is not bitwise identity. GS counters were unchanged and no electronic disk data were saved. The auxiliary-field-free control remained unconverged; its overall review status is separate from the successful field-ramp/TDDFT route.

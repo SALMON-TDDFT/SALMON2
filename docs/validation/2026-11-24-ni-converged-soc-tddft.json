@@ -1,0 +1,348 @@
+{
+  "date": "2026-11-24",
+  "status": "passed",
+  "scope": "Converged coarse-input Ni SOC GS to in-memory TDDFT; mode and rollback consistency, not physical grid/k/dt convergence",
+  "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-converged-rt-v3-20261124",
+  "MPI_ranks": 2,
+  "OMP_threads_per_rank": 4,
+  "runtime_sha256": "a0f9b9339079e289f1e76158f624e0ed303356b38861bef1923cf385c7606f30",
+  "GS_final_stage": {
+    "stage": 3,
+    "field_au": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "start_iteration": 1744,
+    "end_iteration": 3181,
+    "charge_converged": true,
+    "moment_stable_over_last_sample": true,
+    "stage_target_met": true,
+    "preliminary_stage": false,
+    "residual_target": 1e-05,
+    "moment_change_target_muB": 0.0001,
+    "energy_change_hartree": 5.239586528205109e-06,
+    "energy_change_target_hartree": 1e-05,
+    "moment_change_muB": 1.0953122444534724e-05,
+    "sample_interval": 1,
+    "info": {
+      "energy_hartree": -167.66144535624272,
+      "residual": 9.929139608966465e-06,
+      "tolerance": 1e-05,
+      "iterations": 3181,
+      "converged": true,
+      "atoms": 1,
+      "bands": 36
+    },
+    "spin": {
+      "field_au": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "zeeman_energy_hartree": 0.0,
+      "spin_magnetic_moment_muB": [
+        0.28193489872721456,
+        0.2871576334097092,
+        0.29227227481962226
+      ],
+      "energy_without_auxiliary_hartree": -167.66144535624272
+    },
+    "mixing": {
+      "rate": 0.15,
+      "min_rate": 0.01,
+      "growth": 1.2,
+      "best_residual": 9.929139608966465e-06,
+      "enabled": true,
+      "patience": 3,
+      "cooldown": 20,
+      "remaining": 0,
+      "streak": 0,
+      "changes": 0,
+      "last_iteration": 0,
+      "coefficient": "mixrate"
+    }
+  },
+  "TDDFT": {
+    "status": "passed",
+    "steps": 8,
+    "dt_au": 0.001,
+    "rtol": 2e-12,
+    "atol": 2e-14,
+    "comparisons": {
+      "checked_performance_current_electrons": [
+        {
+          "bitwise_equal": false,
+          "max_absolute_difference": 3.552713678800501e-15
+        },
+        {
+          "bitwise_equal": false,
+          "max_absolute_difference": 3.552713678800501e-15
+        }
+      ],
+      "checked_restored_current_electrons": [
+        {
+          "bitwise_equal": false,
+          "max_absolute_difference": 1.734723475976807e-18
+        },
+        {
+          "bitwise_equal": false,
+          "max_absolute_difference": 1.734723475976807e-18
+        }
+      ],
+      "performance_restored_current_electrons": [
+        {
+          "bitwise_equal": false,
+          "max_absolute_difference": 3.552713678800501e-15
+        },
+        {
+          "bitwise_equal": false,
+          "max_absolute_difference": 3.552713678800501e-15
+        }
+      ],
+      "checked_performance_observations": {
+        "0": {
+          "bytes_equal": false,
+          "max_absolute_difference": 2.270048298641525e-18,
+          "samples": 8,
+          "time_values": [
+            0.001,
+            0.002,
+            0.003,
+            0.004,
+            0.005,
+            0.006,
+            0.007,
+            0.008
+          ]
+        },
+        "1": {
+          "bytes_equal": true,
+          "max_absolute_difference": 0.0,
+          "samples": 1,
+          "time_values": [
+            0.0
+          ]
+        },
+        "2": {
+          "bytes_equal": false,
+          "max_absolute_difference": 9.992007221626409e-16,
+          "samples": 3,
+          "time_values": [
+            0.0,
+            0.001,
+            0.008
+          ]
+        }
+      },
+      "checked_restored_observations": {
+        "0": {
+          "bytes_equal": false,
+          "max_absolute_difference": 1.849919956803392e-18,
+          "samples": 8,
+          "time_values": [
+            0.001,
+            0.002,
+            0.003,
+            0.004,
+            0.005,
+            0.006,
+            0.007,
+            0.008
+          ]
+        },
+        "1": {
+          "bytes_equal": true,
+          "max_absolute_difference": 0.0,
+          "samples": 1,
+          "time_values": [
+            0.0
+          ]
+        },
+        "2": {
+          "bytes_equal": false,
+          "max_absolute_difference": 9.992007221626409e-16,
+          "samples": 3,
+          "time_values": [
+            0.0,
+            0.001,
+            0.008
+          ]
+        }
+      },
+      "performance_restored_observations": {
+        "0": {
+          "bytes_equal": false,
+          "max_absolute_difference": 2.710081914740134e-18,
+          "samples": 8,
+          "time_values": [
+            0.001,
+            0.002,
+            0.003,
+            0.004,
+            0.005,
+            0.006,
+            0.007,
+            0.008
+          ]
+        },
+        "1": {
+          "bytes_equal": true,
+          "max_absolute_difference": 0.0,
+          "samples": 1,
+          "time_values": [
+            0.0
+          ]
+        },
+        "2": {
+          "bytes_equal": false,
+          "max_absolute_difference": 2.0057740190981832e-18,
+          "samples": 3,
+          "time_values": [
+            0.0,
+            0.001,
+            0.008
+          ]
+        }
+      }
+    },
+    "GS_counters_unchanged": true,
+    "electronic_disk_data_saved": false,
+    "observations_explicitly_flushed_and_model_closed": true,
+    "traces": {
+      "checked": [
+        [
+          -7.614188976527323e-07,
+          3.916062948081719e-08,
+          -4.345448918175555e-07,
+          18.000000000501924
+        ],
+        [
+          -1.4934737749451458e-06,
+          1.5354868302612078e-07,
+          -8.777049455666952e-07,
+          18.000000000501924
+        ],
+        [
+          -2.092221690344555e-06,
+          3.3729390898254007e-07,
+          -1.2962017271302758e-06,
+          18.000000000501938
+        ],
+        [
+          -2.5040378559658275e-06,
+          5.829232704243625e-07,
+          -1.6781294897022113e-06,
+          18.00000000050187
+        ],
+        [
+          -2.69202155712793e-06,
+          8.805300909185123e-07,
+          -2.0125852653283687e-06,
+          18.00000000050191
+        ],
+        [
+          -2.6392937705200896e-06,
+          1.2181790192822414e-06,
+          -2.2899703288316526e-06,
+          18.000000000501938
+        ],
+        [
+          -2.35050535499898e-06,
+          1.5823874201715453e-06,
+          -2.502259659058236e-06,
+          18.00000000050191
+        ],
+        [
+          -1.8514211112514263e-06,
+          1.958663469844098e-06,
+          -2.643232309555146e-06,
+          18.000000000501903
+        ]
+      ],
+      "performance": [
+        [
+          -7.614188976526239e-07,
+          3.9160629479841405e-08,
+          -4.345448918173522e-07,
+          18.000000000501924
+        ],
+        [
+          -1.4934737749456879e-06,
+          1.535486830267713e-07,
+          -8.777049455663158e-07,
+          18.000000000501924
+        ],
+        [
+          -2.0922216903444465e-06,
+          3.37293908983299e-07,
+          -1.296201727130181e-06,
+          18.000000000501938
+        ],
+        [
+          -2.504037855964635e-06,
+          5.829232704246878e-07,
+          -1.678129489702008e-06,
+          18.000000000501874
+        ],
+        [
+          -2.6920215571285804e-06,
+          8.805300909187292e-07,
+          -2.0125852653279756e-06,
+          18.00000000050191
+        ],
+        [
+          -2.639293770520957e-06,
+          1.2181790192820246e-06,
+          -2.289970328830785e-06,
+          18.000000000501938
+        ],
+        [
+          -2.3505053549986547e-06,
+          1.582387420169919e-06,
+          -2.502259659060513e-06,
+          18.00000000050191
+        ],
+        [
+          -1.8514211112512094e-06,
+          1.9586634698439895e-06,
+          -2.643232309556908e-06,
+          18.000000000501906
+        ]
+      ]
+    }
+  },
+  "zero_control": {
+    "reused": true,
+    "converged": false,
+    "note": "Deliberately separate comparison; raw overall status remains SCF review required because this control did not converge. Final field-ramp GS and TDDFT comparisons passed."
+  },
+  "electronic_disk_data_saved": false,
+  "remote_CI_dispatched": false,
+  "installed_wheel_suite": {
+    "total": 729,
+    "passed": 684,
+    "skipped": 45,
+    "log": "/private/tmp/salmonpy-converged-rt-final-wheel-20261124/tests.log",
+    "scope": "final driver and implementation included; AI task keywords subsequently checked with29 source tests"
+  },
+  "related_source_tests": 29,
+  "earlier_attempts": [
+    {
+      "directory": "salmonpy-ni-converged-rt-20261124",
+      "reason": "exact comparison rejected multithreaded roundoff; retained as failed comparison"
+    },
+    {
+      "directory": "salmonpy-ni-converged-rt-v2-20261124",
+      "reason": "interrupted to correct buffered-output comparison timing"
+    }
+  ],
+  "method": "Use separate continuous and retry states, restore memory at step4, run only steps5..8 after restore, explicitly flush observations with existing native transaction capture/release and close before reading. No electronic disk checkpoint or SCF replay. Current/electron trace covers8 steps; default spin output covers0,1,8.",
+  "hashes": {
+    "configuration.json": "92f682cf3ab131dbe7df02b8db996572264a7d8bea1e794da1dcc5ec3d821687",
+    "result.json": "f904f12cfd73d4279b772b624034fee666d15de2885c3763cfeeef1d890c113b",
+    "history.csv": "deca9c43b79a46db8c0d431186801c05817fe3008020af4e9720be451d933628",
+    "run.log": "c4c59f816fb8ea2d3ad01909935bfb586bd1099d7ba435b9600c1d4b96d960a1",
+    "executed-driver.py": "41bc83d88942a0929a957b84a1076d8c2288fe965b18dbc72095127f4dd21005"
+  }
+}

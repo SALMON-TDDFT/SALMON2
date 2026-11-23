@@ -136,6 +136,15 @@ class SCFSettings:
     initial_wavefunction: str | None=None
     random_seed: int | None=None
 
+    @classmethod
+    def for_magnetic(cls, *, tolerance=1e-5, **settings):
+        """Explicit magnetic-material starting point, not a convergence guarantee.
+
+        Inspect energy and magnetic-moment changes as well as the residual.
+        SOC alone does not select this preset. Explicit tolerances take priority.
+        """
+        return cls(tolerance=tolerance, **settings)
+
     def __post_init__(self):
         if type(self.adaptive_mixing) is not bool:raise InputError('adaptive_mixing must be bool')
         object.__setattr__(self,'max_iterations',_integer(self.max_iterations,'max_iterations',1,2**31-1))

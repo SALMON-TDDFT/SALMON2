@@ -7,10 +7,15 @@ from salmonpy.dft import DFT, Pseudopotential, SCFSettings, _read_status, Ground
 class DFTTest(unittest.TestCase):
     def test_effective_mixing_coefficient(self):
         self.assertEqual(SCFSettings().mixing_rate,.3)
+        self.assertEqual(SCFSettings().tolerance,1e-9)
+        self.assertEqual(SCFSettings.for_magnetic().tolerance,1e-5)
+        self.assertEqual(SCFSettings.for_magnetic(tolerance=1e-7).tolerance,1e-7)
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'Si_rps.dat';path.write_bytes(b'original')
             pseudo=Pseudopotential.from_file(path,atomic_number=14,local_channel=2)
             model=DFT([14],np.eye(3)*10.26,[[0,0,0]],[pseudo],electrons=4,states=8,grid=[12]*3,kmesh=[2]*3)
+            magnetic=model.input_text(SCFSettings.for_magnetic())
+            self.assertIn('threshold=1.00000000000000008e-05',magnetic)
             for method,key in ((None,'alpha_mb'),('broyden','alpha_mb'),('pulay','beta_p'),('simple','mixrate'),('simple_dm','mixrate')):
                 with self.subTest(method=method):
                     text=model.input_text(SCFSettings(mixing_method=method,mixing_rate=.1,adaptive_mixing=True))
