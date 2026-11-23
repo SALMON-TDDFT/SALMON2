@@ -34,6 +34,31 @@ class OutputTests(unittest.TestCase):
             path.write_text(header.replace('spin_curr_z_z','other')+'\n'+' '.join(str(i) for i in range(16))+'\n')
             with self.assertRaisesRegex(ValueError,'spin dynamics columns'):read_spin_dynamics(path)
 
+    def test_restart_table_segments(self):
+        from salmonpy.analysis import read_table
+        from salmonpy.outputs import read_spin_dynamics
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = (Path(tmp)/name for name in ('before.data', 'after.data'))
+            header = '# 1:Time[au] 2:Jm_x[au]\n'
+            a.write_text(header+'0 1\n1 2\n')
+            b.write_text(header+'1 2\n2 3\n4 5\n')
+            result = read_table([a, b])
+            np.testing.assert_array_equal(result.values, [[0,1],[1,2],[2,3],[4,5]])
+            self.assertFalse(result.values.flags.writeable)
+            self.assertIn(str(b.resolve()), result.source)
+            for text in ('1 9\n2 3\n', '0.5 1\n2 3\n', '2 3\n1 2\n'):
+                b.write_text(header+text)
+                with self.assertRaises(ValueError): read_table([a,b])
+            b.write_text(header.replace('Time[au]', 'Time[fs]')+'2 3\n')
+            with self.assertRaises(ValueError): read_table([a,b])
+            with self.assertRaises(ValueError): read_table([])
+            names = ['Time','mag_x','mag_y','mag_z']+[
+                'spin_curr_'+s+'_'+d for s in ('0','x','y','z') for d in ('x','y','z')]
+            header = '# '+' '.join(f'{i+1}:{n}[au]' for i,n in enumerate(names))+'\n'
+            a.write_text(header+' '.join(map(str,range(16)))+'\n')
+            b.write_text(header+' '.join(map(str,range(16)))+'\n'+'1 '+' '.join(map(str,range(1,16)))+'\n')
+            np.testing.assert_array_equal(read_spin_dynamics([a,b]).time,[0,1])
+
     def test_roundtrip_and_no_overwrite(self):
         from salmonpy.outputs import save_arrays, OutputArchive
         with tempfile.TemporaryDirectory() as tmp:

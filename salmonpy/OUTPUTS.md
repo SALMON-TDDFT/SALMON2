@@ -202,3 +202,16 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 
 Pauliの0成分は、同じ時刻・単位の物質電流Jmと一致します。Pythonの電荷電流はj=-Jmです。
 出力の読み取り方と対応条件は[NICKEL_SOC.md](NICKEL_SOC.md)を参照してください。
+
+### 再開前後の出力をまとめて読む
+
+`read_table` と `read_spin_dynamics` には、出力ファイルを計算した順のリストで渡せます。
+
+```python
+from salmonpy.analysis import read_table
+from salmonpy.outputs import read_spin_dynamics
+current = read_table(['part1/ni_rt.data', 'part2/ni_rt.data'])
+spin = read_spin_dynamics(['part1/ni_rt_spin.data', 'part2/ni_rt_spin.data'])
+```
+
+各ファイルは絶対時刻の `Time` 列を保持してください。時刻のずらしや単位変換は行いません。列名・列順・単位が一致し、各ファイル内の時刻が増加する必要があります。重複する時刻の行は全成分が完全一致した場合だけ除き、不一致はエラーにします。保存時の丸めなどで一致しない場合は、採用するデータを利用者が確認してください。欠測区間はそのまま残るため、スペクトル解析前に時間間隔を確認してください。戻り値の `source` と `headers` に全ファイルの出典が残ります。

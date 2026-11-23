@@ -51,3 +51,16 @@ not files being written concurrently by another process.
 
 The Pauli identity channel matches native matter current Jm at matching times and units. Python charge current is j=-Jm.
 See [NICKEL_SOC.en.md](NICKEL_SOC.en.md) for reading outputs and supported conditions.
+
+### Read restart output segments together
+
+Pass output files in calculation order to `read_table` or `read_spin_dynamics`.
+
+```python
+from salmonpy.analysis import read_table
+from salmonpy.outputs import read_spin_dynamics
+current = read_table(['part1/ni_rt.data', 'part2/ni_rt.data'])
+spin = read_spin_dynamics(['part1/ni_rt_spin.data', 'part2/ni_rt_spin.data'])
+```
+
+Keep the absolute `Time` column in every file. No time shifts or unit conversions are applied. Column names, order and units must match, and times within each file must increase strictly. Overlapping rows are removed only when every component matches exactly; conflicts raise an error. If output rounding causes differences, review which data to retain explicitly. Missing intervals are preserved, so check sample spacing before spectral analysis. The returned `source` and `headers` retain all source paths.

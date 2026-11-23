@@ -24,9 +24,13 @@ class Table:
 def read_table(path):
     """Read numbered SALMON headers, Fortran D exponents and comment lines.
 
+    An ordered list/tuple joins absolute-time restart segments. Exact duplicate
+    samples are removed; conflicting overlaps are rejected. Gaps are retained.
     Units are retained, never inferred or converted. Unlabeled columns are named
     column_1, column_2,... with unknown units represented by None.
     """
+    if isinstance(path, (list, tuple)):
+        return _read_table_segments(path)
     path=Path(path);headers=[];rows=[];labels={}
     for line in path.read_text().splitlines():
         line=line.strip()
@@ -45,6 +49,38 @@ def read_table(path):
     if len(set(names))!=len(names): raise InputError('column names must be unique')
     units=tuple(labels.get(i,('',None))[1] for i in range(data.shape[1]))
     return Table(names,units,_readonly(data),tuple(headers),str(path.resolve()))
+
+
+def _read_table_segments(paths):
+    """Join ordered absolute-time segments without shifting or interpolation."""
+    if not paths:
+        raise InputError('at least one table segment is required')
+    tables = [read_table(path) for path in paths]
+    first = tables[0]
+    if 'Time' not in first.columns:
+        raise InputError('table segments require a labeled Time column')
+    axis = first.columns.index('Time')
+    data = first.values
+    for table in tables:
+        if table.columns != first.columns or table.units != first.units:
+            raise InputError('table segment columns and units must match')
+        if np.any(np.diff(table.values[:, axis]) <= 0):
+            raise InputError('each table segment must have strictly increasing Time')
+    for table in tables[1:]:
+        incoming = table.values
+        overlap = incoming[:, axis] <= data[-1, axis]
+        rows = incoming[overlap]
+        indices = np.searchsorted(data[:, axis], rows[:, axis])
+        if (np.any(indices >= len(data)) or
+                not np.array_equal(data[indices, axis], rows[:, axis]) or
+                not np.array_equal(data[indices], rows)):
+            raise InputError('overlapping table segments disagree; select the intended files explicitly')
+        data = np.concatenate((data, incoming[~overlap]), axis=0)
+    sources = tuple(table.source for table in tables)
+    headers = tuple(header for table in tables for header in table.headers)
+    headers += tuple('# segment source: ' + source for source in sources)
+    return Table(first.columns, first.units, _readonly(data), headers,
+                 '\n'.join(sources))
 
 
 @dataclass(frozen=True,slots=True)

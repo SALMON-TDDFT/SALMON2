@@ -38,7 +38,9 @@ class SpinDynamics:
 def read_spin_dynamics(path):
     """Read SALMON *_rt_spin.data as owned, immutable arrays.
 
-    Sampling times belong to this file. Do not align with current/energy by
+    Accepts one path or an ordered list/tuple of restart output paths.
+    Matching overlap rows are removed; times are never shifted.
+    Sampling times belong to these files. Do not align with current/energy by
     row number: output strides and inclusion of step0 may differ.
     Channel0 is retained, not silently relabeled as charge current j=-Jm.
     All physical observables are computed by the existing Fortran writer.
