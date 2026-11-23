@@ -1,6 +1,6 @@
 import unittest
 import importlib
-from salmonpy.manual import load, search
+from salmonpy.manual import load, search, task_details
 
 class ManualTest(unittest.TestCase):
     def test_user_facing_hse_names_and_entry_guidance(self):
@@ -82,6 +82,28 @@ class ManualTest(unittest.TestCase):
         self.assertEqual(search('unrecognizedxyz')['tasks'],[])
         with self.assertRaises(ValueError):search('')
 
+    def test_search_routing_and_bounded_details(self):
+        import json
+        import subprocess
+        import sys
+        from salmonpy.manual import task_details
+        for query in ('LDとSBEとTDDFTを混ぜて多層膜を計算',
+                      'combine LD SBE TDDFT in a multilayer'):
+            result=search(query)
+            self.assertEqual(result['tasks'][0]['id'],'native_coupled')
+            self.assertLessEqual(len(result['tasks']),5)
+            self.assertLess(len(json.dumps(result,ensure_ascii=False)),100000)
+            self.assertTrue(all('instructions' not in t for t in result['tasks']))
+        self.assertIn('retained_native_gs',{t['id'] for t in search('retain',lang='en')['tasks']})
+        self.assertEqual(search('task_details')['tasks'][0]['id'],'public_api')
+        detail=task_details('checkpoint_compatibility',lang='en')
+        self.assertEqual([i['heading'] for i in detail['instructions']],['en'])
+        self.assertIn('CheckpointSchedule',detail['instructions'][0]['text'])
+        with self.assertRaises(ValueError):task_details('unknown-task')
+        with self.assertRaises(ValueError):search('test',limit=0)
+        out=subprocess.check_output([sys.executable,'-m','salmonpy.manual','--lang','en','--task','checkpoint_compatibility'],text=True)
+        self.assertEqual(json.loads(out)['id'],'checkpoint_compatibility')
+
     def test_portable_guidance(self):
         d=load()
         self.assertIn('environment',search('バンド'))
@@ -141,7 +163,7 @@ class ManualTest(unittest.TestCase):
         tasks=search('checkpoint compatibility')['tasks']
         self.assertEqual(tasks[0]['id'],'checkpoint_compatibility')
         import json
-        task=tasks[0]
+        task=task_details(tasks[0]['id'])
         text=json.dumps(task,ensure_ascii=False)
         for obsolete in ('salmonpy.native-direct/3','solver-direct/1','solver-direct/2',
                          '--unprotected-direct-restore','`protected=False`'):

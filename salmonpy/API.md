@@ -732,3 +732,7 @@ MPIリンク版を認証読込する場合は、そのビルドのMPI試験も�
 使ってください。未認証の実行ファイルではNLCCの力を有効にしません。
 固定Si/PBE参照との今回の比較は、エネルギー差0、最大力差
 9.773e-16 Hartree/bohrでした。計算式・換算定数・期待値は変更していません。
+
+## AI向けのタスク検索
+
+`salmonpy.manual.search(query, lang="ja", limit=5)`は上位タスクの概要を返します。本文は含みません。`task_details(task_id, lang="ja")`は指定した一つのタスクと指定言語のガイドを返します。未翻訳の場合は元ガイドと`translation_available=False`を返します。`load()`は全JSONを読むため、通常の案内では検索を優先してください。

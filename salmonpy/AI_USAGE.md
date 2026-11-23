@@ -41,7 +41,7 @@ Fortranコンパイラ、MPI、SALMON実行ファイル、擬ポテンシャル�
 数秒程度の実行を想定しますが、導入・取得時間を含む保証ではありません。
 この例は導入確認であり、実物質の物性や収束を検証した結果ではありません。
 
-Si固定入力例は2026-11-23に現行ランタイムで再検証しました。新しいApple Silicon用ZIPはローカル検証済みで公開Releaseは未作成です。旧2026-11-14配布物は使わず、対応する更新wheelとZIPを配布者から受け取った場合だけSI_INTRO.mdへ進みます。擬ポテンシャルの取得は明示的な利用許可の後にPSEUDOPOTENTIALS.mdを使い、計算中には取得しません。量子キャビティ・量子計算機の別ブランチ／設計中の機能も、この配布版の実装済み機能として説明しません。
+Si固定入力例は、対応するApple Silicon用wheelとZIPを配布者から受け取った場合にSI_INTRO.mdへ進みます。入手済みの配布物と同梱の一覧の対応を確認します。擬ポテンシャルの取得は明示的な利用許可の後にPSEUDOPOTENTIALS.mdを使い、計算中には取得しません。量子キャビティ・量子計算機の別ブランチ／設計中の機能も、この配布版の実装済み機能として説明しません。
 
 失敗時は最初に表示されたログを読みます。コンパイル・再ダウンロード・別汎関数への変更を無断で繰り返しません。
 必要な時だけ `python -m salmonpy.doctor --json` で導入状態を調べます。
@@ -53,11 +53,13 @@ MatplotlibやASE等がないことは、この最初の計算の失敗ではあ�
 python -m salmonpy.manual
 python -m salmonpy.manual --lang en
 python -m salmonpy.manual TDDFT
-python -m salmonpy.manual --full checkpoint
+python -m salmonpy.manual checkpoint
+python -m salmonpy.manual --task checkpoint_compatibility
 ```
 
-引数なしは用途の概要と初回手順、検索は上位5件のAPIと文書名を返します。
-`--full` は一致した詳細ガイドを返します。`manual.json` は機械用の検索データです。
+引数なしは用途の概要と初回手順、検索は上位5件の概要・API・必要な入力・対応条件・サンプル名を返します。`matches`は一致した総件数です。必要なら`--limit N`で表示件数を増やします。
+検索結果からタスクIDを一つ選び、`--task TASK_ID`でそのタスクの詳細・実行例・指定言語のガイドを取得してから計算を組み立てます。未翻訳のタスクでは元ガイドを返し、`translation_available=False`と`instruction_language`で区別します。検索概要だけで対応条件を確定しません。
+Pythonでは`search(query, lang="ja", limit=5)`、次に`task_details(task_id, lang="ja")`を呼びます。`load()`は全カタログを読む開発用の入口です。通常利用では全JSON・全ガイドを一度に読まず、検索と選択で必要な範囲を取得します。`manual.json`は機械用の検索データです。
 人間には [README.md](README.md) / [README.en.md](README.en.md) を案内します。
 過去の設計書・検証記録を現在の対応機能一覧として使いません。
 

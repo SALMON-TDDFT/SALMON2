@@ -844,3 +844,7 @@ not publisher authentication: use trusted build/validation records. Uncertified
 executables do not gain NLCC forces. Current validation used the fixed Si PBE
 reference: energy difference0, maximum force difference9.773e-16 Hartree/bohr.
 No numerical formula/constants or reference values were changed.
+
+## AI task discovery
+
+`salmonpy.manual.search(query, lang="en", limit=5)` returns ranked summaries without guide bodies. `task_details(task_id, lang="en")` returns one exact task with its requested-language guide. If unavailable, it returns the source guide with `translation_available=False`. `load()` reads the entire JSON; prefer search for routine guidance.

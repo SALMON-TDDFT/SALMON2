@@ -149,8 +149,7 @@ python -m salmonpy.doctor --lang en --json
 
 The AI catalog finds procedures by task. Select `--lang en` for English guidance.
 `sample_files` points to executable examples. The default command lists up to five matches with introductory guidance.
-Use `--full QUERY` for complete guides and `task_catalog`; the Python `search`
-function also returns that catalog. Reuse known resource answers.
+Select a task ID, then use `python -m salmonpy.manual --lang en --task TASK_ID` for that task and its guide. Search returns summaries plus `task_catalog`; use `--limit N` for more matches. In Python, call `search` and then `task_details`. Read the selected details before running a calculation. A missing translation is labeled with `translation_available=False` and the source language. Reuse known resource answers.
 
 For source development, see [PACKAGING.md](PACKAGING.md); source-only build/test
 commands require a checkout. Restart Python after rebuilding Fortran/C libraries.

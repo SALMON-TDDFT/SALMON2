@@ -77,7 +77,7 @@ TDDFT内部MPIとE/H結合には、別入口の[実験的なPythonから直接�
 
 ## AIに依頼する場合
 
-まず [AI_USAGE.md](AI_USAGE.md) と `manual.json` を読み、既に回答された条件を再利用して、
+まず [AI_USAGE.md](AI_USAGE.md) と下記の検索コマンドを使い、既に回答された条件を再利用して、
 研究計算の前に不足する「目的・使ってよい総メモリ・CPUコア数」を確認します。最初の合成模型テストには追加の選択は不要です。
 
 ```sh
@@ -86,7 +86,7 @@ python -m salmonpy.manual レーザーによる電子の動き
 python -m salmonpy.doctor --json
 ```
 
-検索は上位5件と開始案内を返します。完全なガイドと機能一覧 `task_catalog` は `--full QUERY`、またはPythonの `search` で取得できます。
+検索は上位5件の概要と開始案内を返します。タスクIDを選んで`python -m salmonpy.manual --task TASK_ID`で詳細を読みます。一覧は検索結果の`task_catalog`、表示件数の変更は`--limit N`を使います。Pythonでは`search`で概要、`task_details`で一つのタスクを取得できます。
 `sample_files` が実行例、`beginner_intake` が資源上限の確認手順です。
 環境診断で検出したCPU数を、そのまま利用許可と解釈しません。
 対応する計算ではメモリ見積もりと実測を利用できます。見積もりが上限を超えた場合は警告し、自動では停止しません。未測定の条件では上限を保証しません。

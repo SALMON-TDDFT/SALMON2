@@ -11,6 +11,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.quickstart': ('run',), 'salmonpy.subpix
  'salmonpy.analysis': ('SurfaceFlux', 'surface_flux', 'PortSpectrum', 'absorbed_energy_density', 'reflection_transmission', 'Table', 'read_table', 'Spectrum', 'spectrum', 'OpticalSpectrum',
  'OpticalSensitivity', 'KCurrentContributions', 'optical_sensitivity', 'k_current_contributions', 'LongWavelengthCorrection', 'long_wavelength_correction', 'optical_conductivity', 'dielectric_function', 'dielectric_tensor', 'waveplate_diagnostic', 'optical_linearity', 'optical_sum_rule'),
  'salmonpy.api': ('PUBLIC_API', 'native_contract', 'query_host_abi', 'unit_contract'),
+ 'salmonpy.manual': ('load','search','task_details'),
  'salmonpy.doctor': ('diagnose', 'probe_native_protocols'),
  'salmonpy.convergence': ('plan_grid_scan','run_grid_scan','plan_dt_scan','run_dt_scan','run_current_grid_scan'),
  'salmonpy.gs_input': ('GSInputMetadata','describe_gs_input'),
