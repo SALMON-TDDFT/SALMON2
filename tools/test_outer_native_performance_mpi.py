@@ -1,4 +1,4 @@
-"""Native E/H + LD + two TDDFT points: outer performance regression.
+"""Native E/H + LD + two TDDFT/fast-PR HSE points: outer performance regression.
 
 Arguments: BUILD_JSON EXISTING_SYNTHETIC_GS NEW_OUTPUT MODE FAULT
 MODE checked/performance; FAULT 0/1. Run with 3 or 6 ranks, a launcher timeout,
@@ -25,6 +25,7 @@ record,fixture,output,mode,fault=sys.argv[1:];fixture=Path(fixture).resolve();ou
 assert mode in ('checked','performance') and fault in ('0','1') and world.size in (3,6)
 n=world.size//3;steps=96;dt=.003
 record_data=json.loads(Path(record).read_text())
+hse=record_data.get('schema')=='salmonpy.fast-hse-mpi/1'
 def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 assert digest(Path(record_data['library']))==record_data['sha256']
 gs=fixture/'data_for_restart';before={str(p.relative_to(gs)):digest(p) for p in gs.rglob('*') if p.is_file()}
@@ -37,7 +38,15 @@ def link_copy(source,dest):
   if p.is_dir():(dest/rel).mkdir(exist_ok=True)
   elif p.is_file():shutil.copy2(p,dest/rel)
  (dest/'data_for_restart').symlink_to((source/'data_for_restart').resolve(),target_is_directory=True)
- return tuple(sorted(records))
+ return test_manifest(source)
+from salmonpy._hse_assets import _path as original_asset_path
+def test_asset_path(root,name):
+ rel=Path(name)
+ if not rel.is_absolute() and '..' not in rel.parts and rel.parts and rel.parts[0]=='data_for_restart':
+  target=(root/rel).resolve()
+  assert target==gs.resolve() or target.is_relative_to(gs.resolve())
+  return target
+ return original_asset_path(root,name)
 def test_manifest(root):
  records=[]
  for p in root.rglob('*'):
@@ -57,12 +66,18 @@ try:
  geometry=Geometry(grid,(Shape('box',(4.,4.,4.),(9.,1.,1.)),))
  ld=LorentzDrude(plasma_frequency=20.,strength=[.7,.3],resonance=[0.,25.],damping=[2.,3.])
  calc=FDTD(geometry,(ld,),dt,steps,source=PlaneWave(AcosPulse(.001,20.,.15),0,-16.),observations=((9.,1.,1.),))
- with patch('salmonpy.embedded_tddft._copy_bundle',side_effect=link_copy),patch('salmonpy.embedded_tddft._manifest',side_effect=test_manifest),ParallelContext.create(world,plan) as context:
+ with patch('salmonpy.embedded_tddft._copy_bundle',side_effect=link_copy),patch('salmonpy.fast_hse_mpi._copy_bundle',side_effect=link_copy),patch('salmonpy.embedded_tddft._manifest',side_effect=test_manifest),patch('salmonpy.fast_hse._manifest',side_effect=test_manifest),patch('salmonpy._hse_assets._path',side_effect=test_asset_path),ParallelContext.create(world,plan) as context:
   field=session=None;history=[];restored=False
   try:
    if context.group.role=='field':field=NativeEHField(context,calc,record,out/'field',points=points,grid=(n,1,1),execution_mode=mode)
-   provider=NativeTDDFTMaterialProvider(fixture,'rt.inp',max_steps=steps)
-   backend=NativeTDDFTBackend(record,out,decomposition=(n,1,1,1,1),execution_mode=mode)
+   if hse:
+    from salmonpy.fast_hse import FastHSEMaterialProvider
+    from salmonpy.fast_hse_mpi import NativeFastHSEBackend
+    provider=FastHSEMaterialProvider(fixture,'rt.inp',max_steps=steps)
+    backend=NativeFastHSEBackend(record,out,allow_symmetry=True,execution_mode=mode)
+   else:
+    provider=NativeTDDFTMaterialProvider(fixture,'rt.inp',max_steps=steps)
+    backend=NativeTDDFTBackend(record,out,decomposition=(n,1,1,1,1),execution_mode=mode)
    binding=MaterialBinding('same-initial',provider,backend)
    session=ResponseSession(context,{1:binding,2:binding},dt=dt,execution_mode=mode)
    coupled=CoupledStepper(session,field)
@@ -92,7 +107,7 @@ try:
     probe=np.loadtxt(out/'field/obs1_at_point_rt.data')
     assert np.max(np.abs(probe[:,1:4]))>0
     np.savez(out/'traces.npz',values=values,ld_probe=probe)
-    (out/'summary.json').write_text(json.dumps(dict(mode=mode,fault=fault=='1',ranks=world.size,field_ranks=n,material_ranks=n,steps=steps,protected_restore=restored,library_sha256=record_data['sha256'],GS_collected=False),indent=2)+'\n')
+    (out/'summary.json').write_text(json.dumps(dict(mode=mode,fault=fault=='1',ranks=world.size,field_ranks=n,material_ranks=n,steps=steps,protected_restore=restored,library_sha256=record_data['sha256'],GS_collected=False,electronic_backend='fast-pr-hse' if hse else 'standard-tddft'),indent=2)+'\n')
   finally:
    if session is not None:session.close()
    if field is not None:field.close()
