@@ -50,7 +50,7 @@ def main():
     parser.add_argument('--fast-hse-build', type=Path, help='explicit fast-PR serial worker build record for hse-point')
     parser.add_argument('--fast-hse-mpi-build', type=Path, help='explicit native fast-PR host-MPI build record')
     parser.add_argument('--outer-execution-mode',choices=('checked','performance'),default='checked',help='outer A/J transport diagnostics; backend modes are separate')
-    parser.add_argument('--hse-execution-mode',choices=('checked','performance'),default='checked',help='native HSE updates only; select outer mode separately')
+    parser.add_argument('--hse-execution-mode',choices=('checked','performance'),default='checked',help='HSE updates (MPI library or serial worker); select outer mode separately')
     parser.add_argument('--hse-bundle', type=Path, help='optional separate fast-PR HSE GS bundle; default is BUNDLE')
     parser.add_argument('--hse-symmetry', action='store_true', help='explicit fast-PR symmetry opt-in; native HSE group1/2 with matching mode capability')
     parser.add_argument('--hse-reference-bundle', type=Path, help='explicit equivalent full-k HSE bundle for serial comparison')
@@ -101,8 +101,6 @@ def main():
     if args.tddft_materials is not None and args.layers is None:parser.error('tddft-materials requires --layers')
     if args.tddft_points_per_group<1:parser.error('positive tddft-points-per-group required')
     if args.tddft_points_per_group>1 and args.layers is None:parser.error('tddft grouping requires --layers')
-    if args.hse_execution_mode=='performance' and args.fast_hse_mpi_build is None:
-        parser.error('HSE performance mode requires fast-hse-mpi-build')
     if args.hse_points_per_group<1 or (args.hse_points_per_group>1 and args.fast_hse_mpi_build is None):
         parser.error('positive hse-points-per-group; grouping requires fast-hse-mpi-build')
     if args.hse_ranks != 1 and args.fast_hse_mpi_build is None:
@@ -170,7 +168,7 @@ def main():
             from salmonpy.fast_hse_mpi import NativeFastHSEBackend
             available['hse-point'] = MaterialBinding('hse-point',
                 FastHSEMaterialProvider(args.hse_bundle or args.bundle, 'rt.inp', max_steps=args.steps),
-                (FastHSEResponseBackend(args.fast_hse_build, output) if args.fast_hse_mpi_build is None
+                (FastHSEResponseBackend(args.fast_hse_build, output,execution_mode=args.hse_execution_mode) if args.fast_hse_mpi_build is None
                  else NativeFastHSEBackend(args.fast_hse_mpi_build, output, allow_symmetry=args.hse_symmetry, shared_model=args.hse_points_per_group>1,execution_mode=args.hse_execution_mode)))
         assembly = None
         if layout is None:
@@ -415,7 +413,7 @@ def main():
                         local = SolverContext(SimpleNamespace(rank=0,size=1),'serial-reference',(point,))
                         binding = bindings[point]
                         from salmonpy.fast_hse import FastHSEResponseBackend
-                        reference = FastHSEResponseBackend(args.fast_hse_build, output)
+                        reference = FastHSEResponseBackend(args.fast_hse_build, output,execution_mode=args.hse_execution_mode)
                         if args.hse_reference_bundle is not None:
                             from salmonpy.fast_hse import FastHSEMaterialProvider
                             reference_provider = FastHSEMaterialProvider(args.hse_reference_bundle, max_steps=args.steps)

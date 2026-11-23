@@ -314,7 +314,7 @@ Checkpoint history g, b and coeff now use scalar IEEE inquiries over every eleme
 `NativeFastHSEBackend(..., execution_mode="performance")` selects the
 caller-managed MPI route; the default is `"checked"`. The choice
 is fixed on each state. Single-state, shared-model and heterogeneous-registry
-routes are supported; serial subprocess workers are not supported by this option.
+routes are supported. Serial subprocesses use the separate `FastHSEResponseBackend` option described below.
 
 The performance update omits endpoint agreement, Python finite scans, electronic
 and exchange-state backups, and numerical-recovery diagnostic votes/scans.
@@ -361,3 +361,13 @@ selected mode and point-b in checked mode, including a matching point-a restart.
 With `--second-initial`, the same example uses two registered input models.
 The usual `mpi_mixed_native --hse-execution-mode performance` also permits
 shared HSE points; field/outer-coupling checks have independent settings.
+
+## Choosing process-isolated fast-PR HSE
+
+`FastHSEResponseBackend(..., execution_mode="performance")` selects a fixed per-state mode; the default is `"checked"`. Keep this route when the host needs isolation from Fortran process state, working-directory ownership or MPI/main-thread constraints. It uses one serial CPU child per material point. Prefer `NativeFastHSEBackend` for internal MPI or reduced-k symmetry. The serial process route already requires full k points: reduced inputs cannot initialize, and performance mode does not extend that physical scope.
+
+Before any update, the worker must accept `MODE_PERFORMANCE` and reply `SALMONPY_HSE_PERFORMANCE 1`. Unsupported workers are closed and rejected, with no silent fallback. Build explicitly with `tools/build_fast_hse_worker.py`; never compile on import.
+
+Performance mode omits per-step finite scans, old-A comparison and optional Fortran diagnostic backups through the existing `rt_step(..., checked=...)` interface. Initialization, executable SHA, reply structure/index, shapes, capacity, lifetime and explicit save/restore checks remain. Physical update and learning/output order are unchanged. Failed workers are retired without automatic respawn or history replay; no new operation terminates independent siblings or the caller, but continuation of the failed state is not guaranteed.
+
+Direct restore retains the receiving mode and existing caller-owned checkpoint authentication/A-restoration contract. `mpi_mixed_native --hse-execution-mode performance` selects either the MPI HSE backend or the serial worker. The outer coupling mode remains a separate choice.

@@ -148,7 +148,9 @@ class FastHSEResponseBackend:
     execution = 'leader_only'
     reduction = 'leader'
 
-    def __init__(self, build_record, work_root, *, threads=1, timeout=300.):
+    def __init__(self, build_record, work_root, *, threads=1, timeout=300., execution_mode="checked"):
+        from .ld import _execution_mode_name
+        self._execution_mode=_execution_mode_name(execution_mode)
         if os.name != 'posix':
             raise InputError('fast HSE worker requires POSIX /dev/stdin (macOS or Linux)')
         record_path = Path(build_record).expanduser().resolve()
@@ -168,7 +170,10 @@ class FastHSEResponseBackend:
         self.threads = _integer(threads, 'threads', 1, 2**31 - 1)
         self.timeout = _positive(timeout, 'timeout')
         self.identity = 'salmonpy.fast-hse-worker/1/' + hashlib.sha256(json.dumps(
-            [self.sha256, self.origin_sha256, self.threads], sort_keys=True).encode()).hexdigest()
+            [self.sha256, self.origin_sha256, self.threads, self.execution_mode], sort_keys=True).encode()).hexdigest()
+
+    @property
+    def execution_mode(self):return self._execution_mode
 
     def create_state(self, initial, point_id, dt, context):
         if context is not None and context.solver_comm.size != 1:
@@ -202,6 +207,7 @@ class _State:
     checkpoint_decomposition = (1,1,1,1,1)
 
     def __init__(self, backend, work, dt, capacity, propagator):
+        self._execution_mode=backend.execution_mode
         self.work = work
         self.dt = dt
         self.capacity = capacity
@@ -231,10 +237,16 @@ class _State:
             self.current = self._numbers(parts[1:4])
             self.initial_current = self.current.copy()
             self.energy = None
+            if self.execution_mode=='performance':
+                version=self._request('MODE_PERFORMANCE','PERFORMANCE')
+                if version!=['1']:raise RuntimeFailure('unsupported fast HSE performance protocol')
         except BaseException:
             self._failed = True
             self._terminate()
             raise
+
+    @property
+    def execution_mode(self):return self._execution_mode
 
     def _read_stdout(self):
         try:
@@ -273,12 +285,12 @@ class _State:
         return result
 
     @staticmethod
-    def _numbers(parts):
+    def _numbers(parts, *, checked=True):
         try:
             result = np.array([float(p.replace('D', 'E').replace('d', 'e')) for p in parts])
         except ValueError as exc:
             raise RuntimeFailure('invalid native numeric response') from exc
-        if not np.isfinite(result).all():
+        if checked and not np.isfinite(result).all():
             raise RuntimeFailure('nonfinite native response')
         return result
 
@@ -301,16 +313,20 @@ class _State:
     def advance(self, old, new):
         self._enter()
         try:
-            old = _vector(old, 'old A'); new = _vector(new, 'new A')
+            if self.execution_mode=='checked':
+                old=_vector(old,'old A');new=_vector(new,'new A')
+            else:
+                from .ld import _array_unchecked
+                old=_array_unchecked(old,'old A',(3,));new=_array_unchecked(new,'new A',(3,))
             if self.closed or self._failed or self.steps >= self.capacity:
                 raise InputError('fast HSE state is closed, failed or exhausted')
-            if not np.array_equal(old, self.A):
+            if self.execution_mode=="checked" and not np.array_equal(old, self.A):
                 raise InputError('old A differs from accepted fast HSE endpoint')
             parts = self._request('STEP ' + ' '.join(format(x, '.17g') for x in new), 'STEP')
             try:
                 if len(parts) != 5 or self._step_number(parts[0]) != self.steps + 1:
                     raise RuntimeFailure('fast HSE worker step mismatch')
-                values = self._numbers(parts[1:])
+                values = self._numbers(parts[1:],checked=self.execution_mode=="checked")
             except BaseException:
                 self._failed = True; self._terminate(); raise
             self.steps += 1

@@ -37,7 +37,9 @@ print('ordinary native output ignored by protocol', flush=True)
 print('SALMONPY_HSE_READY 0 1 2 3', flush=True)
 for line in sys.stdin:
     command, _, data = line.strip().partition(' ')
-    if command == 'STEP':
+    if command == 'MODE_PERFORMANCE':
+        print('SALMONPY_HSE_PERFORMANCE 1',flush=True)
+    elif command == 'STEP':
         if Path('hang').exists():
             time.sleep(60)
         if Path('bad-response').exists():
@@ -63,11 +65,21 @@ for line in sys.stdin:
         self.record.write_text(json.dumps(self.metadata))
         self.provider = FastHSEMaterialProvider(self.bundle, max_steps=3)
 
-    def state(self, *, timeout=2., context=None):
-        backend = FastHSEResponseBackend(self.record, self.root, timeout=timeout)
+    def state(self, *, timeout=2., context=None, **kwargs):
+        backend = FastHSEResponseBackend(self.record, self.root, timeout=timeout, **kwargs)
         state = backend.create_state(self.provider.prepare(context), 7, .01, context)
         self.addCleanup(state.close)
         return state
+
+    def test_performance_mode_handshake_and_restore(self):
+        s=self.state(execution_mode='performance')
+        self.assertEqual(s.execution_mode,'performance')
+        with self.assertRaises(AttributeError):s.execution_mode='checked'
+        np.testing.assert_array_equal(s.advance([99,99,99],[.1,.2,.3]),[4,5,6])
+        path=self.root/'performance-state.bin';s.checkpoint(path,False)
+        s.close();fresh=self.state(execution_mode='performance');fresh.checkpoint(path,True)
+        self.assertEqual(fresh.execution_mode,'performance');self.assertEqual(fresh.steps,1)
+        fresh.A[:]=[.1,.2,.3];np.testing.assert_array_equal(fresh.step([0,0,0]),[4,5,6])
 
     def test_current_endpoint_and_capacity(self):
         state = self.state()

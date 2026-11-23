@@ -17,6 +17,7 @@ program fast_hse_worker
  implicit none
  type(tddft_context),pointer::ctx=>null()
  type(s_rt_model_settings)::model_settings
+ logical::checked
  integer::commands,ios,code,accepted
  real(8)::ac(3),current(3),energy
  character(8192)::line
@@ -45,6 +46,7 @@ program fast_hse_worker
  if(code/=0)call fail('OPEN',code)
  call rt_current(ctx,current,code)
  if(code/=0)call fail('CURRENT',code)
+ checked=.true.
  write(output_unit,'(a,1x,i0,3(1x,es26.17e3))')'SALMONPY_HSE_READY',rt_accepted_step(ctx),current
  flush(output_unit)
  do
@@ -54,10 +56,14 @@ program fast_hse_worker
   read(line,*,iostat=ios)command
   if(ios/=0)call fail('COMMAND',ios)
   select case(trim(command))
+  case('MODE_PERFORMANCE')
+   if(rt_accepted_step(ctx)/=0)call fail('PERFORMANCE_PHASE',1)
+   checked=.false.
+   write(output_unit,'(a)')'SALMONPY_HSE_PERFORMANCE 1'
   case('STEP')
    read(line,*,iostat=ios)command,ac
    if(ios/=0)call fail('STEP_INPUT',ios)
-   call rt_step(ctx,ac,current,energy,code)
+   call rt_step(ctx,ac,current,energy,code,checked=checked)
    if(code/=0)call fail('STEP',code)
    write(output_unit,'(a,1x,i0,4(1x,es26.17e3))')'SALMONPY_HSE_STEP',rt_accepted_step(ctx),current,energy
   case('SAVE','LOAD')

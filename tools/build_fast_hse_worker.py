@@ -110,6 +110,8 @@ def main():
         'linked_object_hashes': {str(path): digest(path) for path in original_objects},
         'commands': commands,
         'protocol': 'salmonpy.fast-hse-worker/1',
+        'execution_modes': ['checked','performance'],
+        'performance_protocol': 1,
         'scope': 'serial fast-PR HSE only; one process per state; Unix inputfile plus command stdin',
     }
     (out/'build.json').write_text(json.dumps(receipt, indent=2)+'\n')
