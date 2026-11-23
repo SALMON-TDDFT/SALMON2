@@ -1,6 +1,6 @@
 # 場の部品（j→A）と物質との結合
 
-[English](FIELDS.en.md) · Topic: `macro-field` · Paired revision: `2026-11-14.2`
+[English](FIELDS.en.md)
 
 `salmonpy.maxwell` は、光と物質の結合ループを場の側から閉じる部品です。
 物質の部品（TDDFT、SBE、利用者のモデル）は A を受けて電流を返します（A→J）。
@@ -23,7 +23,7 @@ j_0 = 物質(A_0)  →  A_1 = 場(j_0)  →  j_1 = 物質(A_1)  →  A_2 = 場(j
 - SALMON と同様に、**t=0 の電流は場に戻しません**。最初の `step` は外場だけで決まります。
 - 設定は不変です。dt と最大ステップ数は `new_state(dt=..., steps=...)` で固定します。
   `state.config` で確定値を確認できます。
-- 不正な入力や非有限の結果では状態を変えません（失敗は原子的）。
+- 通常モードでは、不正な入力や非有限の結果で状態を変えません（失敗は原子的）。
 
 ## 部品
 
@@ -114,7 +114,7 @@ result = couple(material, layer, dt=.02, steps=4000, output_directory='new-run')
 - 薄膜の透過係数が、解析解 −iω/(−iω+γ) と一致する
 - 1次元の真空伝播（c·dt = h）が解析解と相対 1×10⁻⁵ 以内で一致し、反射が残らない
 - 1セル厚の1次元計算と薄膜モデルが一致する
-- 同梱の SBE カーネルで `Transverse` と結合した結果が `crystal.respond` とビット一致する
+- 同梱の SBE 計算ルーチンで `Transverse` と結合した結果が `crystal.respond` とビット一致する
 - `Longitudinal` と結合した結果が SALMON の漸化式とビット一致する
 
 SALMON 本体との直接比較は `tools/test_longitudinal_salmon.py` で行います（外部 SALMON が必要）。
@@ -123,8 +123,29 @@ SALMONpy の TDDFT ワーカー（`tr`）＋場の部品で計算します。400
 相対 3×10⁻¹⁵ 以下で、SALMON の出力桁と一致しました。1次元では格子全体の A も一致します。
 記録は `docs/maxwell-field-validation-2026-11-14.md` にあります。
 
-## ホスト向けAPIと状態保存
+## 呼び出し元プログラム向けAPIと状態保存
 
 [公開API・例外](API.md)と[メモリ上のsnapshot／restore](SNAPSHOTS.md)を参照してください。
 0.1.0a5からLD・SBE・4種類のPythonの場で固定dtの保存・復元を使えます。
-ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。
+計算処理FDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。
+
+## 直列結合のパフォーマンスモード
+
+`Transverse`、`Longitudinal`、`ThinFilm`、`Multiscale1D` の
+`new_state(dt=..., steps=..., execution_mode="performance")` が使えます。
+`maxwell.couple(...)` の同じ指定は、場と全物質状態の両方へ渡されます。
+組み込みSBEは対応しています。この入口のTDDFT・高速HSEは未対応です。
+既定は `"checked"` です。
+
+初期入力・容量・CFL条件・結合前の時間ステップ契約は検査します。更新中は
+場の電流／結果の有限値走査と、直列ドライバーの電流走査・時刻比較を省きます。
+形状・容量の検査は残り、更新式・更新順・符号変換は変えません。明示的な
+保存／復元と出力保存も検査します。物理状態の保存にはモードを含めず、
+復元先のモードを維持します。性能モードで異常更新後の自動復元は保証しません。
+MPIセッションやTDDFT・HSE内部の検査を外す指定ではありません。
+
+自作の場・物質は `new_state` が `execution_mode` を受け取り、返す状態の
+同名プロパティで選択を示す必要があります。未対応の部品へ性能モードを指定
+した場合だけ明示的に知らせます。通常モードの自作部品は変更不要です。
+
+例：`python -m salmonpy.examples.field_coupling NEW_DIRECTORY --execution-mode performance`。

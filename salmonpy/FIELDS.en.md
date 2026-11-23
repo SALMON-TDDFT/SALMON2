@@ -1,6 +1,6 @@
 # Field components (j→A) and coupling to matter
 
-[日本語](FIELDS.md) · Topic: `macro-field` · Paired revision: `2026-11-14.2`
+[日本語](FIELDS.md)
 
 `salmonpy.maxwell` closes the light–matter loop from the field side. Matter
 components (TDDFT, SBE, user models) take A and return a current (A→J). Field
@@ -16,7 +16,7 @@ j_0 = matter(A_0)  →  A_1 = field(j_0)  →  j_1 = matter(A_1)  →  A_2 = fie
 - Atomic units, laboratory frame. A is SALMON's `Ac = A/c`, and E = −dAc/dt.
 - **Interfaces exchange the electric (charge) current density j.** Matter
   components keep SALMON's electronic matter current J internally, with j = −J.
-  The `crystal` protocol returns j (SBE and TDDFT states included); a backend
+  The `crystal` protocol returns j (SBE and TDDFT states included); a calculation implementation
   that declares J_matter output is converted by `couple` in exactly one place.
   When you drive a field component directly, pass j to `step`.
 - Timing: `state.step(j_n)` takes the current at n·dt and returns A at (n+1)·dt (checked mechanically; see "Time-layout declarations").
@@ -26,7 +26,7 @@ j_0 = matter(A_0)  →  A_1 = field(j_0)  →  j_1 = matter(A_1)  →  A_2 = fie
   determined by the external field alone.
 - Settings are immutable. dt and the step capacity are fixed by
   `new_state(dt=..., steps=...)`; inspect `state.config` for resolved values.
-- Invalid input or a nonfinite result leaves the state unchanged.
+- In checked mode, invalid input or a nonfinite result leaves the state unchanged.
 
 ## Components
 
@@ -76,7 +76,7 @@ producer's t=0 output is `physical`. Both declarations are kept in
 |---|---|---|
 | Field components (all four) | j: offset 0, point, lag 1, t=0 unused | A: offset 0, point, physical |
 | `SBEState`, `TDDFTState` | A: offset 0, point, lag 0 | j: offset 0, point, physical |
-| Native E/H Yee field (`coupled.NativeEHField`) | j: offset ½, point, lag 1, t=0 unused | A: offset ½, point, physical |
+| FDTD updates of E and H Yee field (`coupled.NativeEHField`) | j: offset ½, point, lag 1, t=0 unused | A: offset ½, point, physical |
 | Matter in E/H coupling (response-service states) | A: offset 0, point, lag 0, on the electronic clock (+½) | j: offset 0 (+½) |
 | User component without a declaration | `crystal` protocol default (as above) | as above |
 
@@ -128,7 +128,7 @@ Example: `python -m salmonpy.examples.field_coupling NEW_OUTPUT_DIRECTORY`
 - 1D vacuum propagation (c·dt = h) matches the analytic wave within 1×10⁻⁵
   relative, with no residual reflection
 - a one-cell 1D layer agrees with the thin-film model
-- `Transverse` coupling with the bundled SBE kernel is bit-identical to
+- `Transverse` coupling with the bundled SBE calculation routine is bit-identical to
   `crystal.respond`
 - `Longitudinal` coupling is bit-identical to SALMON's recurrence
 
@@ -142,8 +142,32 @@ the whole-grid A agrees as well. See `docs/maxwell-field-validation-2026-11-14.m
 Uniform fields need at least N+1 endpoint samples, from t=0 through N*dt, for N steps.
 An incident wave requires an `abc` left boundary. Other left boundaries require `incident=None`.
 
-## Host API and state snapshots
+## calling program API and state snapshots
 
 See [public API and errors](API.en.md) and [in-memory snapshots](SNAPSHOTS.en.md).
 LD, SBE and the four Python fields support fixed-dt snapshot/restore since 0.1.0a5.
-This does not add native FDTD/TDDFT/MPI restart or change current/time conventions.
+This does not add solver FDTD/TDDFT/MPI restart or change current/time conventions.
+
+## Performance mode for serial coupling
+
+`Transverse`, `Longitudinal`, `ThinFilm` and `Multiscale1D` accept
+`new_state(dt=..., steps=..., execution_mode="performance")`. The same option
+on `maxwell.couple(...)` selects performance mode for both the field and every
+matter state. Built-in SBE supports this; TDDFT and fast HSE do not yet support
+this entry. The default remains `"checked"`.
+
+Setup still validates inputs, capacity, CFL and timing contracts. During stepping
+the field omits current/result finite scans, and the serial driver omits current
+finite scans and repeated clock comparisons. Shape/capacity checks remain;
+update formulas, ordering, sign conversion and physical communication are unchanged.
+Explicit snapshots, restoration and saved output retain their checks. Physical
+snapshots exclude the mode; restore preserves the receiving state's mode.
+Automatic failure rollback is not guaranteed in performance mode. This option
+does not select performance mode for MPI sessions or TDDFT/HSE internals.
+
+Custom field/matter models must accept the `execution_mode` keyword in
+`new_state` and expose the selected mode on the returned state. A requested
+performance mode is rejected if the model cannot honor it; there is no silent
+fallback. Ordinary checked custom models need no changes.
+
+Try `python -m salmonpy.examples.field_coupling NEW_DIRECTORY --execution-mode performance`.

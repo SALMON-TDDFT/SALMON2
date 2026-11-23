@@ -1,0 +1,22 @@
+{
+  "schema": "salmonpy.hse-rt-state-overlay/1",
+  "upstream_commit": "c9e8ce431f43eefd4a88998134adb4796f8ec837",
+  "patch_sha256": "a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8",
+  "modified_sources": [
+    "src/xc/CMakeLists.txt",
+    "src/xc/exx_native.f90",
+    "src/xc/exx_rt_state.f90"
+  ],
+  "scope": "experimental fast-PR RT ownership/lifecycle, default native adapter still single-state",
+  "reference_source_hashes": {
+    "src/xc/exx_native.f90": "2d71c6ef30f1513ace9e0e09dea6eb44c3bb1123aa419704cef93761a311b55d",
+    "src/xc/exx_ace.f90": "233b2674e12c1b2210e8fd6b66760a5003199beec81025fd0c2037cc1606cf2c",
+    "src/xc/exx_factor_history.f90": "51478fae0d6237a87680f5106f74b410a84f4a0ed36f78f0e7e9aaee4c156d98"
+  },
+  "source_tree": "sources/hse-fast-reference",
+  "source_tree_manifest": "source-trees/hse-fast-reference.json",
+  "source_tree_sha256": "97cb70824b48897b926c2d0a4b76ac4cf0203fe322fb829ab679b00ec6efe742",
+  "replacements": "source-trees/hse-rt-state-replacements.json",
+  "replacements_sha256": "044ad51843f99b799f5f88045d66c012b90a140e3372a24aa26892dd33815170",
+  "patch_sha256_role": "historical migration identity; no patch is applied"
+}

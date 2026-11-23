@@ -11,8 +11,17 @@ class TDDFTLoaderTests(unittest.TestCase):
             for name in ('info.bin','occupation.bin','wfn.bin'):
                 (restart/name).write_bytes(b'synthetic loader test, not physics')
             (root/'rt.inp').write_text('&calculation\n theory="tddft_pulse"\n/\n')
+            (root/'a').mkdir()
+            (root/'a/auxiliary.bin').write_bytes(b'synthetic auxiliary')
+            (root/'a.meta').write_bytes(b'synthetic metadata')
             exe=SalmonExecutable(root/'salmon','0'*64)
-            initial=TDDFTInitialState.from_salmon(root,'rt.inp',executable=exe,max_steps=10)
+            from unittest.mock import patch
+            # A Windows path string uses backslashes; manifest keys must not.
+            with patch('salmonpy.tddft.str', lambda value: str(value).replace('/', chr(92)), create=True):
+                initial=TDDFTInitialState.from_salmon(root,'rt.inp',executable=exe,max_steps=10)
+            self.addCleanup(initial.close)
+            self.assertIn('data_for_restart/wfn.bin', dict(initial.manifest))
+            self.assertEqual(initial.manifest, tuple(sorted(initial.manifest)))
             original=initial.manifest
             (restart/'wfn.bin').write_bytes(b'changed outside snapshot')
             self.assertEqual(initial.manifest,original)
@@ -58,3 +67,18 @@ class TDDFTLoaderTests(unittest.TestCase):
             if state._proc.poll() is None: state._proc.kill()
             state._proc.wait()
             state._proc.stdin.close()
+
+    def test_measured_electron_reply_rejects_old_protocol(self):
+        import queue
+        from salmonpy.tddft import TDDFTState
+        from salmonpy.errors import RuntimeFailure
+        state=object.__new__(TDDFTState)
+        state._closed=False;state._execution_mode="checked";state._timeout=1;state._events=queue.Queue()
+        state._reply_size=3
+        state._events.put('SALMONPY_TDDFT_V1 0 0 0 0 7.99999')
+        self.assertEqual(state._receive(0).shape,(3,))
+        self.assertEqual(state.electron_number,7.99999)
+        state._events.put('SALMONPY_TDDFT_V1 1 0 0 0')
+        with self.assertRaisesRegex(RuntimeFailure,'electron'):
+            state._receive(1)
+        state._closed=True

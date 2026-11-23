@@ -8,7 +8,6 @@ import argparse
 import json
 from pathlib import Path
 import numpy as np
-from mpi4py import MPI
 from salmonpy.distributed import SolverGroup,ParallelPlan,ParallelContext,NativeParallelContext
 from salmonpy.material_response import MaterialBinding,ResponseSession
 
@@ -34,6 +33,7 @@ class MyResponse:
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('output');p.add_argument('--bridge');p.add_argument('--sha256')
 a=p.parse_args()
+from mpi4py import MPI
 world=MPI.COMM_WORLD
 if world.size!=5: raise ValueError('launch exactly 5 MPI ranks')
 if bool(a.bridge)!=bool(a.sha256): raise ValueError('bridge and sha256 must be supplied together')

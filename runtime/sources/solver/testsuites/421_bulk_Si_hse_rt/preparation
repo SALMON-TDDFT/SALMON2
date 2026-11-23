@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+# The producer is generated afresh by CTest, never a checked-in checkpoint.
+producer=../420_bulk_Si_hse_gs
+test -s "$producer/data_for_restart/wfn.bin"
+grep -q '#GS converged at' "$producer/outputfile"
+cp ../pseudo/Si_rps.dat ./

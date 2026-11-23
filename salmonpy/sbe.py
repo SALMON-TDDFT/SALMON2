@@ -6,7 +6,7 @@ SALMON electronic matter current J is kept internally (``matter_current``); j = 
 Initial arrays use Fortran index order: (band, k), (band, band, xyz, k).
 Closed-shell occupations match SALMON: two electrons in each of ne/2 bands.
 """
-from .errors import InputError, NumericalError, RuntimeFailure
+from .errors import InputError, NumericalError, RuntimeFailure, SnapshotError
 from .snapshots import _SnapshotMixin, _fingerprint
 import ctypes as ct
 from dataclasses import dataclass, field
@@ -16,12 +16,12 @@ from pathlib import Path
 import sys
 import re
 import numpy as np
-from .ld import _array, _positive
+from .ld import _array, _positive, _array_unchecked, _execution_mode_name
 
 
-def _frozen(value, dtype=float):
+def _frozen(value, dtype=float, *, check=True):
     a = np.array(value, dtype=dtype, order='F')
-    if not np.isfinite(a).all():
+    if check and not np.isfinite(a).all():
         raise InputError('initial data must be finite')
     return np.frombuffer(a.tobytes(order='F'), dtype=a.dtype).reshape(a.shape, order='F')
 
@@ -32,8 +32,12 @@ def _integer(value, name, low, high):
     return int(value)
 
 
+class _WeakInitial:
+    __slots__=('__weakref__',)
+
+
 @dataclass(frozen=True, slots=True, eq=False)
-class SBEInitialState:
+class SBEInitialState(_WeakInitial):
     eigen: np.ndarray
     momentum: np.ndarray
     nonlocal_velocity: np.ndarray
@@ -68,8 +72,13 @@ class SBEInitialState:
         if not isinstance(self.nonlocal_correction,(bool,np.bool_)):
             raise InputError('nonlocal_correction must be boolean')
 
-    def new_state(self, *, dt, time0=0., initial_A=(0.,0.,0.)):
-        return SBEState(self,dt,time0,initial_A)
+    def __reduce__(self):
+        # Process-local handles are never serialized; construction refreezes data.
+        return (type(self),(self.eigen,self.momentum,self.nonlocal_velocity,self.weights,
+                            self.lattice,self.electrons,self.correction_order,self.nonlocal_correction))
+
+    def new_state(self, *, dt, time0=0., initial_A=(0.,0.,0.), execution_mode="checked"):
+        return SBEState(self,dt,time0,initial_A,execution_mode=execution_mode)
 
     @classmethod
     def from_salmon(cls, directory, sysname, *, bands, kpoints, electrons, lattice,
@@ -148,25 +157,38 @@ def _native():
     return fn
 
 
+def _handles_api():
+    from ._material_handles import default_sbe_api as default_api
+    return default_api()
+
+
+def _model_handle(initial):
+    from ._material_handles import model_for
+    return model_for(initial,_handles_api())
+
+
 class SBEState(_SnapshotMixin):
     """Independent density matrix; fixed dt/model; step accepts only the next A/c."""
-    __slots__=('_initial','_dt','_time0','_steps','_A','_rho','_current')
+    __slots__=('_initial','_dt','_time0','_steps','_A','_current','_native_state','_closed','_execution_mode','_parse_A')
     _snapshot_kind = 'sbe'
     _snapshot_counter = '_steps'
 
     def _snapshot_owner(self): return self._initial
     def _snapshot_settings(self): return _fingerprint((self.dt, self._time0))
     def _snapshot_arrays(self):
-        return {name: getattr(self, name) for name in ('_A', '_rho', '_current')}
+        return {'_A':self._A,'_rho':self._native_state.density(),'_current':self._current}
 
-    def __init__(self,initial,dt,time0,initial_A):
+    def __init__(self,initial,dt,time0,initial_A,*,execution_mode="checked"):
+        self._execution_mode=_execution_mode_name(execution_mode)
+        self._parse_A=_array_unchecked if execution_mode=='performance' else _array
         self._initial=initial; self._dt=_positive(dt,'dt')
         self._time0=float(_array(time0,'time0',()))
         self._steps=0; self._A=_array(initial_A,'initial_A',(3,))
-        nb,nk=initial.eigen.shape
-        self._rho=np.zeros((nb,nb,nk),complex,order='F')
-        for ib in range(initial.electrons//2): self._rho[ib,ib,:]=2
-        self._current=self._evaluate(self._rho,self._A,False)
+        self._closed=False
+        self._native_state=_model_handle(initial).new_state(self.dt,self._A,execution_mode=execution_mode)
+        self._current=self._native_state.current.copy()
+    @property
+    def execution_mode(self):return self._execution_mode
     @property
     def dt(self): return self._dt
     @property
@@ -178,27 +200,44 @@ class SBEState(_SnapshotMixin):
         return TimeSpec(self._dt,(InputPort('A'),),(OutputPort('j'),),t0=self._time0,
             integrator='4th-order Taylor with midpoint A; J evaluated at the new endpoint A')
     @property
-    def density(self): return _frozen(self._rho,complex)
+    def density(self): return _frozen(self._native_state.density(),complex)
     @property
     def current(self):
         """Electric (charge) current density j = -J_matter at the current time."""
-        return _frozen(-self._current)
+        return _frozen(-self._current,check=self.execution_mode=="checked")
     @property
     def matter_current(self):
         """SALMON electronic matter current J (internal representation)."""
-        return _frozen(self._current)
-    def _evaluate(self,rho,A,advance):
-        i=self._initial; nb,nk=i.eigen.shape; j=np.empty(3)
-        arrays=(i.eigen,i.weights,i.momentum,i.nonlocal_velocity,rho,self._A,A)
-        _native()(nb,nk,i.electrons,i.correction_order,int(i.nonlocal_correction),i.volume,self.dt,
-                  *(a.ctypes.data for a in arrays),int(advance),j.ctypes.data)
-        if not np.isfinite(rho).all() or not np.isfinite(j).all():
-            raise NumericalError('SBE evolution produced nonfinite values; state unchanged')
-        return j
+        return _frozen(self._current,check=self.execution_mode=="checked")
     def step(self,Anew):
-        A=_array(Anew,'Anew',(3,))
-        if not np.isfinite(self._time0+(self._steps+1)*self.dt):
+        if self._closed:raise RuntimeFailure('SBE state is closed')
+        A=self._parse_A(Anew,'Anew',(3,))
+        if self.execution_mode=="checked" and not np.isfinite(self._time0+(self._steps+1)*self.dt):
             raise InputError('time overflow')
-        rho=self._rho.copy(order='F'); j=self._evaluate(rho,A,True)
-        self._rho=rho; self._A=A; self._current=j; self._steps+=1
+        current=self._native_state.step(A)
+        self._A=A;self._current=current;self._steps+=1
         return self.current
+
+    def snapshot(self):
+        if self._closed:raise SnapshotError('SBE state is closed')
+        return super().snapshot()
+
+    def restore(self,snapshot):
+        if self._closed:raise SnapshotError('SBE state is closed')
+        from types import SimpleNamespace
+        nb,nk=self._native_state.model.shape
+        target=SimpleNamespace(dt=self.dt,_time0=self._time0,_snapshot_kind=self._snapshot_kind,
+            _snapshot_counter=self._snapshot_counter,_snapshot_owner=self._snapshot_owner,
+            _snapshot_settings=self._snapshot_settings,
+            _snapshot_arrays=lambda:{'_A':np.empty(3),'_rho':np.empty((nb,nb,nk),complex,order='F'),
+                                     '_current':np.empty(3)})
+        _SnapshotMixin.restore(target,snapshot)
+        self._native_state.replace(target._rho,target._A,target._current)
+        self._A=target._A;self._current=target._current;self._steps=target._steps
+
+    def close(self):
+        if not self._closed:
+            self._native_state.close();self._closed=True
+
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()

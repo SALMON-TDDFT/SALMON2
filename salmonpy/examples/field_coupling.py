@@ -13,6 +13,7 @@ from salmonpy.maxwell import Transverse, Longitudinal, Multiscale1D, SPEED_OF_LI
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('directory', help='新規出力ディレクトリ（存在しないこと）')
+    p.add_argument("--execution-mode", choices=("checked", "performance"), default="checked")
     args = p.parse_args()
     out = Path(args.directory)
     if out.exists(): raise SystemExit(f'{out} already exists')
@@ -27,12 +28,12 @@ def main():
     dt, steps = .02, 4000
 
     # 1) 外場をそのまま与える（SALMON trans_longi='tr'）
-    tr = couple(material, Transverse(pulse), dt=dt, steps=steps, output_directory=out/'transverse')
+    tr = couple(material, Transverse(pulse), dt=dt, steps=steps, output_directory=out/'transverse',execution_mode=args.execution_mode)
     # 2) バルクの縦波配置：誘起場が電流から決まる（trans_longi='lo'）
-    lo = couple(material, Longitudinal(pulse), dt=dt, steps=steps, output_directory=out/'longitudinal')
+    lo = couple(material, Longitudinal(pulse), dt=dt, steps=steps, output_directory=out/'longitudinal',execution_mode=args.execution_mode)
     # 3) 1次元伝播：3セルの層に左から入射（SALMON多スケールの1D）。c*dt = 刻み幅で真空分散なし
     layer = Multiscale1D(cells=3, spacing=SPEED_OF_LIGHT*dt, vacuum=(50, 50), incident=pulse)
-    ms = couple(material, layer, dt=dt, steps=steps, output_directory=out/'multiscale_1d')
+    ms = couple(material, layer, dt=dt, steps=steps, output_directory=out/'multiscale_1d',execution_mode=args.execution_mode)
 
     # 結果の current は電荷電流密度 j（SBEの状態も j を返す。SALMONの物質電流は -j）
     print('外場の最大|A_z|        :', np.abs(tr.A[:, 0, 2]).max())

@@ -1,0 +1,66 @@
+{
+  "schema": "salmonpy.native-layers/1",
+  "length_unit": "bohr",
+  "axis": 0,
+  "origin_cell": [
+    27,
+    32,
+    32
+  ],
+  "layers": [
+    {
+      "id": "sbe-layer",
+      "material_id": "sbe-point",
+      "thickness": 4,
+      "transverse_cells": [
+        2,
+        1
+      ]
+    },
+    {
+      "id": "tddft-layer",
+      "material_id": "si-tddft",
+      "thickness": 4,
+      "transverse_cells": [
+        1,
+        1
+      ]
+    },
+    {
+      "id": "fast-hse-layer",
+      "material_id": "hse-point",
+      "thickness": 4,
+      "transverse_cells": [
+        1,
+        1
+      ]
+    },
+    {
+      "id": "gap",
+      "material_id": null,
+      "thickness": 4,
+      "transverse_cells": [
+        1,
+        1
+      ]
+    },
+    {
+      "id": "drude-layer",
+      "material_id": "drude",
+      "thickness": 4,
+      "transverse_cells": [
+        24,
+        24
+      ]
+    },
+    {
+      "id": "lorentz-layer",
+      "material_id": "lorentz",
+      "thickness": 4,
+      "transverse_cells": [
+        24,
+        24
+      ]
+    }
+  ]
+}

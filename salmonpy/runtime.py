@@ -5,6 +5,7 @@ third-party URLs. Hashes establish integrity, not scientific correctness.
 """
 from .errors import InputError, RuntimeFailure
 import argparse
+from dataclasses import dataclass, field
 import hashlib
 import json
 import os
@@ -122,9 +123,131 @@ def _relative(name):
     return path
 
 
-def _manifest(directory, *, required=(), host=None):
-    directory = Path(directory).expanduser().resolve()
-    meta = json.loads((directory/'runtime.json').read_text(encoding='utf-8'))
+@dataclass(frozen=True, slots=True)
+class RuntimeValidation:
+    """Explicit single-job reuse context; never put its secret in input JSON/logs."""
+    receipt: Path
+    job_id: str
+    job_token: str = field(repr=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, 'receipt', Path(self.receipt).expanduser().resolve())
+        if not isinstance(self.job_id, str) or not self.job_id.strip():
+            raise InputError('a nonempty current job_id is required')
+        if not isinstance(self.job_token, str) or len(self.job_token.encode('utf-8')) < 32:
+            raise InputError('use a fresh secret job_token of at least32 bytes, generated for this job')
+
+
+def _canonical(data):
+    return json.dumps(data, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
+
+
+def _stat_mark(path):
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+        raise InputError('runtime changed to a symlink or nonregular entry')
+    return [info.st_mode, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+
+
+def _stat_snapshot(root):
+    """One explicit initial walk. Reuse only stats these recorded paths."""
+    marks = {'.': _stat_mark(root)}
+    def walk(directory):
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                marks[path.relative_to(root).as_posix()] = _stat_mark(path)
+                if stat.S_ISDIR(marks[path.relative_to(root).as_posix()][0]):
+                    walk(path)
+    walk(root)
+    return marks
+
+
+def _check_snapshot(root, marks):
+    if not isinstance(marks, dict) or '.' not in marks:
+        raise InputError('runtime receipt lacks file metadata')
+    for name, expected in marks.items():
+        path = root if name == '.' else root.joinpath(*_relative(name).parts)
+        if _stat_mark(path) != expected:
+            raise InputError('runtime metadata changed')
+    return len(marks)
+
+
+def prepare_runtime_job(directory, receipt, *, job_id, job_token, required=(), host=None):
+    """Fully validate once and publish a NEW external single-job receipt.
+
+    This never executes SALMON, initializes MPI, downloads or builds. Distribute
+    the returned context only within the same job; its secret is not persisted.
+    Keep the bundle immutable while in use. This is not a publisher signature.
+    """
+    root = Path(directory).expanduser().resolve()
+    context = RuntimeValidation(receipt, job_id, job_token)
+    if context.receipt.is_relative_to(root):
+        raise InputError('job receipt must be stored outside the immutable runtime bundle')
+    if context.receipt.exists():
+        raise FileExistsError(context.receipt)
+    before = _stat_snapshot(root)
+    engine = load_runtime(root, required=required, host=host)
+    manifest = json.loads((root/'runtime.json').read_text(encoding='utf-8'))
+    manifest_sha = _hash(root/'runtime.json')
+    _check_snapshot(root, before)
+    payload = dict(schema='salmonpy.runtime-job/1', job_id=job_id, directory=str(root),
+                   manifest=manifest, manifest_sha256=manifest_sha, snapshot=before,
+                   initial_validation=engine.runtime_validation_report,
+                   lifetime='caller-owned single-job secret; never reuse across jobs')
+    import hmac
+    signature = hmac.new(job_token.encode('utf-8'), _canonical(payload), hashlib.sha256).hexdigest()
+    context.receipt.parent.mkdir(parents=True, exist_ok=True)
+    # Same-directory publication, no partial file and no overwrite, even in a race.
+    fd, name = tempfile.mkstemp(prefix='.salmonpy-job-', dir=context.receipt.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            json.dump(dict(payload=payload, signature=signature), stream, allow_nan=False)
+            stream.write('\n')
+        os.link(temporary, context.receipt)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return context
+
+
+def _job_manifest(directory, validation, *, required=(), host=None):
+    import hmac
+    if os.name != 'posix':
+        raise InputError('receipt metadata reuse requires POSIX change-time semantics')
+    data = json.loads(validation.receipt.read_text(encoding='utf-8'))
+    payload = data['payload']
+    signature = hmac.new(validation.job_token.encode('utf-8'), _canonical(payload), hashlib.sha256).hexdigest()
+    if not isinstance(data['signature'], str) or not hmac.compare_digest(signature, data['signature']):
+        raise InputError('job receipt signature does not match this job')
+    if payload['schema'] != 'salmonpy.runtime-job/1' or payload['job_id'] != validation.job_id:
+        raise InputError('job receipt belongs to a different job')
+    root = Path(directory).expanduser().resolve()
+    if payload['directory'] != str(root):
+        raise InputError('job receipt belongs to a different runtime directory')
+    meta = payload['manifest']
+    _validate_runtime_metadata(meta, required=required, host=host)
+    names = set(payload['snapshot'])
+    required_paths = set(meta['files']) | {'runtime.json', '.'}
+    if not required_paths.issubset(names):
+        raise InputError('incomplete job receipt inventory')
+    checks = _check_snapshot(root, payload['snapshot'])
+    if _hash(root/'runtime.json') != payload['manifest_sha256']:
+        raise InputError('runtime manifest changed')
+    # Mandatory executable-byte check remains; never replace it with a stat.
+    exe = root.joinpath(*_relative(meta['executable']).parts)
+    if _hash(exe) != meta['files'][meta['executable']]:
+        raise InputError('runtime executable checksum mismatch')
+    checks += _check_snapshot(root, payload['snapshot'])
+    report = dict(mode='job-receipt', job_id=validation.job_id, payload_files_hashed=1,
+                  payload_bytes_hashed=exe.stat().st_size,
+                  manifest_bytes_hashed=(root/'runtime.json').stat().st_size,
+                  snapshot_stat_checks=checks, tree_walks=0,
+                  scope='executable rehashed; auxiliary bytes reused under authenticated metadata guard')
+    return meta, report
+
+
+def _validate_runtime_metadata(meta, *, required=(), host=None):
     if meta.get('schema') != 'salmonpy.runtime/1' or meta.get('interface') != INTERFACE:
         raise InputError('unsupported runtime interface')
     if not _compatible(meta.get('platform', {}), host_platform() if host is None else host):
@@ -134,26 +257,98 @@ def _manifest(directory, *, required=(), host=None):
     files = meta.get('files')
     if not isinstance(files, dict) or meta.get('executable') not in files:
         raise InputError('runtime manifest lacks executable inventory')
+    return files
+
+
+def _manifest(directory, *, required=(), host=None, metrics=None):
+    directory = Path(directory).expanduser().resolve()
+    meta = json.loads((directory/'runtime.json').read_text(encoding='utf-8'))
+    files = _validate_runtime_metadata(meta, required=required, host=host)
+    payload_bytes = 0
     for name, expected in files.items():
         path = directory.joinpath(*_relative(name).parts)
         if any(p.is_symlink() for p in [path, *path.parents] if p != directory.parent):
             raise InputError('runtime symlinks are not supported')
-        if not path.is_file() or _hash(path) != expected:
+        try:
+            info = path.stat()
+        except FileNotFoundError as exc:
+            raise InputError('runtime file checksum mismatch: '+name) from exc
+        if not stat.S_ISREG(info.st_mode) or _hash(path) != expected:
             raise InputError('runtime file checksum mismatch: '+name)
+        payload_bytes += info.st_size
     actual = {p.relative_to(directory).as_posix() for p in directory.rglob('*') if p.is_file()}
     if actual != set(files) | {'runtime.json'}:
         raise InputError('runtime contains unlisted files')
+    if metrics is not None:
+        metrics.update(mode='full', payload_files_hashed=len(files),
+                       payload_bytes_hashed=payload_bytes, tree_walks=1)
     return meta
 
 
-def load_runtime(directory, *, required=(), host=None):
-    """Verify all bundle files and return the existing SalmonExecutable adapter."""
+def load_runtime(directory, *, required=(), host=None, validation=None):
+    """Verify bundle integrity; explicit single-job receipt may reuse auxiliary hashes."""
     from .fdtd import SalmonExecutable
-    meta = _manifest(directory, required=required, host=host)
+    report = {}
+    if validation is not None:
+        if not isinstance(validation, RuntimeValidation):
+            raise InputError('validation must be a RuntimeValidation single-job context')
+        try:
+            meta, report = _job_manifest(directory, validation, required=required, host=host)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            import warnings
+            warnings.warn('job runtime receipt is unavailable, stale or inapplicable; performing full runtime verification', RuntimeWarning, stacklevel=2)
+            meta = _manifest(directory, required=required, host=host, metrics=report)
+    else:
+        meta = _manifest(directory, required=required, host=host, metrics=report)
     path = Path(directory).expanduser().resolve()/meta['executable']
     if not os.access(path, os.X_OK):
         raise InputError('runtime executable is not executable')
-    return SalmonExecutable(path, meta['files'][meta['executable']])
+    engine = SalmonExecutable(path, meta['files'][meta['executable']])
+    claims = meta.get('validated_capabilities', {})
+    if type(claims) is not dict: raise InputError('invalid runtime capability inventory')
+    record = claims.get('nlcc-forces')
+    feature = 'nlcc-forces' in meta.get('features', [])
+    if feature != (record is not None): raise InputError('NLCC feature requires a validation record')
+    if record is not None:
+        if type(record) is not str: raise InputError('invalid NLCC validation path')
+        relative = _relative(record)
+        if relative.as_posix() not in meta['files']: raise InputError('unverified NLCC validation record')
+        receipt = json.loads((Path(directory).expanduser().resolve()/relative).read_text())
+        from ._runtime_capabilities import validate_nlcc_receipt
+        scope = validate_nlcc_receipt(receipt, executable_sha256=engine.sha256,
+            source_patch_sha256=meta.get('provenance', {}).get('patch_sha256'),
+            source_tree_sha256=meta.get('provenance', {}).get('source_tree_sha256'))
+        object.__setattr__(engine, '_nlcc_force_xc', scope)
+    object.__setattr__(engine, '_runtime_validation_stats', tuple(report.items()))
+    return engine
+
+
+def load_validated_build(build_record, validation_record):
+    """Load an audited build plus binary/source-bound NLCC validation.
+
+    Records must come from trusted explicit build/validation commands. This does
+    not run a solver or promise material convergence. Uncertified executables keep an empty NLCC capability.
+    """
+    from .fdtd import SalmonExecutable
+    from ._runtime_capabilities import validate_nlcc_receipt
+    path = Path(build_record).expanduser().resolve()
+    record = json.loads(path.read_text())
+    exe = Path(record.get('executable','')).resolve()
+    if (record.get('status') != 'built-and-audited' or exe != path.parent/'build/salmon'
+            or type(record.get('build_configuration',{}).get('mpi_enabled')) is not bool
+            or not exe.is_file() or _hash(exe) != record.get('sha256')):
+        raise InputError('expected unchanged audited runtime build')
+    receipt = json.loads(Path(validation_record).read_text())
+    if receipt.get('build_executable_sha256') != record['sha256']:
+        raise InputError('NLCC evidence belongs to another build')
+    scope = validate_nlcc_receipt(receipt, executable_sha256=record['sha256'],
+                                source_patch_sha256=record.get('source',{}).get('patch_sha256'),
+                                source_tree_sha256=record.get('source',{}).get('source_tree_sha256'))
+    if record['build_configuration']['mpi_enabled'] and 'mpi' not in receipt['native_validation']['tests']:
+        raise InputError('MPI-linked NLCC runtime requires matching MPI force validation')
+    engine = SalmonExecutable(exe,record['sha256'])
+    object.__setattr__(engine,'_nlcc_force_xc',scope)
+    return engine
 
 
 def install_runtime(directory, *, catalog=None, required=(), artifact=None, host=None, archive=None):
@@ -218,7 +413,7 @@ def install_runtime(directory, *, catalog=None, required=(), artifact=None, host
             raise
 
 
-def build_runtime(upstream, directory, *, jobs, cmake_args=()):
+def build_runtime(directory, *, jobs, cmake_args=()):
     """Explicit local build. Retain logs/source on failure; no dependency install.
 
     Returns the audited executable path and hash, not a portable distribution or
@@ -235,17 +430,19 @@ def build_runtime(upstream, directory, *, jobs, cmake_args=()):
     checker = resources/'tools/check_forbidden_eigensolvers.py'
     if not prepare.is_file() or not checker.is_file():
         raise RuntimeFailure('runtime build resources missing; reinstall a complete SALMONpy wheel')
+    if directory is None:
+        raise InputError('a new build directory is required')
     work = Path(directory).expanduser().resolve()
-    upstream = Path(upstream).expanduser().resolve()
-    if work.is_relative_to(upstream) or work.is_relative_to(resources):
+    if work.is_relative_to(resources):
         raise InputError('build directory must be outside source checkouts')
     work.mkdir(parents=True, exist_ok=False)
     commands = [
-        [sys.executable, str(prepare), str(upstream), str(work/'source')],
-        ['cmake', '-S', str(work/'source'), '-B', str(work/'build'), *cmake_args,
+        [sys.executable, str(prepare), str(work/'source')],
+        [sys.executable, str(checker), '--source-root', str(work/'source/src')],
+        ['cmake', '-S', str(work/'source'), '-B', str(work/'build'), '-DUSE_HSE=OFF', *cmake_args,
          '-DCMAKE_REQUIRE_FIND_PACKAGE_LAPACK=TRUE', '-DCMAKE_REQUIRE_FIND_PACKAGE_LIBXCF90=TRUE'],
         ['cmake', '--build', str(work/'build'), '--target', 'salmon', '--parallel', str(jobs)],
-        [sys.executable, str(checker), '--object-tree', str(work/'build/src')],
+        [sys.executable, str(checker), '--object-tree', str(work/'build')],
     ]
     record = {'schema': 'salmonpy.runtime-build/1', 'status': 'started', 'commands': commands,
               'platform': host_platform(), 'validation': 'source/object audit only; run workflow-specific tests before production'}
@@ -257,7 +454,8 @@ def build_runtime(upstream, directory, *, jobs, cmake_args=()):
                 subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
         executable = work/'build'/('salmon.exe' if os.name == 'nt' else 'salmon')
         config=(work/'build/config.h').read_text()
-        record['build_configuration']={'mpi_enabled':bool(re.search(r'^\s*#define\s+USE_MPI(?:\s|$)',config,re.M)),
+        record['build_configuration']={'hse_enabled':bool(re.search(r'^\s*#define\s+USE_HSE(?:\s|$)',config,re.M)),
+                                       'mpi_enabled':bool(re.search(r'^\s*#define\s+USE_MPI(?:\s|$)',config,re.M)),
                                        'config_sha256':_hash(work/'build/config.h')}
         record.update(status='built-and-audited', executable=str(executable), sha256=_hash(executable))
         record['source'] = json.loads((work/'source/salmonpy-runtime-source.json').read_text())
@@ -279,8 +477,8 @@ def main(argv=None):
         if name == 'install':
             p.add_argument('directory'); p.add_argument('--artifact')
             p.add_argument('--archive', help='local ZIP downloaded from CI; verified against the catalog')
-    p = sub.add_parser('build', help='explicit source build; requires compilers, libraries, CMake and Git')
-    p.add_argument('upstream'); p.add_argument('directory')
+    p = sub.add_parser('build', help='explicit source build; requires compilers, libraries and CMake; uses bundled sources')
+    p.add_argument('directory', help='new output directory')
     p.add_argument('--jobs', required=True, type=int)
     p.add_argument('--cmake-arg', action='append', default=[], help='repeat --cmake-arg=-DNAME=VALUE')
     p = sub.add_parser('verify')
@@ -296,7 +494,7 @@ def main(argv=None):
             exe = load_runtime(args.directory, required=args.require)
             result = {'executable': str(exe.path), 'sha256': exe.sha256}
         else:
-            result = build_runtime(args.upstream, args.directory, jobs=args.jobs, cmake_args=args.cmake_arg)
+            result = build_runtime(args.directory, jobs=args.jobs, cmake_args=args.cmake_arg)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, zipfile.BadZipFile) as exc:
         parser.exit(2, str(exc)+'\n')
     print(json.dumps(result, indent=2))

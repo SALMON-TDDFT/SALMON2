@@ -20,6 +20,19 @@ from .sbe import _integer
 from .ld import _positive
 
 
+def _has_nlcc(pseudo):
+    """Conservatively recognize NLCC in validated NC-UPF bytes.
+
+    SALMON reads PP_NLCC data independently of the header flag. Unknown flags
+    and even zero-valued PP_NLCC blocks remain guarded until force validation.
+    """
+    if pseudo.suffix != '.upf': return False
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(pseudo.data)
+    flag = root.find('PP_HEADER').get('core_correction', '').strip().lower()
+    return flag not in ('', 'f', 'false', '.false.', '0') or root.find('PP_NLCC') is not None
+
+
 class SalmonCalculator(Calculator):
     """Energy (eV) and native forces (eV/Å), fixed ions per SCF, no stress.
 
@@ -27,6 +40,7 @@ class SalmonCalculator(Calculator):
     PZ/Libxc-PZ/Libxc-PBE with scalar KY/NC-UPF pseudopotentials. Opt-in
     warm_start reuses compatible wavefunctions, not mixing history. Native forces
     are not replaced by derivatives of a possibly egg-box-contaminated energy.
+    NLCC UPF forces require matching completed runtime implementation validation.
     Users must establish grid and SCF convergence for their optimization target.
     """
     implemented_properties=['energy','forces']
@@ -41,6 +55,9 @@ class SalmonCalculator(Calculator):
             raise InputError('Calculator supports PZ, Libxc-PZ and Libxc-PBE with scalar KY/NC-UPF potentials')
         if not isinstance(warm_start, bool):
             raise InputTypeError('warm_start must be a bool')
+        self._nlcc = any(_has_nlcc(p) for p in pseudos)
+        self._nlcc_forces = xc.lower() in executable.nlcc_force_xc
+        self.implemented_properties = ['energy'] if self._nlcc and not self._nlcc_forces else ['energy', 'forces']
         self._warm_start = warm_start
         if not isinstance(scf,SCFSettings): raise InputTypeError('expected SCFSettings')
         grid=tuple(_integer(v,'grid',8,2**20) for v in grid)
@@ -71,7 +88,18 @@ class SalmonCalculator(Calculator):
         if kwargs: raise InputError('Calculator settings are immutable; construct a new calculator')
         return {}
 
+    def _check_nlcc_forces(self, properties):
+        if self._nlcc and not self._nlcc_forces and 'forces' in properties:
+            raise PropertyNotImplementedError(
+                'NLCC UPF forces require matching completed runtime validation; '
+                'use matching PZ + KY potentials for structural optimization')
+
+    def get_property(self, name, atoms=None, allow_calculation=True):
+        self._check_nlcc_forces((name,))
+        return super().get_property(name, atoms, allow_calculation)
+
     def calculate(self,atoms=None,properties=('energy',),system_changes=all_changes):
+        self._check_nlcc_forces(properties)
         if any(p not in self.implemented_properties for p in properties):
             raise PropertyNotImplementedError('only energy and forces are implemented')
         previous = self._last_ground_state
@@ -86,9 +114,13 @@ class SalmonCalculator(Calculator):
             options['initial_guess'] = previous
         result=model.run(self._engine,run_directory,scf=self._scf,threads=self._threads,timeout=self._timeout,**options)
         energy=float(result.energy_hartree*HARTREE_EV)
-        forces=np.array(result.forces_hartree_per_bohr,copy=True)*HARTREE_EV/BOHR_ANGSTROM
-        if forces.shape!=(len(self.atoms),3) or not np.isfinite(forces).all() or not np.isfinite(energy):
-            raise RuntimeFailure('invalid native energy/force result')
-        self.results={'energy':energy,'forces':forces}
+        if not np.isfinite(energy): raise RuntimeFailure('invalid native energy result')
+        values={'energy':energy}
+        if not self._nlcc or self._nlcc_forces:
+            forces=np.array(result.forces_hartree_per_bohr,copy=True)*HARTREE_EV/BOHR_ANGSTROM
+            if forces.shape!=(len(self.atoms),3) or not np.isfinite(forces).all():
+                raise RuntimeFailure('invalid native force result')
+            values['forces']=forces
+        self.results=values
         self._last_ground_state=result
         self._last_model=model

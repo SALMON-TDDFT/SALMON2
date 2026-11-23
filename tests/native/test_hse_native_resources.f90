@@ -1,0 +1,177 @@
+! Exercise the optimized native refresh/action path with independent owners.
+program probe
+ use iso_fortran_env,only:int64
+ use structures
+ use occupation,only:occupation_input_config
+ use exx_rt_state,only:s_exx_rt_state,rt_state_clear,rt_state_bytes
+ use exx_native,only:exx_refresh,exx_add_action,exx_bind_system,exx_unbind_system,exx_set_phase,exx_pre_scf
+ use exx_native,only:exx_set_scf_flags,exx_adaptive_is_ready,exx_is_frozen,exx_support_has_changed, &
+   exx_check_localization,exx_bind_gs_system
+ use salmon_global
+ use sym_sub,only:use_symmetry
+ use communication,only:COMM_GROUP_SELF
+ implicit none
+ type(s_exx_rt_state),target::a,b,reference,reference_b
+ type(s_dft_system)::sa,sb,sref,srefb,legacy
+ type(s_rgrid)::mg
+ type(s_parallel_info)::info
+ type(s_orbital)::psi,hpsi
+ complex(8)::u(8,2,2),v(8,2,2),target(8,2,2),expected(8,2,2),actual(8,2,2),saved(8,2,2)
+ integer::i,j,k,status
+ integer(int64)::state_bytes
+ character(8)::mode,isolated
+ xc='hse06';theory='tddft_response';propagator='hse_taylor4';num_kgrid=[2,1,1]
+  sa%kmesh=[2,1,1];sa%kpoint_input%num_kgrid=[2,1,1];num_rgrid=2
+ yn_periodic='y';yn_spinorbit='n';yn_hse_wannier='n';yn_dc='n';yn_md='n';yn_jm='n'
+ yn_symmetrized_stencil='n';yn_conventional_from_dcdft='n';temperature=-1d0;nstate=2;nelec=4
+ call get_command_argument(1,mode)
+ if(trim(mode)=='full')propagator='hse_taylor4_full'
+ exx_factor_mode='off';exx_pre_scf_active=.false.;use_symmetry=.false.
+ exx_mlwf_radius=0d0;exx_mlwf_norm_fraction=0d0;exx_kpoint_backend='cpu';hse_omega=.11d0
+ hse_q_reduction=1;hse_block_rows=0;hse_fft_layout='strided';pbeh_coulomb_radius=0d0
+ yn_exx_k_pair_symmetry='y';yn_exx_fft_orbits='n';yn_hse_sr_pair_symmetry='n'
+ mg%is=1;mg%ie=2;mg%num=2
+ info%io_s=1;info%io_e=2;info%ik_s=1;info%ik_e=2;info%numo=2;info%numk=2
+ info%isize_o=1;info%isize_r=1;info%isize_k=1;info%isize_ro=1;info%numm=1
+ info%id_k=0;info%id_r=0;info%id_ro=0;info%icomm_k=COMM_GROUP_SELF;info%icomm_rko=COMM_GROUP_SELF
+ info%icomm_r=COMM_GROUP_SELF;info%icomm_o=COMM_GROUP_SELF;info%icomm_ro=COMM_GROUP_SELF
+ sa%nspin=1;sa%no=2;sa%nk=2;sa%hvol=1d0;sa%hgs=1d0;sa%primitive_a=0d0;sa%primitive_b=0d0
+ do i=1,3
+  sa%primitive_a(i,i)=2d0;sa%primitive_b(i,i)=acos(-1d0)
+ enddo
+ allocate(sa%vec_k(3,2),sa%wtk(2),sa%rocc(2,2,1))
+ sa%vec_k=0d0;sa%vec_k(1,2)=acos(-1d0)/2d0;sa%wtk=.5d0;sa%rocc=2d0
+ sa%xc_input_ready=.true.;sa%xc_input%xcname='hse06'
+ sa%xc_input%exchange_fraction=.25d0;sa%xc_input%screened_exchange=.true.
+ sa%xc_input%hse_omega=.11d0
+ call exx_set_phase(sa,.false.)
+ call occupation_input_config(sa%occupation_input);sa%occupation_input_ready=.true.
+ sb=sa;sref=sa
+ sb%xc_input%hse_omega=.17d0
+ sb%hgs=1.2d0;sb%hvol=1.2d0**3
+ sb%primitive_a=1.2d0*sa%primitive_a;sb%primitive_b=sa%primitive_b/1.2d0
+ sb%vec_k=sa%vec_k/1.2d0
+ sb%occupation_input%nelec=2;sb%occupation_input%temperature=-2d0;sb%occupation_input%nstate=3
+ sb%rocc(2,:,1)=0d0;srefb=sb
+ allocate(psi%zwf(2,2,2,1,2,2,1),hpsi%zwf(2,2,2,1,2,2,1))
+ u=0d0;v=0d0
+ ! Dense orthogonal orbitals give the empty target nonzero exchange overlap.
+ ! Disjoint delta orbitals make the one-occupied-band ACE metric singular.
+ do k=1,2;do j=1,2;do i=1,8
+  u(i,j,k)=exp(cmplx(0d0,2d0*acos(-1d0)*(i-1)*(j-1)/8d0,8))/sqrt(8d0)
+  v(i,j,k)=exp(cmplx(0d0,2d0*acos(-1d0)*(i-1)*j/8d0,8))/sqrt(8d0)
+ enddo;enddo;enddo
+ do k=1,2;do j=1,2;do i=1,8
+  target(i,j,k)=cmplx(.01d0*i,.02d0*j*k,8)
+ enddo;enddo;enddo
+ call get_command_argument(2,isolated)
+ ! Owned electron/temperature/capacity inputs must take precedence even during owner binding.
+ nelec=99;temperature=.5d0;nstate=0
+ theory='dft';yn_opt='n'
+ call exx_bind_gs_system(sa,info,a,status);if(status/=0)stop 1
+ info%isize_r=2
+ call exx_bind_gs_system(sb,info,b,status)
+ if(status/=2.or.associated(sb%salmonpy_hse_owner).or.b%native_resources_enabled)stop 35
+ info%isize_r=1;theory='tddft_response'
+ call exx_bind_system(sb,b,status);if(status/=0)stop 2
+ call exx_bind_system(sref,reference,status);if(status/=0)stop 3
+ call exx_bind_system(srefb,reference_b,status);if(status/=0)stop 12
+ call exx_set_scf_flags(sa,adaptive_ready=.true.,freeze=.true.,support_changed=.true.)
+ if(.not.exx_adaptive_is_ready(sa).or..not.exx_is_frozen(sa).or..not.exx_support_has_changed(sa))stop 30
+ if(exx_adaptive_is_ready(sb).or.exx_is_frozen(sb).or.exx_support_has_changed(sb))stop 31
+ call exx_set_scf_flags(legacy,adaptive_ready=.true.,freeze=.true.,support_changed=.true.)
+ if(exx_adaptive_is_ready(sb).or.exx_is_frozen(sb).or.exx_support_has_changed(sb))stop 32
+ call exx_set_scf_flags(sa,support_changed=.false.)
+ if(exx_support_has_changed(sa).or..not.exx_is_frozen(sa).or..not.exx_adaptive_is_ready(sa))stop 33
+ if(.not.exx_support_has_changed(legacy))stop 34
+ call exx_set_scf_flags(sa,adaptive_ready=.false.,freeze=.false.)
+ call exx_set_scf_flags(legacy,adaptive_ready=.false.,freeze=.false.,support_changed=.false.)
+ exx_mlwf_radius=1d0;a%finite_support_localized=.true.
+ call exx_check_localization(system=sa)
+ a%finite_support_localized=.false.;exx_mlwf_radius=0d0
+ call rt_state_bytes(a,state_bytes,status)
+ if(status/=2.or.state_bytes/=-1)stop 14
+ call exx_bind_system(sa,b,status);if(status==0)stop 15
+ info%isize_k=2;hpsi%zwf=cmplx(.37d0,.19d0,8)
+ call exx_add_action(psi,hpsi,sa,mg,info,rt_status=status)
+ if(status==0.or.any(hpsi%zwf/=cmplx(.37d0,.19d0,8)))stop 16
+ info%isize_k=1
+ if(trim(isolated)=='solo_b')then
+  call refresh(sb,v/sqrt(sb%hvol));call action(sb,actual)
+  call save_action('b_native.dat',actual,b%exx_exchange_energy)
+  call exx_unbind_system(sb);call rt_state_clear(b)
+  stop
+ endif
+ call refresh(sa,u);call action(sa,expected)
+ call save_action('a_native.dat',expected,a%exx_exchange_energy)
+ if(trim(isolated)=='solo_a')then
+  call exx_unbind_system(sa);call rt_state_clear(a)
+  stop
+ endif
+ ! Owned inputs must survive unrelated legacy input changes between calls.
+ num_kgrid=[9,9,9];use_symmetry=.true.;xc='pz';hse_omega=9d0;pbeh_coulomb_radius=7d0
+ exx_pre_scf_active=.true.
+ call refresh(sb,v/sqrt(sb%hvol));call refresh(srefb,v/sqrt(sb%hvol));call action(sa,actual)
+ if(any(actual/=expected))stop 4
+ call action(sb,saved)
+ b%exx_freeze=.true.
+ call exx_set_phase(sb,.true.)
+ call action(sb,actual);if(any(actual/=(0d0,0d0)))stop 22
+ call action(sa,actual);if(any(actual/=expected))stop 23
+ if(exx_pre_scf(sa).or..not.exx_pre_scf(sb))stop 24
+ if(.not.exx_pre_scf(legacy))stop 25
+ call exx_set_phase(sb,.false.)
+ call refresh(sb,u/sqrt(sb%hvol));call refresh(srefb,u/sqrt(sb%hvol))
+ call action(sb,actual);call action(srefb,expected)
+ if(any(actual/=expected))stop 27
+ call refresh(sb,v/sqrt(sb%hvol));call refresh(srefb,v/sqrt(sb%hvol))
+ call action(sb,actual);if(any(actual/=saved))stop 26
+ call save_action('b_native.dat',saved,b%exx_exchange_energy)
+ call action(srefb,actual);if(any(actual/=saved))stop 13
+ call refresh(sa,v);call refresh(sref,v)
+ call action(sa,actual);call action(sref,expected)
+ if(any(actual/=expected))stop 5
+ call action(sb,actual);if(any(actual/=saved))stop 6
+ if(abs(a%exx_exchange_energy-reference%exx_exchange_energy)>1d-14)stop 7
+ if(abs(b%exx_exchange_energy-reference_b%exx_exchange_energy)>1d-14)stop 36
+ call exx_unbind_system(sa);call rt_state_clear(a)
+ call action(sb,actual);if(any(actual/=saved))stop 8
+ call exx_bind_system(sa,a,status);if(status/=0)stop 9
+ call refresh(sa,u);call action(sa,actual)
+ call refresh(sref,u);call action(sref,expected)
+ if(any(actual/=expected))stop 10
+ call exx_unbind_system(sb);call rt_state_clear(b)
+ call action(sa,actual);if(any(actual/=expected))stop 11
+ call exx_unbind_system(sa);call exx_unbind_system(sref)
+ call rt_state_clear(a);call rt_state_clear(reference)
+ call exx_unbind_system(srefb);call rt_state_clear(reference_b)
+ print *,'Native optimized HSE resources: refresh/action, energy, interleave, close/reopen PASS'
+contains
+ subroutine save_action(name,x,energy)
+ character(*),intent(in)::name
+ complex(8),intent(in)::x(:,:,:)
+ real(8),intent(in)::energy
+ integer::unit,i,j,k
+ open(newunit=unit,file=name,status='new')
+ write(unit,'(a,es26.17)')'# exchange_energy=',energy
+ do k=1,size(x,3);do j=1,size(x,2);do i=1,size(x,1)
+  write(unit,'(2es26.17)')real(x(i,j,k),8),aimag(x(i,j,k))
+ enddo;enddo;enddo
+ close(unit)
+ end subroutine
+ subroutine refresh(s,source)
+ type(s_dft_system),intent(in)::s
+ complex(8),intent(in)::source(8,2,2)
+ psi%zwf=reshape(source,shape(psi%zwf))
+ call exx_refresh(s,mg,info,psi,rt_status=status)
+ if(status/=0)stop 20
+ end subroutine
+ subroutine action(s,out)
+ type(s_dft_system),intent(in)::s
+ complex(8),intent(out)::out(8,2,2)
+ psi%zwf=reshape(target,shape(psi%zwf));hpsi%zwf=0d0
+ call exx_add_action(psi,hpsi,s,mg,info,rt_status=status)
+ if(status/=0)stop 21
+ out=reshape(hpsi%zwf,shape(out))
+ end subroutine
+end program

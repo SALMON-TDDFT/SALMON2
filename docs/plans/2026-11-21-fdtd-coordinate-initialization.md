@@ -1,0 +1,9 @@
+# Deterministic unused FDTD coordinates
+
+Cause: set_coo_em has an intent(out) rectangular coo allocation spanning the largest axis, but writes only each axis' physical+halo domain. Shorter axes leave padding undefined, which was persisted in otherwise identical checkpoints. Reproduced before the fix with an isolated exact-routine Fortran probe poisoned with NaN/Inf (expected failure).
+
+Fix: zero the entire output array, then retain all old periodic/nonperiodic odd/even coordinate arithmetic. No new solver restriction, communication, state selector or update change. A single native regression program covers all six mode/poison combinations; source/application objects are audited before every new probe build. GNU-tested; Fujitsu unverified. Add the short synthetic probe to the existing native-contract job (not a new job/physical campaign) and ship it in the optional source SDK. No manual CI dispatch.
+
+Verification: Git-only maintained739-asset source prepared and embedded MPI runtime freshly built with all application-object audits. LD source serial/MPI2 observer off/on, rollback/retry, candidate discard and direct numerical restore preserve old current/E histories, E/H planes and point-file bytes. Full final checkpoint bytes now agree on every rank, including the prior MPI nonowner's padding. Results:calc2026/salmonpy-fdtd-coordinate-init-20261121. Preserve pre-fix evidence and fixed prior binaries. No GS collection or cloud synchronization claim.
+
+Final source/wheel suites679 tests, one optional skip. Installed source SDK standalone probe passes; installed native MPI2 matches source including all checkpoint bytes. New runtime/executable records and failure evidence are in the canonical result root. CI YAML gains only one small synthetic step/artifacts in the existing job, not a physical-observable run or extra dispatch.

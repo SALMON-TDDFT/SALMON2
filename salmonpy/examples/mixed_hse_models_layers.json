@@ -1,0 +1,57 @@
+{
+  "schema": "salmonpy.native-layers/1",
+  "length_unit": "bohr",
+  "axis": 0,
+  "origin_cell": [
+    19,
+    20,
+    20
+  ],
+  "layers": [
+    {
+      "id": "sbe",
+      "material_id": "sbe-point",
+      "thickness": 2,
+      "transverse_cells": [
+        1,
+        1
+      ]
+    },
+    {
+      "id": "hse-a",
+      "material_id": "hse-a",
+      "thickness": 2,
+      "transverse_cells": [
+        1,
+        1
+      ]
+    },
+    {
+      "id": "hse-b",
+      "material_id": "hse-b",
+      "thickness": 2,
+      "transverse_cells": [
+        1,
+        1
+      ]
+    },
+    {
+      "id": "gap",
+      "material_id": null,
+      "thickness": 4,
+      "transverse_cells": [
+        1,
+        1
+      ]
+    },
+    {
+      "id": "ld",
+      "material_id": "drude",
+      "thickness": 2,
+      "transverse_cells": [
+        3,
+        3
+      ]
+    }
+  ]
+}

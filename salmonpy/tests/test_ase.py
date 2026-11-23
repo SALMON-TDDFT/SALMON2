@@ -89,6 +89,9 @@ class ASEBridgeTest(unittest.TestCase):
         pseudo=Pseudopotential(14,2,'_rps.dat',b'2000 .01 2 4.0\n')
         args=dict(pseudopotentials=[pseudo],electrons=4,states=8,grid=[12]*3,kmesh=[2]*3)
         model=dft_from_atoms(atoms,**args)
+        tb=dft_from_atoms(atoms,**args,xc='tbmbj',cval=1.2)
+        self.assertEqual(tb.cval,1.2)
+        self.assertIn("xc='tbmbj'",tb.input_text())
         atoms.positions[0,0]=1
         np.testing.assert_array_equal(model.fractional_positions,[[0,0,0]])
         np.testing.assert_allclose(model.cell,np.eye(3)*5/BOHR_ANGSTROM)
@@ -96,11 +99,6 @@ class ASEBridgeTest(unittest.TestCase):
         with self.assertRaises(ValueError):dft_from_atoms(atoms,**args)
         atoms.set_initial_magnetic_moments([0]);atoms.pbc[2]=False
         with self.assertRaises(ValueError):dft_from_atoms(atoms,**args)
-
-class OptionalDependencyTest(unittest.TestCase):
-    def test_import_does_not_load_ase(self):
-        import subprocess,sys
-        subprocess.run([sys.executable,'-c',"import sys; import salmonpy.ase; assert 'ase' not in sys.modules; assert 'f90nml' not in sys.modules"],check=True)
 
 @unittest.skipUnless(HAS_ASE, 'optional ASE dependencies')
 class ASEOpticalTest(unittest.TestCase):

@@ -1,0 +1,7 @@
+# Coupled replay restart — 2026-11-16
+
+Four MPI ranks: field1 (two local LD materials), SBE1, TDDFT2. Same Si PZ fixture,128 steps,dt.003,OMP/BLAS1. Saved at64, closed the job, launched a new job/output and reconstructed steps1..64 with exact A/E/j checks before continuing to128. Complete A/c,E,j arrays equal the prior continuous installed-wheel run bit for bit. Independent material serial replay and sample clock/lag checks also pass. Manual tests10 pass and guide synchronization passes. No Actions used.
+
+The modified source sample ran via `python -I salmonpy/examples/mpi_mixed_native.py` against installed0.1.0a5 modules/kernels; no solver changes or implicit build. Persistent local evidence under ~/.codex/outputs/salmonpy-state-inputs-20261116: replay-half-v3, replay-resumed, replay-half-v3.log, replay-resumed.log.
+
+The checkpoint binds native library bytes, GS bundle file bytes, native FDTD input, layout, point/material mapping, total step count and MPI decomposition; NPZ bytes have a SHA256. It reconstructs all hidden native histories from the initial condition and verifies recorded observables. It does not serialize hidden field/LD/TDDFT arrays. General-purpose user-backend checkpoints, changed-topology restart, direct restore and reducing restart cost remain open. Exact replay is limited to the same deterministic environment. This is a sample-level recovery route, not the completed whole-session state archive milestone.

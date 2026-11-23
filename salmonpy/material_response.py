@@ -4,9 +4,11 @@ This is a response service, not an E/H FDTD integrator. dt is fixed. A failed
 backend step invalidates the session; no cross-group rollback is promised.
 """
 from .errors import InputError, InputTypeError, RuntimeFailure
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 import time
+from collections.abc import Mapping
+from .config import _copy_json, _freeze, _identifier
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,8 @@ class SolverContext:
     solver_comm: object
     group_name: str
     point_ids: tuple
+    point_records: object = None
+    group_resources: dict = field(default_factory=dict, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,50 @@ class MaterialBinding:
     key: str
     provider: object
     backend: object
+    material_record: object = None
+
+    def __post_init__(self):
+        if self.material_record is not None:
+            from .point_runs import _identity
+            if not isinstance(self.material_record, Mapping):
+                raise InputError('material_record must be an identity mapping')
+            object.__setattr__(self, 'material_record', _freeze(_identity(dict(self.material_record))))
+
+
+def _supported_group_sizes(backend, count, key):
+    """Optional rank admission, shared by layout planning and direct sessions."""
+    sizes=getattr(backend,'supported_group_sizes',None)
+    if sizes is None:
+        return None
+    if (not isinstance(sizes,tuple) or not sizes
+            or any(type(n) is not int or n<1 for n in sizes)
+            or len(set(sizes))!=len(sizes)):
+        raise InputError(key+': supported_group_sizes must be a nonempty tuple of unique positive integers')
+    if count not in sizes:
+        raise InputError(key+': ranks_per_point not in supported_group_sizes '+str(sizes))
+    return tuple(sorted(sizes))
+
+
+def _point_metadata(plan, record, mapping):
+    if record is None and mapping is None:
+        return None
+    from .point_runs import _record
+    if record is None or not isinstance(mapping, Mapping):
+        raise InputError('point_record and point_map must be supplied together')
+    checked = _record(record)
+    if any(type(p) is not int for p in mapping) or set(mapping) != set(plan.point_ids):
+        raise InputError('point_map must cover exactly the integer transport points')
+    for value in mapping.values():
+        _identifier(value, 'point_map value')
+    names = [entry['point_id'] for entry in checked['points']]
+    if [mapping[p] for p in plan.point_ids] != names:
+        raise InputError('point record order must match explicit point_map in transport order')
+    owners = []
+    for p in plan.point_ids:
+        group = next(g for g in plan.groups if p in g.point_ids)
+        owners.append({'transport_point_id': p, 'point_id': mapping[p],
+                       'group_name': group.name, 'ranks': list(group.ranks)})
+    return {'point_run': checked, 'mpi_point_map': owners}
 
 
 def _response_timing(dt,integrator):
@@ -73,35 +121,77 @@ class ResponseSession:
     execution ('collective' or 'leader_only'), reduction ('sum' or 'leader'),
     create_state(initial, point_id, dt, context). States implement
     step(A_new) -> 3-vector physical charge-current density and close().
+    Optional field_contracts selects explicit step_fields(FieldPacket) -> j.
     Legacy advance(A_old,A_new) callbacks are adapted with owned accepted A.
     Every result is tagged implicitly by the fixed plan's point IDs and accepted
     step index. Initial A is zero; current is at the new endpoint. All units a.u.
     """
-    def __init__(self,context,bindings,*,dt):
+    def __init__(self,context,bindings,*,dt,point_record=None,point_map=None,field_contracts=None,execution_mode="checked"):
         self.context=context;self.dt=dt;self.step_index=0;self.failed=False;self.closed=False;self._registered=False
+        self._execution_mode = None
         self._measurements = _Measurements()
         self._adapters = {}
+        self._point_metadata = None
+        self._field_contracts = None
+        self._group_factories={}
+        self._group_resources={}
         self.states={};self.bindings=dict(bindings);self._A=np.zeros((len(context.plan.point_ids),3))
         error=None;descriptors=None
         try:
+            from .ld import _execution_mode_name
+            self._execution_mode = _execution_mode_name(execution_mode)
             if not np.isfinite(dt) or dt<=0: raise InputError('positive finite dt required')
             if set(bindings)!=set(context.plan.point_ids): raise InputError('binding required for every point')
+            self._point_metadata = _point_metadata(context.plan, point_record, point_map)
+            contract_record = None
+            if field_contracts is not None:
+                from .field_input import FieldContract
+                if not isinstance(field_contracts, Mapping) or set(field_contracts)!=set(context.plan.point_ids):
+                    raise InputError('field contracts required for every point')
+                self._field_contracts = dict(field_contracts)
+                contract_record = []
+                for point in context.plan.point_ids:
+                    contract = self._field_contracts[point]
+                    if not isinstance(contract,FieldContract) or contract.timing.dt != dt:
+                        raise InputError('FieldContract with session dt required')
+                    outputs=contract.timing.outputs
+                    if (len(outputs)!=1 or outputs[0].quantity!='j' or outputs[0].offset not in (0,.5)
+                            or outputs[0].sampling!='point' or contract.timing.clock_offset!=0
+                            or contract.timing.t0!=0):
+                        raise InputError('packet response requires point charge j at n*dt or (n+1/2)*dt from zero')
+                    contract_record.append((point,contract.timing.to_dict(),dict(contract.units),
+                                            contract.position.tolist(),contract.position_unit,contract.gauge))
             descriptors=[]
             keys={}
+            identities={}
             for p in context.plan.point_ids:
                 b=bindings[p]
                 if b.key in keys and keys[b.key] is not b:
                     raise InputError('reuse the same MaterialBinding instance for one material key')
                 keys[b.key]=b
+                if self._point_metadata is not None:
+                    entry = self._point_metadata['point_run']['points'][len(descriptors)]
+                    identity = {k: v for k, v in entry.items() if k != 'point_id'}
+                    if b.material_record is not None and dict(b.material_record) != identity:
+                        raise InputError('point identity differs from recorded binding')
+                    if identities.setdefault(b.key, identity) != identity:
+                        raise InputError('one cached binding key cannot identify different initial/material data')
                 mode=b.backend.execution;reduction=b.backend.reduction
                 if not b.key or not b.provider.identity or not b.backend.identity: raise InputError('stable binding identities required')
                 if mode not in ('collective','leader_only') or reduction not in ('sum','leader'): raise InputError('unsupported execution/reduction')
                 owner=next(g for g in context.plan.groups if p in g.point_ids)
                 if mode=='leader_only' and len(owner.ranks)!=1: raise InputError('leader-only backends require one rank per group')
-                descriptors.append((p,b.key,b.provider.identity,b.backend.identity,mode,reduction,float(dt)))
-        except Exception as exc: error=str(exc)
+                sizes=_supported_group_sizes(b.backend,len(owner.ranks),b.key)
+                descriptors.append((p,b.key,b.provider.identity,b.backend.identity,mode,reduction,float(dt),sizes))
+            rows={p:i for i,p in enumerate(context.plan.point_ids)}
+            self._local_rows=np.asarray([rows[p] for p in context.group.point_ids],dtype=np.intp)
+            self._transport_rows=np.asarray([rows[p] for g in context.plan.groups for p in g.point_ids],dtype=np.intp)
+            self._return_rows=np.argsort(self._transport_rows)
+            self._transport_counts=[3*len(g.point_ids) for g in context.plan.groups]
+        except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self._agree(error)
         # Metadata agreement catches mismatched backend selection before callbacks.
+        descriptors = (descriptors, self._point_metadata, contract_record, self.execution_mode)
         local=context.solver_comm.allgather(descriptors)
         mismatch=any(v!=descriptors for v in local)
         if context.is_leader:
@@ -109,23 +199,45 @@ class ResponseSession:
             mismatch=mismatch or any(v!=descriptors for v in all_descriptors)
         self._agree('binding descriptors differ across ranks' if mismatch else None)
         cache={}
-        callback_context=SolverContext(context.solver_comm,context.group.name,context.group.point_ids)
+        callback_records = None
+        if self._point_metadata is not None:
+            record = self._point_metadata['point_run']
+            callback_records = _freeze({p: {'run_id': record['run_id'], **entry}
+                                        for p, entry in zip(context.plan.point_ids, record['points'])
+                                        if p in context.group.point_ids})
+        callback_context=SolverContext(context.solver_comm,context.group.name,context.group.point_ids,callback_records,self._group_resources)
         for point in context.group.point_ids:
             b=bindings[point];error=None
             try:
                 if b.key not in cache: cache[b.key]=b.provider.prepare(callback_context)
-            except Exception as exc: error=str(exc)
+            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             # Group-only agreement: groups can own different numbers of points.
             errors=context.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
             try:
-                state=b.backend.create_state(cache[b.key],point,dt,callback_context)
-                if any(state is old for old in self.states.values()): raise InputError('backend reused mutable state across points')
-            except Exception as exc: error=str(exc)
+                if b.key not in self._group_factories:
+                    opener=getattr(b.backend,'open_group',None)
+                    factory=None if opener is None else opener(cache[b.key],dt,callback_context)
+                    self._group_factories[b.key]=factory
+                factory=self._group_factories[b.key]
+                state=(b.backend.create_state(cache[b.key],point,dt,callback_context)
+                       if factory is None else factory.new_state(point))
+                _admit_response_state(state, self.states)
+            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             errors=context.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
             self.states[point]=state
             self._adapters[point] = _StepAdapter(state)
+            if self._field_contracts is not None:
+                try:
+                    from .field_input import FieldAdapter
+                    self._adapters[point]=FieldAdapter(state,self._field_contracts[point])
+                    declared=getattr(state,'timing',None)
+                    if declared is not None and declared.outputs!=self._field_contracts[point].timing.outputs:
+                        raise InputError('backend output timing differs from charge-current contract')
+                except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+            errors=context.solver_comm.allgather(error)
+            if any(errors): error=str(errors);break
         try: self._agree(error)
         except Exception:
             self.failed=True
@@ -141,6 +253,11 @@ class ResponseSession:
             self.close()
             raise
 
+    @property
+    def execution_mode(self):
+        """Outer transport diagnostics; backend modes are selected separately."""
+        return self._execution_mode
+
     def agree(self,error):
         """Collective validation agreement on all context ranks."""
         c=self.context
@@ -155,14 +272,61 @@ class ResponseSession:
 
     _agree = agree  # Compatibility for existing callers.
 
+    def identity_record(self):
+        """Detached agreed point/ownership metadata, or None on the legacy path."""
+        return _copy_json(self._point_metadata)
+
+    def save_arrays(self, directory=None, arrays=None, *, point_axes=None, metadata=None):
+        """Collective output; only field leader provides arguments and receives archive.
+
+        No additional stepping or units conversion. Errors propagate to every rank.
+        Output must follow plan.point_ids order. Does not create a restart.
+        """
+        from .point_runs import _axes
+        from .outputs import save_arrays
+        c = self.context
+        writer = c.group.role == 'field' and c.is_leader
+        error = None
+        checked = info = None
+        try:
+            if self.closed or self.failed or self._point_metadata is None:
+                raise InputError('saving point arrays requires an active identified session')
+            if writer:
+                if directory is None or not isinstance(arrays, Mapping):
+                    raise InputError('field leader must supply directory and arrays')
+                checked = {name: np.asarray(value) for name, value in arrays.items()}
+                axes = _axes(point_axes, {name: value.shape for name, value in checked.items()}, len(c.plan.point_ids))
+                info = _copy_json({} if metadata is None else metadata)
+                if type(info) is not dict or set(info) & {'point_run', 'point_axes', 'mpi_point_map'}:
+                    raise InputError('reserved point identity metadata keys')
+                info.update(self.identity_record(), point_axes=axes)
+            elif any(v is not None for v in (directory, arrays, point_axes, metadata)):
+                raise InputError('only field leader supplies output arguments')
+        except Exception as exc:
+            error = f'{type(exc).__name__}: {exc}'
+        self.agree(error)
+        archive = None
+        error = None
+        if writer:
+            try:
+                archive = save_arrays(directory, checked, metadata=info)
+            except Exception as exc:
+                error = f'{type(exc).__name__}: {exc}'
+        self.agree(error)
+        return archive
+
     def timing_records(self):
         """Collective point timing declarations, returned on every rank."""
         from .timing import matter_timing
         records = {}; error = None
         try:
-            records = {p: matter_timing(s, self.dt).to_dict() for p, s in self.states.items()}
+            records = {p: (self._field_contracts[p].timing if self._field_contracts is not None
+                           else matter_timing(s, self.dt)).to_dict() for p, s in self.states.items()}
+            for p, state in self.states.items():
+                if isinstance(state, _APacketState):
+                    records[p]['clock_mapping'] = state.clock_mapping
         except Exception as exc:
-            error = str(exc)
+            error = f'{type(exc).__name__}: {exc}'
         self.agree(error)
         c = self.context
         groups = c.leaders.allgather(records) if c.is_leader else None
@@ -185,7 +349,7 @@ class ResponseSession:
                     if value.shape != (3,) or not np.isfinite(value).all():
                         raise InputError('initial current must be a finite 3-vector')
             except Exception as exc:
-                error = str(exc)
+                error = f'{type(exc).__name__}: {exc}'
             statuses = c.solver_comm.allgather((error, value is not None))
             if any(e for e, _ in statuses):
                 error = next(e for e, _ in statuses if e)
@@ -212,71 +376,295 @@ class ResponseSession:
         m = self._measurements
         local = {'group': c.group.name, 'solver_rank': c.solver_comm.rank,
                  'seconds': dict(m.seconds), 'calls': dict(m.calls),
-                 'measurement_errors': list(m.errors)}
+                 'measurement_errors': list(m.errors),
+                 'received_current_rows': (len(self._field_current_rows_by_rank[c.solver_comm.rank])
+                    if hasattr(self,'_field_current_rows_by_rank') else None)}
         rows = c.solver_comm.gather(local, root=0)
         groups = c.leaders.allgather(rows) if c.is_leader else None
         groups = c.solver_comm.bcast(groups, root=0)
         return {'schema': 'salmonpy.communication/1', 'steps': self.step_index,
-                'logical_A_bytes_per_step': len(c.plan.point_ids)*3*8,
+                'logical_A_bytes_per_step': len(c.plan.point_ids)*3*8 if self._field_contracts is None else None,
+                'logical_field_value_bytes_per_step': (len(c.plan.point_ids)*3*8 if self._field_contracts is None
+                    else sum(len(v.units) for v in self._field_contracts.values())*3*8),
+                'field_metadata_bytes_counted': False,
+                'input_routing': 'owner-only Scatterv/scatter; subgroup broadcast only for owned points',
+                'received_A_rows_by_group': {g.name:len(g.point_ids) for g in c.plan.groups},
+                'response_A_history_scope': 'field leader: global; material ranks: owned rows; other rows unspecified',
                 'logical_j_bytes_per_step': len(c.plan.point_ids)*3*8,
                 'ranks': [row for group in groups for row in group]}
 
-    def step(self,A):
-        """Collective everywhere. Only field leader supplies (points,3) A.
+    def _transport_failure(self,origin,error):
+        """All groups know origin from data headers before entering this Bcast."""
+        c=self.context
+        parent=c._error_comm
+        message=parent.bcast(error if parent.rank==origin else None,root=origin)
+        raise InputError(message)
 
-        Returns ordered physical current on every field rank, None on material
-        ranks. User callbacks may use solver_comm but not any outer communicator.
-        """
+    def _input_with_status(self,send,error,*,field_packets):
+        """Exchange owner inputs and all source statuses in the same operation."""
         from mpi4py import MPI
-        c=self.context;error=None
-        try:
-            if self.closed or self.failed or c.closed: raise InputError('session is not usable')
-            if c.group.role=='field' and c.is_leader:
-                values=np.array(A,dtype=np.float64,order='C',copy=True)
-                if values.shape!=self._A.shape or not np.isfinite(values).all(): raise InputError('finite A array of shape (points,3) required')
-            else:
-                if A is not None: raise InputError('only field leader supplies A')
-                values=np.empty_like(self._A)
-        except Exception as exc: error=str(exc)
-        self._agree(error)
-        started = self._measurements.start()
-        if c.is_leader: c.leaders.Bcast(values,root=c.field_group)
-        c.solver_comm.Bcast(values,root=0)
-        self._measurements.stop('A_distribution', started)
-        started = self._measurements.start()
-        currents=np.zeros((len(c.group.point_ids),3));error=None
-        for i,point in enumerate(c.group.point_ids):
-            k=c.plan.point_ids.index(point);b=self.bindings[point]
-            try:
-                j=np.array(self._adapters[point].step(values[k].copy()),dtype=np.float64,order="C",copy=True)
-                if j.shape!=(3,) or not np.isfinite(j).all(): raise InputError('backend must return finite physical current density (3,)')
-            except Exception as exc: error=str(exc)
-            errors=c.solver_comm.allgather(error)
-            if any(errors): error=str(errors);break
-            if b.backend.reduction=='sum': c.solver_comm.Allreduce(j,currents[i],op=MPI.SUM)
-            elif c.is_leader: currents[i]=j
-            if not np.isfinite(currents[i]).all(): error='nonfinite reduced current'
-            errors=c.solver_comm.allgather(error)
-            if any(errors): error=str(errors);break
-        try: self._agree(error)
-        except ValueError:
-            self.failed=True
-            raise
-        self._measurements.stop('material', started)
-        started = self._measurements.start()
-        result=None
+        c=self.context
+        errors=c.solver_comm.allgather(error) if c.solver_comm.size>1 else [error]
+        bad=next((i for i,e in enumerate(errors) if e),None)
+        origin=c.group.ranks[bad]+1 if bad is not None else 0
+        group_error=errors[bad] if bad is not None else None
+        received=None;status=0
         if c.is_leader:
-            counts=[len(g.point_ids)*3 for g in c.plan.groups]
+            if field_packets:
+                outgoing=[(origin,send[i] if c.group.role=='field' and send is not None else None)
+                          for i in range(len(c.plan.groups))]
+                incoming=c.leaders.alltoall(outgoing)
+                status=min((item[0] for item in incoming if item[0]),default=0)
+                received=(status,incoming[c.field_group][1])
+            else:
+                counts=[1+(n if c.group.role=='field' else 0) for n in self._transport_counts]
+                recvcounts=[1+(3*len(c.group.point_ids) if i==c.field_group else 0)
+                            for i in range(len(c.plan.groups))]
+                packed=np.empty(sum(counts),dtype=np.float64)
+                inputs=np.asarray(send).ravel() if send is not None else None
+                start=offset=0
+                for i,count in enumerate(counts):
+                    packed[start]=origin
+                    if count>1:
+                        packed[start+1:start+count]=0 if inputs is None else inputs[offset:offset+count-1]
+                        offset+=count-1
+                    start+=count
+                incoming=np.empty(sum(recvcounts),dtype=np.float64)
+                c.leaders.Alltoallv([packed,counts,MPI.DOUBLE],[incoming,recvcounts,MPI.DOUBLE])
+                start=0;statuses=[];local=np.empty(3*len(c.group.point_ids))
+                for i,count in enumerate(recvcounts):
+                    statuses.append(int(incoming[start]))
+                    if i==c.field_group:local[:]=incoming[start+1:start+count]
+                    start+=count
+                status=min((v for v in statuses if v),default=0)
+                received=np.concatenate(([status],local))
+        if field_packets:
+            if c.solver_comm.size>1:received=c.solver_comm.bcast(received,root=0)
+            status,payload=received
+        else:
+            if not c.is_leader:received=np.empty(1+3*len(c.group.point_ids),dtype=np.float64)
+            if c.solver_comm.size>1:c.solver_comm.Bcast(received,root=0)
+            status=int(received[0]);payload=received[1:].reshape(-1,3)
+        if status:self._transport_failure(status-1,group_error)
+        return (payload or {}) if field_packets else payload
+
+    def _current_with_status(self,currents,error,origin):
+        """Return current and commit outcome together; broadcast details on failure."""
+        from mpi4py import MPI
+        c=self.context;result=None;status=0
+        if c.is_leader:
+            counts=[n+1 for n in self._transport_counts]
+            outgoing=np.concatenate(([origin+1 if error else 0],currents.ravel()))
             packed=np.empty(sum(counts),dtype=np.float64) if c.group.role=='field' else None
-            c.leaders.Gatherv(currents.ravel(),[packed,counts,MPI.DOUBLE] if packed is not None else None,root=c.field_group)
+            c.leaders.Gatherv(outgoing,[packed,counts,MPI.DOUBLE] if packed is not None else None,root=c.field_group)
             if packed is not None:
-                order=[p for g in c.plan.groups for p in g.point_ids]
-                result=np.array([packed.reshape(-1,3)[order.index(p)] for p in c.plan.point_ids])
-        if c.group.role=='field': result=c.solver_comm.bcast(result,root=0)
-        self._measurements.stop('j_collection', started)
-        self._A=values;self.step_index+=1
+                chunks=[];flags=[];start=0
+                for count in counts:
+                    flags.append(int(packed[start]));chunks.append(packed[start+1:start+count]);start+=count
+                status=min((v for v in flags if v),default=0)
+                if not status:result=np.ascontiguousarray(np.concatenate(chunks).reshape(-1,3)[self._return_rows])
+            # Remote material groups must know whether they may commit/continue.
+            status=c.leaders.bcast(status,root=c.field_group)
+        if c.group.role=='field':
+            rows_by_rank=getattr(self,'_field_current_rows_by_rank',None)
+            if rows_by_rank is None:rows_by_rank=[np.arange(len(c.plan.point_ids))]*c.solver_comm.size
+            counts=[1+3*len(rows) for rows in rows_by_rank]
+            local=np.empty(counts[c.solver_comm.rank],dtype=np.float64)
+            send=None
+            if c.is_leader:
+                send=np.concatenate([np.concatenate(([status],np.zeros(3*len(rows)) if status else result[rows].ravel()))
+                                     for rows in rows_by_rank])
+            if c.solver_comm.size>1:
+                c.solver_comm.Scatterv([send,counts,MPI.DOUBLE] if c.is_leader else None,local,root=0)
+            else:local[:]=send
+            status=int(local[0])
+            if not c.is_leader and not status:
+                result=np.zeros((len(c.plan.point_ids),3),dtype=np.float64)
+                result[rows_by_rank[c.solver_comm.rank]]=local[1:].reshape(-1,3)
+        elif c.solver_comm.size>1:
+            status=c.solver_comm.bcast(status,root=0)
+        if status:self._transport_failure(status-1,error)
         return result
 
+    def _step(self,A,*,field_packets=False,upstream_error=None,transport_status=False):
+        """Collective everywhere. Only field leader supplies (points,3) A.
+
+        Returns ordered physical current on field ranks, None on material
+        ranks. Native spatial coupling retains full J on the field leader; only
+        configured owner rows are meaningful on other field ranks. Standalone
+        sessions retain the replicated result. User callbacks may use solver_comm
+        but not any outer communicator.
+        """
+        from mpi4py import MPI
+        c=self.context;error=upstream_error
+        send=None;field_values=None;local_values=None
+        try:
+            if error is not None:raise InputError(error)
+            if self.closed or self.failed or c.closed: raise InputError('session is not usable')
+            if field_packets != (self._field_contracts is not None):
+                raise InputError('use step_fields with declared field contracts, otherwise step(A)')
+            if field_packets:
+                values=self._pack_fields(A)
+                if c.group.role=='field' and c.is_leader:
+                    send=[{p:values[p] for p in group.point_ids} for group in c.plan.groups]
+            else:
+                local_values=np.empty((len(c.group.point_ids),3),dtype=np.float64)
+                if c.group.role=='field' and c.is_leader:
+                    field_values=np.array(A,dtype=np.float64,order='C',copy=True)
+                    if field_values.shape!=self._A.shape or (self.execution_mode=="checked" and not np.isfinite(field_values).all()):
+                        raise InputError('finite A array of shape (points,3) required')
+                    send=np.ascontiguousarray(field_values[self._transport_rows])
+                elif A is not None:
+                    raise InputError('only field leader supplies A')
+        except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+        if transport_status:
+            started=self._measurements.start()
+            received=self._input_with_status(send,error,field_packets=field_packets)
+            if field_packets:values=received
+            else:local_values=received
+        else:
+            self._agree(error)
+            started = self._measurements.start()
+            if field_packets:
+                values=c.leaders.scatter(send,root=c.field_group) if c.is_leader else None
+                if c.group.point_ids:
+                    if c.solver_comm.size>1:values=c.solver_comm.bcast(values,root=0)
+                else:values={}
+            else:
+                if c.is_leader:
+                    c.leaders.Scatterv([send,self._transport_counts,MPI.DOUBLE] if c.group.role=='field' else None,
+                                       local_values,root=c.field_group)
+                if c.group.point_ids and c.solver_comm.size>1:
+                    c.solver_comm.Bcast(local_values,root=0)
+        if field_packets:
+            from .field_input import FieldPacket, FieldValue
+            error=None
+            try:
+                if not isinstance(values,dict) or set(values)!=set(c.group.point_ids):
+                    raise InputError('received packet IDs differ from the owning group')
+                values={p:FieldPacket(**{q:FieldValue._from_transport(**v,checked=self.execution_mode=="checked") for q,v in packet.items()})
+                        for p,packet in values.items()}
+                for p in c.group.point_ids:
+                    self._field_contracts[p].validate(values[p],step_index=self.step_index+1)
+            except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+            self._agree(error)
+        self._measurements.stop('A_distribution', started)
+        started = self._measurements.start()
+        currents=np.zeros((len(c.group.point_ids),3));error=None;error_origin=None
+        for i,point in enumerate(c.group.point_ids):
+            b=self.bindings[point]
+            try:
+                raw = self._adapters[point].step_fields(values[point]) if field_packets else self._adapters[point].step(local_values[i].copy())
+                j=np.array(raw,dtype=np.float64,order="C",copy=True)
+                if j.shape!=(3,) or (self.execution_mode=="checked" and not np.isfinite(j).all()): raise InputError('backend must return finite physical current density (3,)')
+            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+            errors=c.solver_comm.allgather(error)
+            if any(errors):
+                error_origin=c.group.ranks[next(i for i,e in enumerate(errors) if e)]
+                error=str(errors);break
+            if b.backend.reduction=='sum': c.solver_comm.Allreduce(j,currents[i],op=MPI.SUM)
+            elif c.is_leader: currents[i]=j
+            if self.execution_mode=="checked":
+                if not np.isfinite(currents[i]).all(): error='nonfinite reduced current'
+                errors=c.solver_comm.allgather(error)
+                if any(errors):
+                    error_origin=c.group.ranks[next(i for i,e in enumerate(errors) if e)]
+                    error=str(errors);break
+        if transport_status:
+            self._measurements.stop('material', started)
+            started=self._measurements.start()
+            try:result=self._current_with_status(currents,error,error_origin)
+            except ValueError:
+                self.failed=True
+                raise
+        else:
+            try: self._agree(error)
+            except ValueError:
+                self.failed=True
+                raise
+            self._measurements.stop('material', started)
+            started = self._measurements.start()
+            result=None
+            if c.is_leader:
+                counts=self._transport_counts
+                packed=np.empty(sum(counts),dtype=np.float64) if c.group.role=='field' else None
+                c.leaders.Gatherv(currents.ravel(),[packed,counts,MPI.DOUBLE] if packed is not None else None,root=c.field_group)
+                if packed is not None:
+                    result=np.ascontiguousarray(packed.reshape(-1,3)[self._return_rows])
+            if c.group.role=='field':
+                rows_by_rank=getattr(self,'_field_current_rows_by_rank',None)
+                if rows_by_rank is None:
+                    result=c.solver_comm.bcast(result,root=0)
+                else:
+                    rows=rows_by_rank[c.solver_comm.rank]
+                    local=np.empty((len(rows),3),dtype=np.float64)
+                    counts=[3*len(r) for r in rows_by_rank]
+                    send=np.concatenate([result[r].ravel() for r in rows_by_rank]) if c.is_leader else None
+                    c.solver_comm.Scatterv([send,counts,MPI.DOUBLE] if c.is_leader else None,local,root=0)
+                    if not c.is_leader:
+                        result=np.zeros((len(c.plan.point_ids),3),dtype=np.float64)
+                        result[rows]=local
+
+        self._measurements.stop('j_collection', started)
+        if not field_packets:
+            # Keep the checkpoint's global-indexed shape, not replicated drives.
+            if c.group.role=='field' and c.is_leader:self._A=field_values
+            elif c.group.point_ids:self._A[self._local_rows]=local_values
+        self.step_index+=1
+        return result
+
+    def _pack_fields(self,fields):
+        from .field_input import FieldPacket
+        c=self.context
+        if c.group.role!='field' or not c.is_leader:
+            if fields is not None: raise InputError('only field leader supplies fields')
+            return None
+        if not isinstance(fields,Mapping) or set(fields)!=set(c.plan.point_ids):
+            raise InputError('FieldPacket mapping must cover exactly transport point IDs')
+        packed={}
+        for point,contract in self._field_contracts.items():
+            packet=fields[point]
+            contract.validate(packet,step_index=self.step_index+1)
+            packed[point]={}
+            for q in contract.units:
+                v=getattr(packet,q)
+                packed[point][q]=dict(value=v.value.tolist(),time=v.time,position=v.position.tolist(),
+                    unit=v.unit,position_unit=v.position_unit,sampling=v.sampling)
+        return packed
+
+    def _can_merge_field_admission(self,*,field_packets=False):
+        """Initialization-only capability; public overrides require legacy dispatch."""
+        method=self.step_fields if field_packets else self.step
+        base=ResponseSession._merge_step_fields if field_packets else ResponseSession._merge_step
+        return (getattr(method,'__func__',None) is base
+                and getattr(self._step,'__func__',None) is ResponseSession._merge_impl)
+
+    def _step_from_field(self,payload,error,*,field_packets=False):
+        """Explicit upstream error; enabled only by unanimous setup negotiation.
+
+        The coupling fixes response dispatch at initialization, not per rank/step.
+        No upstream-error flag survives a call or needs checkpoint/rollback.
+        """
+        return self._step(payload,field_packets=field_packets,upstream_error=error,transport_status=True)
+
+    def step(self,A):
+        """Collective legacy A/c endpoint input, supplied only by field leader."""
+        return self._step(A)
+
+    def step_fields(self,fields):
+        """Collective explicit per-point A/E/H packets; returns charge current j.
+
+        Contracts are required at construction. No interpolation, conversion or
+        dipole-to-current normalization is performed. Only field leader supplies
+        a mapping keyed by transport point IDs; all other ranks supply None.
+        """
+        return self._step(fields,field_packets=True)
+
+    # Stable callable identities detect subclass, instance and class-level
+    # overrides during setup without bypassing their public dispatch.
+    _merge_step = step
+    _merge_step_fields = step_fields
+    _merge_impl = _step
     advance = step  # Existing prescribed-A entry point.
 
     def close(self):
@@ -285,7 +673,14 @@ class ResponseSession:
         for point in self.context.group.point_ids:
             if point in self.states:
                 try: self.states[point].close()
-                except Exception as exc: error=str(exc)
+                except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+        for factory in self._group_factories.values():
+            if factory is not None:
+                try: factory.close()
+                except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+        for resource in self._group_resources.values():
+            try: resource.close()
+            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self.closed=True
         if self._registered:
             self.context._dependents-=1;self._registered=False
@@ -297,16 +692,15 @@ class LDMaterialProvider:
     def __init__(self,model):
         import hashlib,json
         from dataclasses import asdict
-        from .ld import LorentzDrude
-        if not isinstance(model,LorentzDrude): raise InputTypeError('LorentzDrude model required')
+        from .ld import LorentzDrude,LDModelConfig,LDTensorModelConfig
+        if isinstance(model,(LDModelConfig,LDTensorModelConfig)):model=LorentzDrude.from_config(model)
+        if not isinstance(model,LorentzDrude): raise InputTypeError('LorentzDrude model or LD tensor config required')
         self._config=model.config
         self.identity='salmonpy.ld/'+hashlib.sha256(json.dumps(asdict(self._config),sort_keys=True).encode()).hexdigest()
 
     def prepare(self,context):
         from .ld import LorentzDrude
-        c=self._config
-        return LorentzDrude(plasma_frequency=c.plasma_frequency,strength=c.strength,
-                            resonance=c.resonance,damping=c.damping)
+        return LorentzDrude.from_config(self._config)
 
 
 class LDResponseBackend:
@@ -320,11 +714,14 @@ class LDResponseBackend:
     reduction='leader'
 
     def create_state(self,initial,point_id,dt,context):
+        if getattr(getattr(initial,'config',None),'epsilon_infinity',1.0)!=1.0:
+            import warnings
+            warnings.warn('LD A-endpoint current contains dispersive poles only; epsilon_infinity must be included by the field solver via D=epsilon_infinity*E+4*pi*P. It is not an extra current in this adapter.',RuntimeWarning,stacklevel=2)
         state=initial.new_state(dt=dt)
         class State:
             timing=_response_timing(dt,'LD driven by E_new = -(A_new-A_old)/dt; physical polarization current')
             def advance(self,old,new): return state.step(-(new-old)/dt)[1]
-            def close(self): pass
+            def close(self): state.close()
         return State()
 
 
@@ -346,7 +743,7 @@ class TDDFTMaterialProvider:
     not invoke DFT: supply an existing GS bundle. Close the provider after sessions.
     Each macro point's worker copies the snapshot and owns its evolution history.
     """
-    def __init__(self,directory,input_file,*,runtime,max_steps=1000,threads=1,timeout=300.):
+    def __init__(self,directory,input_file,*,runtime,max_steps=1000,threads=1,timeout=300.,runtime_validation=None):
         from pathlib import Path
         import hashlib,json
         from .runtime import load_runtime
@@ -354,7 +751,8 @@ class TDDFTMaterialProvider:
         from .ld import _positive
         from .tddft import _digest
         self._runtime=Path(runtime).expanduser().resolve()
-        self._executable=load_runtime(self._runtime,required=['tddft','single-rank'])
+        self._executable=load_runtime(self._runtime,required=['tddft','single-rank'],
+            **({} if runtime_validation is None else {'validation':runtime_validation}))
         self._directory=Path(directory).expanduser().resolve()
         self._input=Path(input_file)
         if self._input.is_absolute() or '..' in self._input.parts: raise InputError('relative bundle input required')
@@ -407,23 +805,177 @@ class TDDFTResponseBackend:
     execution='leader_only'
     reduction='leader'
 
+    def __init__(self,*,runtime_validation=None,execution_mode="checked"):
+        from .ld import _execution_mode_name
+        self._execution_mode=_execution_mode_name(execution_mode)
+        self._runtime_validation=runtime_validation
+
+    @property
+    def execution_mode(self):return self._execution_mode
+
     def create_state(self,initial,point_id,dt,context):
         from .tddft import TDDFTInitialState
         from .runtime import load_runtime
         if not isinstance(initial,TDDFTPreparedState) or not isinstance(initial.initial,TDDFTInitialState):
             raise InputTypeError('TDDFTPreparedState with managed serial runtime required')
-        verified=load_runtime(initial.runtime,required=['tddft','single-rank'])
+        verified=load_runtime(initial.runtime,required=['tddft','single-rank'],
+            **({} if self._runtime_validation is None else {'validation':self._runtime_validation}))
         if verified.sha256!=initial.initial.executable.sha256:
             raise InputError('initial-state executable differs from verified serial runtime')
         from dataclasses import replace
-        worker=replace(initial.initial,executable=verified).new_state(dt=dt)
+        worker=replace(initial.initial,executable=verified).new_state(dt=dt,execution_mode=self.execution_mode)
         class State:
             timing=_response_timing(dt,'SALMON middlepoint TDDFT worker; charge current j')
             def __init__(self): self.A=np.zeros(3)
+            @property
+            def execution_mode(self):return worker.execution_mode
             def advance(self,old,new):
-                if not np.array_equal(old,self.A): raise InputError('old A differs from accepted TDDFT state')
+                if worker.execution_mode=="checked" and not np.array_equal(old,self.A): raise InputError('old A differs from accepted TDDFT state')
                 current=worker.step(new)  # TDDFTState returns charge current j
                 self.A=np.array(new,copy=True)
                 return current
             def close(self): worker.close()
         return State()
+
+
+class _APacketState:
+    def __init__(self, raw, dt, phase, owner):
+        from dataclasses import replace
+        from .timing import TimeSpec, InputPort, OutputPort
+        from .field_input import _real
+        spec = getattr(raw, 'timing', None)
+        if (not isinstance(spec, TimeSpec) or spec.dt != dt or spec.t0 != 0
+                or spec.clock_offset != 0 or len(spec.inputs) != 1
+                or len(spec.outputs) != 1 or spec.inputs[0] != InputPort('A')
+                or spec.outputs[0] != OutputPort('j')):
+            raise InputError('packet A binding requires explicit endpoint A/j timing')
+        if not (callable(getattr(raw, 'step', None)) or callable(getattr(raw, 'advance', None))):
+            raise InputError('A backend requires step or advance')
+        initial_A = getattr(raw, 'A', np.zeros(3))
+        if np.any(_real(initial_A, (3,), 'initial A') != 0):
+            raise InputError('packet A binding requires zero initial A')
+        self._raw = raw
+        self._owner = owner
+        self._phase = phase
+        self._original = spec
+        self._steps = 0
+        self._closed = False
+        self._failed = False
+        self._adapter = _StepAdapter(raw)
+        offset = 0 if phase == 'endpoint' else .5
+        self.timing = replace(spec, inputs=(replace(spec.inputs[0], offset=offset),),
+            outputs=(replace(spec.outputs[0], offset=offset),),
+            integrator='explicit A packet '+phase+': '+spec.integrator)
+        self._check_clock()
+
+    @property
+    def time(self):
+        return self._steps*self.timing.dt
+
+    @property
+    def clock_mapping(self):
+        return {'schema':'salmonpy.A-packet-clock/1', 'field_phase':self._phase,
+                'original':self._original.to_dict(), 'mapped':self.timing.to_dict()}
+
+    @property
+    def initial_current(self):
+        value = getattr(self._raw, 'initial_current', None)
+        if value is None and self._steps == 0:
+            value = getattr(self._raw, 'current', None)
+        return None if value is None else np.array(value, copy=True)
+
+    def _check_clock(self):
+        from .field_input import _real
+        if getattr(self._raw, 'timing', None) != self._original:
+            raise InputError('wrapped backend timing changed')
+        actual = float(_real(getattr(self._raw, 'time', self.time), (), 'backend time'))
+        tolerance = min(self.timing.dt*1e-3, max(self.timing.dt*1e-9,
+            8*np.finfo(float).eps*max(abs(self.time), self.timing.dt)))
+        if abs(actual-self.time) > tolerance:
+            raise InputError('wrapped backend clock differs')
+
+    def step_fields(self, packet):
+        from .field_input import FieldPacket, FieldContract, _real
+        if self._closed or self._failed:
+            raise InputError('packet A state is closed or invalidated')
+        self._check_clock()
+        if not isinstance(packet, FieldPacket) or packet.A is None or packet.E is not None or packet.H is not None:
+            raise InputError('packet A state requires only A')
+        # Spatial matching is owned by the session's per-point contract.
+        contract = FieldContract(self.timing, {'A':'A/c:au'}, packet.A.position, 'velocity')
+        contract.validate(packet, step_index=self._steps+1)
+        try:
+            result = _real(self._adapter.step(packet.A.value), (3,), 'charge current')
+            self._steps += 1
+            self._check_clock()
+        except BaseException:
+            self._failed = True
+            raise
+        return result
+
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            try:
+                self._raw.close()
+            finally:
+                self._owner._live[:] = [s for s in self._owner._live if s is not self._raw]
+
+
+class _APacketBackend:
+    def __init__(self, backend, phase):
+        self._backend = backend
+        self._live = []
+        self._phase = phase
+        self.identity = backend.identity+'/packet-A/'+phase+'/1'
+        self.execution = backend.execution
+        self.reduction = backend.reduction
+
+    @property
+    def supported_group_sizes(self):
+        return getattr(self._backend,'supported_group_sizes',None)
+
+    def create_state(self, initial, point_id, dt, context):
+        raw = self._backend.create_state(initial, point_id, dt, context)
+        if any(raw is state for state in self._live):
+            raise InputError('backend reused a live mutable state across packet points')
+        try:
+            state = _APacketState(raw, dt, self._phase, self)
+            self._live.append(raw)
+            return state
+        except BaseException:
+            raw.close()
+            raise
+
+
+def packetize_A_binding(binding, *, field_phase):
+    """Explicitly map an endpoint A/j binding onto packet clocks.
+
+    field_phase is 'endpoint' (1D) or 'yee_half_step' (native E/H). This
+    preserves the numerical A history and charge-current sign; it does not
+    interpolate, change the worker clock, or add magnetic/length-gauge physics.
+    The provider and material identity are borrowed unchanged. Requires zero
+    initial A and an explicit endpoint TimeSpec from every created state.
+    Only leader_only backends (one rank per material group) are supported.
+    """
+    if not isinstance(binding, MaterialBinding):
+        raise InputTypeError('MaterialBinding required')
+    if binding.backend.execution != 'leader_only':
+        raise InputError('packet A adapter requires leader_only backend and one rank per material group')
+    if field_phase not in ('endpoint', 'yee_half_step'):
+        raise InputError('choose endpoint or yee_half_step explicitly')
+    return MaterialBinding(binding.key, binding.provider,
+        _APacketBackend(binding.backend, field_phase), binding.material_record)
+
+
+def _admit_response_state(state, existing):
+    """Reject aliases hidden by distinct packet wrappers within one session."""
+    raw = state._raw if isinstance(state, _APacketState) else state
+    for old in existing.values():
+        owned = old._raw if isinstance(old, _APacketState) else old
+        if raw is owned:
+            if isinstance(state, _APacketState) and state is not old:
+                # Abandon only the alias wrapper; the first owner must stay live.
+                state._closed = True
+                state._owner._live[:] = [s for s in state._owner._live if s is not raw]
+            raise InputError('backend reused mutable state across response points')

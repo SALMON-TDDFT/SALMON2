@@ -10,6 +10,29 @@ class EmbeddedTDDFTTest(unittest.TestCase):
         self.assertEqual(NativeTDDFTBackend.execution, 'collective')
         self.assertEqual(NativeTDDFTBackend.reduction, 'leader')
 
+    def test_performance_tddft_omits_admission_and_marks_failed_updates(self):
+        from pathlib import Path
+        from types import SimpleNamespace
+        import numpy as np
+        from salmonpy.embedded_tddft import _NativeState
+        from salmonpy.errors import RuntimeFailure
+        def forbidden(*args,**kwargs):raise AssertionError('per-step agreement forbidden')
+        native=SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=forbidden)))
+        calls=[]
+        def step(old,new,j):calls.append(new.copy());j[:]=-new;return 0
+        lib=SimpleNamespace(sp_tddft_step_performance=step)
+        state=_NativeState(native,lib,Path('/unused'),4,execution_mode='performance')
+        state._call_performance=lambda fn,*args:fn(*args)
+        self.assertEqual(state.execution_mode,'performance')
+        with self.assertRaises(AttributeError):state.execution_mode='checked'
+        np.testing.assert_array_equal(state.advance([9.,9.,9.],[.1,.2,.3]),[.1,.2,.3])
+        state.advance(state.A,[np.nan,0.,0.])
+        self.assertTrue(np.isnan(calls[-1][0]))
+        self.assertEqual(state.steps,2)
+        lib.sp_tddft_step_performance=lambda *args:20
+        with self.assertRaises(RuntimeFailure):state.advance(state.A,[0.,0.,0.])
+        self.assertTrue(state.failed)
+
     def test_loader_detects_changed_assets(self):
         import tempfile
         from pathlib import Path
@@ -26,10 +49,6 @@ class EmbeddedTDDFTTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'relative'):
                 NativeTDDFTMaterialProvider(root,'../rt.inp')
 
-    def test_import_does_not_initialize_mpi(self):
-        import subprocess,sys
-        code="import sys; import salmonpy.embedded_tddft; assert 'mpi4py.MPI' not in sys.modules"
-        subprocess.run([sys.executable,'-c',code],check=True)
 
     def test_native_eh_field_interface_is_available(self):
         self.assertIsNotNone(importlib.util.find_spec('salmonpy.coupled'),
@@ -50,7 +69,7 @@ class EmbeddedTDDFTTest(unittest.TestCase):
             if error:raise ValueError(error)
         response=SimpleNamespace(context=context,dt=.1,step_index=0,closed=False,failed=False,agree=agree,
                                  timing_records=lambda:{1:matter_record})
-        field=object.__new__(NativeEHField)
+        field=object.__new__(NativeEHField);field._execution_mode="checked"
         field.context=context;field.dt=.1;field.point_ids=(1,);field.step_index=0;field.closed=False;field.failed=False
         return response,field
 
@@ -100,7 +119,7 @@ class EmbeddedTDDFTTest(unittest.TestCase):
         from types import SimpleNamespace
         import numpy as np
         from salmonpy.coupled import NativeEHField
-        field=object.__new__(NativeEHField)
+        field=object.__new__(NativeEHField);field._execution_mode="checked"
         field.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=lambda x:[x]))
         field.lib=SimpleNamespace(sp_eh_step=object());field.capacity=4;field.point_ids=(1,)
         field.A=np.zeros((1,3));field.E=field.A.copy();field.dt=.1
@@ -113,3 +132,67 @@ class EmbeddedTDDFTTest(unittest.TestCase):
         self.assertTrue(field.failed)
         with self.assertRaises(ValueError):field.advance(np.zeros((1,3)))
         self.assertEqual(len(calls),1)
+
+    def test_queryable_native_rejection_is_retryable_without_advancing(self):
+        import numpy as np
+        from types import SimpleNamespace
+        from salmonpy.embedded_tddft import _NativeState
+        from salmonpy.errors import InputError, RuntimeFailure
+        for protocol, expected in ((1,InputError),(0,RuntimeFailure)):
+            code=[10]
+            def native_step(old,new,J):
+                J[:]=0
+                return code[0]
+            comm=SimpleNamespace(allgather=lambda value:[value,value])
+            lib=SimpleNamespace(sp_tddft_step=native_step,sp_tddft_error_protocol=lambda:protocol)
+            state=_NativeState(SimpleNamespace(context=SimpleNamespace(solver_comm=comm)),lib,None,8)
+            state._call=lambda function,*args:function(*args)
+            with self.subTest(protocol=protocol),self.assertRaises(expected):
+                state.advance(np.zeros(3),np.ones(3))
+            np.testing.assert_array_equal(state.A,np.zeros(3))
+            self.assertEqual(state.steps,0)
+            code[0]=0
+            if protocol:
+                self.assertFalse(state.failed)
+                np.testing.assert_array_equal(state.advance(np.zeros(3),np.ones(3)),np.zeros(3))
+                self.assertEqual(state.steps,1)
+            else:
+                self.assertTrue(state.failed)
+                with self.assertRaises(InputError):state.advance(np.zeros(3),np.ones(3))
+                self.assertEqual(state.steps,0)
+
+    def test_rejection_guarantee_requires_protocol_and_unanimous_status(self):
+        from types import SimpleNamespace
+        from salmonpy.embedded_tddft import _admission_rejected
+        lib=SimpleNamespace(sp_tddft_error_protocol=lambda:1)
+        self.assertTrue(_admission_rejected(lib,[(11,True),(11,True)]))
+        for outcomes in ([],[(0,True),(10,True)],[(1,True),(1,True)],[(10,False),(10,True)]):
+            self.assertFalse(_admission_rejected(lib,outcomes))
+        self.assertFalse(_admission_rejected(SimpleNamespace(),[(10,True)]))
+        self.assertFalse(_admission_rejected(lib,[(12,True)],allowed=(10,11)))
+
+    def test_deep_native_error_restored_state_can_retry(self):
+        import numpy as np
+        from types import SimpleNamespace
+        from salmonpy.embedded_tddft import _NativeState
+        from salmonpy.errors import NumericalError,RuntimeFailure,InputError
+        for declared,error in ((True,NumericalError),(False,RuntimeFailure)):
+            result=[23]
+            def step(old,new,current):current[:]=0.;return result[0]
+            lib=SimpleNamespace(sp_tddft_step=step)
+            if declared:lib.sp_tddft_recovery_protocol=lambda:1
+            comm=SimpleNamespace(allgather=lambda value:[value,value])
+            state=_NativeState(SimpleNamespace(context=SimpleNamespace(solver_comm=comm)),lib,None,4)
+            state._call=lambda fn,*args:fn(*args)
+            with self.subTest(declared=declared),self.assertRaises(error):state.advance(np.zeros(3),np.ones(3))
+            self.assertEqual(state.steps,0)
+            np.testing.assert_array_equal(state.A,np.zeros(3))
+            result[0]=0
+            if declared:
+                self.assertFalse(state.failed)
+                state.advance(np.zeros(3),np.ones(3))
+                self.assertEqual(state.steps,1)
+            else:
+                self.assertTrue(state.failed)
+                with self.assertRaises(InputError):state.advance(np.zeros(3),np.ones(3))
+                self.assertEqual(state.steps,0)

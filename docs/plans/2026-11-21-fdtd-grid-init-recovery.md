@@ -1,0 +1,9 @@
+# R3: local MPI grid initialization recovery
+
+Reproduce: validated prior library terminates the host in init_grid_parallel when a local domain has fewer than existing Nd4 cells, without a completed validation JSON even with exit0. The two-rank case uses7 y cells split4/3: a local-only rejection could strand its peer.
+
+Implement optional status in the common initializer, using the already complete mg is_all/ie_all table to reject the same old condition consistently without new MPI communication. Return native1106 before sendrecv-cache setup; release state/owned communicator children. Keep status-absent standalone behavior and numerical loops unchanged. Versioned cold-init recovery query plus unanimous1106 permits the Python adapter to detach and release its initialization reservation; no broader unknown-error reset. Replace, rather than add, the existing startup agreement with a status agreement.
+
+Tests extend the existing E/H regression runner with the small-domain case and optional public --grid-init-retry; no additional module/test campaign framework. GNU/MPI1/2 low-level and constructor rejections twice each, resource counts and caller liveness, then normal32-step/direct-resume comparisons against the unchanged audited control. No GS, scheduler allocation/input auto edits, heavy CI dispatch or arbitrary failure recovery.
+
+Completed locally: source and installed sdist→wheel suites679 tests, one skip. Installed SDK MPI2 repeats constructor/raw retries, resource cleanup and direct resume; arrays and output bytes match source. Normal midpoint checkpoints match old runtime bytewise on every rank. All native source/application-object audits and paired-guide/JSON sync checks pass. Results stored in calc2026/salmonpy-fdtd-grid-init-recovery-20261121; no GS collection, push or manual Actions dispatch.

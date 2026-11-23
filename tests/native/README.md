@@ -9,3 +9,12 @@ regeneration tool no longer reads this repository's Git history. Run
 Compile `native/lorentz_drude.f90`, `tests/native/legacy_ld.f90` and
 `tests/native/test_ld.f90` in a temporary build directory for the LD oracle test.
 `test_pzheevd.f90` is an optional ScaLAPACK check, not a wheel dependency.
+
+The coordinate-initialization regression uses the exact dependency-free
+`set_coo_em` routine from the maintained source. Run explicitly with
+`python tools/test_fdtd_coordinates.py NEW_EXTERNAL_OUTPUT --compiler gfortran`.
+It audits sources/application objects, builds only a tiny probe, and checks
+periodic/nonperiodic odd/even coordinates and all unused padding after NaN/Inf
+poisoning. No SALMON job, MPI, GS data or network is involved. GNU-tested;
+Fujitsu compilation remains unverified. Existing native-contract CI includes
+this small synthetic check in its existing job, not a new physical campaign.

@@ -1,0 +1,127 @@
+"""Exercise public isolated loader/replay against validated E-worker history.
+
+Args: EXECUTABLE VALIDATION_DIR NEW_OUTPUT
+VALIDATION_DIR is produced by tools/test_isolated_worker.py; no new SCF/physics
+convergence calculation. At most two simultaneous one-thread children.
+"""
+import json
+from pathlib import Path
+import sys
+import numpy as np
+from salmonpy.isolated_tddft import load_isolated_runtime, IsolatedTDDFTInitialState
+from salmonpy.field_input import FieldPacket, FieldValue
+from salmonpy.errors import RuntimeFailure
+
+
+def main():
+    executable, validation, output = sys.argv[1:]
+    validation, output = Path(validation), Path(output)
+    output.mkdir(parents=True,exist_ok=False)
+    runtime = load_isolated_runtime(executable,validation/'report.json')
+    with np.load(validation/'dipoles.npz',allow_pickle=False) as data:
+        E, dt, reference = data['fields'].copy(),float(data['dt']),data['values'].copy()
+    with IsolatedTDDFTInitialState.from_salmon(validation/'first','input.inp',runtime=runtime,
+                                              max_steps=25,threads=1,timeout=30) as model:
+        with model.new_state(dt=dt) as a:
+            with model.new_state(dt=dt) as b:
+                np.testing.assert_array_equal(a.observables.dipole,reference[0,3:6])
+                for n,v in enumerate(E[:10],1):
+                    before=b.observables.dipole.copy()
+                    frame=a.step_fields(FieldPacket(E=FieldValue(v,time=n*dt,position=(0,0,0),unit='E:au')))
+                    np.testing.assert_array_equal(b.observables.dipole,before)
+                    np.testing.assert_array_equal(frame.dipole,reference[n,3:6])
+                    np.testing.assert_equal(frame.electron_number,reference[n,6])
+                    if reference[n,8]==1.:np.testing.assert_equal(frame.internal_energy,reference[n,7])
+                    else:assert frame.internal_energy is None
+                    np.testing.assert_array_equal(b.step(v).dipole,frame.dipole)
+            live=a.savepoint()
+            initial_stats=a.worker_statistics()
+            live_expected=np.array([a.step(v).dipole for v in E[10:]])
+            before_restore=a.worker_statistics()
+            a.restore_savepoint(live)
+            restored_stats=a.worker_statistics()
+            assert initial_stats['pid']==before_restore['pid']==restored_stats['pid']
+            assert restored_stats['updates']==before_restore['updates']
+            np.testing.assert_equal(a.electron_number,reference[10,6])
+            np.testing.assert_equal(a.internal_energy,reference[10,7])
+            live_actual=np.array([a.step(v).dipole for v in E[10:]])
+            np.testing.assert_array_equal(live_actual,live_expected)
+            a.restore_savepoint(live)
+            a.release_savepoint(live)
+            saved=a.snapshot()
+            a.save_checkpoint(output/'checkpoint')
+            expected=np.array([a.step(v).dipole for v in E[10:]])
+            model.close()
+            a.restore(saved)
+            np.testing.assert_equal(a.electron_number,reference[10,6])
+            np.testing.assert_equal(a.internal_energy,reference[10,7])
+            actual=np.array([a.step(v).dipole for v in E[10:]])
+            np.testing.assert_array_equal(actual,expected)
+            # Public step recovers accepted history after a lost child.
+            before=a.observables.dipole.copy()
+            a._engine._proc.kill();a._engine._proc.wait()
+            try:a.step([0,0,0])
+            except RuntimeFailure:pass
+            else:raise AssertionError('killed worker did not report failed step')
+            np.testing.assert_array_equal(a.observables.dipole,before)
+            assert a.time==20*dt
+            a.step([0,0,0])
+    with IsolatedTDDFTInitialState.from_salmon(validation/'first','input.inp',runtime=runtime,
+                                              max_steps=25,threads=1,timeout=30) as rebuilt:
+        with rebuilt.new_state(dt=dt) as resumed:
+            resumed.restore_checkpoint(output/'checkpoint')
+            np.testing.assert_equal(resumed.electron_number,reference[10,6])
+            np.testing.assert_equal(resumed.internal_energy,reference[10,7])
+            disk_actual=np.array([resumed.step(v).dipole for v in E[10:]])
+            np.testing.assert_array_equal(disk_actual,expected)
+            np.testing.assert_equal(resumed.electron_number,reference[-1,6])
+    # Direct numerical disk persistence: first process exits before import.
+    from salmonpy.native_steps import _AppendJournal
+    from salmonpy.errors import SnapshotError
+    import hashlib, shutil
+    with IsolatedTDDFTInitialState.from_salmon(validation/'first','input.inp',runtime=runtime,
+                                              max_steps=25,threads=1,timeout=30) as direct_model:
+        with direct_model.new_state(dt=dt) as first:
+            for value in E[:10]:first.step(value)
+            original_pid=first.worker_statistics()['pid']
+            first.save_direct_checkpoint(output/'direct-checkpoint')
+            direct_expected=[first.step(value) for value in E[10:]]
+            token=first.savepoint();first.release_savepoint(token)
+            run=Path(first._engine._work.name)/'run'
+            expected_files={name:(run/name).read_bytes() for name in _AppendJournal.capture(run).files}
+        with direct_model.new_state(dt=dt) as second:
+            second.restore_direct_checkpoint(output/'direct-checkpoint')
+            restored=second.worker_statistics()
+            assert restored['pid']!=original_pid and restored['updates']==0 and restored['step']==10
+            for value,control in zip(E[10:],direct_expected):
+                observed=second.step(value)
+                for attribute in ('electronic_change','dipole','electron_number','internal_energy'):
+                    np.testing.assert_equal(getattr(observed,attribute),getattr(control,attribute))
+            assert second.worker_statistics()['updates']==len(E)-10
+            token=second.savepoint();second.release_savepoint(token)
+            run=Path(second._engine._work.name)/'run'
+            for name,raw in expected_files.items():assert raw==(run/name).read_bytes()
+            broken=output/'invalid-direct-checkpoint'
+            shutil.copytree(output/'direct-checkpoint',broken)
+            binary=broken/'isolated-state.bin';raw=binary.read_bytes();binary.write_bytes(raw[:-1]+b'!')
+            metadata=json.loads((broken/'manifest.json').read_text())
+            metadata['files']['isolated-state.bin']['sha256']=hashlib.sha256(binary.read_bytes()).hexdigest()
+            (broken/'manifest.json').write_text(json.dumps(metadata))
+            before=second.worker_statistics();dipole=second.observables.dipole.copy()
+            try:second.restore_direct_checkpoint(broken)
+            except SnapshotError:pass
+            else:raise AssertionError('incomplete native trailer was accepted')
+            assert second.worker_statistics()==before and second.usable
+            np.testing.assert_array_equal(second.observables.dipole,dipole)
+    np.savez(output/'continuation.npz',expected=expected,actual=actual,disk_actual=disk_actual,live_expected=live_expected,live_actual=live_actual)
+    (output/'report.json').write_text(json.dumps(dict(public_loader=True,independent_states=True,
+        disk_rebuilt_model=True,disk_continuation_max_abs_error=0.,
+        direct_disk_new_process=True,direct_disk_restore_updates=0,direct_disk_all_observations_exact=True,
+        direct_disk_output_streams_exact=True,direct_disk_failed_candidate_preserves_original=True,
+        field_packet=True,restore_continuation_max_abs_error=0.,worker_failure_recovery=True,
+        runtime_sha256=runtime.executable.sha256,direct_savepoint_same_process=True,direct_restore_evolution_calls=0,
+        direct_continuation_exact=True,scope='interface regression; no convergence study'),indent=2)+'\n')
+    print('public isolated loader, replay, independent states and recovery PASS')
+
+
+if __name__=='__main__':main()

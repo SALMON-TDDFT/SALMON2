@@ -9,7 +9,6 @@ Set OpenMP/BLAS threads in the launch environment; example budget assumes one.
 import argparse,json
 from pathlib import Path
 import numpy as np
-from mpi4py import MPI
 from salmonpy.fdtd import FDTD,PlaneWave
 from salmonpy.geometry import Grid,Geometry
 from salmonpy.fields import AcosPulse
@@ -23,7 +22,13 @@ p.add_argument('build_record');p.add_argument('bundle');p.add_argument('input');
 p.add_argument('--field-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--material-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--steps',type=int,default=64)
-a=p.parse_args();world=MPI.COMM_WORLD
+p.add_argument('--outer-execution-mode',choices=('checked','performance'),default='checked',help='outer A/J transport diagnostics; backend modes are separate')
+p.add_argument('--matter-execution-mode',choices=('checked','performance'),default='checked',
+               help='TDDFT update mode only; field and outer coupling retain their own checks')
+p.add_argument('--sample-h',action='store_true',help='collect raw half-step H; requires H-enabled native ABI')
+a=p.parse_args()
+from mpi4py import MPI
+world=MPI.COMM_WORLD
 try:
     nf=a.field_ranks;nm=a.material_ranks
     if world.size!=nf+2*nm:raise ValueError('launch field-ranks + 2*material-ranks MPI ranks')
@@ -48,20 +53,32 @@ try:
     # Each material rank enters the same native electronic state on its group.
     # Replace these provider/backend objects with a user implementation to change physics.
     provider=NativeTDDFTMaterialProvider(a.bundle,a.input,max_steps=a.steps)
-    backend=NativeTDDFTBackend(a.build_record,output,decomposition=(1,nm,1,1,1))
+    backend=NativeTDDFTBackend(a.build_record,output,decomposition=(1,nm,1,1,1),execution_mode=a.matter_execution_mode)
     binding=MaterialBinding('crystal',provider,backend)
-    response=ResponseSession(context,{1:binding,2:binding},dt=dt)
-    coupled=CoupledStepper(response,field);history=[]
+    response=ResponseSession(context,{1:binding,2:binding},dt=dt,execution_mode=a.outer_execution_mode)
+    coupled=CoupledStepper(response,field);history=[];sample_history=[]
     for _ in range(a.steps):
         frame=coupled.step()
+        magnetic=field.sample_magnetic_field() if a.sample_h and field is not None else None
         if world.rank==0:
+            samples=field.sample_fields()
+            if magnetic is not None:samples['H']=magnetic
+            sample_history.append(samples)
             history.append({k:v.tolist() if isinstance(v,np.ndarray) else v for k,v in frame.items()})
     response.close()
     if field is not None:field.close()
     context.close()
     if world.rank==0:
+        np.savez(output/'field_samples.npz',
+                 A=np.concatenate([s['A'].values for s in sample_history]),
+                 E=np.concatenate([s['E'].values for s in sample_history]),
+                 A_time=np.concatenate([s['A'].times for s in sample_history]),
+                 E_time=np.concatenate([s['E'].times for s in sample_history]),
+                 positions=sample_history[0]['E'].positions,point_ids=plan.point_ids,
+                 **({'H':np.concatenate([s['H'].values for s in sample_history]),
+                     'H_time':np.concatenate([s['H'].times for s in sample_history])} if a.sample_h else {}))
         (output/'response.json').write_text(json.dumps({'scheme':NativeEHField.scheme,'units':'atomic',
-            'point_ids':plan.point_ids,'timing':coupled.timing,'history':history},indent=2)+'\n')
+            'point_ids':plan.point_ids,'matter_execution_mode':a.matter_execution_mode,'timing':coupled.timing,'history':history},indent=2)+'\n')
         print(output/'response.json')
 except BaseException:
     # Native failures cannot be rolled back collectively; do not enter context

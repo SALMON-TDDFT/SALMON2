@@ -81,7 +81,7 @@ class OutputTests(unittest.TestCase):
         from salmonpy.tddft import TDDFTState
         import shutil
         state=TDDFTState.__new__(TDDFTState)
-        state._closed=False;state._dt=.1;state._steps=0;state._history=[];state._curr_history=[]
+        state._closed=False;state._execution_mode="checked";state._dt=.1;state._steps=0;state._history=[];state._curr_history=[]
         state._A0=np.zeros(3);state._J0=np.zeros(3);state._initial_hashes={};state._threads=1;state._input='input'
         state._executable=SimpleNamespace(sha256='0'*64);state._reader=None
         state._owner=tempfile.TemporaryDirectory()
@@ -116,7 +116,7 @@ class OutputTests(unittest.TestCase):
         from salmonpy.tddft import TDDFTState
         import shutil
         state=TDDFTState.__new__(TDDFTState)
-        state._closed=False;state._dt=.1;state._steps=0;state._history=[];state._curr_history=[]
+        state._closed=False;state._execution_mode="checked";state._dt=.1;state._steps=0;state._history=[];state._curr_history=[]
         state._A0=np.zeros(3);state._J0=np.zeros(3);state._initial_hashes={};state._threads=1;state._input='input'
         state._executable=SimpleNamespace(sha256='0'*64);state._reader=None
         state._owner=tempfile.TemporaryDirectory()

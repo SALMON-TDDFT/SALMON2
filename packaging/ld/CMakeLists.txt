@@ -14,8 +14,10 @@ endforeach()
 add_custom_target(ld_audit ALL
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/native"
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/salmonpy")
-add_library(salmonpy_ld SHARED "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90"
-  "${ROOT}/native/sbe_types.f90" "${ROOT}/native/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90")
+# The shared LD kernel conditionally includes test-only allocation injection.
+set_source_files_properties("${ROOT}/native/lorentz_drude.f90" PROPERTIES Fortran_PREPROCESS ON)
+add_library(salmonpy_ld SHARED "${ROOT}/native/fdtd_energy.f90" "${ROOT}/native/molecular_feedback.f90" "${ROOT}/native/subpixel_smoothing.f90" "${ROOT}/native/lorentz_drude_tensor.f90" "${ROOT}/native/lorentz_drude_fit.f90" "${ROOT}/salmonpy/convergence_kernel.f90" "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90" "${ROOT}/salmonpy/ld_handles.f90"
+  "${ROOT}/native/sbe_types.f90" "${ROOT}/native/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90" "${ROOT}/salmonpy/sbe_handles.f90")
 if(APPLE)
   target_link_libraries(salmonpy_ld PRIVATE "-framework Accelerate")
 else()
@@ -55,7 +57,7 @@ install(FILES "${ROOT}/salmonpy/runtime.py" "${ROOT}/salmonpy/runtime_catalog.js
 install(FILES "${ROOT}/tools/prepare_salmon_runtime.py" "${ROOT}/tools/check_forbidden_eigensolvers.py"
   DESTINATION salmonpy/_runtime_source/tools)
 install(DIRECTORY "${ROOT}/runtime/" DESTINATION salmonpy/_runtime_source/runtime
-  FILES_MATCHING PATTERN "*.json" PATTERN "*.patch")
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "*.tar.gz" EXCLUDE)
 install(DIRECTORY "${ROOT}/native/" DESTINATION salmonpy/_runtime_source/native
   FILES_MATCHING PATTERN "*.f90")
 
@@ -75,9 +77,251 @@ install(DIRECTORY "${ROOT}/salmonpy/examples/si_intro_data/"
 install(FILES "${ROOT}/salmonpy/SI_INTRO.md" "${ROOT}/salmonpy/SI_INTRO.en.md"
   DESTINATION salmonpy)
 
+install(FILES "${ROOT}/salmonpy/MEMORY.md" "${ROOT}/salmonpy/MEMORY.en.md" "${ROOT}/salmonpy/memory.py" "${ROOT}/salmonpy/_memory_advice.py" "${ROOT}/salmonpy/checkpointing.py" "${ROOT}/salmonpy/_native_checkpoint.py" "${ROOT}/salmonpy/CHECKPOINTING.md" "${ROOT}/salmonpy/CHECKPOINTING.en.md" DESTINATION salmonpy)
+
 # Public Python integration contract and in-memory state snapshots.
 install(FILES "${ROOT}/salmonpy/_version.py" "${ROOT}/salmonpy/errors.py"
   "${ROOT}/salmonpy/api.py" "${ROOT}/salmonpy/snapshots.py"
   "${ROOT}/salmonpy/API.md" "${ROOT}/salmonpy/API.en.md"
   "${ROOT}/salmonpy/SNAPSHOTS.md" "${ROOT}/salmonpy/SNAPSHOTS.en.md"
   DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/_tddft_checkpoint.py" "${ROOT}/salmonpy/_runtime_capabilities.py" "${ROOT}/salmonpy/_nlcc_reference.json"
+  DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/materials.py" "${ROOT}/salmonpy/MATERIALS.md" "${ROOT}/salmonpy/MATERIALS.en.md" DESTINATION salmonpy)
+
+# Preview public C material ABI; only declarations/examples, no implicit plugin build.
+install(FILES "${ROOT}/salmonpy/c_material.py" "${ROOT}/salmonpy/C_ABI.md" "${ROOT}/salmonpy/C_ABI.en.md" DESTINATION salmonpy)
+install(DIRECTORY "${ROOT}/salmonpy/include/" DESTINATION salmonpy/include
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.f90")
+install(DIRECTORY "${ROOT}/salmonpy/examples/c_material/" DESTINATION salmonpy/examples/c_material
+  FILES_MATCHING PATTERN "*.c" PATTERN "*.cpp" PATTERN "*.f90")
+install(FILES "${ROOT}/tools/build_c_material_example.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/_material_handles.py" "${ROOT}/salmonpy/quickstart.py" "${ROOT}/salmonpy/SBE.md" "${ROOT}/salmonpy/SBE.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/LD.md" "${ROOT}/salmonpy/LD.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/gs_archive.py" "${ROOT}/salmonpy/GS_ARCHIVE.md" "${ROOT}/salmonpy/GS_ARCHIVE.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/include/salmonpy_gs_stream.f90" DESTINATION salmonpy/include)
+
+install(FILES "${ROOT}/salmonpy/gs_native.py" DESTINATION salmonpy)
+install(DIRECTORY "${ROOT}/salmonpy/native_adapters/" DESTINATION salmonpy/native_adapters FILES_MATCHING PATTERN "*.f90" PATTERN "*.h")
+install(FILES "${ROOT}/tools/build_gs_restart_converter.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/_gs_archive.py" DESTINATION salmonpy)
+
+# Opt-in RT configuration extraction; default pinned runtime remains unchanged.
+install(FILES "${ROOT}/tools/prepare_rt_step_config.py" "${ROOT}/tools/test_rt_step_config.py"
+  "${ROOT}/tools/test_rt_step_config_runtime.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_rt_step_config.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+# Separate opt-in fast-PR HSE profile; no full solver is bundled.
+install(FILES "${ROOT}/tools/prepare_hse_rt_state.py" "${ROOT}/tools/test_hse_rt_state.py"
+  "${ROOT}/tools/test_hse_rt_state_runtime.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_hse_rt_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/test_pp_grid_config.py" "${ROOT}/tools/test_kpoint_config.py" "${ROOT}/tools/test_pp_input_config.py" "${ROOT}/tools/test_xc_input_config.py" "${ROOT}/tools/test_pre_scf_state.py" "${ROOT}/tools/test_pre_scf_runtime.py" "${ROOT}/tools/test_gs_lifecycle.py" "${ROOT}/tools/test_gs_occupation_runtime.py" "${ROOT}/tools/test_occupation_inputs.py" "${ROOT}/tools/test_cell_config.py" "${ROOT}/tools/test_grid_config.py" "${ROOT}/tools/test_owned_workspaces.py" "${ROOT}/tools/test_tddft_contexts.py" "${ROOT}/tools/test_hse_explicit_state.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_hse_explicit_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tests/native/test_pp_grid_config.f90" "${ROOT}/tests/native/test_kpoint_config.f90" "${ROOT}/tests/native/test_pp_input_config.f90" "${ROOT}/tests/native/test_xc_input_config.f90" "${ROOT}/tests/native/test_pre_scf_state.f90" "${ROOT}/tests/native/test_gs_lifecycle.f90" "${ROOT}/tests/native/test_occupation_inputs.f90" "${ROOT}/tests/native/test_dip_occupation_inputs.f90" "${ROOT}/tests/native/test_cell_config.f90" "${ROOT}/tests/native/test_grid_config.f90" "${ROOT}/tests/native/test_owned_workspaces.f90" "${ROOT}/tests/native/test_tddft_contexts.f90" "${ROOT}/tests/native/test_hse_native_resources.f90" "${ROOT}/tests/native/test_hse_resource_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/runtime_sources.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/config.py" "${ROOT}/salmonpy/CONFIG.md" "${ROOT}/salmonpy/CONFIG.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/preparation.py" "${ROOT}/salmonpy/PREPARATION.md" "${ROOT}/salmonpy/PREPARATION.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/structure.py" "${ROOT}/salmonpy/STRUCTURE.md" "${ROOT}/salmonpy/STRUCTURE.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/builtin_materials.py" "${ROOT}/salmonpy/BUILTIN_MATERIALS.md" "${ROOT}/salmonpy/BUILTIN_MATERIALS.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/DFT_CONFIG.md" "${ROOT}/salmonpy/DFT_CONFIG.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/initial_states.py" "${ROOT}/salmonpy/INITIAL_STATES.md" "${ROOT}/salmonpy/INITIAL_STATES.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/point_runs.py" "${ROOT}/salmonpy/POINT_RUNS.md" "${ROOT}/salmonpy/POINT_RUNS.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/MPI_IDENTITY.md" "${ROOT}/salmonpy/MPI_IDENTITY.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/RECORDED_MATERIALS.md" "${ROOT}/salmonpy/RECORDED_MATERIALS.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/CONFIGURED_NATIVE.md" "${ROOT}/salmonpy/CONFIGURED_NATIVE.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/_point_checkpoint.py" "${ROOT}/salmonpy/POINT_CHECKPOINTS.md" "${ROOT}/salmonpy/POINT_CHECKPOINTS.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/field_input.py" "${ROOT}/salmonpy/FIELD_INPUT.md" "${ROOT}/salmonpy/FIELD_INPUT.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/dipole_source.py" "${ROOT}/salmonpy/DIPOLE_RADIATION.md" "${ROOT}/salmonpy/DIPOLE_RADIATION.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/isolated_tddft.py" "${ROOT}/salmonpy/ISOLATED_TDDFT.md" "${ROOT}/salmonpy/ISOLATED_TDDFT.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/field_sampling.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/layers.py" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/mixed_layers.json" DESTINATION salmonpy/examples)
+
+# Fast-PR HSE direct numerical checkpoint regression, explicitly built only.
+install(FILES "${ROOT}/tools/test_hse_direct_checkpoint.py" "${ROOT}/tools/test_fast_hse_mpi_checkpoint.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_hse_direct_checkpoint.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+# Explicit process-isolated fast-PR HSE material adapter and worker sources.
+install(FILES "${ROOT}/salmonpy/fast_hse.py" "${ROOT}/salmonpy/fast_hse_mpi.py" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/mixed_hse_layers.json" DESTINATION salmonpy/examples)
+install(FILES "${ROOT}/tools/build_fast_hse_worker.py" "${ROOT}/tools/build_fast_hse_mpi.py" "${ROOT}/tools/prepare_fast_hse_coupled_fixture.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_native_tddft_admission_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_mixed_scaling.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_tddft_deep_recovery_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_fast_hse_deep_recovery_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_eh_deep_recovery_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/stepping.py" "${ROOT}/salmonpy/STEPPING.md" "${ROOT}/salmonpy/STEPPING.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/native_steps.py" "${ROOT}/salmonpy/NATIVE_STEPPING.md" "${ROOT}/salmonpy/NATIVE_STEPPING.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/mixed_tddft_hse_layers.json" DESTINATION salmonpy/examples)
+install(FILES "${ROOT}/tools/test_native_protected_step_mpi.py" "${ROOT}/tools/test_native_step_admission_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/examples/mixed_multipoint_layers.json" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/tests/native/test_ion_initialization.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tests/native/test_orbital_initialization.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tests/native/test_hse_symmetry_resources.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+install(FILES "${ROOT}/tests/native/test_hse_symmetry_field.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+install(FILES "${ROOT}/tests/native/test_hse_symmetry_checkpoint.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+install(FILES "${ROOT}/tests/native/test_hse_symmetry_tddft.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+install(FILES "${ROOT}/tools/prepare_fast_hse_symmetry_fixture.py" "${ROOT}/tools/test_fast_hse_symmetry_tddft.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tools/test_fast_hse_symmetry_mpi.py" "${ROOT}/tools/probe_hse_low_gradient.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/FAST_HSE_SYMMETRY.md" "${ROOT}/salmonpy/FAST_HSE_SYMMETRY.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/tools/test_hse_low_gradient.py" "${ROOT}/tools/test_fast_hse_low_gradient_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_hse_low_gradient.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/_hse_geometry.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/_hse_assets.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/tools/test_fast_hse_general_cell_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_fast_hse_symmetry_history_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_hse_context_owners.f90" "${ROOT}/tests/native/test_step_output_owners.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+install(FILES "${ROOT}/tools/test_fast_hse_context_owners_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_tddft_output_close.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/test_fast_hse_handles_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/salmonpy/examples/native_fast_hse_handles.c" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/salmonpy/NATIVE_HANDLES.md" "${ROOT}/salmonpy/NATIVE_HANDLES.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/_shared_hse.py" DESTINATION salmonpy)
+install(FILES "${ROOT}/tools/test_shared_hse_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/SHARED_HSE.md" "${ROOT}/salmonpy/SHARED_HSE.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/mixed_shared_hse_layers.json" "${ROOT}/salmonpy/examples/mixed_shared_tddft_hse_layers.json" DESTINATION salmonpy/examples)
+install(FILES "${ROOT}/tools/test_shared_mixed_restore_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_shared_symmetry_hse_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_hse_mpi_resource_owners.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_tddft_mpi_resource_owner.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/STANDARD_HANDLES.md" "${ROOT}/salmonpy/STANDARD_HANDLES.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/native_adapters/standard_tddft_handles.h" DESTINATION salmonpy/native_adapters)
+install(FILES "${ROOT}/tools/test_standard_tddft_handles_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/_shared_tddft.py" "${ROOT}/salmonpy/_native_group.py" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/mixed_shared_tddft_layers.json" "${ROOT}/salmonpy/examples/mixed_shared_tddft_hse_both_layers.json" DESTINATION salmonpy/examples)
+install(FILES "${ROOT}/tools/test_python_shared_tddft_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/SHARED_TDDFT.md" "${ROOT}/salmonpy/SHARED_TDDFT.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/examples/_tddft_materials.py" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/salmonpy/examples/mixed_distinct_tddft_layers.json" "${ROOT}/salmonpy/examples/distinct_tddft_materials.json" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/tools/test_model_input_ownership.py" "${ROOT}/tools/test_standard_checkpoint_finite_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_model_inputs.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/test_parser_ownership.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_parser_ownership.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/_tddft_registry.py" "${ROOT}/salmonpy/TDDFT_REGISTRY.md" "${ROOT}/salmonpy/TDDFT_REGISTRY.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/native_adapters/standard_tddft_models.h" DESTINATION salmonpy/native_adapters)
+install(FILES "${ROOT}/tools/test_heterogeneous_tddft_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/salmonpy/examples/tddft_models.py" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/salmonpy/examples/mixed_tddft_model_groups.json" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/tools/test_standard_gs_models.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_gs_model.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/native_gs.py" "${ROOT}/salmonpy/gs_input.py" "${ROOT}/salmonpy/_gs_tddft.py" "${ROOT}/salmonpy/NATIVE_GS.md" "${ROOT}/salmonpy/NATIVE_GS.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/retained_gs.py" "${ROOT}/salmonpy/examples/memory_gs.py" DESTINATION salmonpy/examples)
+install(FILES "${ROOT}/salmonpy/native_adapters/standard_gs.h" DESTINATION salmonpy/native_adapters)
+install(FILES "${ROOT}/tools/test_retained_gs_mpi.py" "${ROOT}/tools/test_retained_gs_archive_mpi.py" "${ROOT}/tools/test_memory_gs_mpi.py" "${ROOT}/tools/test_portable_retained_gs_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/_hse_registry.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/tools/test_hse_registry_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/examples/mixed_hse_models.py" "${ROOT}/salmonpy/examples/mixed_hse_models_layers.json" "${ROOT}/salmonpy/examples/mixed_hse_models_inputs.json" DESTINATION salmonpy/examples)
+
+install(FILES "${ROOT}/tools/test_scf_progress.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_scf_progress.f90" "${ROOT}/tests/native/test_scf_convergence.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/convergence.py" "${ROOT}/salmonpy/CONVERGENCE.md" "${ROOT}/salmonpy/CONVERGENCE.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/convergence_kernel.f90" DESTINATION salmonpy/_runtime_source/salmonpy)
+
+install(FILES "${ROOT}/tools/test_symmetry_force_units.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tools/test_scf_live_resume_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/generate_scf_disk_io.py" "${ROOT}/tools/test_scf_disk_restart.py" DESTINATION salmonpy/_runtime_source/tools)
+
+# One authoritative source-version compatibility catalog, also available to SDK checks.
+install(FILES "${ROOT}/salmonpy/scf_compatibility.json" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/scf_compatibility.json" DESTINATION salmonpy/_runtime_source/salmonpy)
+
+install(FILES "${ROOT}/docs/plans/2026-11-20-scf-declared-source-migration.md" DESTINATION salmonpy/_runtime_source/docs/plans)
+
+install(FILES "${ROOT}/tools/test_timer_context.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_timer_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/test_em_restart_read.py" "${ROOT}/tools/test_em_restart_save.py" "${ROOT}/tools/test_io_ownership.py" "${ROOT}/tools/prepare_pz_state_fixture.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_em_restart_read.f90" "${ROOT}/tests/native/test_io_ownership.f90" "${ROOT}/tests/native/test_native_protocol.c" "${ROOT}/tests/native/test_native_state.c" "${ROOT}/tests/native/test_native_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tests/native/test_directory_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/test_fdtd_periodic.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_fdtd_fresnel.c" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/examples/pz_host_gs.inp" DESTINATION salmonpy/examples)
+
+# Pinned, explicitly CC0 optical measurements and derived candidate coefficients.
+install(FILES "${ROOT}/salmonpy/optical_materials.py"
+  "${ROOT}/salmonpy/OPTICAL_DATA.md" "${ROOT}/salmonpy/OPTICAL_DATA.en.md" DESTINATION salmonpy)
+install(DIRECTORY "${ROOT}/salmonpy/optical_data/" DESTINATION salmonpy/optical_data
+  FILES_MATCHING PATTERN "*.json" PATTERN "*.yml" PATTERN "*.txt" PATTERN "*.md" PATTERN "*.csv")
+install(FILES "${ROOT}/tools/fit_optical_materials.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/subpixel.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/OPTICAL_CORRECTION.md" "${ROOT}/salmonpy/OPTICAL_CORRECTION.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/OPTICAL_TRAJECTORIES.md" "${ROOT}/salmonpy/OPTICAL_TRAJECTORIES.en.md" DESTINATION salmonpy)
+
+# Small, explicit GS-free coordinate initialization regression from installed SDK.
+install(FILES "${ROOT}/tools/test_fdtd_coordinates.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_fdtd_coordinates.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/salmonpy/gs_initial_guess.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/tools/test_molecular_feedback_mpi.py" "${ROOT}/tools/test_molecular_feedback_schedule.py" DESTINATION salmonpy/_runtime_source/tools)

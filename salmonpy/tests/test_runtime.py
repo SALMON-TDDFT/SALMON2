@@ -43,6 +43,10 @@ class RuntimeTests(unittest.TestCase):
         engine = self.install()
         self.assertEqual(engine.path, (self.root/'installed/bin/salmon').resolve())
         self.assertEqual(runtime.load_runtime(self.root/'installed', host=self.host).sha256, engine.sha256)
+        from salmonpy.fdtd import SalmonExecutable
+        verified=SalmonExecutable.from_runtime(self.root/'installed',required=['tddft'],host=self.host)
+        self.assertEqual(verified.sha256,engine.sha256)
+        self.assertEqual(SalmonExecutable.from_runtime(self.root/'installed',host=self.host).sha256,engine.sha256)
         engine.path.write_bytes(b'changed')
         with self.assertRaisesRegex(ValueError, 'checksum'):
             runtime.load_runtime(self.root/'installed', host=self.host)
@@ -96,21 +100,90 @@ class RuntimeTests(unittest.TestCase):
     def test_build_invalid_arguments_do_not_create_directory(self):
         for jobs, options in [(0, []), (True, []), (1, ['--bad'])]:
             with self.assertRaises(ValueError):
-                runtime.build_runtime(self.root/'upstream', self.root/'build', jobs=jobs, cmake_args=options)
+                runtime.build_runtime(self.root/'build', jobs=jobs, cmake_args=options)
             self.assertFalse((self.root/'build').exists())
 
     def test_build_failure_keeps_diagnostics(self):
         import subprocess
         with patch.object(runtime.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'fixture')):
             with self.assertRaises(subprocess.CalledProcessError):
-                runtime.build_runtime(self.root/'upstream', self.root/'build', jobs=1)
+                runtime.build_runtime(self.root/'build', jobs=1)
         record = json.loads((self.root/'build/build.json').read_text())
         self.assertEqual(record['status'], 'failed')
+        configure=next(command for command in record['commands'] if command[0]=='cmake')
+        self.assertIn('-DUSE_HSE=OFF',configure)
         self.assertTrue((self.root/'build/build.log').exists())
 
     def test_no_implicit_build(self):
         with patch('subprocess.run') as run:
             runtime.inspect_runtime({'schema':'salmonpy.runtimes/1', 'artifacts':[]}, host=self.host)
             run.assert_not_called()
+
+    def test_job_receipt_reuses_auxiliary_hashes_and_hides_token(self):
+        import os
+        if os.name!='posix':self.skipTest('fast receipt needs POSIX change-time semantics')
+        engine=self.install();bundle=self.root/'installed'
+        aux=bundle/'lib/data.bin';aux.parent.mkdir();aux.write_bytes(b'library data'*100)
+        meta=json.loads((bundle/'runtime.json').read_text());meta['files']['lib/data.bin']=runtime._hash(aux)
+        (bundle/'runtime.json').write_text(json.dumps(meta))
+        token='job-secret-'*6;receipt=self.root/'job-proof.json'
+        validation=runtime.prepare_runtime_job(bundle,receipt,job_id='job-42',job_token=token,host=self.host)
+        self.assertNotIn(token,receipt.read_text());self.assertNotIn(token,repr(validation))
+        with patch.object(runtime,'_hash',wraps=runtime._hash) as hashed,patch.object(Path,'rglob',side_effect=AssertionError('fast reuse must not scan the tree')):
+            verified=runtime.load_runtime(bundle,host=self.host,validation=validation)
+        self.assertEqual(verified.sha256,engine.sha256)
+        self.assertNotIn(aux,[Path(call.args[0]) for call in hashed.call_args_list])
+        self.assertIn(engine.path,[Path(call.args[0]) for call in hashed.call_args_list])
+        self.assertEqual(verified.runtime_validation_report['mode'],'job-receipt')
+        self.assertNotIn(token,str(verified.runtime_validation_report))
+        report=verified.runtime_validation_report;report['mode']='host edit'
+        self.assertEqual(verified.runtime_validation_report['mode'],'job-receipt')
+        from salmonpy.material_response import TDDFTMaterialProvider,TDDFTResponseBackend
+        source=self.root/'initial';source.mkdir();(source/'rt.inp').write_text('synthetic parser-only input')
+        with patch.object(runtime,'load_runtime',return_value=verified) as provider_load:
+            provider=TDDFTMaterialProvider(source,'rt.inp',runtime=bundle,runtime_validation=validation)
+            self.assertIs(provider_load.call_args.kwargs['validation'],validation)
+            provider.close()
+        self.assertIs(TDDFTResponseBackend(runtime_validation=validation)._runtime_validation,validation)
+
+        from salmonpy.fdtd import SalmonExecutable
+        self.assertEqual(SalmonExecutable.from_runtime(bundle,host=self.host,validation=validation).sha256,engine.sha256)
+        with self.assertRaises(FileExistsError):runtime.prepare_runtime_job(bundle,receipt,job_id='job-42',job_token=token,host=self.host)
+        with self.assertRaises(ValueError):runtime.prepare_runtime_job(bundle,bundle/'bad-proof.json',job_id='job-42',job_token=token,host=self.host)
+
+    def test_job_receipt_falls_back_safely_and_rejects_corrupt_runtime(self):
+        import os
+        from dataclasses import replace
+        self.install();bundle=self.root/'installed';receipt=self.root/'job-proof.json'
+        good=runtime.prepare_runtime_job(bundle,receipt,job_id='job-42',job_token='s'*64,host=self.host)
+        for bad in (replace(good,job_id='other-job'),replace(good,job_token='x'*64),replace(good,receipt=self.root/'missing.json')):
+            with self.assertWarns(RuntimeWarning):loaded=runtime.load_runtime(bundle,host=self.host,validation=bad)
+            self.assertEqual(loaded.runtime_validation_report['mode'],'full')
+        signed=receipt.read_text();changed=json.loads(signed);changed['payload']['manifest']['features'].append('libxc')
+        receipt.write_text(json.dumps(changed))
+        with self.assertWarns(RuntimeWarning),self.assertRaises(runtime.RuntimeUnavailable):
+            runtime.load_runtime(bundle,host=self.host,required=['libxc'],validation=good)
+        receipt.write_text(signed)
+        # Metadata-only changes do not block an otherwise valid calculation.
+        old=(bundle/'bin/salmon').stat();os.utime(bundle/'bin/salmon',ns=(old.st_atime_ns,old.st_mtime_ns+1_000_000))
+        with self.assertWarns(RuntimeWarning):loaded=runtime.load_runtime(bundle,host=self.host,validation=good)
+        self.assertEqual(loaded.runtime_validation_report['mode'],'full')
+        # Same length and restored mtime still cannot bless changed executable bytes.
+        (bundle/'bin/salmon').write_bytes(b'BADBAD');os.utime(bundle/'bin/salmon',ns=(old.st_atime_ns,old.st_mtime_ns))
+        with self.assertWarns(RuntimeWarning),self.assertRaisesRegex(ValueError,'checksum'):
+            runtime.load_runtime(bundle,host=self.host,validation=good)
+        (bundle/'bin/salmon').write_bytes(b'binary')
+        aux=bundle/'support.bin';aux.write_bytes(b'original')
+        meta=json.loads((bundle/'runtime.json').read_text());meta['files']['support.bin']=runtime._hash(aux)
+        (bundle/'runtime.json').write_text(json.dumps(meta))
+        fresh=runtime.prepare_runtime_job(bundle,self.root/'fresh-proof.json',job_id='job-42',job_token='s'*64,host=self.host)
+        before=aux.stat();aux.write_bytes(b'changed!');os.utime(aux,ns=(before.st_atime_ns,before.st_mtime_ns))
+        with self.assertWarns(RuntimeWarning),self.assertRaisesRegex(ValueError,'checksum'):
+            runtime.load_runtime(bundle,host=self.host,validation=fresh)
+        aux.write_bytes(b'original')
+        (bundle/'unlisted').write_text('unexpected')
+        with self.assertWarns(RuntimeWarning),self.assertRaisesRegex(ValueError,'unlisted'):
+            runtime.load_runtime(bundle,host=self.host,validation=good)
+
 
 if __name__ == '__main__': unittest.main()

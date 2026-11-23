@@ -34,6 +34,40 @@ try:
 except ValueError: pass
 else: raise AssertionError('inconsistent plans accepted')
 with d.ParallelContext.create(world,plan) as ctx:
+    # A mismatch on one subgroup member must reject everyone before attachment.
+    from unittest.mock import patch
+    from types import SimpleNamespace
+    class Function:
+        def __init__(self,fn):self.fn=fn
+        def __call__(self,*args):return self.fn(*args)
+    for variant in ('missing','version','width','status',
+                    'sp_attach','sp_detach','sp_info','sp_barrier','sp_sum','sp_library'):
+        attached=[]
+        def attach(handle):
+            attached.append(handle)
+            raise AssertionError('mismatched host must never attach')
+        def descriptor(capacity,words):
+            values=[1,32,64,64,32,64,1,1,1,3]
+            if ctx.solver_comm.rank==ctx.solver_comm.size-1:
+                if variant=='status':return 13
+                if variant=='version':values[0]=2
+                if variant=='width':values[2]=32
+            for i,v in enumerate(values):words[i]=v
+            return 0
+        def library(buffer,capacity,active):
+            buffer.value=MPI.Get_library_version().encode()
+            active._obj.value=1
+        fake=SimpleNamespace(sp_host_abi=Function(descriptor),sp_attach=Function(attach),
+            sp_detach=Function(lambda:0),sp_info=Function(lambda *a:None),
+            sp_barrier=Function(lambda:None),sp_sum=Function(lambda x:x),sp_library=Function(library))
+        if variant=='missing' and ctx.solver_comm.rank==ctx.solver_comm.size-1:del fake.sp_host_abi
+        if variant.startswith('sp_') and ctx.solver_comm.rank==ctx.solver_comm.size-1:delattr(fake,variant)
+        with patch('ctypes.CDLL',return_value=fake):
+            try:d.NativeParallelContext(ctx,sys.argv[1],sys.argv[2])
+            except ValueError:pass
+            else:raise AssertionError('invalid host ABI accepted')
+        assert not attached and ctx._dependents==0
+        assert MPI.Is_initialized() and not MPI.Is_finalized()
     native=d.NativeParallelContext(ctx,sys.argv[1],sys.argv[2])
     try: ctx.close()
     except RuntimeError: pass

@@ -1,0 +1,14 @@
+! Small PZ host-interoperability starter, not converged material properties.
+! Run explicitly on a compute node with an audited runtime and matching pseudo.
+&calculation theory='dft' /
+&control sysname='pz_host', yn_restart='n' /
+&units unit_system='au' /
+&system yn_periodic='y', al=8,8,8, nelem=1, natom=1, nelec=4, nstate=2 /
+&pseudo file_pseudo(1)='Si_rps.dat', izatom(1)=14, lloc_ps(1)=2 /
+&functional xc='pz' /
+&rgrid num_rgrid=8,8,8 /
+&kgrid num_kgrid=2,1,1 /
+&scf nscf=40, threshold=1d-7 /
+&atomic_red_coor
+ Si 0 0 0 1
+/

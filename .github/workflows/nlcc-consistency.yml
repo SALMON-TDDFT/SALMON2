@@ -1,0 +1,102 @@
+name: NLCC native consistency
+# Expensive numerical/physics validation is explicit, not required automatic CI.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  nlcc:
+    # Run only when a maintainer explicitly requests this optional campaign.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      OMPI_MCA_rmaps_base_oversubscribe: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install GNU/OpenBLAS/OpenMPI build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc gfortran cmake libopenblas-dev libopenmpi-dev openmpi-bin
+          python -m pip install numpy
+      - name: Validate CI result rejection tests
+        run: python tools/test_validate_nlcc_ci_results.py
+      - name: Build pinned Libxc legacy Fortran interface
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 \
+            https://gitlab.com/libxc/libxc/-/archive/5.2.3/libxc-5.2.3.tar.bz2 \
+            --output "$RUNNER_TEMP/libxc-5.2.3.tar.bz2"
+          echo "851a45aee9ddaafea49f684fe3e3ab2fbd79f1c1289b8c1cea216330b27e887b  $RUNNER_TEMP/libxc-5.2.3.tar.bz2" | sha256sum --check --strict
+          tar -xjf "$RUNNER_TEMP/libxc-5.2.3.tar.bz2" -C "$RUNNER_TEMP" --no-same-owner
+          cmake -S "$RUNNER_TEMP/libxc-5.2.3" -B "$RUNNER_TEMP/libxc-build" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_Fortran_COMPILER=gfortran \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/libxc" \
+            -DENABLE_FORTRAN=ON -DENABLE_XHOST=OFF -DBUILD_TESTING=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/libxc-build" --parallel 2
+          cmake --install "$RUNNER_TEMP/libxc-build"
+      - name: Build audited serial Libxc runtime
+        shell: bash
+        run: |
+          python -m salmonpy.runtime build "$RUNNER_TEMP/nlcc-serial" --jobs 2 \
+            --cmake-arg=-DCMAKE_C_COMPILER=gcc \
+            --cmake-arg=-DCMAKE_Fortran_COMPILER=gfortran \
+            --cmake-arg=-DUSE_LIBXC=ON --cmake-arg=-DLIBXC_INSTALLDIR="$RUNNER_TEMP/libxc" \
+            --cmake-arg=-DBLA_VENDOR=OpenBLAS --cmake-arg=-DOPENMP_FLAGS=-fopenmp \
+            --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
+            --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
+      - name: Validate XC variations and sampled core forces
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/nlcc-results"
+          python tools/run_nlcc_native_tests.py "$RUNNER_TEMP/nlcc-serial/build" "$RUNNER_TEMP/nlcc-xc" \
+            --test test_nlcc_xc_variation | tee "$RUNNER_TEMP/nlcc-results/xc.log"
+          python tools/run_nlcc_native_tests.py "$RUNNER_TEMP/nlcc-serial/build" "$RUNNER_TEMP/nlcc-core" \
+            --test test_nlcc_core_force | tee "$RUNNER_TEMP/nlcc-results/core.log"
+      - name: Build audited MPI Libxc runtime
+        shell: bash
+        run: |
+          python -m salmonpy.runtime build "$RUNNER_TEMP/nlcc-mpi-build" --jobs 2 \
+            --cmake-arg=-DCMAKE_C_COMPILER=mpicc --cmake-arg=-DCMAKE_Fortran_COMPILER=mpifort \
+            --cmake-arg=-DUSE_MPI=ON --cmake-arg=-DUSE_LIBXC=ON \
+            --cmake-arg=-DLIBXC_INSTALLDIR="$RUNNER_TEMP/libxc" \
+            --cmake-arg=-DBLA_VENDOR=OpenBLAS --cmake-arg=-DOPENMP_FLAGS=-fopenmp \
+            --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
+            --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
+      - name: Validate spatial reduction and collective rejection
+        shell: bash
+        run: |
+          python tools/run_nlcc_native_tests.py "$RUNNER_TEMP/nlcc-mpi-build/build" "$RUNNER_TEMP/nlcc-mpi" \
+            --test test_nlcc_mpi_force --ranks 2 4 --mpiexec mpiexec \
+            | tee "$RUNNER_TEMP/nlcc-results/mpi.log"
+      - name: Check complete hash-bound native evidence
+        shell: bash
+        run: |
+          python tools/validate_nlcc_ci_results.py \
+            "$RUNNER_TEMP/nlcc-serial/build.json" \
+            "$RUNNER_TEMP/nlcc-xc/test-record.json" "$RUNNER_TEMP/nlcc-core/test-record.json" \
+            --mpi-build-record "$RUNNER_TEMP/nlcc-mpi-build/build.json" \
+            --mpi-record "$RUNNER_TEMP/nlcc-mpi/test-record.json" \
+            --output "$RUNNER_TEMP/nlcc-results/validation.json"
+      - name: Preserve scalar diagnostics and build audits
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nlcc-native-consistency-linux
+          path: |
+            ${{ runner.temp }}/nlcc-results/*.log
+            ${{ runner.temp }}/nlcc-results/*.json
+            ${{ runner.temp }}/nlcc-xc/test-record.json
+            ${{ runner.temp }}/nlcc-core/test-record.json
+            ${{ runner.temp }}/nlcc-mpi/test-record.json
+            ${{ runner.temp }}/nlcc-serial/build.json
+            ${{ runner.temp }}/nlcc-serial/build.log
+            ${{ runner.temp }}/nlcc-mpi-build/build.json
+            ${{ runner.temp }}/nlcc-mpi-build/build.log
+          if-no-files-found: warn

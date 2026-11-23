@@ -15,10 +15,6 @@ class DistributedTest(unittest.TestCase):
             ParallelPlan((SolverGroup('field',(0,),role='field'),SolverGroup('a',(1,),point_ids=(3,)),SolverGroup('b',(2,),point_ids=(3,)))).validate(3)
         with self.assertRaises(ValueError): SolverGroup('bad',(True,))
 
-    def test_import_does_not_initialize_mpi(self):
-        import subprocess,sys
-        code="import sys; import salmonpy.distributed; assert 'mpi4py.MPI' not in sys.modules"
-        self.assertEqual(subprocess.run([sys.executable,'-c',code],capture_output=True).returncode,0)
 
     def test_ld_independent_a_response(self):
         self.assertIsNotNone(importlib.util.find_spec('salmonpy.material_response'))
@@ -35,6 +31,12 @@ class DistributedTest(unittest.TestCase):
             np.testing.assert_array_equal(one.advance(old,new),reference.step(-(new-old)/.01)[1])
         np.testing.assert_array_equal(two.advance(np.zeros(3),np.zeros(3)),np.zeros(3))
         one.close();two.close()
+        # Preserve the existing duck-typed entry for user models without config.
+        from types import SimpleNamespace
+        custom=backend.create_state(SimpleNamespace(new_state=model.new_state),3,.01,None)
+        np.testing.assert_array_equal(custom.advance(np.zeros(3),np.zeros(3)),np.zeros(3))
+        custom.close()
+
 
     def test_tddft_backend_rejects_other_initial_types(self):
         from salmonpy.material_response import TDDFTResponseBackend

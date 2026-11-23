@@ -8,9 +8,9 @@ calling ASE operations requires the optional dependencies:
 python -m pip install "ase>=3.26,<4" "f90nml>=1.4,<2"
 ```
 
-Install a compatible SALMONpy wheel first. Native DFT/TDDFT/bands also need an
+Install a compatible SALMONpy wheel first. solver DFT/TDDFT/bands also need an
 explicitly installed, audited external runtime (see [runtime setup](RUNTIME.en.md)).
-Nothing is compiled or downloaded on import. The bridge does not change native
+Nothing is compiled or downloaded on import. The bridge does not change solver
 solver order. Ordinary LD/SBE/TDDFT use does not require ASE.
 
 ## Neutral structures and electron counts
@@ -28,11 +28,11 @@ rejected, never rounded or inferred from atomic numbers. The supplied atomic
 number and potential/XC identity still need verification; KY does not identify
 its element in this charge header. Odd-electron closed shells are unsupported.
 
-`states`, `grid` and `kmesh` remain required. No automatic setting can guarantee
+`states` and `kmesh` remain required. Specify either `grid` or `grid_spacing` with `grid_spacing_unit`; see [structure/grid preparation](STRUCTURE.en.md). No automatic setting can guarantee
 convergence. Choose initial values against the purpose and memory/CPU budget,
 then check the target observable against grid, k-point, band and time-step changes.
 The ASE Calculator also accepts omitted electrons, resolving/checking them for
-each structure before native execution. It supports PZ/Libxc-PZ/Libxc-PBE with scalar KY/NC-UPF potentials, energy and forces only.
+each structure before solver execution. It supports PZ/Libxc-PZ/Libxc-PBE with scalar KY/NC-UPF potentials, energy and forces only.
 Libxc needs a matching runtime. Validate potential/XC identity. Stress is not supported;
 each geometry retains a separate GS directory. See [Calculator and warm start](ASE_CALCULATOR.en.md).
 
@@ -92,18 +92,18 @@ not add TB-mBJ GS creation, isolated systems, non-collinear spin or ionic motion
 `atoms_from_initial(initial)` reads the original GS geometry (inline or relative
 coordinate file; Cartesian or fractional; au or A_eV_fs) into new Atoms.
 `run_bands(initial, atoms, path, directory, reference_ev=..., **run_options)`
-validates structure and passes ASE BandPath points unchanged to the native band
+validates structure and passes ASE BandPath points unchanged to the solver band
 runner. Ordered species must match, positions are equivalent modulo lattice
 translations, and cell/position tolerance is 1e-8 Å. No provenance of binary GS
 files is inferred beyond the supplied input and manifest.
 
-The returned `ASEBandRun` retains the native result and ASE `band_structure`.
+The returned `ASEBandRun` retains the solver result and ASE `band_structure`.
 It saves `ase-bands.json` and `ase-input.json`; `.plot(...)` delegates to ASE.
 For conversion only, use `explicit_path` or
 `to_ase_band_structure(bands, path, reference_ev=...)`. The energy reference is
 explicit, never an inferred Fermi level. Arrays change from (k, band, spin) Hartree
 to (spin, k, band) eV using 27.211386245988 eV/Hartree. Actual Cartesian k points
-must match the supplied path/cell. Headless plotting needs an Agg backend.
+must match the supplied path/cell. Headless plotting needs an Agg mode (saving figures without opening a window).
 
 The standard crystalline TDDFT configuration is **transverse** (`trans_longi='tr'`).
 Longitudinal is an explicit alternative field component, not the default.

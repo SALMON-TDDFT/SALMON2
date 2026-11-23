@@ -15,12 +15,221 @@ class FDTDTests(unittest.TestCase):
         return FDTD(Geometry(Grid((24,24,24),(2,2,2)),(Shape('ellipsoid',(8,8,8)),)),
                     materials=(LorentzDrude(plasma_frequency=1.,strength=[1.],resonance=[0.],damping=[.1]),),dt=.001,steps=10)
 
+    def test_native_plane_tiles_colocation_and_incomplete_data(self):
+        import struct
+        from salmonpy.fdtd import PlaneMonitor,read_native_planes,join_plane_segments
+        from dataclasses import replace
+        for axis in range(3):
+            with self.subTest(axis=axis),tempfile.TemporaryDirectory() as tmp:
+                shape=[8,8,8];shape[axis]=24
+                boundary=['periodic']*6;boundary[2*axis:2*axis+2]=['pml']*2
+                pol=[0,0,0];pol[(axis+1)%3]=1
+                calc=FDTD(Geometry(Grid(tuple(shape),(1.,1.,1.))),(),.001,2,
+                    boundaries=Boundaries(tuple(boundary)),
+                    source=PlaneWave(AcosPulse(.001,1.,.1,polarization=tuple(pol)),axis,-1.5),
+                    planes=(PlaneMonitor(axis,.5),))
+                self.assertIn('salmonpy-planes.dat',calc.input_assets())
+                self.assertNotIn('salmonpy-planes.dat',replace(calc,planes=()).input_assets())
+                tangent=[d for d in range(3) if d!=axis];dims=tuple(shape[d] for d in tangent)
+                base=np.arange(3*np.prod(dims),dtype=float).reshape(*dims,3)
+                e=np.stack([base*i for i in range(3)])
+                h=np.stack([(base+10)*i for i in range(3)])
+                ep=np.stack([(base+100)*i for i in range(3)])
+                hp=np.stack([(base+200)*i for i in range(3)])
+                lo=np.array([-n//2+1 for n in shape]);hi=lo+shape-1
+                offset=int(np.argmin(abs(calc.geometry.grid.coordinates[axis]-.5)));idx=int(lo[axis]+offset)
+                def write(root,ranks):
+                    root.mkdir()
+                    for rank in range(ranks):
+                        local_lo=lo.copy();local_hi=hi.copy();a=rank*(dims[0]//ranks);b=(rank+1)*(dims[0]//ranks)
+                        local_lo[tangent[0]]=lo[tangent[0]]+a;local_hi[tangent[0]]=lo[tangent[0]]+b-1
+                        header=[16909060,1,axis+1,idx,idx-1,*lo,*hi,*local_lo,*local_hi,1,2,rank,0]
+                        path=root/f'salmonpy_plane_0001_rank_{rank:08d}.bin'
+                        with path.open('wb') as stream:
+                            stream.write(b'SALMONPY_NATIVE_PLANES_V1'.ljust(32,b' '))
+                            stream.write(struct.pack('<21i',*header));stream.write(struct.pack('<d',.001))
+                            for step in range(3):
+                                stream.write(struct.pack('<i',step))
+                                for E,H in ((e,h),(ep,hp)):
+                                    raw=np.concatenate((E[step,a:b],H[step,a:b]),axis=-1)
+                                    stream.write(np.ascontiguousarray(raw.transpose(1,0,2),dtype='<f8').tobytes())
+                root=Path(tmp);write(root/'serial',1);write(root/'split',2)
+                full=read_native_planes(root/'serial',calc)[0]
+                split=read_native_planes(root/'split',calc,ranks=2)[0]
+                np.testing.assert_array_equal(full.E,split.E);np.testing.assert_array_equal(full.H,split.H)
+                for k in range(3):
+                    if k==axis:expected=.5*(e[:,:,:,k]+ep[:,:,:,k])
+                    else:
+                        d=tangent.index(k)+1
+                        expected=.5*(e[:,:,:,k]+np.roll(e[:,:,:,k],1,axis=d))
+                    np.testing.assert_array_equal(full.E[:,:,:,k],expected)
+                    expected=np.zeros_like(h[:,:,:,k])
+                    perpendicular=[d for d in range(3) if d!=k]
+                    for i in (0,1):
+                        for j in (0,1):
+                            previous=(i if perpendicular[0]==axis else j if perpendicular[1]==axis else 0)
+                            values=(hp if previous else h)[:,:,:,k]
+                            for d,shift in zip(perpendicular,(i,j)):
+                                if d!=axis:values=np.roll(values,shift,axis=tangent.index(d)+1)
+                            expected+=values/4
+                    np.testing.assert_array_equal(full.H[:,:,:,k],expected)
+                np.testing.assert_array_equal(full.time,[0.,.001,.002])
+                self.assertEqual(full.config['native_H_time'],'already centered at E time')
+                self.assertFalse(full.E.flags.writeable)
+                path=root/'split/salmonpy_plane_0001_rank_00000000.bin'
+                path.write_bytes(path.read_bytes()[:-8])
+                with self.assertRaisesRegex(ValueError,'truncated'):read_native_planes(root/'split',calc,ranks=2)
+                serial=root/'serial/salmonpy_plane_0001_rank_00000000.bin'
+                original=serial.read_bytes()
+                for value in (float('nan'),float('inf')):
+                    serial.write_bytes(original[:128]+struct.pack('<d',value)+original[136:])
+                    with self.assertRaisesRegex(ValueError,'nonfinite'):
+                        read_native_planes(root/'serial',calc)
+                serial.write_bytes(original)
+                # Explicit prefix and resumed streams share a global observation clock.
+                frame=4+2*6*np.prod(dims)*8
+                prefix=root/'prefix';prefix.mkdir()
+                resumed=root/'resumed';resumed.mkdir()
+                name=serial.name
+                (prefix/name).write_bytes(original[:124+2*frame])
+                header=bytearray(original[:124]);header[112:116]=struct.pack('<i',1)
+                (resumed/name).write_bytes(header+original[124+2*frame:])
+                a=read_native_planes(prefix,calc,stop_step=1)
+                b=read_native_planes(resumed,calc,start_step=1)
+                joined=join_plane_segments(a,b)[0]
+                np.testing.assert_array_equal(joined.time,full.time)
+                np.testing.assert_array_equal(joined.E,full.E)
+                np.testing.assert_array_equal(joined.H,full.H)
+                self.assertFalse(joined.E.flags.writeable)
+                with self.assertRaisesRegex(ValueError,'clock differs'):
+                    read_native_planes(resumed,calc)
+                with self.assertRaisesRegex(ValueError,'gap, overlap'):
+                    join_plane_segments(a,a)
+                with self.assertRaises(ValueError):read_native_planes(resumed,calc,start_step=True)
+                # Checkpoint between observation times: no invented boundary sample.
+                coarse=replace(calc,observation_stride=2)
+                header=bytearray(original[:124]);header[100:104]=struct.pack('<i',2)
+                (prefix/name).write_bytes(header+original[124:124+frame])
+                header[112:116]=struct.pack('<i',1)
+                (resumed/name).write_bytes(header+original[124+2*frame:])
+                selected=join_plane_segments(read_native_planes(prefix,coarse,stop_step=1),
+                    read_native_planes(resumed,coarse,start_step=1))[0]
+                np.testing.assert_array_equal(selected.time,full.time[::2])
+                np.testing.assert_array_equal(selected.E,full.E[::2])
+
+                invalid=list(boundary);invalid[2*tangent[0]:2*tangent[0]+2]=['pec','pec']
+                with self.assertRaisesRegex(ValueError,'periodic'):
+                    replace(calc,boundaries=Boundaries(tuple(invalid)))
+
+    def test_embedded_plane_snapshot_is_readonly_and_transaction_safe(self):
+        import ctypes as c
+        from types import SimpleNamespace
+        from dataclasses import replace
+        from salmonpy.coupled import NativeEHField
+        from salmonpy.fdtd import PlaneMonitor
+        calc=replace(self.calculation(),planes=(PlaneMonitor(0,1.),),
+            boundaries=Boundaries(('pml','pml','periodic','periodic','periodic','periodic')))
+        shape=calc.geometry.grid.counts;lo=np.array([-n//2+1 for n in shape]);hi=lo+shape-1
+        index=int(lo[0]+np.argmin(abs(calc.geometry.grid.coordinates[0]-1.)))
+        header=[16909060,1,1,index,index-1,*lo,*hi,*lo,*hi,1,calc.steps,0,1]
+        class Read:
+            calls=0
+            def __call__(self,axis,offset,count,info,data):
+                self.calls+=1
+                np.ctypeslib.as_array(c.cast(info,c.POINTER(c.c_int)),shape=(21,))[:]=header
+                if count:
+                    values=np.ctypeslib.as_array(c.cast(data,c.POINTER(c.c_double)),shape=(count,))
+                    values[:]=np.tile([1.,2.,3.,4.,5.,6.],count//6)
+                return 0
+        class Comm:
+            rank=0;calls=0;remote_error=None
+            def gather(self,report,root):
+                self.calls+=1
+                return [report] if self.remote_error is None else [report,(self.remote_error,[])]
+        comm=Comm();read=Read();owner=object.__new__(NativeEHField)
+        owner.context=SimpleNamespace(solver_comm=comm);owner.calculation=calc
+        owner.native=SimpleNamespace(_live=lambda:None);owner.lib=SimpleNamespace(sp_eh_plane_read=read)
+        owner.closed=False;owner.failed=False;owner.step_index=1;owner.capacity=calc.steps
+        owner.A=np.array([[.1,.2,.3]]);original=owner.A.copy()
+        result=owner.sample_planes()
+        self.assertEqual(comm.calls,1);self.assertEqual(read.calls,2)
+        np.testing.assert_array_equal(result[0].E,np.broadcast_to([1.,2.,3.],result[0].E.shape))
+        np.testing.assert_array_equal(result[0].H,np.broadcast_to([4.,5.,6.],result[0].H.shape))
+        self.assertFalse(result[0].E.flags.writeable)
+        from salmonpy.fdtd import combine_plane_samples
+        owner.step_index=2;header[-1]=2
+        second=owner.sample_planes();series=combine_plane_samples(result,second)
+        np.testing.assert_array_equal(series[0].time,[calc.dt,2*calc.dt])
+        with self.assertRaisesRegex(ValueError,'increase uniformly'):combine_plane_samples(second,result)
+        with tempfile.TemporaryDirectory() as tmp:
+            destination=Path(tmp)/'planes'
+            self.assertIsNotNone(owner.sample_planes(output_directory=destination))
+            archive_original=(destination/'arrays.npz').read_bytes()
+            with self.assertWarnsRegex(UserWarning,'archive unavailable'):
+                self.assertIsNotNone(owner.sample_planes(output_directory=destination))
+            self.assertEqual((destination/'arrays.npz').read_bytes(),archive_original)
+        owner.step_index=1;header[-1]=1
+        calls=read.calls
+        owner._step_guard=object()
+        with self.assertWarnsRegex(UserWarning,'committed'):self.assertIsNone(owner.sample_planes())
+        self.assertEqual(read.calls,calls)
+        owner._step_guard=None;owner._restore_candidate=object()
+        with self.assertWarnsRegex(UserWarning,'committed'):self.assertIsNone(owner.sample_planes())
+        owner._restore_candidate=None;comm.remote_error='injected remote diagnostic failure'
+        with self.assertWarnsRegex(UserWarning,'remote diagnostic'):self.assertIsNone(owner.sample_planes())
+        self.assertFalse(owner.failed);self.assertEqual(owner.step_index,1)
+        np.testing.assert_array_equal(owner.A,original)
+        comm.remote_error=None
+        np.testing.assert_array_equal(owner.sample_planes()[0].E,result[0].E)
+
+    def test_plane_diagnostic_failure_preserves_completed_calculation(self):
+        from dataclasses import replace
+        from types import SimpleNamespace
+        import json
+        from salmonpy.fdtd import PlaneMonitor
+        calculation=replace(self.calculation(),
+            boundaries=Boundaries(('pml','pml','periodic','periodic','periodic','periodic')),
+            planes=(PlaneMonitor(0,1.),))
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);exe=root/'native';exe.write_bytes(b'SALMONPY_NATIVE_PLANES_V1')
+            engine=SalmonExecutable(exe,hashlib.sha256(exe.read_bytes()).hexdigest())
+            def run(*args,**kw):
+                kw['stdout'].write('FDTD end\nend SALMON\n');kw['stdout'].flush()
+                (Path(kw['cwd'])/'obs1_at_point_rt.data').write_text(
+                    '# 1:Time[a.u.] 2:E_z[a.u.]\n'+''.join(f'{n*.001} 0\n' for n in range(1,11)))
+                return SimpleNamespace(returncode=0)
+            with patch('salmonpy.fdtd.subprocess.run',side_effect=run),patch(
+                    'salmonpy.fdtd.read_native_planes',side_effect=MemoryError('injected diagnostic resource failure')):
+                with self.assertWarnsRegex(UserWarning,'FDTD completed; plane diagnostics unavailable'):
+                    result=engine.run(calculation,root/'out')
+            record=json.loads((result.directory/'salmonpy-run.json').read_text())
+            self.assertEqual(record['status'],'complete')
+            self.assertEqual(record['plane_observations_status'],'unavailable')
+            self.assertEqual(len(result.observations[0].values),10)
+            self.assertEqual(result.planes,())
+            old=root/'old-runtime';old.write_bytes(b'old runtime without plane capability')
+            old_engine=SalmonExecutable(old,hashlib.sha256(old.read_bytes()).hexdigest())
+            with patch('salmonpy.fdtd.subprocess.run',side_effect=run),patch('salmonpy.fdtd.read_native_planes') as read:
+                with self.assertWarnsRegex(UserWarning,'calculation continues'):
+                    old_result=old_engine.run(calculation,root/'old-out')
+                read.assert_not_called()
+            self.assertEqual(old_result.planes,())
+            self.assertEqual(len(old_result.observations[0].values),10)
+
     def test_input_and_fixed_settings(self):
         c=self.calculation();text=c.input_text()
         self.assertIn("theory = 'maxwell'",text)
         self.assertIn("unit_system = 'au'",text)
         self.assertIn('omega_p_ld(1) = 1',text)
         self.assertIn('obs_samp_em = 1',text)
+        from dataclasses import replace
+        periodic=Boundaries(('pml','pml','periodic','periodic','periodic','periodic'))
+        mixed=replace(c,boundaries=periodic)
+        self.assertIn("boundary_em(2,1) = 'periodic'",mixed.input_text())
+        self.assertIn("yn_periodic = 'n'",mixed.input_text())
+        with self.assertRaisesRegex(ValueError,'pairs'):
+            Boundaries(('pml','pml','periodic','pec','pml','pml'))
+
         with self.assertRaises(AttributeError): c.dt=.5
         with self.assertRaises(ValueError): FDTD(c.geometry,c.materials,dt=1.,steps=10)
 
@@ -39,7 +248,10 @@ class FDTDTests(unittest.TestCase):
                 run.return_value.returncode=0
                 with self.assertRaises(RuntimeError): runner.run(self.calculation(),target)
                 self.assertFalse(run.call_args.kwargs.get('shell',False))
-            with self.assertRaises(FileExistsError): runner.run(self.calculation(),target)
+            with self.assertRaisesRegex(FileExistsError,'Choose a new directory') as caught:
+                runner.run(self.calculation(),target)
+            self.assertEqual(caught.exception.filename,str(target.resolve()))
+            self.assertEqual(caught.exception.errno,17)
             exe.write_bytes(b'changed')
             with self.assertRaises(ValueError): runner.run(self.calculation(),Path(d)/'other')
             self.assertFalse((Path(d)/'other').exists())
@@ -84,11 +296,42 @@ class FDTDTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError,'material-ID-independent'):
                     engine.run(c,Path(tmp)/'result')
 
+    def test_ld_background_and_fastest_cell_cfl(self):
+        from dataclasses import replace
+        from salmonpy.ld import LDModelConfig
+        base=self.calculation()
+        cfg=LDModelConfig(1.,(1.,),(0.,),(.1,),epsilon_infinity=2.25)
+        calc=replace(base,materials=(cfg,),source=PlaneWave(AcosPulse(.001,10.,2.),0,-12.),boundaries=Boundaries(('pec',)*6))
+        self.assertEqual(calc.materials[0].epsilon_infinity,2.25)
+        with self.assertWarnsRegex(RuntimeWarning,'raw data continue'):
+            kicked=replace(base,materials=(cfg,))
+        self.assertIsInstance(kicked.source,Impulse)
+        with self.assertWarnsRegex(RuntimeWarning,'calibrated'):
+            extrapolated=replace(calc,materials=(replace(cfg,valid_frequency_range=(.1,.3)),))
+        self.assertEqual(extrapolated.materials[0].valid_frequency_range,(.1,.3))
+
+
+        self.assertIn('epsilon_em(1) = 2.25',calc.input_text())
+        # Slower matter cannot loosen the vacuum/PML timestep limit.
+        with self.assertRaisesRegex(ValueError,'CFL'):
+            replace(calc,dt=.009)
+        fast=replace(calc,materials=(replace(cfg,epsilon_infinity=.25),))
+        with self.assertRaisesRegex(ValueError,'CFL'):
+            replace(fast,dt=.005)
+
     def test_mpi_grid_configuration(self):
         import salmonpy.fdtd as f
         self.assertTrue(hasattr(f,'FDTDMPI'),'FDTD MPI launch configuration missing')
         mpi=f.FDTDMPI((1,2,2))
         self.assertEqual(mpi.ranks,4)
+        self.assertEqual(mpi.command('/site/salmon'),('mpiexec','-n','4','/site/salmon'))
+        site=f.FDTDMPI((1,2,2),launcher=('site-launch',),rank_arguments=('--tasks={ranks}',))
+        self.assertEqual(site.command('/site path/salmon'),('site-launch','--tasks=4','/site path/salmon'))
+        implicit=f.FDTDMPI((1,2,2),launcher=('allocation-launch',),rank_arguments=())
+        self.assertEqual(implicit.command('/site/salmon'),('allocation-launch','/site/salmon'))
+        for args in ('-n',('bad\x00arg',)):
+            with self.assertRaises(ValueError):f.FDTDMPI((1,1,1),rank_arguments=args)
+
         self.assertIn('nproc_rgrid = 1, 2, 2',mpi.input_text(self.calculation()))
         with self.assertRaises(ValueError): f.FDTDMPI((1,0,2))
         with self.assertRaises(ValueError): f.FDTDMPI((True,1,2))
@@ -152,3 +395,59 @@ class FDTDTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'MPI'):
                     engine.run(self.calculation(),Path(tmp)/'run')
                 run.assert_not_called()
+
+
+    def test_single_component_ld_tensor_uses_same_eh_input(self):
+        from dataclasses import replace
+        from salmonpy.ld import LDTensorModelConfig
+        original=self.calculation()
+        scalar=original.materials[0]
+        tensor=scalar.tensor_config
+        self.assertIsInstance(tensor,LDTensorModelConfig)
+        self.assertEqual(tensor.independent_components,1)
+        self.assertEqual(tensor.representation,'isotropic_diagonal')
+        # Frozen slotted dataclasses use TypeError on some supported Python versions.
+        with self.assertRaises((AttributeError,TypeError)):tensor.representation='full'
+        self.assertEqual(tensor.representation,'isotropic_diagonal')
+        converted=replace(original,materials=(tensor,))
+        self.assertEqual(original.input_text(),converted.input_text())
+        self.assertEqual(converted.tensor_materials,(tensor,))
+        self.assertEqual(original.tensor_materials,(tensor,))
+        from salmonpy.material_response import LDMaterialProvider
+        standard=LorentzDrude.from_config(scalar)
+        converted_model=LorentzDrude.from_config(tensor)
+        provider=LDMaterialProvider(tensor)
+        self.assertEqual(provider.identity,LDMaterialProvider(standard).identity)
+        fields=np.array([[0.,0.,0.],[.01,.02,.03],[.02,0.,-.01]])
+        first=standard.respond(fields,dt=.001)
+        second=converted_model.respond(fields,dt=.001)
+        np.testing.assert_array_equal(first.polarization,second.polarization)
+        np.testing.assert_array_equal(first.current,second.current)
+
+
+    def test_diagonal_tensor_asset_and_explicit_capability(self):
+        from dataclasses import replace
+        from salmonpy.ld import TensorLorentzDrude
+        base=self.calculation()
+        model=TensorLorentzDrude(plasma_frequency=.5,strength=[np.diag([.1,.2,.3])],resonance=[.4],damping=[.03],epsilon_infinity=np.diag([2.,3.,4.]))
+        with self.assertWarns(RuntimeWarning):calculation=replace(base,materials=(model,))
+        text=calculation.input_text()
+        self.assertIn("media_type(1) = 'ld-diagonal'",text)
+        assets=calculation.input_assets()
+        self.assertEqual(set(assets),{'salmonpy-ld-diagonal.dat'})
+        self.assertIn(hashlib.sha256(assets['salmonpy-ld-diagonal.dat'].encode()).hexdigest(),text)
+        self.assertEqual(base.input_assets(),{})
+        with tempfile.TemporaryDirectory() as directory:
+            exe=Path(directory)/'old';exe.write_bytes(b'not an anisotropic runtime')
+            runner=SalmonExecutable(exe,hashlib.sha256(exe.read_bytes()).hexdigest())
+            target=Path(directory)/'not-created'
+            with self.assertRaisesRegex(ValueError,'diagonal'):
+                runner.run(calculation,target)
+            self.assertFalse(target.exists())
+        offdiag=TensorLorentzDrude(plasma_frequency=1.,strength=[[[.2,.05,0.],[.05,.3,0.],[0.,0.,.4]]],resonance=[.4],damping=[.03])
+        full=replace(base,materials=(offdiag,))
+        self.assertIn('ld-tensor',full.input_text())
+        self.assertIn('salmonpy-ld-tensor.dat',full.input_assets())
+        self.assertIn('SALMONPY_LD_TENSOR 1',full.input_assets()['salmonpy-ld-tensor.dat'])
+        for settings in ({'tensor_rtol':1.},{'tensor_rtol':float('nan')},{'tensor_maxiter':0}):
+            with self.assertRaises(ValueError):replace(full,**settings)

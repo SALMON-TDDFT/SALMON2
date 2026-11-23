@@ -1,0 +1,247 @@
+# R3: field initialization admission
+
+The first recoverable stage is native E/H admission, before `read_input` and
+numerical initialization. All field ranks participate even if one rank has a
+zero point count, an empty/overlong path, or a missing input file. Rejection
+must not consume `used`, create child communicators, or allocate field payload.
+A corrected call on the same native attachment must initialize normally.
+
+This does not make malformed namelist parsing, allocation failure, or failure
+inside `eh_init` recoverable. Once admission succeeds the lifetime is consumed;
+those later stages remain R3 work. The Python constructor's attachment/lifetime
+policy is unchanged. The regression invokes rejected calls within that one
+attachment before the normal constructor call, then checks normal evolution.
+
+Validation: `tools/test_eh_deep_recovery_mpi.py --admission --inspect-mpi`,
+1 and 2 field ranks, with rank-local invalid arguments. Compare all normal
+A/E/H samples and output data bytes against the previous validated build.
+No GS data is generated or copied. No GitHub Actions are scheduled.
+
+Observed validation (2026-11-20): all three rank-local rejection cases followed
+by valid initialization passed on 1 and 2 ranks; all 32 A/E/H samples and `.data`
+outputs matched the R2 build exactly. MPI resource counts were zero after each
+preflight rejection. Existing source tests: 638 run, 637 passed, 1 skipped.
+Source/object/link prohibition audits passed. Record:
+`calc2026/salmonpy-r3-field-admission-record-20261120` (canonical OneDrive results
+root; cloud synchronization unconfirmed). R3 parser/deep failure work remains.
+
+## Parsed admission (next stage)
+
+Use an invocation-owned `s_input_parser`, so successful parsing closes its scratch
+units before admission returns. A parsed request with non-Maxwell theory or
+native restart enabled is rejected collectively before consuming the numerical
+lifetime. The small context allocation and MPI-owner admission also precede
+`used`; allocation failure is agreed collectively and allocated peers release
+that empty context. `used` is set immediately before `eh_init`.
+
+The regression repeats parsed restart rejection twice on the same attachment,
+then initializes the ordinary input. This is native retry support; it does not
+change Python constructor attachment ownership. Malformed parser input and
+failures inside/after `eh_init` remain outside the recoverable scope.
+
+Parsed-stage validation (2026-11-20): the previous build reproduced the consumed
+lifetime failure. The updated build passed repeated parsed rejection followed by
+normal initialization on 1/2 ranks. All 32 A/E/H samples and `.data` file bytes
+matched R2 exactly, with zero child communicators after rejected calls. Source
+tests: 638 run, 637 passed, 1 skipped. Source/object/link audits passed.
+Canonical record: `calc2026/salmonpy-r3-field-parsed-record-20261120`.
+No GS generated/copied; no Actions runs; cloud sync unconfirmed.
+
+Distribution check: fresh sdist -> wheel -> clean environment succeeded;
+installed tests also ran 638 (637 passed, 1 skipped). Installed solver source,
+Japanese/English coupled guides and AI JSON exactly match the working source.
+
+## Namelist read errors
+
+`read_input`/`dump_input_common` accept an optional status used by native FDTD.
+Detected positive namelist I/O statuses are broadcast and returned rather than
+calling `end_parallel`/`stop`. The invocation-owned parser closes scratch files
+on this rejection path. Callers omitting status retain standalone behavior.
+Earlier unit selection, coordinate parsing, semantic validation and `eh_init`
+failures remain separately scoped; this is not arbitrary parser exception safety.
+The regression repeats an invalid integer in `&maxwell` then runs valid input.
+
+Observed namelist-stage validation (2026-11-20): old build reproduced MPI
+termination on the invalid integer. Updated build passed all seven admission
+attempts (including two malformed integer attempts), then normal 32-step
+propagation on 1/2 ranks. A/E/H samples and `.data` bytes matched R2 exactly.
+Rejected calls retained zero MPI child communicators. Source tests: 638 run,
+637 passed, 1 skipped. Source/object/link prohibition audits passed. Record:
+`calc2026/salmonpy-r3-field-namelist-record-20261120`; no GS generated/copied,
+no Actions runs, cloud synchronization unconfirmed.
+
+Fresh sdist -> wheel -> clean-environment verification also passed: 638 tests,
+637 passed, 1 skipped. Installed parser/field sources and Japanese/English guides
+plus AI JSON match the working tree exactly. Changes remain uncommitted.
+
+## Batch-job priority (user clarification)
+
+Interactive input repair is not expected in a scheduled job. Prioritize checking
+staged inputs on an allowed management/login node and recording rank-local
+startup failures before solver creation. `preparation.preflight_inputs` reuses
+existing integrity checks and an optional explicit trusted material registry.
+CLI reports are exclusive-create files outside the immutable bundle; invalid
+inputs return exit code2. `examples.mpi_input_preflight` checks each rank's local
+view, gathers diagnostics, writes one report, broadcasts outcome and exits.
+It does not edit inputs, submit jobs, execute solvers or retry automatically.
+Runtime/native semantic admission remains separate, not certified by this check.
+
+Verified valid management check, 1/2-rank checks, rank1-only missing input and
+corrupted catalog rejection without solver startup. Record:
+`calc2026/salmonpy-job-input-preflight-20261120`. No GS data collected and no
+Actions runs; cloud sync unconfirmed.
+
+Batch-input distribution verification: source and fresh wheel environments each
+ran 640 tests (639 passed, 1 skipped). The installed preflight API, MPI sample,
+Japanese/English preparation/API guides and AI JSON match the working tree.
+Installed management check and MPI1/2-rank checks passed; rank1-only missing input
+and corrupt catalog exited2 before solver startup. Record:
+`calc2026/salmonpy-job-input-preflight-installed-20261120`.
+
+## Ordinary mixed sample connection
+
+`mpi_mixed_native --input-check STAGED_BUNDLE` reuses the MPI input-check helper
+before native state creation and writes `OUTPUT/input-preflight.json`.
+Optional `--input-manifest-sha256` anchors the manifest. This integrity-only gate
+is opt-in and does not reinterpret the sample's legacy GS BUNDLE argument or
+bind independently specified command arguments to staged material recipes.
+Output-directory creation errors now broadcast before a barrier, preserving
+existing outputs and ending all ranks with code2 instead of stranding peers.
+Subsequent runtime/numerical failure policy is unchanged.
+
+Source trial verified protected restore/continuation parity with/without input
+checking (2 field ranks + 2 SBE ranks, LD local to field), and failed checksum/
+existing-output collective exits before any solver creation. The initial test
+harness expected `response.npz` from the stop-at-checkpoint driver; that driver
+actually emits `protected-continuation.npz`. Existing outputs were retained and
+compared using the correct artifact; no calculation code change was needed.
+
+Fresh wheel normal sample: 4 ranks, 64 steps, A/E/j and point IDs exactly equal
+with/without preflight. No GS collected/copied; no Actions run. Canonical records:
+`calc2026/salmonpy-job-connection-20261120` and
+`calc2026/salmonpy-job-connection-installed-20261120` (cloud sync unconfirmed).
+
+User clarification: management/login-node preflight is an optional action the
+user runs independently under facility policy. SALMONpy does not automatically
+connect/run there or require a preflight report for ordinary job execution.
+The mixed sample gate remains opt-in; no external scheduler integration is implied.
+
+## Ordinary startup reads without any optional preflight
+
+Moved explicit layers/model-group/TDDFT catalog reads before solver creation and
+wrapped them in rank-local diagnostics, gather, report write and broadcast.
+`startup-inputs.json` identifies rank, phase, path, exception type and message;
+invalid declarations terminate all ranks with exit2. No management-node action,
+report or --input-check is required. Detailed assembly/native semantic checks
+remain later, with their existing policy.
+
+Source and installed wheel verified missing layers, malformed JSON, rank1-only
+read failure and parent MPI survival after caught rejection. Valid LD/SBE/native
+FDTD protected continuation exactly matched the previous baseline. Both source
+and installed tests: 640 run, 639 passed, 1 skipped. Installed sample and JP/EN/AI
+guides exactly match source. No GS data collected; no Actions run; uncommitted.
+Records: `calc2026/salmonpy-startup-reads-20261120` and
+`calc2026/salmonpy-startup-reads-installed-20261120` (cloud sync unconfirmed).
+
+## Unit-selection admission
+
+Optional status is threaded through `read_input_common`. Unsupported unit_system
+returns1001 on that path rather than STOP; read_input closes its local parser
+scratch and native E/H forwards the reason to Python. Existing callers omitting
+status retain standalone behavior. Valid unit conversions remain unchanged.
+The test replaces the existing units block (an initial duplicate-block test did
+not override the first block and was corrected); the old build confirms
+`STOP invalid unit_system`. New 1/2-rank tests repeat invalid units twice, then
+normal propagation; A/E/H samples and `.data` output bytes match R2 exactly.
+No GS data collected, no Actions runs. Native source/object/link audits passed.
+Record: `calc2026/salmonpy-r3-unit-record-20261120` (cloud sync unconfirmed).
+
+Management-node checks are independent optional user commands that only check
+and exit, including on success. They never launch a solver or submit a job.
+The ordinary mixed calculation sample is for separately submitted compute-node
+jobs, not a management-node checker. Documentation states that distinction.
+
+## Coordinate input status (2026-11-20)
+
+Thread optional status through read_atomic_coordinates. Existing collective
+coordinate-source conflicts return1002/1003, reduced isolated coordinates1004.
+Root opens/reads use iostat only on the opted-in status path, normalize to1005/
+1006, close external units and broadcast failure before coordinate-array
+collectives. The caller closes parser scratch before return. Legacy callers
+without status retain their existing STOP/runtime-I/O behavior. Python names
+these reasons without extra physical restrictions.
+
+Old validated unit-stage build reproduces MPI termination on absent coordinate
+source. New build passed eight coordinate-admission cases on1/2 ranks, followed
+by normal FDTD whose A/E/H exactly match R2. This proves the tested admission
+cases and normal field regression, not physical electronic-coordinate accuracy,
+allocation failure recovery or every semantic constraint. No GS collected/CI.
+
+Coordinate-stage distribution check: fresh sdist/wheel installed tests641
+(640passed/1skipped). Installed parser/field source, Python error mapping and
+JP/EN/AI guides exactly match source. Validation records live at canonical
+calc2026/salmonpy-r3-coordinates-record-20261120; cloud sync unconfirmed.
+
+## Named semantic checks (2026-11-20)
+
+Optional status now reaches check_bad_input and existing y/n normalizers.
+Unsupported propagator1010, source-support ACE1011, finite-range EXX1012 and
+invalid y/n flags1013 return rather than terminate on the opted-in native path.
+Absent status retains legacy fatal behavior. The existing predicates, accepted
+profiles and uppercase Y/N normalization remain unchanged. Later specialized
+semantic STOP paths are still outside this subset.
+
+Old validated coordinate build reproduces ERROR STOP Unsupported propagator.
+New build passes six semantic cases and all earlier admission cases (23 total)
+on1/2 ranks, then normal FDTD with uppercaseN. All A/E/H and `.data` bytes equal
+R2. Source641 tests (640pass/1skip); native source/object/link audits passed.
+No GS collection, no Actions runs. Canonical evidence:
+calc2026/salmonpy-r3-semantic-record-20261120 (cloud sync unconfirmed).
+
+Named-semantic distribution check: fresh sdist/wheel installed tests641
+(640passed/1skipped). Installed parser/native/Python status mapping and JP/EN/AI
+guides match source exactly. Changes remain uncommitted.
+
+## Backend-scoped validation supersedes blanket electronic checks for native E/H
+
+User-added backends own their parameter semantics; generic checks must not apply
+SALMON's electronic method lists to them. Native status-returning Maxwell parsing
+now uses only active E/H y/n flags at check_bad_input, not propagator/SCF/LCFO
+choice lists. No-status legacy calls retain existing checks. Earlier common
+parsing and actual E/H initialization remain separately scoped, so this is not
+arbitrary unknown-namelist acceptance. Broad common-choice status expansion was
+not retained. Historical build evidence is preserved and is not a new feature.
+
+Confirmed old rejection of an unused user propagator; new1/2-rank tests accept
+user_extension/user_initializer in inactive electronic settings, reject active
+field flags and exactly match R2 A/E/H and `.data` bytes. Static-checker test
+accepts lab.custom/user_knob as unverified without execution. Source and installed
+wheel641 tests (640pass/1skip), native source/object/link audits and installed
+source/JP/EN/AI parity pass. Evidence:
+calc2026/salmonpy-r3-maxwell-scope-record-20261120. No GS collected, no Actions;
+cloud sync unconfirmed. Pushed baseline dc7525b3; this scope correction uncommitted.
+
+## Inactive electronic preprocessing during native E/H input reading
+
+Native status-returning Maxwell input skips KY PP/spin probing, EXX/legacy MLWF
+alias-conflict rejection, EXX route resolution and ACE warmup guards/arithmetic.
+The existing broadcasts and field units/flags remain. Electronic/no-status
+callers retain existing behavior. Missing inactive PP, conflicting aliases,
+user_route, zero history/teacher/interval settings are accepted in native E/H;
+1/2-rank A/E/H and all `.data` bytes equal R2. Earlier source reproduced the
+unnecessary PP open error. The freshly audited standalone executable still
+rejects missing PP, alias conflicts, invalid EXX route and warmup history in
+four separate pre-GS trials; recorded executable SHA checked before each use.
+This does not certify new electronic physics or arbitrary namelist extensions.
+
+Source/installed wheel641 tests (640pass/1skip); native audits and installed
+source/JP/EN/AI parity pass. Records:
+calc2026/salmonpy-r3-electronic-scope-record-20261120 and
+calc2026/salmonpy-electronic-scope-legacy-20261120. No GS collected, no Actions;
+cloud sync unconfirmed, uncommitted.
+
+## Early errors inside eh_init (2026-11-20)
+
+Optional status returns the existing grid/boundary/time/CFL errors as1101–1104; omitted status preserves standalone termination. A grid_ready output identifies completed communication setup so native rejection frees sendrecv caches before child communicators, destroys the context, and restores retryability. This does not catch failures inside grid/MPI setup or subsequent material/source/I/O/allocations. No new input restriction, numerical threshold, parser gate or automatic management-node calculation is introduced.
+
+The old library reproduces whole-host termination on overdetermined grid input. MPI1/2 candidate tests repeat each of the4 errors twice, require no surviving context/children and bounded reused registry slots, then initialize normally. All32 A/E/H samples and .data bytes equal the prior validated build. Initial test setup mistakenly duplicated an existing cell length rather than supplying the missing third grid quantity; a later test incorrectly expected zero registry slots after released children. Both test assumptions were corrected; their original logs remain preserved. Source/object/link prohibition audits pass. Evidence: calc2026/salmonpy-r3-geometry-record-v2-20261120 (cloud sync unconfirmed). No GS collection or Actions dispatch.

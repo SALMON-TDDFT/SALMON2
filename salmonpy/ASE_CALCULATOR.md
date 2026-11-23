@@ -4,7 +4,42 @@
 このモジュールのimportにはASEが必要ですが、SALMONpyの通常のimportやLDなどには不要です。
 対応する物理量は `energy`（eV）と `forces`（eV/Å）。応力・free_energyは公開しません。
 対応範囲は3次元周期・中性・固定イオンSCF・非スピン分極、PZ／Libxc-PZ／Libxc-PBEとスカラーKY／NC-UPF擬ポテンシャルです。
-Libxcには対応したランタイムが必要です。擬ポテンシャルの生成汎関数・元素との整合を確認してください。TB-mBJの力は対象外です。
+Libxcには対応した計算プログラムが必要です。擬ポテンシャルの生成汎関数・元素との整合を確認してください。TB-mBJの力は対象外です。
+
+## NLCC付きUPFの力
+
+**既存・未検証計算プログラムのLibxc-PBE＋NLCC付きUPFの力は拒否します。**
+通常の`SalmonExecutable(path, sha256)`だけではNLCC力は有効になりません。
+検証記録のない環境で構造最適化を行う場合は、対応するPZ＋KYを使い、
+格子・k点・SCF精度を確認してください。
+
+実装検証を終えた計算プログラムは、次の入口で読み込みます。
+
+```python
+from salmonpy.runtime import load_runtime, load_validated_build
+
+engine = load_runtime('my-runtime', required=['nlcc-forces'])
+# または、自分で監査・検証したビルドと、その検証記録を指定する。
+# engine = load_validated_build('work/build.json', 'checks/validation.json')
+print(engine.nlcc_force_xc)  # ('pz', 'libxc_pz', 'libxc_pbe')
+```
+
+この`engine`をCalculatorへ渡すと、対応範囲のNLCC力を取得できます。
+実行ファイルのSHA256・修正パッチ・XC/コア力の微分検査・固定Si8の実行検査が
+結び付いた記録を要求します。別の場所へ同梱するときも実行検査をやり直します。
+対象はCPU・非スピン分極・スカラーNC-UPFです。記録は信頼できるビルドと検証の
+コマンドで生成したものを使い、手で有効化フラグを付けません。
+
+**これは実装の回帰検証であり、利用する物質の力の収束を保証しません。**
+支持表の線形補間・切断境界、格子・k点・SCFの収束は別途確認してください。
+旧Libxc-NLCCの密度重み・GGA勾配の不整合と明示的コア力は互換パッチで修正していますが、
+既存の実行ファイルへ自動適用される変更ではありません。
+
+検証記録がない場合、UPFの有効または不明な`core_correction`指定、もしくは
+`PP_NLCC`要素を検出すると、力要求は計算開始前に`PropertyNotImplementedError`となります。
+エネルギーのみ利用でき、力はキャッシュしません。エネルギー取得可能と物理的な検証済みを
+混同しないでください。低水準の`GroundStateResult.forces_hartree_per_bohr`も、
+計算プログラムの妥当性を自動認定する入口ではありません。
 
 ```python
 from ase.build import bulk
@@ -28,7 +63,7 @@ forces = atoms.get_forces()
 gs = atoms.calc.last_ground_state
 ```
 
-`electrons` は省略可能です。各構造の擬ポテンシャル価電子数の合計から決定し、明示値が異なればネイティブ計算前に拒否します。`states`・`grid`・`kmesh` は明示指定です。
+`electrons` は省略可能です。各構造の擬ポテンシャル価電子数の合計から決定し、明示値が異なれば計算処理計算前に拒否します。`states`・`grid`・`kmesh` は明示指定です。
 
 上の格子はSiの例であり、任意の系や目標精度への推奨値ではありません。
 実行ファイルにはGS収束報告と `gs_forces.dat` の `SALMONPY_FORCES_V1` 報告を含めます。
@@ -45,8 +80,7 @@ gs = atoms.calc.last_ground_state
 同じCalculatorインスタンスを複数スレッドから同時使用することは想定しません。
 
 モデル設定は構築時に固定し、`set(...)` による変更は拒否します。格子などを変更する場合は
-新しいCalculatorを作って `atoms.calc` に設定します。未収束・失敗時は結果と
-`last_ground_state` を消去し、古い力を返しません。失敗ログは計算ディレクトリに残ります。
+新しいCalculatorを作って `atoms.calc` に設定します。SCF未収束時は警告と `SCFReviewRequired` で構造最適化などの自動継続を止めます。保存結果は例外の `result` に残り、残差履歴は `report_directory` から確認できます。未収束の力はCalculator結果に登録しません。残差と入力条件を確認してから再計算します。実行失敗・破損出力・非有限値の場合は結果と `last_ground_state` を消去し、古い力を返しません。失敗ログは計算ディレクトリに残ります。
 
 `GroundStateResult.forces_hartree_per_bohr` で本体の力を原子単位で読み出せます。
 このプロパティには新しい力報告ファイルが必要です。過去の報告なしGSを読み直せても、

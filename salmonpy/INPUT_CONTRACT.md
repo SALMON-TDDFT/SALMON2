@@ -1,6 +1,6 @@
 # Input parameter lifecycle
 
-This is the SALMONpy public interface rule. LD implements it now; other backends
+This is the SALMONpy public interface rule. LD implements it now; other calculation implementations
 must adopt it when their Python interfaces are introduced.
 
 | Lifetime | LD example | Allowed change |
@@ -38,12 +38,12 @@ have shape (N,3), N>=1. Inputs are copied so caller mutation cannot alter the mo
 or stored field. Public settings have no setters; private underscore attributes
 are implementation details and must not be modified.
 
-Validation failure, native-library failure and nonfinite native output do not
+Validation failure, solver-library failure and nonfinite solver output do not
 commit a step. P/J, previous E and step count are preserved. Step time is implicit:
 the new E is at `state.time + state.dt`. No automatic reset or interpolation is
 performed. The API cannot detect a caller supplying the wrong physical time.
 
-For future backends, restart loading must check model, units, state schema and
+For future calculation implementations, restart loading must check model, units, state schema and
 time-evolution settings before accepting state. Configuration records alone are
 not checkpoints: per-pole P/J and previous E are also required. No checkpoint
 save/load API is implemented in this preview.
@@ -56,20 +56,20 @@ SBE: eigenvalues, momentum/nonlocal matrices, weights, lattice, electron count,
 correction order and nonlocal-correction flag belong to immutable SBEInitialState.
 `new_state` fixes dt, time0 and initial A; only the next endpoint A is passed to
 `step`. Density, previous A and current belong to each individual state. Failed
-validation or nonfinite native output does not commit a step. Independent states
+validation or nonfinite solver output does not commit a step. Independent states
 never share mutable density matrices.
 
 
 TDDFT: the loaded bundle, executable identity, OpenMP thread count and response
  timeout are immutable factory settings. Every state fixes dt, zero time origin,
 initial A and maximum step capacity. Only Anew is a per-step input. Copies of the
-complete input bundle and process-owned native data ensure independence, including
+complete input bundle and process-owned solver data ensure independence, including
 module globals. Direct states require close/context-manager ownership; common
-respond closes automatically. Native failures replay accepted history before
+respond closes automatically. solver failures replay accepted history before
 returning an error, or explicitly close the state if replay fails.
 
-## ホスト向けAPIと状態保存
+## 呼び出し元プログラム向けAPIと状態保存
 
 [公開API・例外](API.md)と[メモリ上のsnapshot／restore](SNAPSHOTS.md)を参照してください。
 0.1.0a5からLD・SBE・4種類のPythonの場で固定dtの保存・復元を使えます。
-ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。
+計算処理FDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。

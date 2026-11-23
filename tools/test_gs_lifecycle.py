@@ -1,0 +1,307 @@
+"""Compile/run the sequential GS lifecycle probe against an existing audited serial HSE build.
+
+BUILD_RECORD REFERENCE_RECORD NEW_OUTPUT. Explicit local compilation only; no downloads.
+"""
+import argparse
+import hashlib
+import json
+from decimal import Decimal
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+
+
+INPUT = "&calculation\n theory='dft'\n/\n&control\n sysname='gs', base_directory='./', yn_restart='n', yn_self_checkpoint='n'\n/\n&units\n unit_system='au'\n/\n&system\n yn_periodic='y', spin='unpolarized', nelem=1, natom=1, nelec=4, nstate=2, al=8,8,8\n/\n&pseudo\n file_pseudo(1)='Si_rps.dat', izatom(1)=14, lloc_ps(1)=2\n/\n&functional\n xc='hse06', exx_pre_scf_threshold=1d8, exx_pre_scf_steps=2, yn_hse_wannier='n'\n/\n&rgrid\n num_rgrid=8,8,8\n/\n&kgrid\n num_kgrid=2,1,1\n/\n&scf\n nscf=8, convergence='rho_dne', threshold=1d8, nscf_init_mix_zero=1, iseed_number_change=0\n/\n&atomic_red_coor\n'Si' .3 .4 .45 1\n/\n"
+
+def import_existing(args):
+    """Read synthetic restart fixtures only; never invoke SCF or collect GS data."""
+    root=Path(__file__).resolve().parents[1]
+    record=json.loads(args.build.read_text());artifact=Path(record.get('library') or record['executable'])
+    if hashlib.sha256(artifact.read_bytes()).hexdigest()!=record['sha256']:
+        raise ValueError('build artifact checksum mismatch')
+    command=record.get('configure_command') or record['commands'][0]
+    build=Path(command[command.index('-B')+1]);out=args.output.resolve()
+    config=(build/'config.h').read_text()
+    mpi=bool(re.search(r'^#define USE_MPI\b',config,re.M))
+    hse=bool(re.search(r'^#define USE_HSE\b',config,re.M))
+    if not mpi and args.ranks!=1:raise ValueError('serial import probe uses --ranks 1')
+    out.mkdir(parents=True,exist_ok=False)
+    source=root/'tests/native/test_gs_lifecycle.f90';obj=out/'probe.o';exe=out/'probe'
+    checker=root/'tools/check_forbidden_eigensolvers.py'
+    subprocess.run(['mpifort','-cpp','-DSALMONPY_GS_IMPORT_PROBE','-I'+str(build),'-c',str(source),'-o',str(obj)],check=True)
+    subprocess.run([sys.executable,str(checker),'--object-tree',str(out)],check=True)
+    if 'library' in record:
+        subprocess.run(['mpifort',str(obj),str(artifact),'-o',str(exe)],check=True)
+    else:
+        subprocess.run([sys.executable,str(checker),'--object-tree',str(build)],check=True)
+        link=shlex.split((build/'src/CMakeFiles/salmon.dir/link.txt').read_text())
+        link[link.index('-o')+1]=str(exe)
+        link=[str(obj) if value=='CMakeFiles/salmon.dir/main.f90.o' else value for value in link]
+        subprocess.run(link,cwd=build/'src',check=True)
+
+    from salmonpy.bands import _input_groups
+    template=_input_groups((args.import_bundle/'rt.inp').read_text())
+    rows=[]
+    for first,second in ([('hse06','libxc_pbe'),('hse06','hse06')] if hse else [])+[('pz','libxc_pbe'),('tbmbj','libxc_pz')]:
+        case=out/(first+'-'+second);case.mkdir()
+        for name in ('data_for_restart','pseudo1_rps.dat'):
+            source=args.import_bundle/name
+            if source.is_dir():shutil.copytree(source,case/name)
+            else:shutil.copy2(source,case/name)
+        hashes={str(p.relative_to(case)):hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in (case/'data_for_restart').rglob('*') if p.is_file()}
+        for name,xc in [('a',first),('b',second)]:
+            groups=dict(template)
+            groups['calculation']="\n theory='dft'\n"
+            groups['control']="\n sysname='"+name+"',directory_read_data='./data_for_restart/',yn_restart='y',read_gs_restart_data='wfn'\n"
+            groups['functional']="\n xc='"+xc+"',exx_pre_scf_threshold=0,exx_factor_mode='off'\n"
+            if first==second=='hse06' and name=='b':
+                groups['functional']=groups['functional'].replace("exx_factor_mode='off'","exx_factor_mode='off',hse_omega=.19")
+            groups['propagation']="\n propagator='middlepoint',yn_predictor_corrector='n'\n"
+            groups['parallel']='\n nproc_k='+str(args.ranks)+',nproc_ob=1,nproc_rgrid=1,1,1\n'
+            if name=='b':groups['atomic_red_coor']="\n 'Si' .1 .2 .3 1\n"
+            text='\n'.join('&'+key+value+'/' for key,value in groups.items())+'\n'
+            (case/(name+'.inp')).write_text(text)
+        with (case/'a.inp').open() as inp,(out/(case.name+'.log')).open('w') as log:
+            launch=['mpiexec','-n',str(args.ranks),str(exe),'import'] if mpi else [str(exe),'import']
+            subprocess.run(launch,cwd=case,stdin=inp,
+                stdout=log,stderr=subprocess.STDOUT,check=True,timeout=180,
+                env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'})
+        if 'GS_IMPORT independent/seed/fresh/close PASS' not in (out/(case.name+'.log')).read_text():
+            raise AssertionError('GS import probe did not complete')
+        for name,h in hashes.items():
+            if hashlib.sha256((case/name).read_bytes()).hexdigest()!=h:
+                raise AssertionError('input restart mutated')
+        rows.append({'xc':[first,second],'status':'pass','independent':True,'detached_seed':True,
+                     'fresh_import_exact':True,'close_preserves_other_state':True,'SCF_calls':0})
+    (out/'result.json').write_text(json.dumps({'status':'pass','ranks':args.ranks,'cases':rows,
+        'scope':'synthetic import only; no SCF/physical convergence; reference positional unused'},indent=2)+'\n')
+    print('GS import-only ownership PASS',flush=True)
+
+
+def batch_controls(args):
+    """Public DFT batch reports versus fixed fast CLI, without GS restart output."""
+    import warnings
+    import numpy as np
+    from salmonpy.dft import DFT,Pseudopotential,SCFSettings
+    from salmonpy.fdtd import SalmonExecutable
+    # Legacy gs_info.data uses inputoutput.f90's fixed conversion, not newer CODATA.
+    legacy_ev_per_hartree=27.21138505
+    root=Path(__file__).resolve().parents[1];out=args.output.resolve();out.mkdir(parents=True,exist_ok=False)
+    def executable(receipt):
+        record=json.loads(receipt.read_text());path=Path(record['executable'])
+        if record.get('status')!='built-and-audited' or hashlib.sha256(path.read_bytes()).hexdigest()!=record['sha256']:
+            raise ValueError('unchanged audited executable required')
+        return SalmonExecutable(path,record['sha256'])
+    engine=executable(args.build);reference=executable(args.reference)
+    pp=Pseudopotential.from_file(root/'salmonpy/examples/si_intro_data/Si_rps.dat',atomic_number=14,local_channel=2)
+    cases=[DFT((14,),np.eye(3)*8,[[.3,.4,.45]],(pp,),4,2,(8,8,8),(2,1,1),xc='pz'),
+           DFT((14,14),np.eye(3)*9,[[.3,.4,.45],[.7,.6,.55]],(pp,),8,4,(12,12,12),(1,2,1),xc='libxc_pbe')]
+    summary=[]
+    for i,model in enumerate(cases):
+        scf=SCFSettings(max_iterations=4,tolerance=1e-12 if i==0 else 1.)
+        with warnings.catch_warnings(record=True) as observed:
+            warnings.simplefilter('always')
+            result=model.run(engine,out/('batch-'+str(i)),scf=scf,save_restart=False)
+            forces=result.forces_hartree_per_bohr
+        assert not result.restart_saved and not list(result.directory.rglob('wfn.bin'))
+        assert result.converged==bool(i)
+        if not result.converged:assert any('not converged' in str(w.message) for w in observed)
+        old=out/('reference-'+str(i));old.mkdir()
+        (old/model._pseudo_name(0)).write_bytes(pp.data)
+        text=model.input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
+        text=text.replace('&scf','&scf\n nscf_init_mix_zero=0,')
+        with (old/'stdout.log').open('w') as log:
+            subprocess.run([str(reference.path)],input=text,text=True,cwd=old,
+                stdout=log,stderr=subprocess.STDOUT,check=True,timeout=120,
+                env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'})
+        assert not list(old.rglob('wfn.bin'))
+        report=(old/'gs_info.data').read_text()
+        energy=float(re.search(r'Total energy \(eV\)\s*=\s*([-+0-9.Ee]+)',report)[1])/legacy_ev_per_hartree
+        np.testing.assert_allclose(result.energy_hartree,energy,rtol=3e-12,atol=3e-13)
+        lines=report.split('Force [au]')[1].strip().splitlines()[:len(model.numbers)]
+        for actual,line in zip(forces,lines):
+            for value,printed in zip(actual,line.split()[1:]):
+                number=Decimal(printed);rounding=float(Decimal('0.5')*Decimal(10)**number.as_tuple().exponent)
+                assert abs(float(value)-float(number))<=rounding+3e-13
+        summary.append({'xc':model.xc,'converged':result.converged,'iterations':result.iterations,
+            'energy_hartree':result.energy_hartree,'energy_difference_hartree':result.energy_hartree-energy,
+            'reference_force_print_rounding_respected':True,'restart_saved':False})
+    (out/'result.json').write_text(json.dumps({'status':'pass','cases':summary,
+        'GS_restart_collected':False,'scope':'scalar report/API regression, not physical convergence'},indent=2)+'\n')
+    print('Public GS batch scalar reports PASS',flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('build', type=Path)
+    parser.add_argument('reference', type=Path)
+    parser.add_argument('output', type=Path)
+    parser.add_argument('--batch',action='store_true',help='public scalar-only DFT runs; no GS restart collection')
+    parser.add_argument('--convergence', choices=('rho_dne','norm_rho','norm_rho_dng','norm_pot','norm_pot_dng'), default='rho_dne')
+    parser.add_argument('--mixing', choices=('simple','broyden','pulay','simple_potential'), default='simple')
+    parser.add_argument('--auto-mixing', action='store_true')
+    parser.add_argument('--distinct-mixing', action='store_true')
+    parser.add_argument('--initial-no-mix-steps', type=int, default=1)
+    parser.add_argument('--different-normalization', action='store_true')
+    parser.add_argument('--import-bundle',type=Path,help='read-only existing synthetic restart; no SCF; reference positional unused')
+    parser.add_argument('--ranks',type=int,default=2)
+    args = parser.parse_args()
+    if args.batch:
+        batch_controls(args)
+        return
+    if args.import_bundle:
+        import_existing(args)
+        return
+    if args.different_normalization and (args.convergence!='rho_dne' or args.distinct_mixing):
+        parser.error('different normalization requires rho_dne and no distinct mixing')
+    root = Path(__file__).resolve().parents[1]
+    record = json.loads(args.build.read_text())
+    executable = Path(record['executable'])
+    if (record.get('schema') != 'salmonpy.hse-rt-state-build/1'
+            or record.get('status') != 'built-and-audited'
+            or hashlib.sha256(executable.read_bytes()).hexdigest() != record['sha256']):
+        raise ValueError('unchanged audited build required')
+    reference = json.loads(args.reference.read_text())
+    reference_executable = Path(reference['executable'])
+    if (reference.get('schema') != record['schema'] or reference.get('status') != 'built-and-audited'
+            or hashlib.sha256(reference_executable.read_bytes()).hexdigest() != reference['sha256']):
+        raise ValueError('unchanged audited reference required')
+    build = executable.parent
+    output = args.output.resolve()
+    if any(output.is_relative_to(p.resolve()) for p in (root, build, Path(record['source_root']), reference_executable.parent, Path(reference['source_root']))):
+        raise ValueError('new external output directory required')
+    config = (build / 'config.h').read_text()
+    if not re.search(r'^#define USE_HSE\b', config, re.M):
+        raise ValueError('HSE build required')
+    if re.search(r'^#define (USE_MPI|USE_OPENACC)\b', config, re.M):
+        raise ValueError('serial CPU build required')
+    output.mkdir(parents=True, exist_ok=False)
+    source = output / 'src'
+    source.mkdir()
+    shutil.copy2(root / 'tests/native/test_gs_lifecycle.f90', source / 'probe.f90')
+    flags = (build / 'src/CMakeFiles/salmon.dir/flags.make').read_text()
+    options = [v for v in shlex.split(re.search(r'^Fortran_FLAGS\s*=\s*(.*)$', flags, re.M)[1])
+               if not v.startswith('-J')]
+    includes = shlex.split(re.search(r'^Fortran_INCLUDES\s*=\s*(.*)$', flags, re.M)[1])
+    compiler = re.search(r'^CMAKE_Fortran_COMPILER:[^=]*=(.*)$',
+                         (build / 'CMakeCache.txt').read_text(), re.M)[1].strip()
+    checker = root / 'tools/check_forbidden_eigensolvers.py'
+    commands = []
+    with (output / 'build.log').open('w') as log:
+        def run(command, **kwargs):
+            commands.append([str(v) for v in command])
+            subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT, **kwargs)
+        run([sys.executable, checker, '--source-root', Path(record['source_root']) / 'src'])
+        run([sys.executable, checker, '--source-root', source])
+        run([compiler, *options, *includes, '-J' + str(output), '-c', source / 'probe.f90',
+             '-o', output / 'probe.o'], cwd=output)
+        run([sys.executable, checker, '--object-tree', build])
+        run([sys.executable, checker, '--object-tree', output])
+        link = shlex.split((build / 'src/CMakeFiles/salmon.dir/link.txt').read_text())
+        link[link.index('-o') + 1] = str(output / 'probe')
+        link = [str(output / 'probe.o') if v == 'CMakeFiles/salmon.dir/main.f90.o' else v for v in link]
+        run(link, cwd=build / 'src')
+    root_pseudo = root / 'salmonpy/examples/si_intro_data/Si_rps.dat'
+    if not root_pseudo.exists():
+        root_pseudo = root.parent / 'examples/si_intro_data/Si_rps.dat'
+    env = dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1')
+    cases = []
+    for steps in ((0,) if args.convergence.startswith('norm_pot') or args.mixing=='simple_potential' else (0, 1, 2, 3)):
+        directory = output / f'steps-{steps}'
+        directory.mkdir()
+        for name in ('first', 'second', 'reference', 'reference_second'):
+            (directory / name).mkdir()
+        shutil.copy2(root_pseudo, directory / 'Si_rps.dat')
+        text = INPUT.replace("convergence='rho_dne'", f"convergence='{args.convergence}'").replace('exx_pre_scf_threshold=1d8', f'exx_pre_scf_threshold={1e8 if steps else 0}')
+        text = text.replace('&scf\n', f"&scf\n method_mixing='{args.mixing}', yn_auto_mixing='{'y' if args.auto_mixing else 'n'}', update_mixing_ratio=0, mixrate=0.35, alpha_mb=0.65, beta_p=0.55, nmemory_p=2,\n")
+        text = text.replace('exx_pre_scf_steps=2', f'exx_pre_scf_steps={max(1, steps)}')
+        text=text.replace('nscf_init_mix_zero=1', f'nscf_init_mix_zero={args.initial_no_mix_steps}')
+        (directory / 'gs.inp').write_text(text)
+        reference_input = text.replace("base_directory='./'", "base_directory='./reference/'")
+        try:
+            with (directory / 'probe.log').open('w') as log:
+                subprocess.run([str(output / 'probe'), *(['normalization'] if args.different_normalization else ['distinct'] if args.distinct_mixing else [])], input=text, text=True, cwd=directory,
+                               env=env, stdout=log, stderr=subprocess.STDOUT, timeout=120, check=True)
+            with (directory / 'reference.log').open('w') as log:
+                subprocess.run([str(reference_executable)], input=reference_input, text=True, cwd=directory,
+                               env=env, stdout=log, stderr=subprocess.STDOUT, timeout=120, check=True)
+            second_input=reference_input.replace('./reference/', './reference_second/')
+            if args.distinct_mixing:
+                second_input=second_input.replace('mixrate=0.35','mixrate=0.175').replace('alpha_mb=0.65','alpha_mb=0.325').replace('beta_p=0.55','beta_p=0.275').replace('nmemory_p=2','nmemory_p=1')
+            with (directory / 'reference_second.log').open('w') as log:
+                subprocess.run([str(reference_executable)], input=second_input, text=True, cwd=directory,
+                               env=env, stdout=log, stderr=subprocess.STDOUT, timeout=120, check=True)
+            log = (directory / 'probe.log').read_text()
+            if log.count('EXX_GS_OWNER explicit') != 2 or 'Sequential GS lifecycle PASS' not in log:
+                raise AssertionError('both GS calls must use an explicit owner and complete')
+            def residuals(text):
+                return [line.split() for line in text.splitlines() if line.strip().startswith('iter and ')]
+            reference_residuals=residuals((directory/'reference.log').read_text())
+            observed=residuals(log)
+            second_residuals=residuals((directory/'reference_second.log').read_text())
+            if not reference_residuals or not second_residuals:
+                raise AssertionError('both references must contain convergence residuals')
+            if args.different_normalization:
+                if observed[:len(reference_residuals)]!=reference_residuals or len(observed)!=len(reference_residuals)+len(second_residuals):
+                    raise AssertionError('normalization changed iteration count or first state')
+                for actual, expected in zip(observed[len(reference_residuals):],second_residuals):
+                    actual_value,expected_value=Decimal(actual[-1]),Decimal(expected[-1])
+                    # Each E-format value was independently rounded to its last printed digit.
+                    rounding=Decimal(10)**actual_value.as_tuple().exponent/2 + Decimal(10)**expected_value.as_tuple().exponent/4
+                    if actual[:-1]!=expected[:-1] or abs(actual_value-expected_value/2)>rounding:
+                        raise AssertionError('second state density residual must be halved (printed precision)')
+            elif not reference_residuals or observed!=reference_residuals+second_residuals:
+                raise AssertionError('per-iteration convergence labels/residuals differ from reference')
+            trace = (directory / 'a_before.bin').read_bytes()
+            if not trace or any((directory / name).read_bytes() != trace
+                                for name in ('a_after.bin', 'a_after_close.bin')):
+                raise AssertionError('retained A changed while running/closing B')
+            files = ['gs_info.data', 'gs_eigen.data', 'gs_k.data']
+            restart = directory / 'reference/data_for_restart'
+            payloads = sorted(str(p.relative_to(restart)) for p in restart.rglob('*') if p.is_file())
+            if not {'wfn.bin', 'rho_inout.bin', 'occupation.bin', 'info.bin'}.issubset(payloads):
+                raise AssertionError('reference checkpoint payload incomplete')
+            files += ['data_for_restart/' + name for name in payloads]
+            hashes = {}
+            second_hashes = {}
+            for name in files:
+                expected = (directory / 'reference' / name).read_bytes()
+                for label in ('first', 'second'):
+                    if (directory / label / name).read_bytes() != (directory / ('reference' if label=='first' else 'reference_second') / name).read_bytes():
+                        raise AssertionError(f'{steps}: {label}/{name} differs from original')
+                hashes[name] = hashlib.sha256(expected).hexdigest()
+                second_hashes[name] = hashlib.sha256((directory/'reference_second'/name).read_bytes()).hexdigest()
+            cases.append({'different_normalization':args.different_normalization, 'observed_residuals':observed, 'initial_no_mix_steps':args.initial_no_mix_steps, 'distinct_mixing':args.distinct_mixing, 'mixing_method':args.mixing, 'auto_mixing':args.auto_mixing, 'convergence_metric':args.convergence, 'pre_scf_steps': steps, 'two_sequential_calls_equal_reference': True, 'retained_a_unchanged': True,
+                          'reference_file_sha256': hashes, 'reference_residuals':reference_residuals,
+                          'reference_second_file_sha256':second_hashes,
+                          'reference_second_residuals':residuals((directory/'reference_second.log').read_text())})
+        finally:
+            for name in ('first', 'second', 'reference', 'reference_second'):
+                shutil.rmtree(directory / name / 'data_for_restart', ignore_errors=True)
+            (directory / 'Si_rps.dat').unlink(missing_ok=True)
+            for name in ('a_before.bin', 'a_after.bin', 'a_after_close.bin'):
+                (directory / name).unlink(missing_ok=True)
+    invalid = output / 'invalid-wrapper'
+    invalid.mkdir()
+    shutil.copy2(root_pseudo, invalid / 'Si_rps.dat')
+    with (invalid / 'run.log').open('w') as log:
+        rejected = subprocess.run([str(executable)], input=INPUT.replace('nscf=8', 'nscf=0'),
+                                  text=True, cwd=invalid, env=env, stdout=log,
+                                  stderr=subprocess.STDOUT, timeout=30)
+    if rejected.returncode == 0 or 'Invalid GS run configuration' not in (invalid / 'run.log').read_text():
+        raise AssertionError('wrapper must fail visibly for invalid SCF configuration')
+    (invalid / 'Si_rps.dat').unlink()
+    (output / 'result.json').write_text(json.dumps({'status': 'passed', 'cases': cases,
+        'scope': 'same-input serial GS reuse and checkpoint equivalence; not concurrency or physical convergence',
+        'commands': commands, 'build': record, 'reference': reference,
+        'probe_sha256': hashlib.sha256((source / 'probe.f90').read_bytes()).hexdigest()}, indent=2) + '\n')
+    print(f'Sequential GS/checkpoint/residual comparison PASS ({len(cases)} cases, {args.convergence})')
+
+
+if __name__ == '__main__':
+    main()

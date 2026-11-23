@@ -1,23 +1,33 @@
-name: Full runtime bundles
+name: Runtime bundles and TDDFT integration
+# Expensive numerical/physics validation is explicit, not required automatic CI.
 on:
   workflow_dispatch:
-  push:
-    paths: ['runtime/**', 'native/**', 'salmonpy/runtime*', 'salmonpy/dft.py', 'salmonpy/ase*.py', 'tools/test_ase_warm_start.py', 'tools/*runtime*.py', 'tools/test_fdtd_material*.py', 'tools/test_fdtd_mpi_entrypoint.py', 'salmonpy/fdtd.py', 'salmonpy/distributed.py', 'salmonpy/material_response.py', 'salmonpy/embedded_tddft.py', 'salmonpy/coupled.py', 'salmonpy/examples/mpi_coupled_tddft.py', 'salmonpy/tests/test_embedded_tddft.py', 'tools/*embedded*.py', 'tools/*coupled*.py', 'tools/*ms1d*.py', 'tools/test_longitudinal_salmon.py', 'salmonpy/maxwell.py', 'salmonpy/timing.py', 'salmonpy/examples/mpi_multiscale_tddft.py', 'tools/*parallel*.py', 'tools/test_distributed_mpi.py', 'tools/test_ld_distributed_mpi.py', 'tools/test_tddft_distributed_mpi.py', '.github/workflows/runtime-bundles.yml']
+    inputs:
+      scope:
+        description: 'Bundle/integration campaign or the short Linux worker check'
+        type: choice
+        options: [bundle, worker]
+        default: bundle
+        required: true
 permissions:
   contents: read
 jobs:
   bundle:
+    # Run only when a maintainer explicitly requests this optional campaign.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-15, macos-15-intel]
+        os: ${{ fromJSON(inputs.scope == 'worker' && '["ubuntu-22.04"]' || '["ubuntu-22.04", "macos-15", "macos-15-intel"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install numpy delocate 'ase>=3.26,<4' 'f90nml>=1.4,<2'
+      - run: python -m pip install numpy
+      - name: Install bundle/integration extras
+        if: inputs.scope != 'worker'
+        run: python -m pip install delocate 'ase>=3.26,<4' 'f90nml>=1.4,<2'
       - name: Linux build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gfortran libopenblas-dev patchelf
@@ -28,28 +38,38 @@ jobs:
           echo "FC=$(brew --prefix)/bin/gfortran" >> "$GITHUB_ENV"
           echo "CC=$(brew --prefix)/bin/gcc-$(gfortran -dumpversion | cut -d. -f1)" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix openblas)" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
-        with:
-          repository: SALMON-TDDFT/SALMON2
-          ref: 3322d0561c0cad5180679136b3eddbe8b909487c
-          path: upstream-salmon
+      - name: Validate runtime preparation (including nested Git ownership)
+        run: python tools/test_runtime_preparation.py
       - name: Explicit build using the public command
         shell: bash
         run: |
-          python -m salmonpy.runtime build upstream-salmon "$RUNNER_TEMP/runtime-build" --jobs 2 \
+          python -m salmonpy.runtime build "$RUNNER_TEMP/runtime-build" --jobs 2 \
             --cmake-arg=-DCMAKE_Fortran_COMPILER="${FC:-gfortran}" \
             --cmake-arg=-DCMAKE_C_COMPILER="${CC:-gcc}" \
             --cmake-arg=-DBLA_VENDOR=OpenBLAS \
             --cmake-arg=-DOPENMP_FLAGS=-fopenmp \
             --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
             --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
+      - name: Standalone TDDFT worker regression
+        if: inputs.scope == 'worker'
+        shell: bash
+        env:
+          PYTHONPATH: .
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+          SALMONPY_RUNTIME_SOURCE: ${{ runner.temp }}/runtime-build/source
+        run: |
+          python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/worker-check"
+          SALMONPY_TEST_PC=y python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/worker-pc-check"
       - name: Bundle dependencies and install into a different directory
+        if: inputs.scope != 'worker'
         shell: bash
         run: |
           python tools/package_salmon_runtime.py "$RUNNER_TEMP/runtime-build/build" "$RUNNER_TEMP/runtime-build/source" "$RUNNER_TEMP/distribution"
           archive=$(find "$RUNNER_TEMP/distribution" -maxdepth 1 -name '*.zip')
           python -m salmonpy.runtime install "$RUNNER_TEMP/relocated" --catalog "$RUNNER_TEMP/distribution/catalog.json" --archive "$archive" --require tddft
       - name: Test relocated native runtime
+        if: inputs.scope != 'worker'
         shell: bash
         env:
           PYTHONPATH: .
@@ -62,6 +82,7 @@ jobs:
           python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/relocated/bin/salmon" "$RUNNER_TEMP/relocation-test"
           SALMONPY_TEST_PC=y python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/relocated/bin/salmon" "$RUNNER_TEMP/relocation-pc-test"
       - name: ASE PZ warm-start regression
+        if: inputs.scope != 'worker'
         shell: bash
         env:
           OPENBLAS_NUM_THREADS: '1'
@@ -71,14 +92,14 @@ jobs:
             salmonpy/examples/si_intro_data/Si_rps.dat salmonpy/examples/si_intro_data/Si_rps.dat \
             "$RUNNER_TEMP/ase-warm-start" --xc pz
       - name: Native MPI material corner regression (Linux)
-        if: runner.os == 'Linux'
+        if: inputs.scope != 'worker' && runner.os == 'Linux'
         shell: bash
         env:
           OPENBLAS_NUM_THREADS: '1'
           OMPI_MCA_rmaps_base_oversubscribe: '1'
         run: |
           sudo apt-get install -y libopenmpi-dev openmpi-bin
-          python -m salmonpy.runtime build upstream-salmon "$RUNNER_TEMP/mpi-build" --jobs 2 \
+          python -m salmonpy.runtime build "$RUNNER_TEMP/mpi-build" --jobs 2 \
             --cmake-arg=-DUSE_MPI=ON --cmake-arg=-DCMAKE_Fortran_COMPILER=mpifort \
             --cmake-arg=-DCMAKE_C_COMPILER=mpicc --cmake-arg=-DBLA_VENDOR=OpenBLAS \
             --cmake-arg=-DOPENMP_FLAGS=-fopenmp --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
@@ -91,7 +112,7 @@ jobs:
           PYTHONPATH=. python tools/run_parallel_mpi_tests.py "$RUNNER_TEMP/parallel-bridge/build.json" "$RUNNER_TEMP/parallel-tests" --tddft-runtime "$RUNNER_TEMP/relocated" --tddft-bundle "$RUNNER_TEMP/relocation-test/bundle"
 
       - name: Embedded TDDFT and E/H coupling regression (Linux)
-        if: runner.os == 'Linux'
+        if: inputs.scope != 'worker' && runner.os == 'Linux'
         shell: bash
         env:
           PYTHONPATH: .
@@ -108,6 +129,7 @@ jobs:
           python tools/run_ms1d_mpi_tests.py "$RUNNER_TEMP/embedded-build/build.json" "$RUNNER_TEMP/mpi-build/source" "$RUNNER_TEMP/ms1d-tests"
 
       - name: Upload tested branch artifacts (not an upstream SALMON release)
+        if: inputs.scope != 'worker'
         uses: actions/upload-artifact@v4
         with:
           name: salmonpy-runtime-${{ matrix.os }}
@@ -121,6 +143,8 @@ jobs:
         with:
           name: runtime-build-log-${{ matrix.os }}
           path: |
+            ${{ runner.temp }}/worker-check/**/run.log
+            ${{ runner.temp }}/worker-pc-check/**/run.log
             ${{ runner.temp }}/ms1d-tests/*.log
             ${{ runner.temp }}/ms1d-tests/summary.json
             ${{ runner.temp }}/runtime-build/build.log

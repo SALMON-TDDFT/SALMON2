@@ -3,7 +3,7 @@
 E is at native time n*dt. Electronic local time n*dt corresponds to field clock
 (n+1/2)*dt; native saved H is centered at E time, not the raw H endpoint.
 """
-from .errors import InputError, InputTypeError
+from .errors import InputError, InputTypeError, NumericalError, RuntimeFailure
 from pathlib import Path
 import ctypes as c
 import json
@@ -26,6 +26,40 @@ def _agree(comm,error):
     if any(errors):raise InputError(str(errors))
 
 
+def _select_response_admission(response,*,field_packets=False):
+    """Choose one dispatch for the whole coupling, once before any step."""
+    context=response.context
+    if not callable(getattr(context.solver_comm,'allgather',None)):return False
+    eligible=False
+    try:
+        query=getattr(response,'_can_merge_field_admission',None)
+        eligible=callable(query) and bool(query(field_packets=field_packets))
+    except Exception:
+        pass  # An unsupported custom response keeps its existing separate vote.
+    local=all(context.solver_comm.allgather(eligible))
+    groups=context.leaders.allgather(local) if context.is_leader else None
+    selected=all(groups) if context.is_leader else None
+    return context.solver_comm.bcast(selected,root=0)
+
+
+def _response_from_field(response,payload,error,*,field_packets=False,merge=False):
+    """Use the group-unanimous dispatch selected during coupling setup."""
+    if merge:return response._step_from_field(payload,error,field_packets=field_packets)
+    response.agree(error)
+    return response.step_fields(payload) if field_packets else response.step(payload)
+
+
+def _require_field_record(record):
+    """Admit the legacy field record or an explicitly declared fast field ABI."""
+    if record.get('schema')=='salmonpy.embedded-tddft/1':return
+    field=record.get('field_abi')
+    if (record.get('schema')=='salmonpy.fast-hse-mpi/1' and isinstance(field,dict)
+            and type(field.get('protocol')) is int and field['protocol']==1
+            and field.get('scheme')=='salmonpy.eh-centered-current/1'):
+        return
+    raise InputError('embedded host library record or explicit fast-runtime E/H ABI required')
+
+
 class NativeEHField:
     """Collective field-group context; points map IDs to zero-based grid indices.
 
@@ -36,9 +70,10 @@ class NativeEHField:
     scheme='salmonpy.eh-centered-current/1'
     electronic_clock_offset = ELECTRONIC_CLOCK_OFFSET
 
-    def __init__(self,context,calculation,build_record,directory,*,points,grid):
+    def __init__(self,context,calculation,build_record,directory,*,points,grid,execution_mode="checked"):
         comm=context.solver_comm;error=None
         try:
+            if execution_mode not in ('checked','performance'):raise InputError('execution_mode must be checked or performance')
             if context.group.role!='field':raise InputError('field group required')
             if embedded._used:raise InputError('one native lifetime per process')
             if threading.current_thread() is not threading.main_thread():raise InputError('main thread required')
@@ -47,6 +82,7 @@ class NativeEHField:
             parallel=FDTDMPI(tuple(grid))
             if parallel.ranks!=comm.size:raise InputError('field decomposition must match group size')
             text=parallel.input_text(calculation)
+            assets=calculation.input_assets()
             self.point_ids=context.plan.point_ids
             if set(points)!=set(self.point_ids):raise InputError('one field index per material point required')
             indices=np.asarray([points[p] for p in self.point_ids])
@@ -64,17 +100,25 @@ class NativeEHField:
                 i,j,k=point
                 if np.any(ids[i-1:i+2,j-1:j+2,k-1:k+2]):raise InputError('coupled cells require a vacuum constitutive neighborhood')
             record=json.loads(Path(build_record).read_text())
-            if record.get('schema')!='salmonpy.embedded-tddft/1':raise InputError('embedded host library record required')
+            _require_field_record(record)
             library=Path(record['library']);sha=record['sha256']
             if _digest(library)!=sha:raise InputError('native library checksum mismatch')
+            if 'salmonpy-ld-diagonal.dat' in assets and b'SALMONPY_FDTD_LD_DIAGONAL_V1' not in library.read_bytes():
+                raise InputError('native field library lacks diagonal tensor LD support; build a matching runtime')
+            if 'salmonpy-ld-tensor.dat' in assets and b'SALMONPY_FDTD_LD_TENSOR_V1' not in library.read_bytes():
+                raise InputError('native runtime lacks off-diagonal tensor FDTD capability; explicitly rebuild it')
+            if 'salmonpy-subpixel.dat' in assets and b'SALMONPY_SUBPIXEL_REFERENCE_V2' not in library.read_bytes():
+                raise InputError('native field lacks reference-frequency subpixel module; explicitly rebuild it')
             lib=c.CDLL(str(library))
-            ints=np.ctypeslib.ndpointer(dtype=np.int32,ndim=2,flags='C_CONTIGUOUS')
-            floats=np.ctypeslib.ndpointer(dtype=np.float64,ndim=2,flags='C_CONTIGUOUS')
-            lib.sp_eh_init.argtypes=[c.c_char_p,c.c_int,ints];lib.sp_eh_init.restype=c.c_int
-            lib.sp_eh_step.argtypes=[c.c_int,floats,floats];lib.sp_eh_step.restype=c.c_int
-            lib.sp_eh_close.argtypes=[];lib.sp_eh_close.restype=c.c_int
+            from .api import _bind_field_operations
+            _bind_field_operations(lib)
+            if execution_mode=='performance':
+                _bind_field_operations(lib,('sp_eh_step_performance',))
+                self._performance_fn=lib.sp_eh_step_performance
+                from ._native_group import _bind_performance_directory
+                self._performance_enter,self._performance_leave=_bind_performance_directory(lib)
             self.directory=Path(directory).expanduser().resolve()
-            descriptor=(text,indices.tolist(),sha,str(self.directory))
+            descriptor=(text,indices.tolist(),sha,str(self.directory),execution_mode)
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         descriptors=comm.allgather(descriptor)
@@ -84,18 +128,29 @@ class NativeEHField:
             try:
                 self.directory.mkdir(parents=True,exist_ok=False)
                 (self.directory/'inputfile').write_text(text)
+                for name,payload in assets.items():(self.directory/name).write_bytes(payload.encode('utf-8'))
             except Exception as exc:error=str(exc)
         _agree(comm,error)
         error=None
         try:
             if (self.directory/'inputfile').read_text()!=text:raise InputError('shared field directory required')
+            for name,payload in assets.items():
+                if (self.directory/name).read_text(encoding='utf-8')!=payload:raise InputError('shared diagonal tensor asset differs')
         except Exception as exc:error=str(exc)
         _agree(comm,error)
+        self.checkpoint_decomposition=tuple(grid)
+        self.calculation=calculation
         self.context=context;self.lib=lib;self.dt=calculation.dt;self.capacity=calculation.steps
         self.step_index=0;self.A=np.zeros((len(self.point_ids),3));self.E=np.zeros_like(self.A)
         self.closed=False;self.initialized=False;self.failed=False
+        self._execution_mode=execution_mode
+        self.current_rows=None;self.current_rows_by_rank=None
+        from .field_input import _real
+        xyz=np.column_stack([calculation.geometry.grid.coordinates[d][indices[:,d]] for d in range(3)])
+        self.sample_positions=_real(xyz,(len(self.point_ids),3),'macro sample positions')
         self.manifest={'schema':self.scheme,'status':'started','point_ids':self.point_ids,
-            'grid_indices':indices.tolist(),'cell_volume':float(np.prod(calculation.geometry.grid.spacing)),
+            'grid_indices':indices.tolist(),'sample_positions_bohr':self.sample_positions.tolist(),'cell_volume':float(np.prod(calculation.geometry.grid.spacing)),
+            'execution_mode':execution_mode,'automatic_step_rollback':execution_mode=='checked',
             'dt':self.dt,'steps':self.capacity,'field_ranks':comm.size,'field_grid':list(grid),
             'library_sha256':sha,'sample_map':'half of same-index and previous-axis E edges',
             'deposit_map':'transpose of sample_map, equal cell volumes',
@@ -106,13 +161,64 @@ class NativeEHField:
         self._write_manifest()
         self.native=NativeParallelContext(context,library,sha)
         embedded._used=True
+        retryable_initialization=False
         try:
             code=self._call(lib.sp_eh_init,b'inputfile',len(self.point_ids),np.array(indices,dtype=np.int32,order='C'))
             self.initialized=(code==0)
-            _agree(comm,'native field initialization rejected' if code else None)
+            reason = {1001: 'invalid unit_system; expected au, a.u. or A_eV_fs',
+                      1002: 'explicit atomic coordinates conflict with an MD restart',
+                      1003: 'atomic coordinate source is missing or specified more than once',
+                      1004: 'reduced atomic coordinates require a periodic system',
+                      1005: 'cannot open atomic coordinate file; check the input path',
+                      1006: 'cannot read atomic coordinates; check row count and column format',
+                      1101: 'inconsistent grid specification; set two of al_em, dl_em and num_rgrid_em',
+                      1102: 'incompatible boundary settings; check periodicity and paired faces',
+                      1103: 'inconsistent duration, step count and time step specification',
+                      1104: 'native FDTD time step must be below the existing whole-domain CFL bound',
+                      1110: 'LD diagonal/tensor material sidecar is missing or invalid; check the staged material file',
+                      1111: 'LD diagonal/tensor update coefficients are nonfinite; inspect material scales and dt',
+                      1112: 'off-diagonal tensor FDTD does not implement nonzero Bloch phase',
+                      1114: 'subpixel update coefficients are invalid; inspect profile rates and dt',
+                      1113: 'reference-frequency subpixel material profile is missing or invalid',
+                      1120: 'FDTD material/boundary coefficient allocation failed; release memory and retry',
+                      1119: 'native LD state array allocation failed; reduce per-rank grid or pole count, or release memory and retry',
+                      1118: 'native FDTD core array allocation failed; reduce per-rank grid or release memory and retry',
+                      1117: 'automatic MPI partition is unavailable for this rank count; supply an explicit spatial grid',
+                      1115: 'cannot read the material-ID cube; check file availability, format, grid counts and values',
+                      1116: 'material-ID reader staging allocation failed',
+                      1105: 'Maxwell MPI partition must match attached ranks and use k/orbital factors of one',
+                      1107: 'MPI mapper does not implement this process_allocation',
+                      1106: 'local MPI grid is below the existing stencil support; adjust the spatial decomposition or grid size',
+                      1010: 'unsupported propagator',
+                      1011: 'source-support ACE is deferred',
+                      1012: 'hse_sr_tolerance must be zero in the supported profile',
+                      1013: "a yn_* option only accepts y or n (case-insensitive)"}.get(
+                          code, 'native field initialization rejected')
+            init_codes=comm.allgather(int(code))
+            if any(init_codes):
+                retryable_initialization=embedded._admission_rejected(self.lib,
+                    [(value,True) for value in init_codes],
+                    allowed=(1101,1102,1103,1104,1105,1106,1107,
+                             1110,1111,1112,1113,1114,1115,1116,1117,1118,1119,1120),
+                    query_name='sp_eh_init_recovery_protocol')
+                raise InputError(f'{reason} (native statuses {init_codes})')
+            query=getattr(lib,'sp_eh_current_mask',None)
+            if query is not None and getattr(lib,'sp_eh_step_owned',None) is not None:
+                from .api import _bind_field_operations
+                _bind_field_operations(lib,('sp_eh_current_mask',))
+                mask=np.empty(len(self.point_ids),dtype=np.int32)
+                code=self._call(query,len(self.point_ids),mask)
+                _agree(comm,'native current ownership query failed' if code else None)
+                self.current_rows=np.flatnonzero(mask).astype(np.intp)
+                self.current_rows_by_rank=tuple(np.asarray(rows,dtype=np.intp) for rows in comm.allgather(self.current_rows.tolist()))
+                covered={int(row) for rows in self.current_rows_by_rank for row in rows}
+                _agree(comm,'native current ownership does not cover mapped points' if covered!=set(range(len(self.point_ids))) else None)
+
         except BaseException:
             self.failed=True
-            self.close();raise
+            self.close()
+            if retryable_initialization:embedded._used=False
+            raise
 
     @property
     def timing(self):
@@ -120,6 +226,149 @@ class NativeEHField:
         return TimeSpec(self.dt,(InputPort('j',offset='1/2',lag=1,uses_t0=False),),(OutputPort('A',offset='1/2'),),
             history='zero-initialized plane-wave field; initial feedback current zero',
             integrator='native Yee: E at n*dt, saved H centered at E time; A_new = A_old - dt*S(E)')
+
+    def sample_fields(self):
+        """Read detached A/E point samples after a step; no collectives or update.
+
+        A is at (n+1/2)dt, E at n*dt. Read H via sample_magnetic_field collectively.
+        Positions follow plan.point_ids and the mapped macro-cell centers.
+        """
+        if self.closed or self.failed or self.step_index<1:
+            raise InputError('field samples require a usable field after its first step')
+        from .field_sampling import SampledField
+        return {'A':SampledField('A',[(self.step_index+.5)*self.dt],self.sample_positions,
+                                 self.A[None,:,:],'A/c:au'),
+                'E':SampledField('E',[self.step_index*self.dt],self.sample_positions,
+                                 self.E[None,:,:],'E:au')}
+
+    def energy_observer(self,lower,upper):
+        """Create an opt-in closed inner-box observer; this never advances a field.
+
+        Collective setup on the field group. sample_step() reads only a live
+        accepted-attempt backup before its release. Actual constitutive coefficients, including validated tensor/subpixel/Ohmic
+        profiles; unsupported observations warn and report unavailable. Explicit
+        observation also works in performance mode when the caller supplies a backup.
+        """
+        return _BoxEnergyObserver(self,lower,upper)
+
+    def sample_planes(self,*,output_directory=None):
+        """Collective explicit read: immutable planes on field rank0, None elsewhere.
+
+        One gather coalesces diagnostics and owner-local tiles. Never advances,
+        changes checkpoint state or samples an uncommitted transaction.
+        Optional output_directory saves a separate no-overwrite archive only
+        after capture succeeds; archive failure warns and returns the samples.
+        Failures warn only on field rank0 and leave the calculation usable.
+        """
+        comm=self.context.solver_comm;error=None;tiles=[]
+        try:
+            if self.closed or self.failed:raise InputError('usable native field required')
+            if getattr(self,'_step_guard',None) is not None or getattr(self,'_restore_candidate',None) is not None:
+                raise InputError('sample planes after the protected step/restore is committed')
+            if threading.current_thread() is not threading.main_thread():raise InputError('main thread required')
+            self.native._live()
+            fn=getattr(self.lib,'sp_eh_plane_read',None)
+            if fn is None:raise InputError('runtime lacks read-only embedded plane ABI; explicitly rebuild')
+            from .api import _bind_field_operations
+            _bind_field_operations(self.lib,('sp_eh_plane_read',))
+            for monitor in self.calculation.planes:
+                info=np.empty(21,dtype=np.int32);dummy=np.empty(0,dtype=np.float64)
+                offset=int(np.argmin(abs(self.calculation.geometry.grid.coordinates[monitor.axis]-monitor.position)))
+                status=fn(monitor.axis+1,offset,0,info.ctypes.data,dummy.ctypes.data)
+                if status:raise InputError(f'native plane unavailable at step{self.step_index}: status{status}')
+                if (tuple(info[:3])!=(16909060,1,monitor.axis+1)
+                    or info[3]!=info[5+monitor.axis]+offset or info[4]!=info[3]-1
+                    or info[17]!=self.calculation.observation_stride or info[18]!=self.capacity
+                    or np.any(info[11:14]<info[5:8]) or np.any(info[14:17]>info[8:11])
+                    or np.any(info[14:17]<info[11:14])):
+                    raise InputError('native plane ABI geometry/configuration differs')
+                tangent=[d for d in range(3) if d!=monitor.axis]
+                owns=[q for q,index in enumerate(info[3:5]) if info[11+monitor.axis]<=index<=info[14+monitor.axis]]
+                values=None
+                if owns:
+                    sizes=info[14:17]-info[11:14]+1
+                    n1,n2=(int(sizes[d]) for d in tangent)
+                    values=np.empty(12*n1*n2,dtype=np.float64)
+                    status=fn(monitor.axis+1,offset,len(values),info.ctypes.data,values.ctypes.data)
+                    if status:raise InputError(f'native plane tile rejected: status{status}')
+                    values=values.reshape(2,n2,n1,6).transpose(0,2,1,3)
+                tiles.append((info,values))
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        reports=comm.gather((error,tiles),root=0)
+        if comm.rank!=0:return None
+        try:
+            failures=[error for error,_ in reports if error]
+            if failures:raise InputError(str(failures))
+            from .fdtd import _plane_data
+            result=[]
+            for number,monitor in enumerate(self.calculation.planes):
+                tangent=[d for d in range(3) if d!=monitor.axis]
+                shape=tuple(self.calculation.geometry.grid.counts[d] for d in tangent)
+                raw=np.empty((2,1,*shape,6));covered=np.zeros((2,*shape),dtype=bool)
+                global_box=None
+                for _,owned in reports:
+                    info,values=owned[number]
+                    if info[20]!=self.step_index:raise InputError('native plane clocks differ across ranks')
+                    if global_box is None:global_box=tuple(info[5:11])
+                    if tuple(info[5:11])!=global_box:raise InputError('native plane bounds differ across ranks')
+                    if tuple(info[8:11]-info[5:8]+1)!=self.calculation.geometry.grid.counts:
+                        raise InputError('native plane grid differs')
+                    if values is None:continue
+                    lo=info[11:14];hi=info[14:17]
+                    spans=tuple(slice(int(lo[d]-info[5+d]),int(hi[d]-info[5+d]+1)) for d in tangent)
+                    for q,index in enumerate(info[3:5]):
+                        if not lo[monitor.axis]<=index<=hi[monitor.axis]:continue
+                        if np.any(covered[(q,*spans)]):raise InputError('overlapping native plane tiles')
+                        raw[(q,0,*spans,slice(None))]=values[q];covered[(q,*spans)]=True
+                if not np.all(covered):raise InputError('incomplete native plane coverage')
+                result.append(_plane_data(self.calculation,monitor,raw,[self.step_index],dict(
+                    requested_position=monitor.position,source='explicit embedded snapshot',raw_tiles=len(reports))))
+            if output_directory is not None:
+                try:
+                    from .outputs import save_arrays
+                    arrays={}
+                    for number,plane in enumerate(result):
+                        for name,value in (('E',plane.E),('H',plane.H),('time',plane.time),('area',plane.area_weights)):
+                            arrays[f'plane{number}_{name}']=value
+                        for d,coordinates in enumerate(plane.coordinates):arrays[f'plane{number}_coordinate{d}']=coordinates
+                    save_arrays(output_directory,arrays,metadata=dict(
+                        schema='salmonpy.embedded-planes/1',step=self.step_index,
+                        planes=[dict(axis=p.axis,position=p.position,**dict(p.config)) for p in result]))
+                except Exception as exc:
+                    import warnings
+                    warnings.warn(f'Plane archive unavailable; field and returned samples preserved: {exc}',UserWarning,stacklevel=2)
+            return tuple(result)
+        except Exception as exc:
+            import warnings
+            warnings.warn(f'Plane diagnostic unavailable; field state preserved: {exc}',UserWarning,stacklevel=2)
+            return None
+
+    def sample_magnetic_field(self):
+        """Collective field-group read of macro-centered raw H at (n+1/2)dt.
+
+        Requires the optional sp_eh_sample_h ABI; old libraries reject explicitly.
+        Every field rank must call. No time advance or saved-H averaging occurs.
+        """
+        comm=self.context.solver_comm;error=None;fn=None
+        try:
+            if self.closed or self.failed or self.step_index<1:
+                raise InputError('H samples require a usable field after its first step')
+            fn=getattr(self.lib,'sp_eh_sample_h',None)
+            if fn is None:raise InputError('runtime lacks sp_eh_sample_h; explicitly build an H-enabled runtime')
+            self.native._live()
+            from .api import _bind_field_operations
+            _bind_field_operations(self.lib,('sp_eh_sample_h',))
+            H=np.empty_like(self.A)
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        _agree(comm,error)
+        error=None
+        try:
+            code=self._call(fn,len(self.point_ids),H)
+            if code or not np.isfinite(H).all():error='native H sampling failed'
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        _agree(comm,error)
+        from .field_sampling import SampledField
+        return SampledField('H',[(self.step_index+.5)*self.dt],self.sample_positions,H[None,:,:],'H:au')
 
     def _write_manifest(self):
         error=None
@@ -129,31 +378,107 @@ class NativeEHField:
         _agree(self.context.solver_comm,error)
 
     def _call(self,fn,*args):
-        self.native._live();previous=Path.cwd()
-        try:
-            os.chdir(self.directory)
-            return fn(*args)
-        finally:os.chdir(previous)
+        from ._native_group import _directory_call
+        self.native._live()
+        return _directory_call(self.lib,self.context.solver_comm,self.directory,fn,*args)
 
     def advance(self,J_previous):
+        """Advance with identical global point currents on every field rank."""
+        return self._advance(J_previous,owned=False)
+
+    def advance_owned(self,J_previous):
+        """Coupling path: only current_rows are meaningful off the field leader."""
+        if self.current_rows is None:return self.advance(J_previous)
+        return self._advance(J_previous,owned=True)
+
+    @property
+    def execution_mode(self):
+        return self._execution_mode
+
+    def _call_performance(self,fn,*args):
+        import os
+        self.native._live()
+        code=self._performance_enter(os.fsencode(self.directory))
+        if code:raise RuntimeFailure('performance I/O scope rejected; no collective recovery: '+str(code))
+        try:return fn(*args)
+        finally:self._performance_leave()
+
+    def _advance_performance(self,J_previous,*,owned):
+        if self.closed or self.failed or self.step_index>=self.capacity:
+            raise InputError('closed, failed or exhausted field')
+        J=np.ascontiguousarray(J_previous,dtype=np.float64)
+        if J.shape!=self.A.shape:raise InputError('point-current shape must match field points')
+        if owned:J=np.ascontiguousarray(J[self.current_rows])
+        E=np.empty_like(self.A);next_A=np.empty_like(self.A)
+        try:
+            code=self._call_performance(self._performance_fn,len(self.point_ids),len(J),int(owned),J,self.A,next_A,E)
+            if code:raise RuntimeFailure('performance field failed; state is not guaranteed preserved: '+str(code))
+        except BaseException:
+            self.failed=True
+            raise
+        self.A=next_A;self.E=E;self.step_index+=1
+        return self.A.copy()
+
+    def _advance(self,J_previous,*,owned):
+        if self.execution_mode=='performance':return self._advance_performance(J_previous,owned=owned)
         comm=self.context.solver_comm;error=None
         try:
             if self.closed or self.failed or self.step_index>=self.capacity:raise InputError('closed, failed or exhausted field')
             J=np.array(J_previous,dtype=np.float64,order='C')
             if J.shape!=self.A.shape or not np.isfinite(J).all():raise InputError('finite point currents required')
             if self.step_index==0 and np.any(J):raise InputError('initial feedback current must be zero')
-        except Exception as exc:error=str(exc)
-        _agree(comm,error)
-        values=comm.allgather(J.tolist())
-        _agree(comm,'field currents differ across ranks' if any(v!=values[0] for v in values) else None)
-        E=np.empty_like(self.A)
+            if owned:J=np.ascontiguousarray(J[self.current_rows])
+            E=np.empty_like(self.A)
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        # One admission exchange contains both local validity and exact values.
+        # Every member makes the same decision, including on remote failure.
+        checks=comm.allgather((error,None if error or owned else J.tolist()))
+        errors=[item[0] for item in checks]
+        if any(errors):raise InputError(str(errors))
+        values=[item[1] for item in checks]
+        if any(v!=values[0] for v in values):
+            raise InputError('field currents differ across ranks')
+        workspace_rejected=False
         try:
-            code=self._call(self.lib.sp_eh_step,len(self.point_ids),J,E)
-            _agree(comm,'native field advance failed' if code or not np.isfinite(E).all() else None)
-            with np.errstate(over="ignore",invalid="ignore"):
-                updated_A=self.A-self.dt*E
-            _agree(comm,'nonfinite integrated A' if not np.isfinite(updated_A).all() else None)
+            checked=getattr(self.lib,'sp_eh_step_checked',None)
+            if owned:
+                from .api import _bind_field_operations
+                _bind_field_operations(self.lib,('sp_eh_step_owned',))
+                fn=self.lib.sp_eh_step_owned
+                code=self._call(fn,len(self.point_ids),len(self.current_rows),J,self.A,E)
+            elif checked is not None:
+                from .api import _bind_field_operations
+                _bind_field_operations(self.lib,('sp_eh_step_checked',))
+                code=self._call(checked,len(self.point_ids),J,self.A,E)
+            else:
+                code=self._call(self.lib.sp_eh_step,len(self.point_ids),J,E)
+            # Compute a local candidate only; commit remains after group agreement.
+            finite_E=finite_A=False;integration_error=None;updated_A=None
+            try:
+                finite_E=bool(np.isfinite(E).all())
+                if code==0 and finite_E:
+                    with np.errstate(over="ignore",invalid="ignore"):
+                        updated_A=self.A-self.dt*E
+                    finite_A=bool(np.isfinite(updated_A).all())
+            except Exception as exc:
+                integration_error=f'{type(exc).__name__}: {exc}'
+            outcomes=comm.allgather((int(code),finite_E,finite_A,integration_error))
+            native_outcomes=[(status,valid_E) for status,valid_E,_,_ in outcomes]
+            if embedded._admission_rejected(self.lib,native_outcomes,allowed=(20,21,22,23,24),query_name='sp_eh_recovery_protocol'):
+                if int(code)==24:
+                    workspace_rejected=True
+                    raise RuntimeFailure('FDTD tensor workspace allocation failed before state update; release memory and retry')
+                raise NumericalError('native field numerical state restored without replay; retry permitted: '+str(native_outcomes))
+            if any(status or not valid_E for status,valid_E,_,_ in outcomes):
+                raise InputError('native field advance failed')
+            errors=[error for _,_,_,error in outcomes if error]
+            if errors:raise InputError(errors[0])
+            if any(not valid_A for _,_,valid_A,_ in outcomes):
+                raise InputError('nonfinite integrated A')
+        except NumericalError:
+            raise
         except BaseException as exc:
+            if workspace_rejected:raise
             self.failed=True
             self.manifest['failure']=str(exc)
             raise
@@ -215,6 +540,17 @@ class MultiscaleField:
         start = dict(self.state.config.parameters)['vacuum'][0]
         return self.state.grid_E[start:start+len(self.point_ids)].copy()
 
+    def sample_fields(self):
+        """Read detached A(n dt)/E((n-1)dt) samples in point order; H absent."""
+        if self.closed or self.failed or self.step_index<1:
+            raise InputError('field samples require a usable field after its first step')
+        from .field_sampling import SampledField
+        start=dict(self.state.config.parameters)['vacuum'][0]
+        positions=np.zeros((len(self.point_ids),3))
+        positions[:,0]=self.state.x[start:start+len(self.point_ids)]
+        return {'A':SampledField('A',[self.step_index*self.dt],positions,self.A[None,:,:],'A/c:au'),
+                'E':SampledField('E',[(self.step_index-1)*self.dt],positions,self.E[None,:,:],'E:au')}
+
     def advance(self, j):
         if self.closed or self.failed:
             raise InputError('field is not usable')
@@ -232,7 +568,7 @@ class CoupledStepper:
     and ParallelContext in that order. A step failure invalidates the response.
     """
     @classmethod
-    def from_multiscale(cls, context, bindings, field=None):
+    def from_multiscale(cls, context, bindings, field=None, *, point_record=None, point_map=None, execution_mode="checked"):
         """Collective factory. Only the single field rank supplies a fresh state.
 
         Validate A(0) before creating any material state. All ranks call step,
@@ -257,7 +593,7 @@ class CoupledStepper:
         if context.is_leader:
             dt = context.leaders.bcast(dt, root=context.field_group)
         dt = context.solver_comm.bcast(dt, root=0)
-        response = ResponseSession(context, bindings, dt=dt)
+        response = ResponseSession(context, bindings, dt=dt, point_record=point_record, point_map=point_map, execution_mode=execution_mode)
         try:
             return cls(response, adapter)
         except BaseException:
@@ -277,9 +613,21 @@ class CoupledStepper:
             elif field.dt!=response.dt or field.point_ids!=context.plan.point_ids:
                 error='field/response dt and point order must match'
         elif field is not None:error='material ranks must not provide a field'
+        if getattr(response,'_field_contracts',None) is not None:
+            error='field packet sessions require explicit sampling; CoupledStepper currently requires legacy A response'
         response.agree(error)
         self.timing=self._check_timing(response,field)
         self.J=np.zeros((len(context.plan.point_ids),3))
+        self._configure_current_routing()
+        self._merge_response_admission=_select_response_admission(response)
+
+    def _configure_current_routing(self):
+        field=self.field
+        if isinstance(field,NativeEHField) and getattr(field,'current_rows_by_rank',None) is not None:
+            self.response._field_current_rows_by_rank=field.current_rows_by_rank
+            field.manifest['current_routing']='spatial-owned'
+            field.manifest['current_rows_by_field_rank']=[rows.tolist() for rows in field.current_rows_by_rank]
+            field._write_manifest()
 
     @staticmethod
     def _check_timing(response,field):
@@ -307,23 +655,90 @@ class CoupledStepper:
         if context.is_leader:result=context.leaders.bcast(result,root=context.field_group)
         return context.solver_comm.bcast(result,root=0)
 
+    def step_protected(self, targets):
+        """Opt-in mixed step with explicit full-state/side-effect rollback targets.
+
+        Provide exactly one StepTarget per local field/material owner. No native
+        capability is inferred. Known callback failures must return quiescently
+        everywhere. Retry only when StepRecoveryError.original_preserved is true
+        and cleanup_errors is empty. Ordinary step retains its old behavior.
+        """
+        from .stepping import StepTarget, StepRecoveryError, guarded_step
+        r=self.response;error=None;items=()
+        try:
+            if r.closed or r.failed or r.context.closed:
+                raise InputError('usable response required for protected step')
+            items=tuple(targets)
+            expected=([self.field] if self.field is not None else [])+list(r.states.values())
+            if any(not isinstance(t,StepTarget) for t in items):
+                raise InputError('explicit StepTarget required for each local owner')
+            if (len(items)!=len(expected) or len({id(t.owner) for t in items})!=len(items)
+                    or {id(t.owner) for t in items}!={id(s) for s in expected}):
+                raise InputError('protected step must cover exactly every local field/material owner')
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        r.agree(error)
+
+        def capture():
+            m=r._measurements
+            arrays={'J':(self.J,self.J.copy()),'A':(r._A,r._A.copy())}
+            from .field_input import FieldAdapter
+            adapters={p:('fields',a._steps,a._failed) if isinstance(a,FieldAdapter) else ('A',a.A,a.A.copy())
+                      for p,a in r._adapters.items()}
+            return {'step':self.step_index,'response_step':r.step_index,'failed':r.failed,
+                    'arrays':arrays,'adapters':adapters,
+                    'seconds':(m.seconds,dict(m.seconds)),
+                    'calls':(m.calls,dict(m.calls)),'errors':(m.errors,list(m.errors))}
+
+        def rollback(token):
+            # Preserve original array/dictionary aliases as well as values.
+            self.step_index=token['step'];r.step_index=token['response_step']
+            r.failed=token['failed']
+            for original,values in token['arrays'].values():
+                if not np.array_equal(original,values):original[:]=values
+            self.J=token['arrays']['J'][0];r._A=token['arrays']['A'][0]
+            for p,(kind,original,values) in token['adapters'].items():
+                if kind=='fields':
+                    r._adapters[p]._steps=original;r._adapters[p]._failed=values
+                else:
+                    if not np.array_equal(original,values):original[:]=values
+                    r._adapters[p].A=original
+            for name in ('seconds','calls'):
+                original,values=token[name]
+                original.clear();original.update(values)
+                setattr(r._measurements,name,original)
+            original,values=token['errors'];original[:]=values
+            r._measurements.errors=original
+
+        metadata=StepTarget('__coupling_metadata__',self,capture,rollback)
+        try:
+            return guarded_step(self.step,(metadata,)+items,context=r.context)
+        except StepRecoveryError as exc:
+            if not exc.original_preserved or exc.cleanup_errors:
+                r.failed=True
+                if self.field is not None:self.field.failed=True
+            raise
+
     def step(self):
         r=self.response;context=r.context;A=None;error=None
         if r.closed or r.failed:error='response is not usable'
         if r.step_index!=self.step_index or (self.field is not None and self.field.step_index!=self.step_index):
             error='field and response histories are not synchronized'
-        try:r.agree(error)
-        except Exception:
-            r.failed=True
-            raise
-        if self.field is not None:
-            try:A=self.field.advance(self.J)
+        # Performance mode carries local admission failures with A/J instead
+        # of adding a separate outer agreement before every update.
+        if getattr(r,'execution_mode','checked')=='checked':
+            try:r.agree(error)
+            except Exception:
+                r.failed=True
+                raise
+        if self.field is not None and error is None:
+            try:
+                if isinstance(self.field,NativeEHField) and getattr(self.field,'current_rows',None) is not None:
+                    A=self.field.advance_owned(self.J)
+                else:
+                    A=self.field.advance(self.J)
             except Exception as exc:error=str(exc)
-        try:r.agree(error)
-        except Exception:
-            r.failed=True
-            raise
-        try:J=r.step(A if context.group.role=='field' and context.is_leader else None)
+        try:J=_response_from_field(r,A if context.group.role=='field' and context.is_leader else None,error,
+                                       merge=self._merge_response_admission)
         except BaseException:
             r.failed=True
             raise
@@ -337,3 +752,176 @@ class CoupledStepper:
                     'E_time':(n-1 if isinstance(self.field,MultiscaleField) else n)*dt,
                     'J_previous':previous,'J_charge':J.copy()}
         return None
+
+
+class PacketCoupledStepper:
+    """Exact native samples -> explicit packet current -> next field update.
+
+    All context ranks participate. No interpolation, implicit dipole conversion
+    or whole-session rollback. Initial feedback is zero, as in CoupledStepper.
+    """
+    def __init__(self,response,field=None):
+        from .field_input import FieldContract
+        self.response=response;self.field=field;self.step_index=0
+        cxt=response.context;error=None;record=None
+        try:
+            contracts=response._field_contracts
+            if response.closed or response.failed or response.step_index!=0 or contracts is None:
+                raise InputError('fresh packet response session required')
+            if cxt.group.role=='field':
+                if not isinstance(field,(NativeEHField,MultiscaleField)) or field.context is not cxt:
+                    raise InputError('matching native/1D field required')
+                if field.closed or field.failed or field.step_index!=0 or field.dt!=response.dt or field.point_ids!=cxt.plan.point_ids:
+                    raise InputError('fresh field with matching dt/point order required')
+                native=isinstance(field,NativeEHField)
+                if native:
+                    positions=field.sample_positions
+                    phase=.5
+                    available={'A':(.5,0),'E':(0,0),'H':(.5,0)}
+                else:
+                    start=dict(field.state.config.parameters)['vacuum'][0]
+                    positions=np.zeros((len(field.point_ids),3))
+                    positions[:,0]=field.state.x[start:start+len(field.point_ids)]
+                    phase=0.
+                    available={'A':(0,0),'E':(0,1)}
+                needs_H=False
+                for i,point in enumerate(field.point_ids):
+                    contract=contracts[point]
+                    if (contract.position_unit!='bohr' or not np.array_equal(contract.position,positions[i])
+                            or contract.timing.t0!=0 or contract.timing.clock_offset!=0):
+                        raise InputError('packet coupling requires exact mapped position and zero local clock origin')
+                    output=contract.timing.output('j')
+                    if output is None or float(output.offset)!=phase or output.sampling!='point':
+                        raise InputError('current output phase differs from field feedback schedule')
+                    for port in contract.timing.inputs:
+                        if (port.quantity not in available or (float(port.offset),port.lag)!=available[port.quantity]
+                                or port.sampling!='point' or contract.units[port.quantity]!={'A':'A/c:au','E':'E:au','H':'H:au'}[port.quantity]):
+                            raise InputError('port clock/unit is unavailable without explicit interpolation')
+                        needs_H |= port.quantity=='H'
+                if needs_H:
+                    field.native._live()
+                    if getattr(field.lib,'sp_eh_sample_h',None) is None:
+                        raise InputError('H-enabled runtime required before packet coupling')
+                record={'schema':'salmonpy.packet-coupling/1','current_offset':phase,'needs_H':needs_H,
+                        'field_kind':'native-EH' if native else 'Multiscale1D',
+                        'initial_feedback':'zero; not a measured ground-state current',
+                        'positions_bohr':positions.tolist(),
+                        'point_contracts':{p:contracts[p].timing.to_dict() for p in field.point_ids}}
+            elif field is not None:raise InputError('material ranks must not supply field')
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        response.agree(error)
+        if cxt.is_leader:record=cxt.leaders.bcast(record,root=cxt.field_group)
+        self.timing=cxt.solver_comm.bcast(record,root=0)
+        self.J=np.zeros((len(cxt.plan.point_ids),3))
+        CoupledStepper._configure_current_routing(self)
+        self._merge_response_admission=_select_response_admission(response,field_packets=True)
+
+    step_protected = CoupledStepper.step_protected
+
+    def step(self):
+        from .field_input import FieldPacket,FieldValue
+        r=self.response;cxt=r.context;error=None;packets=None;samples=None
+        try:
+            if r.closed or r.failed or r.step_index!=self.step_index:
+                raise InputError('packet response is unusable or out of sync')
+            if self.field is not None:
+                if self.field.closed or self.field.failed or self.field.step_index!=self.step_index or self.step_index>=self.field.capacity:
+                    raise InputError('packet field is unusable, exhausted or out of sync')
+                if self.timing['needs_H']:self.field.native._live()
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        if getattr(r,'execution_mode','checked')=='checked' or self.timing['needs_H']:
+            r.agree(error)
+        try:
+            if self.field is not None and error is None:
+                try:
+                    if isinstance(self.field,NativeEHField) and getattr(self.field,'current_rows',None) is not None:
+                        self.field.advance_owned(self.J)
+                    else:
+                        self.field.advance(self.J)
+                    samples=self.field.sample_fields()
+                except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+            if self.timing['needs_H']:
+                # This vote is essential: H sampling is itself collective.
+                # No rank may enter it after another failed local A/E sampling.
+                r.agree(error)
+                error=None
+                if self.field is not None:
+                    try:samples['H']=self.field.sample_magnetic_field()
+                    except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+            if error is None and self.field is not None and cxt.is_leader:
+                try:
+                    packets={}
+                    for i,point in enumerate(self.field.point_ids):
+                        components={}
+                        for q in r._field_contracts[point].units:
+                            sample=samples[q]
+                            components[q]=FieldValue._from_transport(sample.values[0,i],time=sample.times[0],
+                                position=sample.positions[i],unit=sample.unit,checked=getattr(r,"execution_mode","checked")=="checked")
+                        packets[point]=FieldPacket(**components)
+                except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+            current=_response_from_field(r,packets,error,field_packets=True,merge=self._merge_response_admission)
+        except BaseException:
+            r.failed=True
+            raise
+        self.step_index+=1
+        if self.field is not None:
+            previous=self.J.copy();self.J=current
+            return {'field_time':self.step_index*r.dt,
+                    'current_time':(self.step_index+self.timing['current_offset'])*r.dt,
+                    'samples':samples,'J_previous':previous,'J_charge':current.copy()}
+        return None
+
+
+class _BoxEnergyObserver:
+    _names=('field_modified_old','field_modified_new','field_modified_change',
+        'field_physical_old','field_physical_new','field_physical_change',
+        'ld_work','external_current_work','out_x_lower','out_x_upper',
+        'out_y_lower','out_y_upper','out_z_lower','out_z_upper',
+        'outward_energy','modified_residual','physical_residual','constitutive_outward_energy','ohmic_work')
+
+    def __init__(self,field,lower,upper):
+        error=None;box=None
+        try:
+            box=np.asarray([lower,upper])
+            if box.shape!=(2,3) or box.dtype.kind not in 'iu':
+                raise InputError('integer lower/upper triples required')
+            counts=np.asarray(field.calculation.geometry.grid.counts)
+            if np.any(box[0]<0) or np.any(box[1]>=counts) or np.any(box[0]>box[1]):
+                raise InputError('ordered inclusive box must lie inside the field grid')
+            field.native._live()
+            from .api import _bind_field_operations
+            _bind_field_operations(field.lib,('sp_eh_box_energy_step',))
+        except Exception as exc:error=str(exc)
+        records=field.context.solver_comm.allgather((error,None if box is None else box.tolist()))
+        if any(e for e,_ in records):raise InputError('energy observer setup: '+str(records))
+        if any(b!=records[0][1] for _,b in records):raise InputError('energy boxes differ across field ranks')
+        self.field=field;self.box=np.array(box,dtype=np.int32,order='C')
+        self.box.setflags(write=False);self._warned=False
+
+    def sample_step(self):
+        """Read-only field-group scalar reduction; leader result, otherwise None.
+
+        All field ranks must call in matching order with their live step guard.
+        There is no I/O scope or application-wide communication in this query.
+        """
+        field=self.field
+        field.native._live()
+        guard=getattr(field,'_step_guard',None)
+        if guard is None or not guard.active:
+            raise InputError('energy observation requires an unconsumed accepted-step backup')
+        values=np.zeros(19)
+        code=field.lib.sp_eh_box_energy_step(self.box,values.ctypes.data)
+        if code==14:raise InputError('energy observation requires a fresh accepted-attempt backup')
+        if not field.context.is_leader:return None
+        if code:
+            reason={1:'box/profile unsupported: exclude source, PML and outer boundary; positive background permittivity and permeability with nonnegative conductivity required',
+                    4:'nonfinite energy observation; no physical state was modified'}.get(code,'energy observation status '+str(code))
+            if not self._warned:
+                import warnings
+                warnings.warn(reason+'; calculation remains available',RuntimeWarning,stacklevel=2)
+                self._warned=True
+            return dict(available=False,reason=reason)
+        values.setflags(write=False)
+        return dict(available=True,step=field.step_index,units='hartree',
+                    lower=self.box[0].tolist(),upper=self.box[1].tolist(),
+                    **{name:float(value) for name,value in zip(self._names,values)})

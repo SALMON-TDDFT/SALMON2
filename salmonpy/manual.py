@@ -41,9 +41,24 @@ def search(query, *, lang='ja'):
 
 
 if __name__ == '__main__':
+    import sys
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     import argparse
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--lang', choices=('en','ja'), default='ja')
-    parser.add_argument('query',nargs='+')
-    args=parser.parse_args()
-    print(json.dumps(search(' '.join(args.query), lang=args.lang),ensure_ascii=False,indent=2))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--lang', choices=('en', 'ja'), default='ja')
+    parser.add_argument('--full', action='store_true', help='include complete matching guides and the task catalog')
+    parser.add_argument('query', nargs='*')
+    args = parser.parse_args()
+    if not args.query:
+        data = load()
+        result = data['getting_started_i18n'][args.lang]
+    else:
+        result = search(' '.join(args.query), lang=args.lang)
+        if not args.full:
+            result = {'query': result['query'], 'getting_started': result['getting_started'],
+                      'tasks': [{k: t[k] for k in ('id', 'intent', 'api', 'guide', 'guides', 'environment') if k in t}
+                                for t in result['tasks'][:5]],
+                      'more': 'python -m salmonpy.manual --full QUERY',
+                      'rules': 'AI_USAGE.md'}
+    print(json.dumps(result, ensure_ascii=False, indent=2))

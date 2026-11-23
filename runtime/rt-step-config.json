@@ -1,0 +1,19 @@
+{
+  "schema": "salmonpy.rt-step-config-overlay/1",
+  "upstream_commit": "c9e8ce431f43eefd4a88998134adb4796f8ec837",
+  "base_patch_sha256": "a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8",
+  "patch_sha256": "5b55a3f32414cff21d72c05bf70b43bdafba72f54a6c6e1891db8a48f8b8cb1a",
+  "scope": "RT settings already integrated; compatibility entry verifies and copies the current source",
+  "modified_sources": [
+    "src/common/structures.f90",
+    "src/rt/initialization_rt.f90",
+    "src/rt/taylor.f90",
+    "src/rt/time_evolution_step.f90",
+    "src/rt/em_field.f90",
+    "src/rt/dip.f90"
+  ],
+  "patch_sha256_role": "historical migration identity; no patch is applied",
+  "base_source_tree_sha256": "ed1839ac5d7adc2c4409789e8e4e7d11138f5ecb04073576b017dad88f51d774",
+  "integrated": true,
+  "source_tree_sha256": "ed1839ac5d7adc2c4409789e8e4e7d11138f5ecb04073576b017dad88f51d774"
+}

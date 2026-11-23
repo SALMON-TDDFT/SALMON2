@@ -66,6 +66,7 @@ class ParallelContext:
         if any(e for e,p in entries): raise InputError('invalid parallel plan: '+str([e for e,p in entries if e]))
         if any(p!=plan for e,p in entries): raise InputError('parallel plans differ across ranks')
         self=cls();self.plan=plan
+        self._error_comm=world.Dup()  # Owned failure-only domain, independent of caller lifetime.
         self.group_id=next(i for i,g in enumerate(plan.groups) if world.rank in g.ranks)
         self.group=plan.groups[self.group_id]
         self.solver_comm=world.Split(self.group_id,self.group.ranks.index(world.rank))
@@ -85,7 +86,7 @@ class ParallelContext:
         if busy:
             raise RuntimeFailure('close response sessions and detach native contexts first')
         if self.is_leader: self.leaders.Free()
-        self.solver_comm.Free();self.closed=True
+        self.solver_comm.Free();self._error_comm.Free();self.closed=True
 
     def __enter__(self): return self
     def __exit__(self,*args): self.close()
@@ -111,12 +112,9 @@ class NativeParallelContext:
             path=Path(library).resolve()
             if hashlib.sha256(path.read_bytes()).hexdigest()!=sha256: raise InputError('bridge checksum mismatch')
             lib=c.CDLL(str(path))
-            lib.sp_attach.argtypes=[c.c_int64];lib.sp_attach.restype=c.c_int
-            lib.sp_detach.argtypes=[];lib.sp_detach.restype=c.c_int
-            lib.sp_info.argtypes=[c.POINTER(c.c_int),c.POINTER(c.c_int)];lib.sp_info.restype=None
-            lib.sp_barrier.argtypes=[];lib.sp_barrier.restype=None
-            lib.sp_sum.argtypes=[c.c_double];lib.sp_sum.restype=c.c_double
-            lib.sp_library.argtypes=[c.POINTER(c.c_char),c.c_int,c.POINTER(c.c_int)];lib.sp_library.restype=None
+            from .api import query_host_abi, _bind_host_operations
+            self.host_abi=query_host_abi(lib)
+            _bind_host_operations(lib)
             text=c.create_string_buffer(8192);active=c.c_int()
             lib.sp_library(text,len(text),c.byref(active))
             if not active.value or text.value.decode().strip()!=MPI.Get_library_version().rstrip('\x00').strip():

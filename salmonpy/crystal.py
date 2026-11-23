@@ -12,11 +12,11 @@ from dataclasses import dataclass
 from typing import Protocol
 import numpy as np
 from .fields import FieldSamples, _readonly
-from .ld import _array
+from .ld import _array, _array_unchecked, _execution_mode_name
 
 
 class AResponseState(Protocol):
-    """Backend-owned mutable state; dt/model fixed, step failures must be atomic."""
+    """Backend-owned mutable state; dt/model fixed; checked stepping preserves failed-step state."""
     @property
     def time(self) -> float: ...
     @property
@@ -47,14 +47,16 @@ class CrystalResponse:
     field_convention: str='Ac=A/c; E=-dAc/dt; atomic units; laboratory frame; electric (charge) current density j (= -SALMON matter current)'
     output_directory: str | None=None
     timing: dict | None=None
+    execution_mode: str="checked"
 
 
-def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=None) -> CrystalResponse:
+def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=None, execution_mode="checked") -> CrystalResponse:
     """Apply an entire A waveform using the backend's same single-step method.
 
     Each call creates an independent state. E-driven crystalline inputs are
     rejected. The first output is the backend's initial current, not forced zero.
     """
+    execution_mode=_execution_mode_name(execution_mode)
     if not isinstance(drive,FieldSamples) or drive.kind!='A':
         raise InputError('crystalline response requires FieldSamples(kind="A")')
     dt=np.diff(drive.time)
@@ -67,8 +69,13 @@ def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=Non
         from pathlib import Path
         output_path=str(Path(output_directory).expanduser().resolve())
         if Path(output_path).exists(): raise FileExistsError(output_path)
-    state=initial.new_state(dt=float(dt[0]),time0=float(drive.time[0]),initial_A=drive.values[0].copy())
+    options=dict(dt=float(dt[0]),time0=float(drive.time[0]),initial_A=drive.values[0].copy())
+    if execution_mode=='performance':options['execution_mode']=execution_mode
+    state=initial.new_state(**options)
     try:
+        if execution_mode=='performance' and getattr(state,'execution_mode',None)!='performance':
+            raise InputError('backend did not declare the requested performance mode')
+        parser=_array_unchecked if execution_mode=='performance' else _array
         from .timing import matter_timing,charge_sign
         spec=matter_timing(state,float(dt[0]),float(drive.time[0]))
         port=spec.input('A')
@@ -77,14 +84,15 @@ def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=Non
         sign=charge_sign(spec);timing=spec.to_dict()
         current=np.empty_like(drive.values)
         for i,t in enumerate(drive.time):
-            if i==0: current[i]=sign*_array(state.current,'initial current',(3,))
-            else: current[i]=sign*_array(state.step(drive.values[i].copy()),'current',(3,))
-            # Permit roundoff from repeated time += dt, bounded far below one step.
-            scale=max(abs(float(t)),abs(float(drive.time[0])),abs(float(dt[0])))
-            roundoff=8*np.finfo(float).eps*(i+1)*scale
-            tolerance=min(abs(float(dt[0]))*1e-3,max(abs(float(dt[0]))*1e-8,roundoff))
-            if not np.isfinite(state.time) or not np.isclose(state.time,t,rtol=0,atol=tolerance):
-                raise InputError('backend time does not match the common A grid')
+            if i==0: current[i]=sign*parser(state.current,'initial current',(3,))
+            else: current[i]=sign*parser(state.step(drive.values[i].copy()),'current',(3,))
+            if execution_mode=='checked':
+                # Permit roundoff from repeated time += dt, bounded far below one step.
+                scale=max(abs(float(t)),abs(float(drive.time[0])),abs(float(dt[0])))
+                roundoff=8*np.finfo(float).eps*(i+1)*scale
+                tolerance=min(abs(float(dt[0]))*1e-3,max(abs(float(dt[0]))*1e-8,roundoff))
+                if not np.isfinite(state.time) or not np.isclose(state.time,t,rtol=0,atol=tolerance):
+                    raise InputError('backend time does not match the common A grid')
         if output_path is not None:
             finish=getattr(state,'finish',None)
             if finish is not None:
@@ -92,10 +100,10 @@ def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=Non
             else:
                 from .outputs import save_arrays
                 save_arrays(output_path,{'time':drive.time,'A':drive.values,'current':current},metadata={
-                    'backend':backend,'dt':float(dt[0]),'units':{'time':'a.u.','A':'Ac=A/c, a.u.',
+                    'backend':backend,'execution_mode':execution_mode,'dt':float(dt[0]),'units':{'time':'a.u.','A':'Ac=A/c, a.u.',
                     'current':'electric (charge) current density, a.u.'},'time_location':'endpoint samples',
                     'matter_current':'-current','timing':timing,'restart_checkpoint':False})
     finally:
         close=getattr(state,'close',None)
         if close is not None: close()
-    return CrystalResponse(drive.time,_readonly(current),backend,float(dt[0]),output_directory=output_path,timing=timing)
+    return CrystalResponse(drive.time,_readonly(current),backend,float(dt[0]),output_directory=output_path,timing=timing,execution_mode=execution_mode)

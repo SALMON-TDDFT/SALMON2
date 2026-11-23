@@ -93,7 +93,7 @@ KYの先頭行の第4項、またはNC-UPFの `PP_HEADER/z_valence` を読み、
 KYには元素名の自己確認情報がないため、`atomic_number` と実際のファイルの対応、
 生成汎関数は引き続き利用者が確認します。
 
-`states`・`grid`・`kmesh` は必須です。資源予算と目的から候補を選び、格子・k点・
+`states`・`kmesh` は必須です。格子は`grid`または`grid_spacing`＋`grid_spacing_unit`で指定します（[構造・格子の準備](STRUCTURE.md)）。資源予算と目的から候補を選び、格子・k点・
 非占有状態数・時間刻みを変えて対象物理量の収束を調べてください。中性電子数が正しい
 ことと、物性が収束していることは別です。以下の16³格子はSi接続試験の条件です。
 
@@ -120,11 +120,11 @@ with tddft_from_atoms(
 `new-gs` の基底状態とログは残ります。再利用には `GroundStateResult.open` を使います。
 実行ファイルにはDFTとTDDFT workerの両方が必要です。実行時の自動取得・コンパイルはありません。
 周期・中性・非スピン分極・固定イオン・一MPIランク、PZ/Libxc-PZ/Libxc-PBEが対象です。
-TB-mBJのGS生成、孤立系、non-collinear、イオン運動、応力は今回追加しません。Calculatorの明示的なwarm startはASE_CALCULATOR.mdを参照してください。
+構造変換 `dft_from_atoms(..., xc="tbmbj", cval=None)` はTB-mBJの直列GS生成に対応します。Calculatorの力・構造最適化にはTB-mBJを追加していません。孤立系、non-collinear、イオン運動、応力は今回追加しません。Calculatorの明示的なwarm startはASE_CALCULATOR.mdを参照してください。
 Aは原子単位のA/c、戻り値は**電荷電流密度j**（SALMON物質電流Jの負号）です。
 
 実行可能な例は [examples/ase_tddft.py](examples/ase_tddft.py)。
-[Si入門例](SI_INTRO.md)で取得・展開したランタイムを再利用できます。
+[Si入門例](SI_INTRO.md)で取得・展開した計算プログラムを再利用できます。
 
 ```sh
 python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --verify-independence

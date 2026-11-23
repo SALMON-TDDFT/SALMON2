@@ -1,0 +1,94 @@
+name: Native source and host contract
+on:
+  push:
+    paths: &native_paths
+      - '.gitattributes'
+      - 'runtime/sources/**'
+      - 'runtime/source-trees/**'
+      - 'runtime/*.json'
+      - 'packaging/**'
+      - 'pyproject.toml'
+      - 'native/lorentz_drude.f90'
+      - 'native/sbe_types.f90'
+      - 'native/sbe_velocity_kernel.f90'
+      - 'native/subpixel_smoothing.f90'
+      - 'native/fdtd_energy.f90'
+      - 'tests/native/**'
+      - 'tools/build_embedded_tddft.py'
+      - 'tools/prepare_salmon_runtime.py'
+      - 'tools/runtime_sources.py'
+      - 'tools/check_forbidden_eigensolvers.py'
+      - 'tools/test_fdtd_coordinates.py'
+      - 'tools/test_io_ownership.py'
+      - 'salmonpy/tests/test_runtime_sources.py'
+      - '.github/workflows/native-contract.yml'
+  pull_request:
+    paths: *native_paths
+  workflow_dispatch:
+concurrency:
+  # Replace obsolete automatic checks, never cancel an explicit manual campaign.
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+permissions:
+  contents: read
+jobs:
+  query-and-parser:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y gfortran libopenblas-dev libopenmpi-dev openmpi-bin
+      - run: python -m pip install numpy pytest
+      - name: Export tracked source only
+        run: |
+          mkdir "$RUNNER_TEMP/export"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/export"
+      - name: Check exported source inventories
+        working-directory: ${{ runner.temp }}/export
+        run: python -m pytest salmonpy/tests/test_runtime_sources.py -q
+      - name: Prepare and audit maintained source
+        working-directory: ${{ runner.temp }}/export
+        run: |
+          python tools/prepare_salmon_runtime.py "$RUNNER_TEMP/source"
+          python tools/check_forbidden_eigensolvers.py --source-root "$RUNNER_TEMP/source/src"
+      - name: Small coordinate and unused-padding contract (no solver job)
+        working-directory: ${{ runner.temp }}/export
+        run: python tools/test_fdtd_coordinates.py "$RUNNER_TEMP/coordinates" --source-root "$RUNNER_TEMP/source"
+      - name: Build audited MPI host library from export (no GS calculation)
+        working-directory: ${{ runner.temp }}/export
+        run: |
+          python tools/build_embedded_tddft.py "$RUNNER_TEMP/source" "$RUNNER_TEMP/host-build" --jobs 2 \
+            --cmake-arg=-DCMAKE_Fortran_COMPILER=mpifort \
+            --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
+            '--cmake-arg=-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -fallow-argument-mismatch' \
+            --cmake-arg=-DBLA_VENDOR=OpenBLAS \
+            --cmake-arg=-DUSE_HSE=OFF --cmake-arg=-DUSE_FFTW=OFF --cmake-arg=-DUSE_LIBXC=OFF
+      - name: C and Fortran query-only contracts
+        working-directory: ${{ runner.temp }}/export
+        run: python tools/test_io_ownership.py "$RUNNER_TEMP/host-build/build.json" "$RUNNER_TEMP/query" --abi-contract
+      - name: Explicit parser scope with caller-owned MPI
+        working-directory: ${{ runner.temp }}/export
+        # Hosted runners may expose one physical MPI slot despite two vCPUs.
+        # This GS-free parser contract is not a production solver allocation.
+        env:
+          OMPI_MCA_rmaps_base_oversubscribe: '1'
+        run: python tools/test_io_ownership.py "$RUNNER_TEMP/host-build/build.json" "$RUNNER_TEMP/parser" --parser-host --ranks 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-contract-records
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/host-build/build.json
+            ${{ runner.temp }}/host-build/build.log
+            ${{ runner.temp }}/coordinates/result.json
+            ${{ runner.temp }}/coordinates/build.log
+            ${{ runner.temp }}/query/result.json
+            ${{ runner.temp }}/parser/result.json
+            ${{ runner.temp }}/parser/ranks-*/stdout.log

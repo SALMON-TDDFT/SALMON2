@@ -8,6 +8,32 @@ import argparse,hashlib,json,os,re,shlex,subprocess,sys
 from pathlib import Path
 
 
+def mpi_link_command(command,*,shared=False):
+    """Keep a host/probe and its library's Darwin BLAS/MPI bindings consistent."""
+    command=list(command)
+    # Some Darwin MPI wrappers inject -flat_namespace after user arguments.
+    # Resolve their documented compiler/link flags so the library binds its own
+    # BLAS, rather than NumPy Accelerate's incompatible complex-return ABI.
+    if sys.platform=='darwin':
+        try:
+            compiler=shlex.split(subprocess.check_output([command[0],'--showme:command'],text=True,stderr=subprocess.DEVNULL))
+            flags=shlex.split(subprocess.check_output([command[0],'--showme:link'],text=True,stderr=subprocess.DEVNULL))
+        except (subprocess.CalledProcessError,OSError):
+            compiler=[];flags=[]
+        if compiler:command=compiler+command[1:]+flags
+        command=[arg for arg in command if arg not in ('-flat_namespace','-Wl,-flat_namespace')]
+        # MPI Fortran sentinels are COMMON blocks: bind them to libmpi rather
+        # than defining private copies that break MPI_IN_PLACE/status handling.
+        # OpenMPI's ignore-tkr dylib also exports tentative sentinel copies;
+        # prefer libmpi's actual sentinel definitions when resolving COMMON.
+        if '-lmpi' in command:
+            command.remove('-lmpi');command.insert(1,'-lmpi')
+        command[1:1]=(['-dynamiclib'] if shared else [])+['-Wl,-commons,use_dylibs']
+    elif shared:
+        command.insert(1,'-shared')
+    return command
+
+
 def link_library(build,output,source):
     checker=Path(__file__).with_name('check_forbidden_eigensolvers.py').resolve()
     subprocess.run([sys.executable,str(checker),'--source-root',str(source)],check=True)
@@ -21,16 +47,27 @@ def link_library(build,output,source):
     library=output/('libsalmonpy_tddft.dylib' if sys.platform=='darwin' else 'libsalmonpy_tddft.so')
     command[out_index+1]=str(library)
     command=[v for v in command if v!='CMakeFiles/salmon.dir/main.f90.o']
-    command.insert(1,'-shared')
+    command=mpi_link_command(command,shared=True)
     subprocess.run(command,cwd=build/'src',check=True)
     source_hashes={str(p.relative_to(source)):hashlib.sha256(p.read_bytes()).hexdigest()
                    for p in sorted((source/'src').rglob('*')) if p.is_file()}
     record={'schema':'salmonpy.embedded-tddft/1','library':str(library),
             'sha256':hashlib.sha256(library.read_bytes()).hexdigest(),
-            'source':json.loads((source/'salmonpy-runtime-source.json').read_text()),
+            'source':json.loads((source/('salmonpy-hse-rt-state.json' if (source/'salmonpy-hse-rt-state.json').is_file() else 'salmonpy-runtime-source.json')).read_text()),
             'source_hashes':source_hashes,'link_command':command,
             'scope':{'one_point_per_group':True,'one_lifetime_per_process':True,
                      'host_mpi':True,'eh_coupling_scheme':'salmonpy.eh-centered-current/1'}}
+    if '#define SALMONPY_FAST_CORE' in config:
+        record['source_profile']='fast-pr'
+        record['ordinary_rt_abi']=1
+        record['gs_abi']={'protocol':1,'modes':['import'],'arrays':['density','occupations','orbitals']}
+        import ctypes as c
+        probe=c.CDLL(str(library));compute=getattr(probe,'sp_gs_compute_protocol',None)
+        if compute is not None:
+            compute.argtypes=[];compute.restype=c.c_int
+            if compute()==1:
+                record['gs_abi']['modes'].append('run')
+                record['gs_abi']['arrays']+=['eigenvalues','forces']
     (output/'build.json').write_text(json.dumps(record,indent=2)+'\n')
     return record
 
@@ -52,7 +89,7 @@ def main():
     # for both languages without replacing caller optimization/toolchain flags.
     pic_options=out/'embedded-pic.cmake'
     pic_options.write_text('add_compile_options(-fPIC)\n')
-    command=['cmake','-G','Unix Makefiles','-S',str(source),'-B',str(build),*a.cmake_arg,
+    command=['cmake','-G','Unix Makefiles','-S',str(source),'-B',str(build),'-DUSE_HSE=OFF',*a.cmake_arg,
              '-DCMAKE_PROJECT_SALMON_INCLUDE='+str(pic_options),
              '-DUSE_MPI=ON','-DCMAKE_POSITION_INDEPENDENT_CODE=ON']
     with (out/'build.log').open('w') as log:

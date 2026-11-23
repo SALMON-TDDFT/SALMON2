@@ -1,43 +1,54 @@
-# SALMONpy：Pythonから使うSALMONの計算・解析部品
+# SALMONpy：Pythonで物質応答・電子の動き・光の伝播を計算する
 
-Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
+[English](README.en.md)
 
-> Standalone layout: full SALMON sources are no longer bundled. Source-checkout
-> runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with
-> the pinned external upstream checkout. Historical validation commands below
-> describe the old source layout and are not current build instructions.
+LD、SBE、DFT、TDDFT、FDTDを目的に合わせて使えます。構造や光パルスの作成、既存の結果の解析だけでも利用できます。現在は開発版で、PyPIには未公開です。
 
-[English](README.en.md) · Topic: `getting-started` · Paired revision: `2026-11-13.4`
-LD・SBEの物質応答、構造・光パルスの作成、解析を単独で利用できます。
-対応する外部SALMONを用意すれば、DFT・TDDFT・FDTD・バンド計算にも接続できます。
-現在はpreview版で、PyPI公開済みではありません。
+| 使い方 | できること | 準備 |
+|---|---|---|
+| Pythonから材料応答を計算する | LD・SBE、パルス・構造・解析 | 配布用wheel（Pythonパッケージ）を導入 |
+| SALMONを別プロセスで実行する | DFT・TDDFT・FDTD・バンド計算 | 対応するSALMON実行ファイルを追加 |
+| Pythonから一ステップずつ計算を進める | 電子計算とFDTDの結合、自作コードとの連携 | 対応する共有ライブラリとMPIを追加 |
 
-## 最初の使い方
+初めての場合は最初の行から進めます。追加の計算プログラムは[準備手順](RUNTIME.md)で導入します。対応するビルド済み配布物を優先し、ない場合だけ同梱ソースを明示的にビルドします。別のSALMONリポジトリを取得する必要はありません。
 
-配布された、自分のOS・CPU・Pythonに対応する**修復済みwheel**を導入します。
-wheel利用ではFortranコンパイラは不要です。import時のコンパイルも行いません。
+SALMONpyは、物質中の電子の応答と光の伝播を、単独でも組み合わせても使える計算部品集です。軽い材料模型から第一原理計算まで選べ、自分の電流計算コードも接続できます。入力準備や既存結果の解析だけでも利用できます。
+
+## 最初の計算：二つのコマンド
+
+OS・CPU・Python版に合う配布用wheelを用意します（Python 3.10以上）。
+現在PyPI未公開なので、下のファイル名は実際に受け取ったwheelへ置き換えます。
+ファイルがなければ配布担当者に確認してください。Fortranコンパイラは不要です。
 
 ```sh
-python -m pip install "PATH_TO_COMPATIBLE_WHEEL.whl"
-python -m salmonpy.doctor
-python -m salmonpy.examples.ld_response
+python -m pip install --only-binary=:all: "PATH_TO_COMPATIBLE_WHEEL.whl"
+python -m salmonpy.quickstart
 ```
 
-`PATH_TO_COMPATIBLE_WHEEL.whl` は実際のファイルに置き換えます。`python` は導入先環境の
-Pythonです。Python 3.10以上が必要ですが、wheelのPython・OSタグにも適合する必要があります。
-診断はライブラリの読み込みと依存パッケージの所在を確認します。インストールや計算は行いません。
-追加依存の実動作、外部SALMONの機能対応、計算規模の上限を保証するものではありません。
+`SALMONpy first calculations: PASS` と出れば、二つの計算が完了です。
+ローレンツ＝ドルーデ（LD）模型を1000更新、合成2バンド模型の半導体ブロッホ方程式（SBE）を500更新します。
+各1スレッドで実行し、追加入力・MPI・SALMON実行ファイル・描画ソフトは不要です。計算中の通信もありません。
+
+表示された保存先には `summary.json`、二つの計算ログ、SBEの結果が入ります。
+通常は数秒程度ですが、パッケージの取得・導入時間は環境によります。
+保存場所を選ぶ場合は `--output NEW_DIRECTORY` を付けます。既存フォルダを上書きしません。
+これは導入確認であり、実材料の物性・収束を確認する計算ではありません。
+失敗時はログを読み、別の計算プログラムの構築や導入を自動で始めないでください。
+
+次は下の目的別一覧か[サンプル集](examples/README.md)を使います。
+[Siの電流計算](SI_INTRO.md)には対応する追加の計算プログラムが必要です。最初のテスト完了の条件ではありません。
+導入状態だけを調べる場合は `python -m salmonpy.doctor --json` を使います。
 
 ## 目的から選ぶ
 
 | やりたいこと | 入口 | 必要な準備 |
 |---|---|---|
 | 材料の誘電率・Eに対するP/J | `salmonpy.LorentzDrude` | wheel |
-| 結晶のA→J（SBE） | `salmonpy.sbe` | wheel、実材料にはバンド・遷移行列データ |
-| 場の部品（j→A）と物質の結合：tr／lo／薄膜／1次元伝播 | `salmonpy.maxwell` | NumPy、物質側の部品。[FIELDS.md](FIELDS.md) |
+| 結晶のA/c→j応答（SBE） | `salmonpy.sbe` | wheel、実材料にはバンド・遷移行列データ |
+| 場（j→A）と物質の結合：横波／縦波／薄膜／1次元伝播 | `salmonpy.maxwell` | NumPy、物質側の部品。[FIELDS.md](FIELDS.md) |
 | 光パルス・構造・解析・結果読み込み | `fields` / `geometry` / `analysis` / `outputs` | NumPy、描画にはMatplotlib |
 | DFTの基底状態・力 | `salmonpy.dft` | 対応外部SALMON・擬ポテンシャル |
-| 結晶のA→J（TDDFT） | `salmonpy.tddft` | 対応外部SALMON・整合する基底状態 |
+| 結晶のA/c→j応答（TDDFT） | `salmonpy.tddft` | 対応外部SALMON・整合する基底状態 |
 | 光伝播（FDTD） | `salmonpy.fdtd` | 対応外部SALMON |
 | バンド計算・描画 | `salmonpy.bands` | 対応外部SALMON・基底状態・Matplotlib |
 | ASEの構造・経路・energy/forces | `salmonpy.ase` / `salmonpy.ase_calculator` | 上記に加え任意のASE依存 |
@@ -51,23 +62,23 @@ wheel内のLD/SBEと、別途準備が必要なSALMON本体は区別してくだ
 
 | 目的 | 起動方法 | 現在の範囲 |
 |---|---|---|
-| 多材料LDの光伝播 | 直列Pythonから `fdtd_mpi_layers` | 既存MPI FDTDが空間分割し、各ランクが多数のLD状態を管理 |
+| 多材料LDの光伝播 | 直列Pythonから `fdtd_mpi_layers` | FDTDが空間を分担し、各MPIプロセスが担当領域のLD状態を管理 |
 | 自作A→Jモデルの群内並列 | `mpiexec -n 5` で `mpi_response` | 二つの物質群、各2ランク・一物質・一マクロ点 |
 | 保存GSから二点のTDDFT応答 | `mpiexec -n 3` で `mpi_tddft` | 二つの1ランク物質群、各点に独立した直列ワーカー |
 
 [材料とMPI FDTD](FDTD_MATERIALS.md)、[応答サービス](DISTRIBUTED.md)、
 [実行コマンドと出力](examples/README.md)を参照してください。後二者の場役は所定のAを配ります。
-TDDFT内部MPIとE/H結合には、別入口の[実験的なネイティブ結合](COUPLED.md)を使います。
+TDDFT内部MPIとE/H結合には、別入口の[実験的なPythonから直接呼ぶFDTDと電子計算の結合](COUPLED.md)を使います。
 標準例は `mpi_coupled_tddft`（場2＋物質2群×2＝6ランク）です。
 バッチFDTDの起動をMPIジョブ内で入れ子に呼びません。
 
 ## AIに依頼する場合
 
 まず [AI_USAGE.md](AI_USAGE.md) と `manual.json` を読み、既に回答された条件を再利用して、
-不足する「目的・使ってよい総メモリ・CPUコア数」を確認します。
+研究計算の前に不足する「目的・使ってよい総メモリ・CPUコア数」を確認します。最初の合成模型テストには追加の選択は不要です。
 
 ```sh
-python -m salmonpy.manual 初めて
+python -m salmonpy.manual
 python -m salmonpy.manual レーザーによる電子の動き
 python -m salmonpy.doctor --json
 ```
@@ -75,7 +86,7 @@ python -m salmonpy.doctor --json
 検索で一致しない場合も `task_catalog` と `getting_started` に案内があります。
 `sample_files` が実行例、`beginner_intake` が資源上限の確認手順です。
 環境診断で検出したCPU数を、そのまま利用許可と解釈しません。
-メモリ自動見積もり・ハード上限の強制機能は未実装です。
+対応する計算ではメモリ見積もりと実測を利用できます。見積もりが上限を超えた場合は警告し、自動では停止しません。未測定の条件では上限を保証しません。
 
 外部SALMONを確認する場合は、監査済みの記録値を指定します。
 
@@ -103,66 +114,38 @@ E[:, 0] = 1e-3
 result = material.respond(E, dt=0.1)
 # result.time: (101,), result.polarization/current: (101, 3)
 
-state = material.new_state(dt=0.1, initial_field=E[0])
-P, J = state.step(E[1])  # fields at t=0.1; returns physical P and J
+with material.new_state(dt=0.1, initial_field=E[0]) as state:
+    P, J = state.step(E[1])  # fields at t=0.1; physical P and J
 ```
 
-All values use SALMON atomic/Gaussian units: angular frequency, damping and plasma
-frequency in inverse atomic time, time in atomic time, E/P/J in the corresponding
-atomic units. Do not pass eV energies or femtoseconds without conversion. Pole
-strengths are dimensionless. Each pole obeys
+値はSALMONの原子単位・Gaussian単位系で渡します。角周波数・減衰率・プラズマ周波数は原子時間の逆数、時間は原子時間、E・P・Jも対応する原子単位です。eVやfsで指定した値は換算が必要です。振動子の強度は無次元で、各振動子は次の式に従います。
 
 ```
 dP/dt = J
 dJ/dt = f * wp**2 * E / (4*pi) - gamma*J - w0**2*P
 ```
 
-`respond` starts with P=J=0 at the first supplied E sample. Sample zero is the
-initial condition, not an update. `step` takes E at the next time, using the stored
-previous E. Time step is fixed for each state. Every call to `respond` starts a
-fresh state; separate `new_state` objects do not share histories. Observed P/J are
-summed over poles. They are not the auxiliary FDTD quantity Q.
+`respond` は最初のEを初期条件とし、P=J=0から計算します。最初のサンプルでは時間を進めません。`step` には次の時刻のEを渡し、内部で保持した前のEと合わせて更新します。dtは各状態で固定です。`respond` を呼ぶたびに独立した状態を作り、別々の `new_state` の計算履歴は混ざりません。
 
-`permittivity(omega)` evaluates the continuous model with exp(-i omega t):
-`1 + sum(f*wp**2 / (w0**2 - omega**2 - i*gamma*omega))`.
-The instantaneous background is fixed at 1; anisotropy, active media, fitting,
-and unit conversion are not included. An exact real-axis pole raises ValueError.
-Finite-step time propagation approximates this continuous response; reduce dt to
-check temporal convergence. A single state must not be shared between threads.
+PとJは全振動子の和です。FDTD更新用の補助量Qとは区別してください。
 
-The step adapter reconstructs a small native context each call; it is intended
-for prototyping, not high-throughput grid coupling. Batch calculations reuse one
-native context. FDTD has an external-executable batch wrapper. The built-in SBE adapter is `salmonpy.sbe.SBEInitialState`; see the loader and
-independent-trajectory example in WORKFLOWS.md. A process-isolated PZ/TB-mBJ/Libxc-PZ/Libxc-PBE TDDFT adapter is available as `salmonpy.tddft.TDDFTInitialState`
-with a separately built worker-enabled SALMON executable.
-Crystalline TDDFT/SBE interfaces remain A-driven only.
+`permittivity(omega)` は時間依存を exp(-i omega t) とする連続モデルの誘電率です。
+`epsilon_infinity + sum(f*wp**2 / (w0**2 - omega**2 - i*gamma*omega))`
+で評価し、瞬時に応答する背景の `epsilon_infinity` は既定で1です。上の例は等方的な材料です。方向によって異なる応答には `salmonpy.ld.TensorLorentzDrude` を使います。フィッティングと対応する材料条件は[LDガイド](LD.md)を参照してください。有限のdtによる時間発展はこの連続モデルの近似なので、dtを小さくして結果を確認します。
 
-See [AI_USAGE.md](AI_USAGE.md) for extension rules and the legacy FDTD boundary.
+計算中のP・JなどはFortran側で保持され、`step` のたびに計算状態を作り直す必要はありません。使い終わった状態は `close()` または `with` で終了します。同じ状態を複数スレッドから同時に操作しないでください。
 
-Input ownership, immutable resolved settings and failure behavior are specified in
-[INPUT_CONTRACT.md](INPUT_CONTRACT.md). Inspect `material.config` and `state.config`
-for all effective settings. Python 3.10 or newer is required.
+SBE、TDDFT、FDTDの実行例は[サンプル集](examples/README.md)から選べます。結晶のTDDFTとSBEはA駆動です。物質ごとに固定する設定と呼び出しごとに渡す値の区別は[入力設定](INPUT_CONTRACT.md)を参照し、確定した設定は `material.config` と `state.config` で確認できます。
 
-## Execution environment
+## 実行環境と出力先
 
-Commands use `python` for the interpreter in the active environment (Python 3.10+).
-Use that environment's interpreter name or full path if different; do not assume
-`python3` exists on Windows. Run repository-only commands from the checkout root;
-`build_native`, `tools/` and tests are source-checkout commands. The examples are included in wheels and run with `python -m salmonpy.examples.NAME`.
-Replace example executable paths and hashes with the selected platform's audited
-SALMON executable (including `.exe` on Windows where applicable). `executable_path`
-and `validated_sha256` in examples are caller-supplied values, not detected defaults.
-Use new, writable output directories. Relative paths resolve from the process's
-working directory, not the installed package directory.
+以下の `python` はSALMONpyを導入した環境のPythonです。Python 3.10以上を使い、環境によってはコマンド名または実行ファイルの絶対パスを指定します。Windowsで `python3` という名前があることは前提にしません。
 
-Pure Python analysis needs NumPy; plotting additionally needs Matplotlib. On a
-headless machine select its `Agg` backend before plotting (e.g.
-`import matplotlib; matplotlib.use('Agg')`). No GUI is needed to save a figure.
-Installed-wheel compatibility does not establish compatibility of an external
-full SALMON executable. See PACKAGING.md for the version-specific validation matrix.
+サンプルはwheelに含まれ、`python -m salmonpy.examples.NAME` で実行できます。ソースのビルドや `tools/`、開発用テストを使う場合は、リポジトリのルートから実行してください。
 
+例の実行ファイルパス・SHA256は、自分の環境で検証した値へ置き換えます。`executable_path` と `validated_sha256` は利用者が渡す値です。出力先には書き込める新しいディレクトリを使います。相対パスの基準はPythonを起動した作業ディレクトリで、パッケージのインストール先ではありません。
 
-実行可能な用途別Pythonサンプルと必要な入力は [examples/README.md](examples/README.md) を参照してください。AI検索の各taskの `sample_files` からも辿れます。
+解析にはNumPy、描画にはMatplotlibが必要です。画面を開けない計算ノードでは `import matplotlib; matplotlib.use('Agg')` でファイル保存用の描画方式を選べます。SALMON計算プログラムの対応環境はwheelとは別に確認します。[配布・ビルド](PACKAGING.md)を参照してください。
 
 ## ソースから開発する場合
 
@@ -176,7 +159,7 @@ python -m unittest discover -s salmonpy/tests -v
 
 ## 独立配布と日英ドキュメント
 
-将来は独立リポジトリとして配布し、このブランチをSALMON本体へマージしない方針です。
+このリポジトリはSALMONpyを独立して配布するためのものです。SALMON本体へのマージは行いません。
 `python -m salmonpy.manual --lang en "I want to run TDDFT"` と
 `python -m salmonpy.doctor --lang en` で英語の開始案内・環境診断を利用できます。
 AIカタログの詳細技術説明はまだ言語が混在しており、全リファレンスの翻訳完了ではありません。
@@ -185,8 +168,11 @@ AIカタログの詳細技術説明はまだ言語が混在しており、全リ
 
 電子応答を結合する実用計算では、TDDFTはまず1次元の伝播・層構造を推奨します。3次元はSBEまたはユーザー作成の電流計算コードを使う場合に推奨します。対応可否とは別の計算負荷に基づく方針です。詳しくは[次元の選択](COUPLED.md)を参照してください。
 
-## ホスト向けAPIと状態保存
+## 呼び出し元プログラム向けAPIと状態保存
 
 [公開API・例外](API.md)と[メモリ上のsnapshot／restore](SNAPSHOTS.md)を参照してください。
-0.1.0a5からLD・SBE・4種類のPythonの場で固定dtの保存・復元を使えます。
-ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。
+LD・SBE・4種類のPythonの場では、固定dtでメモリ上の状態を保存・復元できます。FDTD・TDDFT・MPI計算をディスクへ保存して再開する方法は[保存・再開ガイド](CHECKPOINTING.md)を参照してください。
+
+自作A駆動モデルは直列・MPIで同じ仕様を使えます。[作り方と適合チェッカー](MATERIALS.md)、`python -m salmonpy.examples.custom_material`を参照してください。
+
+LDの状態保持・解放は [LD.md](LD.md) を参照してください。

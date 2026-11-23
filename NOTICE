@@ -4,7 +4,9 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 Bundled LD/SBE kernels and independent regression references originate from
 SALMON-TDDFT/SALMON2. Exact upstream and integration revisions are recorded in
-runtime/source.json. The upstream application is obtained separately when needed.
+runtime/source.json. Complete solver snapshots are now bundled under runtime/sources with their own
+LICENSE, LICENSE.THIRD-PARTY and ACKNOWLEDGEMENTS. Stage-specific complete changes
+are maintained in runtime/overrides. HSE support uses only the pinned fast PR.
 
 Binary wheels may bundle compiler/BLAS runtimes under their respective licenses;
 see packaging/ld/licenses and LICENSE.THIRD-PARTY.
@@ -22,3 +24,14 @@ Independent repository migration (2026-11-14):
   environment and do not certify a later build or platform.
   runtime/source.json continues to identify the separate upstream application
   source and compatibility patch, not the SALMONpy distribution repository.
+
+2026-11-15 source ownership migration: compatibility patches were replaced by
+complete bundled sources and verified replacement files. Original commits and
+legacy patch digests remain provenance, not current-source validation claims.
+
+Small-gradient WPBEh evaluation derives from Libxc 5.2.3 (M.A.L. Marques,
+MPL-2.0); see runtime/NOTICE.md and runtime/licenses/Libxc-MPL-2.0.txt.
+
+The numerical optical reference subset in salmonpy/optical_data is CC0-1.0 data
+from refractiveindex.info-database. Consult its retained license, pinned source
+inventory, original experimental citations and fit-quality records before reuse.

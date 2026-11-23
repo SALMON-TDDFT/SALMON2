@@ -1,0 +1,87 @@
+if (ARCH_FLAGS)
+  message(STATUS "Specific architecture flags: ${ARCH_FLAGS}")
+endif ()
+
+if (OPENMP_FLAGS)
+  message(STATUS "Specific OpenMP flags: ${OPENMP_FLAGS}")
+else ()
+  find_package(OpenMP REQUIRED COMPONENTS Fortran)
+  set(SALMON_OPENMP_Fortran_FLAGS "${OpenMP_Fortran_FLAGS}")
+  if(USE_OPT_EXPLICIT_VECTORIZATION)
+    find_package(OpenMP REQUIRED COMPONENTS C)
+    set(SALMON_OPENMP_C_FLAGS "${OpenMP_C_FLAGS}")
+  elseif(CMAKE_C_COMPILER_ID STREQUAL CMAKE_Fortran_COMPILER_ID)
+    find_package(OpenMP QUIET COMPONENTS C)
+    set(SALMON_OPENMP_C_FLAGS "${OpenMP_C_FLAGS}")
+  endif()
+endif ()
+
+if (Fortran_PP_FLAGS)
+  message(STATUS "Specific Fortran preprocessor flags: ${Fortran_PP_FLAGS}")
+else ()
+  include(CheckFortranCompilerFlag)
+  set(FORTRAN_PREPROCESSOR_OPTION_LISTS -Cpp;-fpp;-cpp)
+  foreach (opt IN LISTS FORTRAN_PREPROCESSOR_OPTION_LISTS)
+    check_fortran_compiler_flag(${opt} FORTRAN_${opt}_OPTIONS)
+    if (FORTRAN_${opt}_OPTIONS)
+      set(Fortran_PP_FLAGS ${opt})
+      break()
+    endif ()
+  endforeach ()
+  if (NOT DEFINED Fortran_PP_FLAGS)
+    message(FATAL_ERROR "SALMON requires fortran preprocessing options (ex. -cpp/-fpp)")
+  endif ()
+endif ()
+
+if (USE_MPI)
+  check_mpi_compiler(${CMAKE_Fortran_COMPILER} IS_MPI_COMPILER)
+  if (${IS_MPI_COMPILER})
+    set(MPI_Fortran_COMPILER ${CMAKE_Fortran_COMPILER})
+  endif ()
+
+  check_mpi_compiler(${CMAKE_C_COMPILER} IS_MPI_COMPILER)
+  if (${IS_MPI_COMPILER})
+    set(MPI_C_COMPILER ${CMAKE_C_COMPILER})
+  endif ()
+
+  find_package(MPI REQUIRED)
+
+  if (NOT DEFINED MPI_Fortran_FOUND)
+    message(FATAL_ERROR "MPI Fortran compilers not found.")
+  endif()
+
+  if (NOT DEFINED MPI_C_FOUND)
+    message(FATAL_ERROR "MPI C compilers not found.")
+  endif()
+
+  list(APPEND EXTERNAL_LIBS MPI::MPI_Fortran MPI::MPI_C)
+endif ()
+
+
+if (CMAKE_Fortran_FLAGS_DEBUG)
+else()
+  set(CMAKE_Fortran_FLAGS_DEBUG "-O2 -g")
+endif ()
+
+if (CMAKE_Fortran_FLAGS_RELEASE)
+else ()
+  set(CMAKE_Fortran_FLAGS_RELEASE "-O3")
+endif ()
+
+if (CMAKE_C_FLAGS_DEBUG)
+else ()
+  set(CMAKE_C_FLAGS_DEBUG "-O2 -g")
+endif ()
+
+if (CMAKE_C_FLAGS_RELEASE)
+else()
+  set(CMAKE_C_FLAGS_RELEASE "-O3")
+endif ()
+
+set(CMAKE_Fortran_FLAGS "${ARCH_FLAGS} ${OPENMP_FLAGS} ${SALMON_OPENMP_Fortran_FLAGS} ${MPI_Fortran_COMPILE_FLAGS} ${Fortran_PP_FLAGS} ${ADDITIONAL_OPTIMIZE_FLAGS} ${CMAKE_Fortran_FLAGS}")
+set(CMAKE_C_FLAGS       "${ARCH_FLAGS} ${OPENMP_FLAGS} ${SALMON_OPENMP_C_FLAGS} ${MPI_C_COMPILE_FLAGS} ${ADDITIONAL_OPTIMIZE_FLAGS} ${CMAKE_C_FLAGS}")
+
+# Legacy MPI interfaces in SALMON pass different types to the same entry point.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND CMAKE_Fortran_COMPILER_VERSION VERSION_GREATER_EQUAL 10)
+  string(APPEND CMAKE_Fortran_FLAGS " -fallow-argument-mismatch")
+endif()

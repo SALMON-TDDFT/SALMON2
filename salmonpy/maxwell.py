@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, asdict
 from .snapshots import _SnapshotMixin, _fingerprint
 import numpy as np
 from .fields import AcosPulse, FieldSamples
-from .ld import _array, _positive
+from .ld import _array, _positive, _array_unchecked, _execution_mode_name
 from .timing import TimeSpec, InputPort, OutputPort, matter_timing, charge_sign, check_loop
 
 #: SALMON ``cspeed_au`` (inverse fine-structure constant), atomic units.
@@ -117,7 +117,7 @@ class FieldStateConfig:
 
 class _FieldState(_SnapshotMixin):
     """Common step bookkeeping. Subclasses implement _advance(J) -> (A_new, commit)."""
-    __slots__ = ('_config', '_n', '_A', '_snapshot_model')
+    __slots__ = ('_config', '_n', '_A', '_snapshot_model', '_execution_mode', '_parse_current')
     _snapshot_counter = '_n'
 
     @property
@@ -142,6 +142,9 @@ class _FieldState(_SnapshotMixin):
                         history=self._HISTORY, integrator=self._INTEGRATOR)
 
     @property
+    def execution_mode(self): return self._execution_mode
+
+    @property
     def config(self): return self._config
     @property
     def dt(self): return self._config.dt
@@ -159,13 +162,13 @@ class _FieldState(_SnapshotMixin):
     def step(self, J):
         """Consume charge current j at the current time; return Ac at the next time, (points, 3).
 
-        Validation or numerical failure leaves the state unchanged.
+        Checked-mode validation or numerical failure leaves the state unchanged.
         """
-        J = _array(J, 'J', (self.points, 3))
+        J = self._parse_current(J, 'J', (self.points, 3))
         if self._n >= self._config.steps:
             raise InputError('field state capacity (steps) is exhausted')
         A_new, commit = self._advance(J)
-        if not np.isfinite(A_new).all():
+        if self.execution_mode=='checked' and not np.isfinite(A_new).all():
             raise NumericalError('field update became nonfinite; state unchanged')
         commit()
         self._A = A_new
@@ -189,15 +192,18 @@ class Transverse:
     def __post_init__(self):
         object.__setattr__(self, 'external', _drive(self.external, 'external'))
 
-    def new_state(self, *, dt, steps):
+    def new_state(self, *, dt, steps, execution_mode="checked"):
+        execution_mode=_execution_mode_name(execution_mode)
         dt = _positive(dt, 'dt'); steps = _steps(steps)
-        return _TransverseState(self, dt, steps)
+        return _TransverseState(self, dt, steps, execution_mode=execution_mode)
 
 
 class _TransverseState(_FieldState):
     __slots__ = ('_ext',)
     _INTEGRATOR = "SALMON trans_longi='tr': A(n) = A_ext(n)"
-    def __init__(self, model, dt, steps):
+    def __init__(self, model, dt, steps, *, execution_mode="checked"):
+        self._execution_mode=execution_mode
+        self._parse_current=_array if execution_mode=="checked" else _array_unchecked
         self._snapshot_model = model
         self._config = FieldStateConfig('transverse', dt, steps, 1,
                                         (('external', _describe(model.external)),))
@@ -222,16 +228,19 @@ class Longitudinal:
     def __post_init__(self):
         object.__setattr__(self, 'external', _drive(self.external, 'external'))
 
-    def new_state(self, *, dt, steps):
+    def new_state(self, *, dt, steps, execution_mode="checked"):
+        execution_mode=_execution_mode_name(execution_mode)
         dt = _positive(dt, 'dt'); steps = _steps(steps)
-        return _LongitudinalState(self, dt, steps)
+        return _LongitudinalState(self, dt, steps, execution_mode=execution_mode)
 
 
 class _LongitudinalState(_FieldState):
     __slots__ = ('_ext', '_ind')
     _HISTORY = 'Ac_ind(0) = Ac_ind(1) = 0'
     _INTEGRATOR = "SALMON trans_longi='lo' leapfrog"
-    def __init__(self, model, dt, steps):
+    def __init__(self, model, dt, steps, *, execution_mode="checked"):
+        self._execution_mode=execution_mode
+        self._parse_current=_array if execution_mode=="checked" else _array_unchecked
         self._snapshot_model = model
         self._config = FieldStateConfig('longitudinal', dt, steps, 1,
                                         (('external', _describe(model.external)),))
@@ -275,9 +284,10 @@ class ThinFilm:
         if np.any(eps <= 0): raise InputError('epsilon must be positive')
         object.__setattr__(self, 'epsilon', tuple(map(float, eps)))
 
-    def new_state(self, *, dt, steps):
+    def new_state(self, *, dt, steps, execution_mode="checked"):
+        execution_mode=_execution_mode_name(execution_mode)
         dt = _positive(dt, 'dt'); steps = _steps(steps)
-        return _ThinFilmState(self, dt, steps)
+        return _ThinFilmState(self, dt, steps, execution_mode=execution_mode)
 
 
 class _ThinFilmState(_FieldState):
@@ -286,7 +296,9 @@ class _ThinFilmState(_FieldState):
     _HISTORY = 'A_ref(0) = A_ref(1) = 0'
     _INTEGRATOR = "SALMON trans_longi='2d', 100 equal substeps"
 
-    def __init__(self, model, dt, steps):
+    def __init__(self, model, dt, steps, *, execution_mode="checked"):
+        self._execution_mode=execution_mode
+        self._parse_current=_array if execution_mode=="checked" else _array_unchecked
         self._snapshot_model = model
         self._config = FieldStateConfig('thin_film', dt, steps, 1, (
             ('external', _describe(model.external)), ('thickness', model.thickness),
@@ -376,11 +388,12 @@ class Multiscale1D:
         i = np.arange(1-self.vacuum[0], self.cells+self.vacuum[1]+1)
         return i*self.spacing
 
-    def new_state(self, *, dt, steps):
+    def new_state(self, *, dt, steps, execution_mode="checked"):
+        execution_mode=_execution_mode_name(execution_mode)
         dt = _positive(dt, 'dt'); steps = _steps(steps)
         if SPEED_OF_LIGHT*dt > self.spacing*(1+1e-12):
             raise InputError('unstable: c*dt must not exceed spacing')
-        return _Multiscale1DState(self, dt, steps)
+        return _Multiscale1DState(self, dt, steps, execution_mode=execution_mode)
 
 
 class _Multiscale1DState(_FieldState):
@@ -388,7 +401,9 @@ class _Multiscale1DState(_FieldState):
     _HISTORY = 'SALMON incident(): cells <= 0 prefilled at -3dt..-dt, one update to t=0; j_em = 0'
     _INTEGRATOR = "SALMON 1D Weyl gauge (fdtd_weyl_gauge.f90), centered E at (n-1)*dt"
 
-    def __init__(self, model, dt, steps):
+    def __init__(self, model, dt, steps, *, execution_mode="checked"):
+        self._execution_mode=execution_mode
+        self._parse_current=_array if execution_mode=="checked" else _array_unchecked
         self._snapshot_model = model
         self._config = FieldStateConfig('multiscale_1d', dt, steps, model.cells, (
             ('cells', model.cells), ('spacing', model.spacing), ('vacuum', model.vacuum),
@@ -407,7 +422,10 @@ class _Multiscale1DState(_FieldState):
         left = np.arange(self._is-1, 1)
         k = left - (self._is-1)
         for array, t0 in ((self._new, -dt), (self._cur, -2*dt), (self._old, -3*dt)):
-            array[k] = _evaluate(model.incident, t0 - left*h/c)
+            values = _evaluate(model.incident, t0 - left*h/c)
+            if np.any(values[:, 0] != 0):
+                raise InputError('incident wave must be transverse: x is the propagation axis')
+            array[k] = values
         self._j = np.zeros((size, 3))
         # One update to the t=0 profile (SALMON: itt=0 weyl_calc with j_em=0).
         self._old, self._cur, self._new = self._update(self._cur, self._new, self._j, 0)
@@ -489,9 +507,31 @@ class CoupledResponse:
     convention: str = field(default='A and current at n*dt; current is the electric (charge) current '
                                      'density j (= -SALMON matter current); j(0) not fed back', init=False)
     output_directory: str | None = None
+    execution_mode: str = "checked"
 
 
-def couple(matter, field_model, *, dt, steps, output_directory=None):
+def _performance_state(model, **options):
+    """Explicit opt-in: do not mask TypeError raised inside a custom constructor."""
+    from inspect import signature
+    options["execution_mode"]="performance"
+    try:
+        parameters=signature(model.new_state)
+    except (TypeError,ValueError):
+        parameters=None  # Extension-backed callables need not expose a Python signature.
+    if parameters is not None:
+        try:
+            parameters.bind(**options)
+        except TypeError as exc:
+            raise InputError("backend new_state must explicitly accept execution_mode=performance") from exc
+    state=model.new_state(**options)
+    if getattr(state,"execution_mode",None)!="performance":
+        close=getattr(state,"close",None)
+        if close is not None:close()
+        raise InputError("backend state did not declare execution_mode=performance")
+    return state
+
+
+def couple(matter, field_model, *, dt, steps, output_directory=None, execution_mode="checked"):
     """Alternate matter A->J and field J->A for ``steps`` steps.
 
     ``matter`` is one AInitialState used for every point (each point gets its own
@@ -503,7 +543,10 @@ def couple(matter, field_model, *, dt, steps, output_directory=None):
     converted j = -J_matter, the only adapter.
     Matter states are closed on return, also on failure.
     """
-    fstate = field_model.new_state(dt=dt, steps=steps)
+    execution_mode=_execution_mode_name(execution_mode)
+    parser=_array if execution_mode=="checked" else _array_unchecked
+    fstate = (field_model.new_state(dt=dt, steps=steps) if execution_mode=="checked"
+              else _performance_state(field_model,dt=dt,steps=steps))
     dt = fstate.dt; steps = fstate.config.steps; P = fstate.points
     if isinstance(matter, (list, tuple)):
         if len(matter) != P: raise InputError(f'expected {P} matter initial states, one per field point')
@@ -522,7 +565,9 @@ def couple(matter, field_model, *, dt, steps, output_directory=None):
         A = np.empty((steps+1, P, 3)); J = np.empty((steps+1, P, 3))
         A[0] = fstate.A
         for p, initial in enumerate(initials):
-            state = initial.new_state(dt=dt, time0=0., initial_A=A[0, p].copy())
+            options=dict(dt=dt,time0=0.,initial_A=A[0,p].copy())
+            state=(initial.new_state(**options) if execution_mode=="checked"
+                   else _performance_state(initial,**options))
             if any(state is s for s in states): raise InputError('matter backend reused one state for two points')
             states.append(state)
             spec = matter_timing(state, dt)
@@ -531,20 +576,20 @@ def couple(matter, field_model, *, dt, steps, output_directory=None):
             # The only conversion: a backend declaring SALMON matter current J -> electric j.
             signs.append(sign)
             matter_records.append(spec.to_dict())
-            J[0, p] = signs[p]*_array(state.current, 'initial current', (3,))
+            J[0, p] = signs[p]*parser(state.current, 'initial current', (3,))
         for n in range(steps):
             A[n+1] = fstate.step(J[n])
             t = (n+1)*dt
             for p, state in enumerate(states):
-                J[n+1, p] = signs[p]*_array(state.step(A[n+1, p].copy()), 'current', (3,))
-                if not np.isfinite(state.time) or not np.isclose(state.time, t, rtol=0, atol=max(1e-8*dt, 16*np.finfo(float).eps*(n+1)*max(t, dt))):
+                J[n+1, p] = signs[p]*parser(state.step(A[n+1, p].copy()), 'current', (3,))
+                if execution_mode=="checked" and (not np.isfinite(state.time) or not np.isclose(state.time, t, rtol=0, atol=max(1e-8*dt, 16*np.finfo(float).eps*(n+1)*max(t, dt)))):
                     raise InputError('matter state time does not match the field clock')
         time = np.arange(steps+1)*dt
         timing = {'field': field_timing.to_dict(), 'matter': matter_records}
         if output_path is not None:
             from .outputs import save_arrays
             save_arrays(output_path, {'time': time, 'A': A, 'current': J}, metadata={
-                'field': asdict(fstate.config), 'backends': list(backends), 'dt': dt,
+                'field': asdict(fstate.config), 'backends': list(backends), 'dt': dt, 'execution_mode':execution_mode,
                 'units': {'time': 'a.u.', 'A': 'Ac=A/c, a.u.', 'current': 'electric (charge) current density, a.u.'},
                 'time_location': 'A and current at n*dt', 'matter_current': '-current',
                 'timing': timing, 'restart_checkpoint': False})
@@ -553,4 +598,4 @@ def couple(matter, field_model, *, dt, steps, output_directory=None):
             close = getattr(state, 'close', None)
             if close is not None: close()
     return CoupledResponse(_readonly(time), _readonly(A), _readonly(J), fstate.config, backends,
-                           timing, output_directory=output_path)
+                           timing, output_directory=output_path,execution_mode=execution_mode)

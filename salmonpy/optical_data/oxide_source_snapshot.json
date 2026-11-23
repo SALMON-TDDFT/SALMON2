@@ -1,0 +1,51 @@
+{
+  "schema": "salmonpy.optical-source-snapshot/1",
+  "repository": "https://github.com/polyanskiy/refractiveindex.info-database",
+  "commit": "e6d15e364f70de1cad8a96a20f75689f2fba8b21",
+  "license": "CC0-1.0",
+  "license_url": "https://github.com/polyanskiy/refractiveindex.info-database/blob/e6d15e364f70de1cad8a96a20f75689f2fba8b21/LICENSE",
+  "files": [
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/LICENSE",
+      "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673",
+      "bytes": 6555
+    },
+    {
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/README.md",
+      "sha256": "0b7fdc29744a97fb573a63fefb38d23ef23b002df07837ae16cd98d82a82fc94",
+      "bytes": 5520
+    },
+    {
+      "path": "database/data/main/SiO2/nk/Rodriguez-de Marcos.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/SiO2/nk/Rodriguez-de%20Marcos.yml",
+      "sha256": "2cfc2305d4da1a101f77e67962bd72dbc8be1c3d9a4d26a816b4428129cf560b",
+      "bytes": 15736
+    },
+    {
+      "path": "database/data/main/Al2O3/nk/Zhukovsky.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/Al2O3/nk/Zhukovsky.yml",
+      "sha256": "cd197a9eb87a0f92ea0bd573452a86e74756be6b7c01fdffc51c13affed6574a",
+      "bytes": 20955
+    },
+    {
+      "path": "database/data/main/TiO2/nk/Siefke.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/TiO2/nk/Siefke.yml",
+      "sha256": "9b03947949e54cd98f58a989bd031a5fddb1a36a9d9f7fd64d5ff2bd68c2885c",
+      "bytes": 52162
+    },
+    {
+      "path": "database/data/main/Ta2O5/nk/Rodriguez-de Marcos.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/Ta2O5/nk/Rodriguez-de%20Marcos.yml",
+      "sha256": "089c70726889ea812283b22f59fa5a82f8e2625347c91de79497e1464c3eda4f",
+      "bytes": 8782
+    },
+    {
+      "path": "database/data/main/HfO2/nk/Franta.yml",
+      "url": "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/e6d15e364f70de1cad8a96a20f75689f2fba8b21/database/data/main/HfO2/nk/Franta.yml",
+      "sha256": "c25668633b10018ed2a6162f745de9744ec50b50b9c0052f2927e86e49fee92a",
+      "bytes": 118569
+    }
+  ]
+}

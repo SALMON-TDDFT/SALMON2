@@ -1,0 +1,413 @@
+"""Three MPI groups: paused/restored SCF vs continuous new/previous runtimes.
+
+BUILD BASELINE NEW_OUTPUT --size2. No GS checkpoint/density/orbital files collected;
+all numerical comparison arrays remain in RAM. Only scalar evidence is written.
+"""
+import argparse,json,warnings,copy
+import ctypes as c
+from pathlib import Path
+from types import SimpleNamespace
+from dataclasses import asdict,replace
+import numpy as np
+from mpi4py import MPI
+from salmonpy.dft import DFT,Pseudopotential,SCFSettings,SymmetryOperations
+from salmonpy.native_gs import NativeGSBackend
+from salmonpy.errors import InputError,RuntimeFailure
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    for name in ('build','baseline','output'):p.add_argument(name,type=Path)
+    p.add_argument('--allow-unconverged-fixture',action='store_true',help='Explicitly accept finite, deliberately unphysical 8-iteration regression states; not production convergence')
+    p.add_argument('--initial-guess',action='store_true',help='interleave independent retained-GS wavefunction seeds; never export GS arrays')
+    p.add_argument('--size',type=int,default=2)
+    p.add_argument('--split',choices=('orbital','spatial','k','mixed'),default='orbital')
+    p.add_argument('--decomposition',type=int,nargs=5)
+    p.add_argument('--xc',choices=('pz','libxc_pz','libxc_pbe','hse06'),default='pz')
+    p.add_argument('--initial-no-mix',type=int,default=3)
+    p.add_argument('--current-steps',type=int,default=0)
+    p.add_argument('--pre-scf-threshold',type=float,default=0.)
+    p.add_argument('--pre-scf-steps',type=int,default=4)
+    p.add_argument('--gamma',action='store_true')
+    p.add_argument('--symmetry',choices=('none','identity','mirror-x','c2z'),default='none')
+    p.add_argument('--tolerance',type=float,default=1e-30)
+    p.add_argument('--common-api',action='store_true')
+    p.add_argument('--protected-api',action='store_true')
+    p.add_argument('--no-chdir',action='store_true',help='forbid host chdir for new-runtime GS calls')
+    p.add_argument('--timer-ownership',action='store_true',help='check rank-local GS timer independence on the new runtime')
+    p.add_argument('--full-k-control',action='store_true',help='also compare SCF-converged diamond-Si full/reduced k states')
+    args=p.parse_args();args.common_api=args.common_api or args.protected_api;world=MPI.COMM_WORLD
+    if world.size!=3*args.size:raise ValueError('launch exactly3*size ranks')
+    g=world.rank//args.size;comm=world.Split(g,world.rank)
+    work=args.output/str(g)
+    if comm.rank==0:work.mkdir(parents=True,exist_ok=False)
+    comm.Barrier()
+    ctx=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
+    dec=(1,args.size,1,1,1) if args.split=='orbital' else (1,1,args.size,1,1) if args.split=='spatial' else (args.size,1,1,1,1)
+    if args.decomposition:dec=tuple(args.decomposition)
+    pp=Path(__file__).resolve().parents[1]/'salmonpy/examples/si_intro_data/Si_rps.dat'
+    if not pp.exists():pp=Path(__file__).resolve().parents[1].parent/'examples/si_intro_data/Si_rps.dat'
+    pseudo=Pseudopotential.from_file(pp,atomic_number=14,local_channel=2)
+    class InMemoryDFT(DFT):
+        def input_text(self,scf=SCFSettings()):
+            text=super().input_text(scf).replace("write_gs_restart_data='all'","write_gs_restart_data='no'")
+            if self.xc=='hse06':
+                text=text.replace('exx_pre_scf_threshold=0',f'exx_pre_scf_threshold={args.pre_scf_threshold},exx_pre_scf_steps={args.pre_scf_steps}')
+            return text.replace('&scf',f'&scf\n nscf_init_mix_zero={args.initial_no_mix}',1)
+    symmetry=None
+    if args.symmetry!='none':
+        if args.gamma:raise ValueError('symmetry control uses a non-Gamma mesh')
+        operations=np.zeros((1 if args.symmetry=='identity' else 2,3,4));operations[:,:,:3]=np.eye(3)
+        if len(operations)>1:operations[1,0,0]=-1
+        if args.symmetry=='c2z':operations[1,1,1]=-1
+        symmetry=SymmetryOperations(operations,directions='yyn')
+    mesh=(2,2,2) if symmetry is not None else (1,1,1) if args.gamma else (2,1,1)
+    a=InMemoryDFT((14,),np.diag([8.]*3),[[0,0,0]] if symmetry is not None else [[.3,.4,.45]],
+        (pseudo,),4,2,(8,8,8),mesh,xc=args.xc,symmetry=symmetry)
+    b=InMemoryDFT((14,14),np.diag([9.]*3),[[0,0,0],[.5,.5,.5]] if symmetry is not None else [[.3,.4,.45],[.7,.6,.55]],
+        (pseudo,),8,4,(12,12,12),mesh if symmetry is not None else (1,1,1) if args.gamma else (1,2,1),
+        xc='hse06' if args.xc=='hse06' else 'libxc_pbe',symmetry=symmetry)
+    assert "write_gs_restart_data='no'" in a.input_text()
+    scf=SCFSettings(max_iterations=8,tolerance=args.tolerance)
+    backend=NativeGSBackend(args.baseline if g==2 else args.build,work,decomposition=dec,hse_spatial=args.xc=='hse06' and (args.split=='spatial' or (args.split=='mixed' and args.gamma)),hse_kspace=args.xc=='hse06' and args.split=='mixed' and not args.gamma)
+    def frame(state,final=False):
+        values={}
+        for q in (('density','occupations','eigenvalues','orbitals','forces') if final else ('density','occupations','eigenvalues','orbitals')):
+            array=state.array(q)
+            if q=='forces' and g!=2:assert array.unit=='hartree/bohr'
+            values[q]=array.values
+        return values
+    def full_k_control(session):
+        if not args.full_k_control or g!=0:return None
+        if args.xc!='hse06':raise ValueError('full-k control requires fast HSE')
+        operations=np.zeros((2,3,4));operations[:,:,:3]=np.eye(3)
+        operations[1,:,:3]=[[0,1,0],[1,0,0],[0,0,1]]
+        model=InMemoryDFT((14,14),np.array([[0,1,1],[1,0,1],[1,1,0]])*5.13,
+            [[0,0,0],[.25,.25,.25]],(pseudo,),8,4,(8,8,8),(2,2,2),xc='hse06',
+            symmetry=SymmetryOperations(operations,directions='yyn'))
+        settings=SCFSettings(max_iterations=128,tolerance=1e-8)
+        with session.run(model,scf=settings,material_id='diamond-reduced') as reduced:
+          with session.run(replace(model,symmetry=None),scf=settings,material_id='diamond-full') as full:
+            first,second=reduced.info,full.info
+            assert first.converged and second.converged,'full-k comparison requires SCF convergence (solver results still retained)'
+            np.testing.assert_allclose(first.energy_hartree,second.energy_hartree,atol=1e-6,rtol=0)
+            np.testing.assert_allclose(reduced.array('density').values,full.array('density').values,atol=1e-7,rtol=1e-4)
+            reduced_array=reduced.array('forces');full_array=full.array('forces')
+            assert reduced_array.unit==full_array.unit=='hartree/bohr'
+            reduced_force=reduced_array.values;full_force=full_array.values
+            np.testing.assert_allclose(reduced_force,full_force,atol=1e-6,rtol=0)
+            force_agrees=True
+            return {'SCF_converged':True,'reduced_kpoints':reduced.array('occupations').values.shape[1],
+                'full_kpoints':full.array('occupations').values.shape[1],
+                'reduced_info':asdict(first),'full_info':asdict(second),
+                'energy_atol_hartree':1e-6,'density_rtol':1e-4,'density_atol_bohr3':1e-7,
+                'force_atol_hartree_per_bohr':1e-6,'density_within_tolerance':True,
+                'force_within_tolerance':force_agrees,
+                'force_max_absolute_difference':float(np.max(abs(reduced_force-full_force))),
+                'status':'pass' if force_agrees else 'energy-density-pass-force-mismatch',
+                'scope':'same fixed cell/grid/k sampling, not grid/k convergence certification'}
+    from unittest.mock import patch
+    from contextlib import nullcontext
+    import os
+    anchor=Path.cwd()
+    directory_guard=patch('os.chdir',side_effect=AssertionError('host chdir is forbidden')) if args.no_chdir and g!=2 else nullcontext()
+    with directory_guard, warnings.catch_warnings():
+      warnings.simplefilter('ignore',RuntimeWarning)
+      with backend.open(ctx) as session:
+        if g==0:
+            state=session.run(a,scf=scf,material_id='A',steps=3)
+            assert state.scf_status['paused'] and state.scf_status['initializations']==1
+            assert state.scf_status['executed_iterations']==3
+            cut3=frame(state);snap3=state.snapshot()
+            if args.initial_guess:
+                positions=np.array(a.fractional_positions,copy=True);positions[0,0]+=.001
+                warm_model=replace(a,fractional_positions=positions)
+                warm_a=session.run(warm_model,scf=scf,material_id='warm-A',steps=2,initial_guess=state)
+                warm_b=session.run(warm_model,scf=scf,material_id='warm-B',steps=2,initial_guess=state)
+                from salmonpy.gs_initial_guess import GSInitialGuess
+                source_orbitals=state.array('orbitals');lower=source_orbitals.lower_indices
+                raw_orbitals=source_orbitals.values.copy()
+                occupation_values=state.array('occupations').values[:,:,0].T
+                mx,my,mz=a.kmesh
+                points=np.array([[(ix+.5)/mx-.5,(iy+.5)/my-.5,(iz+.5)/mz-.5]
+                    for iz in range(mz) for iy in range(my) for ix in range(mx)])
+                def read_tile(bounds):
+                    x,y,z,xe,ye,ze,o,oe,k,ke=bounds
+                    return raw_orbitals[x-lower[0]:xe-lower[0]+1,
+                        y-lower[1]:ye-lower[1]+1,z-lower[2]:ze-lower[2]+1,0,
+                        o-lower[4]:oe-lower[4]+1,k-lower[5]:ke-lower[5]+1,0].transpose(4,3,2,1,0)
+                seed=GSInitialGuess.from_provider(a,read_wavefunctions=read_tile,
+                    occupations=occupation_values,kpoints=points,weights=np.full(len(points),1./len(points)))
+                array_owner=session.run(warm_model,scf=scf,material_id='array-seed',steps=2,initial_guess=seed)
+                for q,value in frame(array_owner).items():np.testing.assert_array_equal(value,frame(warm_b)[q])
+                def failed_reader(bounds):
+                    if comm.rank==0:raise ValueError('injected custom reader failure')
+                    return read_tile(bounds)
+                bad=GSInitialGuess.from_provider(a,read_wavefunctions=failed_reader,
+                    occupations=occupation_values,kpoints=points,weights=seed.weights)
+                before=session.resources()
+                with np.testing.assert_raises(InputError):
+                    session.run(warm_model,scf=scf,steps=2,initial_guess=bad)
+                assert all(session.resources()[q]==before[q] for q in ('states','live_child_communicators'))
+                if comm.size>1:
+                    with np.testing.assert_raises(InputError):
+                        session.run(warm_model,scf=scf,steps=2,initial_guess=seed if comm.rank==0 else None)
+                assert all(session.resources()[q]==before[q] for q in ('states','live_child_communicators'))
+                for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+                # The receiving owner must never read its provider again.
+                saved_raw=raw_orbitals.copy()
+                for invalid in (float('nan'),float('inf')):
+                    raw_orbitals[:]=complex(invalid,0)
+                    with np.testing.assert_raises(RuntimeFailure):
+                        session.run(warm_model,scf=scf,steps=2,initial_guess=seed)
+                    assert all(session.resources()[q]==before[q] for q in ('states','live_child_communicators'))
+                raw_orbitals[:]=saved_raw
+                wrong_sampling=GSInitialGuess.from_provider(a,read_wavefunctions=read_tile,
+                    occupations=occupation_values,kpoints=points,weights=np.full(len(points),2./len(points)))
+                with np.testing.assert_raises(RuntimeFailure):
+                    session.run(warm_model,scf=scf,steps=2,initial_guess=wrong_sampling)
+                assert all(session.resources()[q]==before[q] for q in ('states','live_child_communicators'))
+                retry=session.run(warm_model,scf=scf,material_id='array-retry',steps=2,initial_guess=seed)
+                for q,value in frame(retry).items():np.testing.assert_array_equal(value,frame(warm_b)[q])
+                retry.close()
+                raw_orbitals[:]=complex(float('nan'),0)
+                array_owner.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                warm_cut=frame(warm_b)
+                for q,value in frame(warm_a).items():np.testing.assert_array_equal(value,warm_cut[q])
+                for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+                warm_a.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                warm_future=frame(warm_a)
+                for q,value in frame(array_owner).items():np.testing.assert_array_equal(value,warm_future[q])
+                array_owner.close()
+                # Synthetic input estimate only: never serialize computed GS arrays.
+                import tempfile
+                from salmonpy.gs_archive import save_ground_state
+                synthetic=np.full((len(points),a.states,8,8,8),.04419417382415922+0j)
+                synthetic[:,1,4:,:,:]*=-1
+                references=[dict(atomic_number=p.atomic_number,filename='synthetic-input'+p.suffix,
+                    sha256=p.sha256,source='synthetic initial-estimate regression') for p in a.pseudopotentials]
+                temporary=tempfile.TemporaryDirectory(prefix='synthetic-array-guess-') if comm.rank==0 else None
+                synthetic_root=comm.bcast(temporary.name if temporary else None,root=0)
+                if comm.rank==0:
+                    save_ground_state(Path(synthetic_root)/'archive',wavefunctions=synthetic,
+                        density=np.zeros((8,8,8)),eigenvalues=np.zeros((len(points),a.states)),
+                        occupations=occupation_values,kpoints=points,weights=seed.weights,
+                        cell_bohr=a.cell,fractional_positions=a.fractional_positions,
+                        atomic_numbers=a.numbers,electrons=a.electrons,energy_hartree=0.,
+                        xc=a.xc,pseudopotentials=references)
+                # Existing input agreement synchronizes publication before readers.
+                _ready=comm.bcast(True,root=0)
+                portable=GSInitialGuess.from_archive(Path(synthetic_root)/'archive',model=a)
+                direct=GSInitialGuess.from_arrays(a,wavefunctions=synthetic,
+                    occupations=occupation_values,kpoints=points,weights=seed.weights)
+                portable_owner=session.run(warm_model,scf=scf,material_id='synthetic-archive',steps=2,initial_guess=portable)
+                direct_owner=session.run(warm_model,scf=scf,material_id='synthetic-array',steps=2,initial_guess=direct)
+                for q,value in frame(portable_owner).items():np.testing.assert_array_equal(value,frame(direct_owner)[q])
+                if temporary is not None:temporary.cleanup()
+                portable_owner.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                direct_owner.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                for q,value in frame(portable_owner).items():np.testing.assert_array_equal(value,frame(direct_owner)[q])
+                portable_owner.close();direct_owner.close()
+                for q,value in frame(warm_b).items():np.testing.assert_array_equal(value,warm_cut[q])
+                warm_b.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                for q,value in frame(warm_b).items():np.testing.assert_array_equal(value,warm_future[q])
+                for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+                with np.testing.assert_raises(InputError):
+                    session.run(replace(warm_model,grid=(10,10,10)),scf=scf,steps=1,initial_guess=state)
+                rejected=c.c_int64()
+                bad_steps=-1 if comm.rank==0 else 1
+                code=session._gs_call(state.directory,session.lib.sp_gs_create_from_gs,b'gs.inp',state._token,bad_steps,c.byref(rejected))
+                assert code==11 and rejected.value==0
+                for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+
+            owner_timing=state.timing_seconds if args.timer_ownership else None
+            sibling=session.run(b,scf=scf,material_id='B',steps=2)
+            if args.timer_ownership:
+                assert state.timing_seconds==owner_timing
+                assert all(v>=0 for v in state.timing_seconds.values())
+                assert sibling.timing_seconds['total']>0
+                view=state.timing_seconds;view['total']=-1
+                assert state.timing_seconds==owner_timing
+            sibling_cut=frame(sibling)
+            if args.common_api:
+                from salmonpy.checkpointing import execute_checkpoint,restore_checkpoint,CheckpointState
+                groups=[{'name':'scf','ranks':list(range(comm.size)),'point_ids':['A','B']}]
+                checkpoint=execute_checkpoint(comm,groups,states={
+                    'A':state.checkpoint_target(),'B':sibling.checkpoint_target()})
+                snap3.close();snap3=checkpoint['states']['A'];sibling_snapshot=checkpoint['states']['B']
+                targets={'A':state.checkpoint_target(snap3),'B':sibling.checkpoint_target(sibling_snapshot)}
+                counters=state.scf_status,sibling.scf_status
+                if targets['A'].stage_restore is None:
+                    if args.protected_api:raise AssertionError('SCF isolated candidates missing')
+                    try:
+                        restore_checkpoint(comm,groups,states=targets,saved=checkpoint['compatibility'],
+                            live=CheckpointState(states={'A':state,'B':sibling}))
+                    except InputError:pass
+                    else:raise AssertionError('direct-only SCF target accepted as protected restore')
+                incompatible=copy.deepcopy(checkpoint['compatibility'])
+                incompatible['participants'][0]['states']['A']['identity']='wrong owner or runtime'
+                try:execute_checkpoint(comm,groups,states=targets,operation='restore',saved=incompatible)
+                except InputError:pass
+                else:raise AssertionError('incompatible SCF target admitted')
+                assert (state.scf_status,sibling.scf_status)==counters
+                for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+                for q,value in frame(sibling).items():np.testing.assert_array_equal(value,sibling_cut[q])
+            else:sibling_snapshot=sibling.snapshot()
+            # Native preflight must reject bad/mixed tokens without any mutation.
+            before=state.scf_status
+            bad_token=snap3._token+comm.rank if comm.size>1 else sibling_snapshot._token
+            code=session.lib.sp_gs_scf_restore(state._token,bad_token)
+            assert comm.allgather(code)==[11]*comm.size
+            assert state.scf_status==before
+            if comm.size>1:
+                rejected=c.c_int64()
+                code=session._gs_call(state.directory,session.lib.sp_gs_start,b'gs.inp',3+comm.rank,c.byref(rejected))
+                assert comm.allgather(code)==[11]*comm.size and rejected.value==0
+                assert state.scf_status==before
+            try:state.restore(sibling_snapshot)
+            except InputError:pass
+            else:raise AssertionError('cross-owner snapshot accepted')
+            state.continue_scf(steps=2,allow_unconverged=args.allow_unconverged_fixture);assert state.iterations==5
+            snap5=state.snapshot()
+            state.continue_scf(steps=3,allow_unconverged=args.allow_unconverged_fixture)
+            assert state.iterations==8 and not state.scf_status['paused']
+            linear=state.scf_status
+            assert linear['executed_iterations']==8 and linear['initializations']==1
+            expected=frame(state,True);info=state.info
+            for saved,n,remaining in ((snap3,3,5),(snap5,5,3)):
+                before=state.scf_status['executed_iterations']
+                if args.protected_api:
+                    from salmonpy.checkpointing import CheckpointTarget,AtomicRestoreError
+                    targets={'A':state.checkpoint_target(saved),'B':sibling.checkpoint_target(sibling_snapshot)}
+                    if n==3:
+                        sibling.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+                        state.restore(snap5)
+                        originals=frame(state),frame(sibling)
+                        counts=state.scf_status,sibling.scf_status
+                        def fail_late():
+                            candidate=targets['B'].stage_restore()
+                            if comm.rank==comm.size-1:raise RuntimeError('injected late B candidate failure')
+                            return candidate
+                        broken={'A':targets['A'],'B':CheckpointTarget(targets['B'].capability,
+                            stage_restore=fail_late,discard_restore=targets['B'].discard_restore)}
+                        try:
+                            restore_checkpoint(comm,groups,states=broken,saved=checkpoint['compatibility'],
+                                live=CheckpointState(states={'A':state,'B':sibling}))
+                        except AtomicRestoreError as exc:assert exc.original_preserved and not exc.cleanup_errors
+                        else:raise AssertionError('late candidate failure accepted')
+                        assert (state.scf_status,sibling.scf_status)==counts
+                        for owner,frame0,final in ((state,originals[0],False),(sibling,originals[1],False)):
+                            for q,value in frame(owner,final).items():np.testing.assert_array_equal(value,frame0[q])
+                        # Continue the preserved mixing/HSE state before retrying the restore.
+                        state.continue_scf(steps=3,allow_unconverged=args.allow_unconverged_fixture)
+                        assert state.info==info
+                        for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
+                        before=state.scf_status['executed_iterations']
+                        # New candidates are required after the failed attempt was discarded.
+                        targets={'A':state.checkpoint_target(saved),'B':sibling.checkpoint_target(sibling_snapshot)}
+                    holder=CheckpointState(states={'A':state,'B':sibling})
+                    staged=restore_checkpoint(comm,groups,states=targets,saved=checkpoint['compatibility'],live=holder)
+                    assert state.iterations==8  # only detached payloads have changed
+                    reserved_counts=state.scf_status
+                    assert session.lib.sp_gs_continue(state._token,1)==11
+                    if comm.size>1:
+                        mode=3 if comm.rank==0 else 4
+                        assert session.lib.sp_gs_scf_candidate(state._token,0,mode)==11
+                    assert state.scf_status==reserved_counts
+                    for candidate in staged['states'].values():candidate.publish()
+                elif args.common_api:
+                    execute_checkpoint(comm,groups,states={'A':state.checkpoint_target(saved),
+                        'B':sibling.checkpoint_target(sibling_snapshot)},operation='restore',saved=checkpoint['compatibility'])
+                else:state.restore(saved)
+                assert state.iterations==n and state.scf_status['executed_iterations']==before
+                assert state.scf_status['initializations']==1
+                if n==3:
+                    for q,value in frame(state).items():np.testing.assert_array_equal(value,cut3[q])
+                state.continue_scf(steps=remaining,allow_unconverged=args.allow_unconverged_fixture)
+                assert state.info==info
+                for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
+            for q,value in frame(sibling).items():np.testing.assert_array_equal(value,sibling_cut[q])
+            owner_timing=state.timing_seconds if args.timer_ownership else None
+            sibling.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+            if args.timer_ownership:assert state.timing_seconds==owner_timing
+            sibling_future=frame(sibling);sibling_work=sibling.scf_status['executed_iterations']
+            sibling.restore(sibling_snapshot)
+            assert sibling.iterations==2 and sibling.scf_status['executed_iterations']==sibling_work
+            assert sibling.scf_status['initializations']==1
+            sibling.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+            for q,value in frame(sibling).items():np.testing.assert_array_equal(value,sibling_future[q])
+            for q,value in frame(state,True).items():np.testing.assert_array_equal(value,expected[q])
+            snap3.close();snap5.close();sibling_snapshot.close();sibling.close()
+            assert state.scf_status['snapshots']==0
+            if args.initial_guess:
+                for warm in (warm_a,warm_b):
+                    for q,value in frame(warm).items():np.testing.assert_array_equal(value,warm_future[q])
+            for q in ('wfn.bin','occupation.bin'):assert not list(work.rglob(q))
+        else:
+            state=session.run(a,scf=scf,material_id='A',allow_unconverged=args.allow_unconverged_fixture)
+            expected=frame(state,True);info=state.info
+            linear=None
+        query=getattr(session.lib,'sp_gs_cartesian_force_protocol',None)
+        if query is not None:query.argtypes=[];query.restype=c.c_int
+        force_cartesian=query is not None and query()==1
+        values=world.allgather((expected,info,force_cartesian))
+        for rank in range(args.size):
+            for other in (rank+args.size,rank+2*args.size):
+                assert values[rank][1]==values[other][1]
+                for q,array in values[rank][0].items():
+                    previous=values[other][0][q]
+                    if q=='forces' and args.symmetry!='none' and other>=2*args.size and not values[other][2]:
+                        # Old sym_vector_force_xyz returned direct-lattice components.
+                        # Only this intentional units correction differs from the old runtime.
+                        previous=a.cell.T@previous
+                    np.testing.assert_array_equal(array,previous)
+        if args.current_steps:
+            counters=state.scf_status if g==0 else None
+            model=state.tddft_model(dt=.001,max_steps=args.current_steps+1)
+            response=model.new_state('continued-gs')
+            try:
+                current=np.asarray([response.step(1e-4*np.array([np.sin(.31*i),np.cos(.23*i)-1,np.sin(.17*i)]) if args.symmetry=='none' else np.array([0.,0.,1e-4*np.sin(.17*i)]))
+                                    for i in range(1,args.current_steps+1)])
+                traces=world.allgather(current)
+                for rank in range(args.size):
+                    for other in (rank+args.size,rank+2*args.size):
+                        np.testing.assert_array_equal(traces[rank],traces[other])
+                if g==0:assert state.scf_status==counters
+            finally:response.close();model.close()
+        state.close()
+        if args.initial_guess and g==0:
+            before=session.resources()
+            with np.testing.assert_raises(InputError):
+                session.run(warm_model,scf=scf,steps=1,initial_guess=state)
+            assert session.resources()==before
+            for warm in (warm_a,warm_b):warm.continue_scf(steps=1,allow_unconverged=args.allow_unconverged_fixture)
+            for q,value in frame(warm_a).items():np.testing.assert_array_equal(value,frame(warm_b)[q])
+            assert warm_a.scf_status['initializations']==warm_b.scf_status['initializations']==1
+            warm_a.close();warm_b.close()
+        full_check=full_k_control(session)
+        assert Path.cwd()==anchor
+    if world.rank==0:
+        result={'status':'pass','initial_guess_direct':args.initial_guess,'custom_array_seed_exact':args.initial_guess,'synthetic_archive_array_seed_exact':args.initial_guess,'provider_failure_preserves_owners':args.initial_guess,'seed_source_and_siblings_unchanged':args.initial_guess,
+                'seed_target_continues_after_source_closed':args.initial_guess,'size':args.size,'split':args.split,'xc':args.xc,'initial_no_mix':args.initial_no_mix,
+                'continuous_arrays_exact':True,'new_runtime_host_chdir_forbidden':args.no_chdir,'state_owned_GS_timers_checked':args.timer_ownership,
+                'continuous_new_and_previous_exact':args.build.resolve()!=args.baseline.resolve() and (args.symmetry=='none' or values[2*args.size][2]),
+                'previous_equivalent_with_cartesian_force_units':args.build.resolve()!=args.baseline.resolve(),
+                'old_force_lattice_components_converted':args.symmetry!='none' and not values[2*args.size][2],'snapshot_restore_numerical_arrays_exact':True,
+                'mixed_history_continuation_exact':True,'sibling_preserved':True,'restore_executed_iterations':0,
+                'linear_initializations':linear['initializations'],'linear_executed_iterations':linear['executed_iterations'],
+                'final_info':asdict(info),'GS_datasets_collected':False,
+                'pre_scf_threshold':args.pre_scf_threshold,'pre_scf_steps':args.pre_scf_steps,'gamma':args.gamma,'symmetry':args.symmetry,'retained_kpoints':expected['occupations'].shape[1],
+                'cartesian_force_basis_protocol':force_cartesian,
+                'common_direct_checkpoint_api':args.common_api,'protected_SCF_candidates':args.protected_api,
+                'late_candidate_failure_preserves_originals':args.protected_api,
+                'original_continues_before_retry_exact':args.protected_api,
+                'common_incompatible_rejected_before_mutation':args.common_api,
+                'continued_GS_to_RT_steps':args.current_steps,
+                'continued_GS_to_RT_exact':bool(args.current_steps),'full_k_control':full_check}
+        (args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(result,flush=True)
+
+
+if __name__=='__main__':
+    try:main()
+    except BaseException:
+        import traceback;traceback.print_exc();MPI.COMM_WORLD.Abort(1)

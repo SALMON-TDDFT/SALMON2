@@ -86,3 +86,10 @@ class ManualTest(unittest.TestCase):
                              files('salmonpy').joinpath(name).read_text(encoding='utf-8'),name)
         for query,id_ in [('snapshot restore','snapshots'),('公開API','public_api')]:
             self.assertIn(id_,{t['id'] for t in search(query)['tasks']})
+
+    def test_common_checkpoint_api_is_searchable_and_packaged(self):
+        from importlib.resources import files
+        tasks=search('checkpoint compatibility')['tasks']
+        self.assertEqual(tasks[0]['id'],'checkpoint_compatibility')
+        for name in ('CHECKPOINTING.md','CHECKPOINTING.en.md','examples/custom_checkpoint.py'):
+            self.assertTrue(files('salmonpy').joinpath(name).is_file(),name)
