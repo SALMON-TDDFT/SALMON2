@@ -1,0 +1,451 @@
+{
+  "date": "2026-11-24",
+  "status": "passed",
+  "scope": "CPU spatial SOC spin current and recovery; fixed-spinor equation validation and short Ni software probes, not material convergence",
+  "source_tree_sha256": "ad86ba8f409acb728b19816597bfdaf8e4f334fe015e429c98fe69394abbb175",
+  "library_sha256": "f9f5c0e4977bcbd9587da642cfd42e302cea72b3663a2d22e59b7d0bd2447144",
+  "Git_only_source_tree": "34b1a0947f3d5edc2437af8d393353af5cdbf6cb",
+  "source_and_all_application_object_audits": "passed before builds/links and evidence transfer",
+  "communication": "one sum of projector overlaps per orbital/k point within icomm_r; existing icomm_ko and icomm_rko reductions retained; no extra application-wide agreement or redundant RT halo exchange",
+  "spatial_feature_query": "sp_tddft_soc_spatial_protocol: CPU1; OpenACC0; no MPI side effects",
+  "baseline_comparison": {
+    "current_table_exact": true,
+    "magnetization_exact": true,
+    "max_Pauli_current_change_au": 0.013439549542056655,
+    "max_spin_current_change_au": 0.00981181177439882,
+    "note": "short unconverged software fixture, not a physical Ni result"
+  },
+  "cases": {
+    "checked_x": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-spatial-identity-20261124",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 2,
+        "decomposition": [
+          1,
+          1,
+          2,
+          1,
+          1
+        ],
+        "atoms": 4,
+        "electrons": 72,
+        "states": 144,
+        "kmesh": [
+          2,
+          2,
+          2
+        ],
+        "temperature_k": 300,
+        "conventional_cell": true,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "Pauli0_matches_matter_current": true,
+        "GS_exported": false,
+        "execution_mode": "checked",
+        "deep_cases": [
+          "production-overflow"
+        ],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "result_sha256": "04b45d276fbec8610b606f5097309f5be6f658b688987d318bad297a032720e1",
+      "log_sha256": "b538de9b9c777c5b45b2795df497c07c29dabcdd12639a8416c59ade41f795fd",
+      "Pauli0_Jm_max_error": 1.3999760552219076e-17
+    },
+    "checked_y": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-spatial-y-identity-20261124",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 2,
+        "decomposition": [
+          1,
+          1,
+          1,
+          2,
+          1
+        ],
+        "atoms": 4,
+        "electrons": 72,
+        "states": 144,
+        "kmesh": [
+          2,
+          2,
+          2
+        ],
+        "temperature_k": 300,
+        "conventional_cell": true,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "Pauli0_matches_matter_current": true,
+        "GS_exported": false,
+        "execution_mode": "checked",
+        "deep_cases": [
+          "production-overflow"
+        ],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "result_sha256": "7e20ce7eacd6406b15f5012d9971acfd378cee989f5c57148ecf700c5c594800",
+      "log_sha256": "9fb52c870895c2e951697851b40840750f3817ec90b0e463eb6d2e411fe6c258",
+      "Pauli0_Jm_max_error": 1.2007539060276962e-17
+    },
+    "checked_spatial_orbital": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-spatial-orbital-identity-20261124",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 4,
+        "decomposition": [
+          1,
+          2,
+          2,
+          1,
+          1
+        ],
+        "atoms": 4,
+        "electrons": 72,
+        "states": 144,
+        "kmesh": [
+          2,
+          2,
+          2
+        ],
+        "temperature_k": 300,
+        "conventional_cell": true,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "Pauli0_matches_matter_current": true,
+        "GS_exported": false,
+        "execution_mode": "checked",
+        "deep_cases": [
+          "production-overflow"
+        ],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "result_sha256": "dc2f56a3e6270aa61d974a5e145b5be136439bd6bb9c90aff4a91992be2680a1",
+      "log_sha256": "2be4d8e9d577c1406d9dd4142421264e736348c44496ca1f331b6bdc05c56df5",
+      "Pauli0_Jm_max_error": 8.998878031629687e-18
+    },
+    "performance_x": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-spatial-performance-enabled-20261124",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 2,
+        "decomposition": [
+          1,
+          1,
+          2,
+          1,
+          1
+        ],
+        "atoms": 4,
+        "electrons": 72,
+        "states": 144,
+        "kmesh": [
+          2,
+          2,
+          2
+        ],
+        "temperature_k": 300,
+        "conventional_cell": true,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "GS_exported": false,
+        "execution_mode": "performance",
+        "deep_cases": [],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "result_sha256": "1917cee7619e3df06f43dc4e2e532da1b28163c3475685a5a9a44f510f56901c",
+      "log_sha256": "f2ee845707c8c8164b414c711f29ce4ca71730cd3325d2e8a70bd329d3cddc5d",
+      "Pauli0_Jm_max_error": 1.3999760552219076e-17
+    },
+    "serial_baseline": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-serial-current-baseline-enabled-20261124",
+      "result": {
+        "status": "passed",
+        "spin_rows_per_state": 5,
+        "closed_sibling_files_unchanged": true,
+        "streams_read_while_host_attached": true,
+        "explicit_flush_or_transaction_used": false,
+        "GS_exported": false,
+        "current_trace": [
+          [
+            0.00045537019328421163,
+            -0.0003958381748211321,
+            0.00030248200949120987
+          ],
+          [
+            0.00045538776393656746,
+            -0.00039591315366060867,
+            0.00031564976080400865
+          ],
+          [
+            0.0004554138220311246,
+            -0.00039597451280712175,
+            0.00032884459486645775
+          ],
+          [
+            0.00045544643963859547,
+            -0.00039602194022864774,
+            0.0003420646777913401
+          ]
+        ]
+      },
+      "result_sha256": "ba2fe94c61b2af33061e25982cdd1096776a4d5a137fa1cbb8051fbdf1d6020a",
+      "log_sha256": "47340de188c6b70fd4ae7da1104032172de532e2ae624efc3a8fe89cbdd22c8c",
+      "Pauli0_Jm_max_error": 7.600257229123386e-17
+    }
+  },
+  "prescribed_input_tests": {
+    "spinors": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-soc-spatial-fixed-spinors-verified-20261124/test-record.json",
+      "sha256": "3c32f9fef7865ddfd26b0159c6462202710cc9200ee0044ef0f04a55a3be7163",
+      "expected_failure": false,
+      "record": {
+        "test": "test_soc_spin_current_spatial",
+        "test_compile_flags": [
+          "-O2"
+        ],
+        "test_source_sha256": "956a11e47a7c762c0c350b3221d83101da4449270cea0283c8067e2057a147d5",
+        "source_root": "/private/tmp/salmonpy-soc-spatial-final-source-20261124",
+        "executable_sha256": "170b39e18107702d7edca524d1450300e31cd8dadcb8f6d6033dd8a6110417cd",
+        "runtime_executable_sha256": "e6899f137338424d7006480af964e3db1c645c22615d1f2d9400b14f443d8ba4",
+        "runtime_source_patch_sha256": "a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8",
+        "runtime_source_marker_sha256": "02a5c0fc5f1e5281a62424a297432eee33bffa742637562af22e7feeb8407aa3",
+        "runtime_source_profile": "fast-pr",
+        "runs": [
+          {
+            "ranks": 1,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           1   2.6645352591003757E-015\n SOC_SPATIAL_NONLOCAL_PASS           1   2.6645352591003757E-015\n SOC_SPATIAL_TOTAL_CURRENT_PASS           1   0.0000000000000000     \n"
+          },
+          {
+            "ranks": 1,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           1   2.6645352591003757E-015\n SOC_SPATIAL_NONLOCAL_PASS           1   2.6645352591003757E-015\n SOC_SPATIAL_TOTAL_CURRENT_PASS           1   0.0000000000000000     \n"
+          },
+          {
+            "ranks": 2,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           2   2.6645352591003757E-015\n SOC_SPATIAL_NONLOCAL_PASS           2   2.6645352591003757E-015\n SOC_SPATIAL_TOTAL_CURRENT_PASS           2   2.2204460492503131E-016\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           2   2.6645352591003757E-015\n SOC_SPATIAL_NONLOCAL_PASS           2   2.6645352591003757E-015\n SOC_SPATIAL_TOTAL_CURRENT_PASS           2   1.1102230246251565E-016\n"
+          },
+          {
+            "ranks": 4,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           4   2.6645352591003757E-015\n SOC_SPATIAL_NONLOCAL_PASS           4   2.6645352591003757E-015\n SOC_SPATIAL_TOTAL_CURRENT_PASS           4   2.2204460492503131E-016\n"
+          },
+          {
+            "ranks": 4,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           4   2.6645352591003757E-015\n SOC_SPATIAL_NONLOCAL_PASS           4   2.6645352591003757E-015\n SOC_SPATIAL_TOTAL_CURRENT_PASS           4   1.1102230246251565E-016\n"
+          }
+        ]
+      }
+    },
+    "old_oracle": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-soc-old-spin-oracle-failure-20261124/test-record.json",
+      "sha256": "551cc9ca5bff0a8c176835ddd7d2eb680b2f835ba0d79303c4bb3196cbdfa17f",
+      "expected_failure": true,
+      "record": {
+        "test": "test_soc_spin_current_spatial",
+        "test_compile_flags": [
+          "-DSOC_SERIAL_ONLY",
+          "-O2"
+        ],
+        "source_root": "/private/tmp/salmonpy-soc-close-source-20261124",
+        "executable_sha256": "a7c4a6f43e804f4a1c9a39dbc0549f087b4da993936302b27a35caa2fba7a831",
+        "runtime_executable_sha256": "2ee9c753a09b1744b5f008875f8c3c645d1cd9b76959b4b1f867e63bd9839a73",
+        "runtime_source_patch_sha256": "a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8",
+        "runtime_source_marker_sha256": "bb292947dcaad2e278049779e8d9dedaf909352c4593e97d46a1fdac82426e85",
+        "runtime_source_profile": "fast-pr",
+        "runs": [
+          {
+            "ranks": 1,
+            "threads": 1,
+            "returncode": 3,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           1   25.895102222472559     \n--------------------------------------------------------------------------\nMPI_ABORT was invoked on rank 0 in communicator MPI_COMM_WORLD\n  Proc: [[56362,0],0]\n  Errorcode: 3\n\nNOTE: invoking MPI_ABORT causes Open MPI to kill all MPI processes.\nYou may or may not see output from other processes, depending on\nexactly when Open MPI kills them.\n--------------------------------------------------------------------------\n"
+          },
+          {
+            "ranks": 1,
+            "threads": 2,
+            "returncode": 3,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           1   25.895102222472559     \n--------------------------------------------------------------------------\nMPI_ABORT was invoked on rank 0 in communicator MPI_COMM_WORLD\n  Proc: [[8758,0],0]\n  Errorcode: 3\n\nNOTE: invoking MPI_ABORT causes Open MPI to kill all MPI processes.\nYou may or may not see output from other processes, depending on\nexactly when Open MPI kills them.\n--------------------------------------------------------------------------\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 1,
+            "returncode": 3,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           2   25.895102222472559     \n--------------------------------------------------------------------------\nMPI_ABORT was invoked on rank 1 in communicator MPI_COMM_WORLD\n  Proc: [[24803,1],1]\n  Errorcode: 3\n\nNOTE: invoking MPI_ABORT causes Open MPI to kill all MPI processes.\nYou may or may not see output from other processes, depending on\nexactly when Open MPI kills them.\n--------------------------------------------------------------------------\n--------------------------------------------------------------------------\nprterun has exited due to process rank 1 with PID 0 on node otobebookpro calling\n\"abort\". This may have caused other processes in the application to be\nterminated by signals sent by prterun (as reported here).\n--------------------------------------------------------------------------\n\u0000"
+          },
+          {
+            "ranks": 2,
+            "threads": 2,
+            "returncode": 3,
+            "stdout": " SOC_NONLOCAL_REFERENCE_ERROR           2   25.895102222472559     \n--------------------------------------------------------------------------\nMPI_ABORT was invoked on rank 1 in communicator MPI_COMM_WORLD\n  Proc: [[47821,1],1]\n  Errorcode: 3\n\nNOTE: invoking MPI_ABORT causes Open MPI to kill all MPI processes.\nYou may or may not see output from other processes, depending on\nexactly when Open MPI kills them.\n--------------------------------------------------------------------------\n--------------------------------------------------------------------------\nprterun has exited due to process rank 1 with PID 0 on node otobebookpro calling\n\"abort\". This may have caused other processes in the application to be\nterminated by signals sent by prterun (as reported here).\n--------------------------------------------------------------------------\n\u0000"
+          }
+        ]
+      }
+    },
+    "xc": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-soc-spatial-xc-final-20261124/test-record.json",
+      "sha256": "5fc33269091ec7ed89874212241f69fb4650d1753550964252efa7b4e3e0e7a5",
+      "expected_failure": false,
+      "record": {
+        "test": "test_nlcc_xc_variation",
+        "test_compile_flags": [],
+        "source_root": "/private/tmp/salmonpy-soc-spatial-final-source-20261124",
+        "executable_sha256": "63f960d2527477a5b74e05337452f36b03f30d37d79118530aa12db1c3543a57",
+        "runtime_executable_sha256": "e6899f137338424d7006480af964e3db1c645c22615d1f2d9400b14f443d8ba4",
+        "runtime_source_patch_sha256": "a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8",
+        "runtime_source_marker_sha256": "02a5c0fc5f1e5281a62424a297432eee33bffa742637562af22e7feeb8407aa3",
+        "runtime_source_profile": "fast-pr",
+        "runs": [
+          {
+            "ranks": 1,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": "XC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\n"
+          },
+          {
+            "ranks": 1,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": "XC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": "XC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": "XC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\n"
+          }
+        ]
+      }
+    },
+    "core": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-soc-spatial-core-final-20261124/test-record.json",
+      "sha256": "7fad86ffed92c0364fba64b45cca705ce207408f3b851a29c9f8fff2d565349c",
+      "expected_failure": false,
+      "record": {
+        "test": "test_nlcc_core_force",
+        "test_compile_flags": [],
+        "source_root": "/private/tmp/salmonpy-soc-spatial-final-source-20261124",
+        "executable_sha256": "4a7a74e3585438d06a38128ca4176750271d7d1cd654d592ea68f3d0e0f16fec",
+        "runtime_executable_sha256": "e6899f137338424d7006480af964e3db1c645c22615d1f2d9400b14f443d8ba4",
+        "runtime_source_patch_sha256": "a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8",
+        "runtime_source_marker_sha256": "02a5c0fc5f1e5281a62424a297432eee33bffa742637562af22e7feeb8407aa3",
+        "runtime_source_profile": "fast-pr",
+        "runs": [
+          {
+            "ranks": 1,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": " CORE_FORCE_VARIATION           1   1.0010409168259571E-010\n CORE_FORCE_VARIATION           2   6.1708876897270670E-010\n CORE_FORCE_VARIATION           3   7.6315460201259455E-010\n CORE_FORCE_VARIATION           4   3.1242757270177890E-009\n CORE_FORCE_VARIATION           5   5.2107002354844639E-008\n CORE_FORCE_VARIATION           6   3.8074185632736533E-008\n NLCC_CORE_FORCE_PASS\n"
+          },
+          {
+            "ranks": 1,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": " CORE_FORCE_VARIATION           1   1.0853515308717476E-010\n CORE_FORCE_VARIATION           2   5.9477105879279790E-010\n CORE_FORCE_VARIATION           3   6.5532475973517634E-010\n CORE_FORCE_VARIATION           4   2.3025109596730431E-009\n CORE_FORCE_VARIATION           5   5.3591061947941970E-008\n CORE_FORCE_VARIATION           6   4.3853417506720116E-008\n NLCC_CORE_FORCE_PASS\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": " CORE_FORCE_VARIATION           1   1.0010409168259571E-010\n CORE_FORCE_VARIATION           1   1.0010409168259571E-010\n CORE_FORCE_VARIATION           2   6.1708876897270670E-010\n CORE_FORCE_VARIATION           2   6.1708876897270670E-010\n CORE_FORCE_VARIATION           3   7.6315460201259455E-010\n CORE_FORCE_VARIATION           3   7.6315460201259455E-010\n CORE_FORCE_VARIATION           4   3.1242757270177890E-009\n CORE_FORCE_VARIATION           4   3.1242757270177890E-009\n CORE_FORCE_VARIATION           5   5.2107002354844639E-008\n CORE_FORCE_VARIATION           5   5.2107002354844639E-008\n CORE_FORCE_VARIATION           6   3.8074185632736533E-008\n CORE_FORCE_VARIATION           6   3.8074185632736533E-008\n NLCC_CORE_FORCE_PASS\n NLCC_CORE_FORCE_PASS\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": " CORE_FORCE_VARIATION           1   1.0853515308717476E-010\n CORE_FORCE_VARIATION           2   5.9477105879279790E-010\n CORE_FORCE_VARIATION           1   1.0853515308717476E-010\n CORE_FORCE_VARIATION           3   6.5532475973517634E-010\n CORE_FORCE_VARIATION           2   5.9477105879279790E-010\n CORE_FORCE_VARIATION           4   2.3025109596730431E-009\n CORE_FORCE_VARIATION           3   6.5532475973517634E-010\n CORE_FORCE_VARIATION           4   2.3025109596730431E-009\n CORE_FORCE_VARIATION           5   5.3591061947941970E-008\n CORE_FORCE_VARIATION           5   5.3591061947941970E-008\n CORE_FORCE_VARIATION           6   4.3853417506720116E-008\n CORE_FORCE_VARIATION           6   4.3853417506720116E-008\n NLCC_CORE_FORCE_PASS\n NLCC_CORE_FORCE_PASS\n"
+          }
+        ]
+      }
+    }
+  },
+  "compiler_finding": {
+    "compiler": "GNU Fortran15.2.0 Homebrew, Apple Silicon Mac",
+    "old_function_copy_O0_O2_discrepancy_observed": true,
+    "compiler_internal_cause_established": false,
+    "independent_Pauli_oracle_rejects_old_O2_library": true,
+    "resolution": "same physical formula, CPU projection and coordinate contractions evaluated in two stages, shared by serial/spatial paths",
+    "old_spin_values_preserved": false,
+    "reader_side_automatic_correction": false,
+    "forensic_library": "superseded-diagnostic-library.dylib (not approved for use)"
+  },
+  "installed_wheel_tests": {
+    "total": 729,
+    "passed": 684,
+    "skipped": 45,
+    "log": "/private/tmp/salmonpy-soc-spatial-wheel-20261124/tests.log"
+  },
+  "related_source_unit_tests": 46,
+  "GS_datasets_collected": false,
+  "remote_CI_dispatched": false,
+  "limits": [
+    "no GPU or Fujitsu validation",
+    "no changed-MPI-layout SOC disk resume",
+    "no physical grid/k/dt convergence or long-time spectra claim",
+    "no fast-HSE SOC"
+  ],
+  "note": "The diagnostic source snapshot was taken after several diagnostic edits; original source is separately pinned to commit a3634416. Final oracle and old-library failure tests are reproducible from the tracked test source.",
+  "target_file_O3_validation": {
+    "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-soc-spatial-o3-object-20261124/result.json",
+    "sha256": "6c8b174f24f4da3008ec3a83b5295586d3abd9fcaef90dca96c6bfd3add50354",
+    "scope": "pseudo_pt_current_so and test compiled O3; other audited solver objects O2",
+    "ranks_threads": [
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        1
+      ],
+      [
+        2,
+        2
+      ],
+      [
+        4,
+        1
+      ],
+      [
+        4,
+        2
+      ]
+    ],
+    "status": "passed"
+  }
+}

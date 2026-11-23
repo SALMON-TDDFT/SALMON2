@@ -233,3 +233,7 @@ SOC非共線の追加範囲は[Niの接続検証](NICKEL_SOC.md)を参照して�
 
 
 SOCの深部数値異常からの自動復帰は `checked`、検査・保護用コピーを省く更新は `performance` を使います。Ni PBE・k点MPI 1/2で状態・出力の保持と再試行を確認しました。詳しくは[NICKEL_SOC.md](NICKEL_SOC.md)を参照してください。
+
+SOCはCPUでk点・軌道・空間並列を利用できます。空間並列は直交セルと対応する計算ライブラリが必要です。
+`checked`は対応する数値異常から状態と出力を保持して復帰し、`performance`は明示的な保護から復元できます。
+対応条件と実行例は[NICKEL_SOC.md](NICKEL_SOC.md)を参照してください。

@@ -30,7 +30,12 @@ def open_model(gs,dt,max_steps):
     gs._live();session=gs.session;comm=session.comm;error=None
     if _scalar(_input_groups(gs._input_text).get('system',''),'yn_spinorbit','n').lower()=='y':
         field=gs.scf_spin_field['field_au']
-        _agree(comm,'Set the auxiliary spin field to zero and reconverge before TDDFT' if any(field) else None)
+        error=None
+        from ._shared_tddft import _check_soc_decomposition
+        try:_check_soc_decomposition(True,session.backend.decomposition,session.lib)
+        except InputError as exc:error=str(exc)
+        if error is None and any(field):error='Set the auxiliary spin field to zero and reconverge before TDDFT'
+        _agree(comm,error)
     try:
         dt=_positive(dt,'dt');count=_integer(max_steps,'max_steps',1,2**31-2)
         if getattr(session.backend,'_ordinary_rt',False):

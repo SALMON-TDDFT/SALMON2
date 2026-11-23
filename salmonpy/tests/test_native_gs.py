@@ -19,6 +19,24 @@ class NativeGSTests(unittest.TestCase):
             with self.subTest(value=value),self.assertRaisesRegex(InputError,'three finite real'):
                 state.set_scf_spin_field(value)
 
+        from salmonpy._shared_tddft import _check_soc_decomposition
+        _check_soc_decomposition(False,(1,1,2,1,1),SimpleNamespace())
+        _check_soc_decomposition(True,(2,2,1,1,1),SimpleNamespace())
+        from unittest.mock import Mock
+        for value in (0,2):
+            with self.assertRaisesRegex(InputError,'SOC spatial MPI'):
+                _check_soc_decomposition(True,(1,1,2,1,1),SimpleNamespace(sp_tddft_soc_spatial_protocol=Mock(return_value=value)))
+        _check_soc_decomposition(True,(1,1,2,1,1),SimpleNamespace(sp_tddft_soc_spatial_protocol=Mock(return_value=1)))
+        from salmonpy._gs_tddft import open_model
+        for spatial in ((2,1,1),(1,2,1),(1,1,2)):
+            backend=SimpleNamespace(decomposition=(1,1,*spatial))
+            session=SimpleNamespace(lib=SimpleNamespace(),backend=backend,comm=SimpleNamespace(allgather=lambda value:[value,value]))
+            gs=SimpleNamespace(_live=lambda:None,session=session,
+                _input_text="&system yn_spinorbit='y' /",scf_spin_field={'field_au':[0.,0.,0.]})
+            # No native library exists in the fake session: reject before any physics initialization.
+            with self.subTest(spatial=spatial),self.assertRaisesRegex(InputError,'SOC.*spatial MPI'):
+                open_model(gs,.001,4)
+
     def test_scf_stream_contract_uses_session_library(self):
         from types import SimpleNamespace
         from salmonpy.native_gs import _scf_runtime_contract

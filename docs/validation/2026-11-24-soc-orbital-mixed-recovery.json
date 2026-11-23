@@ -1,0 +1,212 @@
+{
+  "date": "2026-11-24",
+  "status": "passed",
+  "runtime_sha256": "5c09e3cbb7582388d0f8ba12451e4bc954eaacfedc6680252b69198772d4bb06",
+  "runtime_rebuilt": false,
+  "source_and_object_audit_repeated_at_job_start": false,
+  "verification": "recorded immutable runtime SHA checked by NativeGSBackend",
+  "scope": "CPU, local Mac, one OpenMP thread/rank; same-layout SOC ownership, production overflow and handled-host-exception retry. Short SCF4 software fixture, not material convergence.",
+  "cases": {
+    "orbital_checked": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-orbital-checked-final-20261124",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 2,
+        "decomposition": [
+          1,
+          2,
+          1,
+          1,
+          1
+        ],
+        "atoms": 1,
+        "electrons": 18,
+        "states": 36,
+        "kmesh": [
+          2,
+          2,
+          2
+        ],
+        "temperature_k": 300,
+        "conventional_cell": false,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "GS_exported": false,
+        "execution_mode": "checked",
+        "deep_cases": [
+          "production-overflow"
+        ],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "sha256": "90cc6a916f2fd55ea135e6bdbcc5f951f31e9bb327b771e0741eb9d4c267243f",
+      "log_sha256": "e2292678ea4201602e192e5b01df0ca02a10e73d3d1dac13661805d075ebc502"
+    },
+    "orbital_performance": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-orbital-performance-20261124",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 2,
+        "decomposition": [
+          1,
+          2,
+          1,
+          1,
+          1
+        ],
+        "atoms": 1,
+        "electrons": 18,
+        "states": 36,
+        "kmesh": [
+          2,
+          2,
+          2
+        ],
+        "temperature_k": 300,
+        "conventional_cell": false,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "GS_exported": false,
+        "execution_mode": "performance",
+        "deep_cases": [],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "sha256": "0181840a04075bb99d5a8bcf83964d7a3b02e36cf5accdcbb4b672fe839bb499",
+      "log_sha256": "d7b1b2a893ee452f8ec0a047be195c984714ae68d4f97bebb9ce0f96f12f1b2c"
+    },
+    "mixed_checked": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-k-orbital-checked-20261124",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 4,
+        "decomposition": [
+          2,
+          2,
+          1,
+          1,
+          1
+        ],
+        "atoms": 1,
+        "electrons": 18,
+        "states": 36,
+        "kmesh": [
+          2,
+          2,
+          2
+        ],
+        "temperature_k": 300,
+        "conventional_cell": false,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "GS_exported": false,
+        "execution_mode": "checked",
+        "deep_cases": [
+          "production-overflow"
+        ],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "sha256": "124139f333ccdfd5a6769ad0ba68213513f56f4584924a466f4e5e1874187bdb",
+      "log_sha256": "971e703f66258b634209bef018ec5030786503fc778a7cc784a3eac387e3dca6"
+    },
+    "mixed_performance": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-k-orbital-performance-final-20261124",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 4,
+        "decomposition": [
+          2,
+          2,
+          1,
+          1,
+          1
+        ],
+        "atoms": 1,
+        "electrons": 18,
+        "states": 36,
+        "kmesh": [
+          2,
+          2,
+          2
+        ],
+        "temperature_k": 300,
+        "conventional_cell": false,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "GS_exported": false,
+        "execution_mode": "performance",
+        "deep_cases": [],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "sha256": "00d71a58e637e47d99a6eff17176bc68c08d4913893f0987172c34f424d60eb1",
+      "log_sha256": "05bc0a605736b91a2cedab103d89dddfa4a8959159aac9e358fa87a490f71226"
+    },
+    "spatial_safe_rejection": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-spatial-safe-reject-20261124",
+      "result": {
+        "status": "passed",
+        "expected_rejection": "['SOC TDDFT spin-current output does not support spatial MPI yet; use k-point and/or orbital MPI splitting', 'SOC TDDFT spin-current output does not support spatial MPI yet; use k-point and/or orbital MPI splitting']",
+        "SOC_spatial_TDDFT_supported": false,
+        "decomposition": [
+          1,
+          1,
+          2,
+          1,
+          1
+        ],
+        "MPI_caller_survives": true,
+        "GS_preserved": true,
+        "GS_exported": false
+      },
+      "sha256": "76468e3b29a44c4c58d162fe4582817f941431fa80a78f8b2114843aa59a5cfb",
+      "log_sha256": "e65efe5332126dbc044be4c0599b0125c0eed7b6a837a6ccb9a0dea459f250f8"
+    }
+  },
+  "earlier_failures_preserved": {
+    "salmonpy-ni-soc-spatial-checked-20261124": {
+      "reason": "nonorthogonal primitive cell cannot use spatial MPI",
+      "log_sha256": "299525bcf01046d017c5a024fa967b382c7502fb3a9853fe72f5ec4bc17ea39a"
+    },
+    "salmonpy-ni-soc-spatial-cubic-checked-20261124": {
+      "reason": "fixture generation used an incorrect Python field name; fixed to numbers",
+      "log_sha256": "9d9f22a6e076547d5a45cf807f4bfcf1e77589956bb054d4f1bf9af8a91f8f07"
+    },
+    "salmonpy-ni-soc-spatial-cubic-checked-v2-20261124": {
+      "reason": "built-in spatial noncollinear spin current not implemented",
+      "log_sha256": "259bf0ebb0fca60cea2ccccc9d8410e352abe3c6277cb2b4a5542f489dd4d9b2"
+    },
+    "salmonpy-ni-soc-spatial-cubic-performance-20261124": {
+      "reason": "same spatial spin-current implementation limit",
+      "log_sha256": "72a244253e0c42a53b4efabb18d8490ea00a4340e53534ddeb545ae3c8e6f8c3"
+    }
+  },
+  "spatial_SOC_supported": false,
+  "shared_admission": "same predicate on retained GS, initial bundle and model-registry entry points; no change to scalar spatial MPI or user backends",
+  "coverage_limits": [
+    "no multi-node or Fujitsu run",
+    "no MPI-layout-changing SOC restart",
+    "no full fault-injection20..24 sweep for the added layouts",
+    "no fast-HSE SOC",
+    "no physical grid/k/dt convergence claim"
+  ],
+  "unit_tests": 31,
+  "wheel_tests": {
+    "total": 729,
+    "passed": 684,
+    "skipped": 45,
+    "log": "/private/tmp/salmonpy-soc-layout-wheel-20261124/tests.log",
+    "sdist_to_wheel_verified": true
+  },
+  "GS_datasets_saved": false,
+  "remote_CI_dispatched": false
+}

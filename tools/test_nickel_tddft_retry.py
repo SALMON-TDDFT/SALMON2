@@ -4,7 +4,7 @@ Launch SIZE ranks with an audited runtime. GS stays in memory; only normal
 logs/streams and scalar evidence are retained. Unconverged GS is software-only.
 """
 import argparse
-from dataclasses import fields
+from dataclasses import fields,replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +29,19 @@ class SpinProbeDFT(InMemoryDFT):
 
 
 
+def check_pauli_zero(state):
+    """Pauli identity-channel current must equal native matter current Jm."""
+    from salmonpy.outputs import read_spin_dynamics
+    from salmonpy.analysis import read_table
+    spin=read_spin_dynamics(state.work/next(n for n in state.output_files if n.endswith('_rt_spin.data')))
+    current=read_table(state.work/next(n for n in state.output_files if n.endswith('_rt.data')))
+    times,si,ci=np.intersect1d(spin.time,current.column('Time'),return_indices=True)
+    if len(times)!=len(current.values):raise AssertionError('missing matching spin/current times')
+    values=np.column_stack([current.column('Jm_'+axis) for axis in ('x','y','z')])[ci]
+    np.testing.assert_allclose(spin.pauli_current[si,0,:],values,rtol=2e-12,atol=2e-14,equal_nan=False)
+    return float(np.max(np.abs(spin.pauli_current[si,0,:]-values)))
+
+
 def close_output_probe(gs,comm):
     """Read completed spin streams while the calling program remains attached."""
     from salmonpy.outputs import read_spin_dynamics
@@ -44,6 +57,7 @@ def close_output_probe(gs,comm):
                     name=next(n for n in first.output_files if n.endswith('_rt_spin.data'))
                     spin=read_spin_dynamics(first.work/name)
                     if len(spin.time)!=5:raise AssertionError('missing final spin observations after close')
+                    check_pauli_zero(first)
                 except Exception as exc:error=type(exc).__name__+': '+str(exc)
             errors=comm.allgather(error)
             if any(errors):raise AssertionError('SOC close output probe: '+str(errors))
@@ -55,6 +69,7 @@ def close_output_probe(gs,comm):
                         raise AssertionError('closed sibling output changed')
                     name=next(n for n in sibling.output_files if n.endswith('_rt_spin.data'))
                     if len(read_spin_dynamics(sibling.work/name).time)!=5:raise AssertionError('sibling final spin observations missing')
+                    check_pauli_zero(sibling)
                 except Exception as exc:error=type(exc).__name__+': '+str(exc)
             errors=comm.allgather(error)
             if any(errors):raise AssertionError('SOC sibling close probe: '+str(errors))
@@ -70,21 +85,33 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('build',type=Path);p.add_argument('output',type=Path)
     p.add_argument('--potential',type=Path,required=True)
-    p.add_argument('--size',type=int,choices=(1,2),default=1)
+    p.add_argument('--size',type=int,default=1)
     p.add_argument('--execution-mode',choices=('checked','performance'),default='checked')
+    p.add_argument('--decomposition',type=int,nargs=5,metavar=('K','ORBITAL','X','Y','Z'),help='explicit internal MPI split; product must equal size')
+    p.add_argument('--expect-spatial-rejection',action='store_true',help='verify unsupported SOC spatial TDDFT is rejected while MPI and retained GS survive')
+    p.add_argument('--conventional-cell',action='store_true',help='cubic fcc Ni: 4 atoms, 72 electrons, 144 spinors for spatial MPI tests')
+    p.add_argument('--numerical-overflow',action='store_true',help='checked production build: recover from an overflowing finite A')
     p.add_argument('--close-outputs',action='store_true',help='normal close must finalize SOC output without transaction or explicit flush')
     p.add_argument('--deep-faults',action='store_true',help='requires explicit SALMONPY_RECOVERY_TESTING build')
     args=p.parse_args();comm=MPI.COMM_WORLD
-    if args.deep_faults and args.execution_mode!='checked':p.error('deep faults require checked mode')
+    if (args.deep_faults or args.numerical_overflow) and args.execution_mode!='checked':p.error('numerical failure probes require checked mode')
+    from math import prod
+    decomposition=tuple(args.decomposition) if args.decomposition is not None else (args.size,1,1,1,1)
+    if min(decomposition)<1 or prod(decomposition)!=args.size:p.error('positive MPI decomposition with product equal to size required')
     if comm.size!=args.size:raise ValueError('MPI size mismatch')
+    if prod(decomposition[2:])>1 and not args.conventional_cell:p.error('spatial test requires --conventional-cell; SALMON does not support spatial splitting of the primitive nonorthogonal cell')
     if comm.rank==0:args.output.mkdir(parents=True,exist_ok=False)
     comm.Barrier()
     pp=Pseudopotential.from_file(args.potential,atomic_number=28,local_channel=2,
                                reference=catalog_reference('pseudodojo-pbe-0.4-fr-standard-ni'))
-    base=nickel_model(pp);calc=SpinProbeDFT(**{f.name:getattr(base,f.name) for f in fields(DFT)})
+    base=nickel_model(pp)
+    if args.conventional_cell:
+        base=replace(base,numbers=[28]*4,cell=np.eye(3)*(2*base.cell[0,1]),
+                     fractional_positions=[[0,0,0],[0,.5,.5],[.5,0,.5],[.5,.5,0]],electrons=72,states=144)
+    calc=SpinProbeDFT(**{f.name:getattr(base,f.name) for f in fields(DFT)})
     scf=SCFSettings(max_iterations=12,tolerance=1e-12,mixing_method='simple_dm',mixing_rate=.2,
                    initial_wavefunction='random',random_seed=0)
-    backend=NativeGSBackend(args.build,args.output,decomposition=(args.size,1,1,1,1))
+    backend=NativeGSBackend(args.build,args.output,decomposition=decomposition)
     context=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
     def drive(i):return np.array([1e-5*np.sin(.3*i),7e-6*(np.cos(.2*i)-1),1e-5*np.sin(.17*i)])
     def target(state):
@@ -97,6 +124,23 @@ def main():
     def rows(path):return [line for line in path.read_text().splitlines() if line.strip() and not line.startswith('#')]
     with backend.open(context) as session:
         with session.run(calc,scf=scf,steps=4,material_id='ni-soc-retry-probe') as gs:
+            if args.expect_spatial_rejection:
+                from salmonpy.errors import InputError
+                before=gs.scf_status.copy();density=gs.array('density').values.copy();message=None
+                try:
+                    with gs.tddft_model(dt=.001,max_steps=8):pass
+                except InputError as exc:
+                    if 'SOC' not in str(exc) or 'spatial MPI' not in str(exc):raise
+                    message=str(exc)
+                else:raise AssertionError('unsupported spatial SOC TDDFT was not rejected')
+                if comm.allreduce(comm.rank+1)!=comm.size*(comm.size+1)//2:raise AssertionError('caller MPI unavailable')
+                if before!=gs.scf_status:raise AssertionError('rejection changed GS counters')
+                np.testing.assert_array_equal(density,gs.array('density').values)
+                if comm.rank==0:
+                    result={'status':'passed','expected_rejection':message,'SOC_spatial_TDDFT_supported':False,
+                            'decomposition':list(decomposition),'MPI_caller_survives':True,'GS_preserved':True,'GS_exported':False}
+                    (args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                return
             if args.close_outputs:
                 result=close_output_probe(gs,comm)
                 if comm.rank==0:(args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n')
@@ -111,6 +155,22 @@ def main():
                     old_A=retry.A.copy();old_j=retry.current.copy();old_n=retry.electron_number
                     expected_first=control.step(drive(1))
                     cases=[]
+                    if args.numerical_overflow:
+                        from salmonpy.errors import NumericalError
+                        token=targets[0].capture()
+                        try:
+                            try:retry.step(np.array([1e100,0.,0.]))
+                            except NumericalError:pass
+                            else:raise AssertionError('overflow did not return a numerical error')
+                            if retry.steps!=0 or retry.failed:raise AssertionError('overflow changed state flags')
+                            np.testing.assert_array_equal(retry.A,old_A)
+                            np.testing.assert_array_equal(retry.current,old_j)
+                            if retry.electron_number!=old_n:raise AssertionError('overflow changed electron count')
+                            if comm.rank==0 and data(retry)!=before:raise AssertionError('overflow changed output')
+                            np.testing.assert_array_equal(retry.step(drive(1)),expected_first)
+                            cases.append('production-overflow')
+                        finally:
+                            targets[0].rollback(token);targets[0].release(token)
                     if args.deep_faults:
                         import ctypes as c
                         from salmonpy.errors import NumericalError
@@ -169,6 +229,7 @@ def main():
                             raise AssertionError('spin stream is not owned by rollback')
                         from salmonpy.outputs import read_spin_dynamics
                         for a,b in ((retry,control),(sibling,sibling_control)):
+                            check_pauli_zero(a);check_pauli_zero(b)
                             for x,y in zip(a.output_files,b.output_files):
                                 if rows(a.work/x)!=rows(b.work/y):raise AssertionError('stream differs: '+x)
                                 if x.endswith('_rt_spin.data'):
@@ -179,9 +240,10 @@ def main():
                 finally:
                     for state in (sibling_control,sibling,retry,control):state.close()
     if comm.rank==0:
-        result={'status':'passed','MPI_ranks':args.size,'state_preserved':True,
+        result={'status':'passed','MPI_ranks':args.size,'decomposition':list(decomposition),'atoms':len(calc.numbers),'electrons':calc.electrons,'states':calc.states,
+                'kmesh':list(map(int,calc.kmesh)),'temperature_k':300,'conventional_cell':args.conventional_cell,'state_preserved':True,
                 'all_three_streams_byte_preserved':True,'retry_currents_and_streams_exact':True,
-                'sibling_unaffected':True,'GS_exported':False,'execution_mode':args.execution_mode,
+                'sibling_unaffected':True,'Pauli0_matches_matter_current':True,'GS_exported':False,'execution_mode':args.execution_mode,
                 'deep_cases':cases,'performance_skips_stage_checks':args.deep_faults,
                 'scope':'checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery'}
         (args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n')

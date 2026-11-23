@@ -48,3 +48,6 @@ Current and spin files can have different sampling times, strides and initial sa
 Their time axes remain separate: there is no row-number alignment or interpolation.
 Restart output segments are not automatically stitched. Read completed output files,
 not files being written concurrently by another process.
+
+The Pauli identity channel matches native matter current Jm at matching times and units. Python charge current is j=-Jm.
+See [NICKEL_SOC.en.md](NICKEL_SOC.en.md) for reading outputs and supported conditions.

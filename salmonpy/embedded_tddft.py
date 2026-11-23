@@ -160,11 +160,12 @@ class NativeTDDFTBackend:
             if _manifest(initial.directory)!=initial.manifest: raise InputError('initial bundle changed')
             if _digest(self.library)!=self.sha256: raise InputError('native library changed')
             if shared:
-                from ._shared_tddft import _profile,_configure,_spin_orbit
+                from ._shared_tddft import _profile,_configure,_spin_orbit,_check_soc_decomposition
                 from .fast_hse import _positive
                 if self.work_root.is_relative_to(initial.directory):raise InputError('work root must be outside the initial bundle')
                 dt=_positive(dt,'dt');base=_profile(initial)
             lib=c.CDLL(str(self.library))
+            if shared:_check_soc_decomposition(_spin_orbit(initial),self.decomposition,lib)
             if shared:_configure(lib)
             from .api import _bind_state_operations
             _bind_state_operations(lib,'tddft',route='single')

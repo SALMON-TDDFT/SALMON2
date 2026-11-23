@@ -226,3 +226,42 @@ GSの反復をやり直したり、電子状態をディスク保存したりは
 ### SOC出力の通常終了の検査
 
 `tools/test_nickel_tddft_retry.py BUILD_JSON NEW_OUTPUT --potential PINNED_NI_UPF --size 2 --close-outputs` をMPI2ランクで明示的に実行すると、通常終了だけでステップ0～4のスピン出力5行が読み取れることと、兄弟状態の出力が維持されることを確認します。これは短い未収束GSを使うソフトウェア試験です。追加の書き出し同期や保護用バックアップは使いません。2026-11-24に内部MPI1/2で成功し、修正前後の電流行は完全一致しました。
+
+## SOCの軌道・混合MPI並列（2026-11-24）
+
+Niの固定入力（18電子・36状態・300 K・SALMONの2×2×2 k点）で、内部MPI分割 `(k, 軌道, x, y, z)` を次のように検証しました。
+
+- `(1, 2, 1, 1, 1)`：軌道並列2ランク。
+- `(2, 2, 1, 1, 1)`：k点×軌道の混合並列4ランク。
+
+監査付きでは有限の大きなA/cを入力して実際の数値オーバーフローを起こし、元のA・電流・電子数・出力が保たれること、通常の入力で再試行すると独立な対照と一致することを確認しました。性能モードは数値異常を自動検査せず、明示的に保護したホスト例外からの復元・再試行を検証しています。電流・磁化・スピン流の5観測行と兄弟状態の独立性も確認済みです。短い未収束GSによるソフトウェア検証で、物理的な収束の証明ではありません。電子状態ファイルは保存しません。
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python tools/test_nickel_tddft_retry.py \
+  BUILD_JSON NEW_OUTPUT --potential PINNED_NI_UPF --size 4 \
+  --decomposition 2 2 1 1 1 --numerical-overflow
+```
+
+性能モードを試す場合は `--numerical-overflow` を外して `--execution-mode performance` を指定します。この検証ツールにランク数2の上限はなく、指定した分割の積と起動ランク数が一致する必要があります。
+
+### CPUの空間並列（直交セル）
+
+CPUの計算ライブラリでは空間分割した非局所射影を合算し、スピン流を計算できます。
+`sp_tddft_soc_spatial_protocol()` が1を返すことをPythonが確認し、対応していないライブラリは初期化前に拒否します。
+GPU版は0を返し、今回の対象外です。斜交したNi基本セルの空間分割はSALMON自体の対応外なので、立方fccセルを使います。
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 2 python tools/test_nickel_tddft_retry.py \
+  BUILD_JSON NEW_OUTPUT --potential PINNED_NI_UPF --size 2 \
+  --decomposition 1 1 2 1 1 --conventional-cell --numerical-overflow
+```
+
+立方セルの試験は4原子・72電子・144状態・300 K・2×2×2 k点・16³格子です。
+x方向とy方向の空間2分割で、Pauli0と物質電流Jmの一致、実オーバーフロー後の状態と出力の保持、通常入力での再試行を確認しました。
+性能モードは明示的な保護からの復元を確認しています。`--decomposition 1 1 1 2 1` でy方向へ切り替えられます。
+
+### 出力の確認
+
+Pauliの0成分は、同じ時刻・単位の物質電流Jmと一致します。Pythonの電荷電流はj=-Jmです。
+磁化とスピン流はそれぞれの時刻配列と単位を保持して読み取ってください。
+研究計算では、格子幅・k点・時間刻み・計算時間の収束を目的とする観測量で確認します。

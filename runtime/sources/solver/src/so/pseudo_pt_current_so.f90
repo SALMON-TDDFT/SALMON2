@@ -23,7 +23,7 @@ module pseudo_pt_current_so
   private
   public :: calc_current_nonlocal_so
   public :: calc_current_nonlocal_rdivided_so
-  public :: calc_spin_current_nonlocal
+  public :: calc_spin_current_nonlocal,calc_spin_current_nonlocal_rdivided
 
 contains
 
@@ -246,6 +246,74 @@ contains
   end subroutine calc_current_nonlocal_rdivided_so
   
   
+  ! Separate projection and position contractions to make the complex sums
+  ! independent of compiler handling of the original combined expression.
+  subroutine spin_projector_overlap(overlap,psi,ppg,is_array,ie_array,ik)
+    use structures,only:s_pp_grid
+    implicit none
+    integer,intent(in)::is_array(3),ie_array(3),ik
+    type(s_pp_grid),intent(in)::ppg
+    complex(8),intent(in)::psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3),2)
+    complex(8),intent(out)::overlap(size(ppg%ia_tbl_so))
+    complex(8)::eu,ed
+    integer::ilma,ia,j,jx,jy,jz
+    overlap=(0d0,0d0)
+!$omp parallel do private(ilma,ia,j,jx,jy,jz,eu,ed)
+    do ilma=1,size(ppg%ia_tbl_so)
+      ia=ppg%ia_tbl_so(ilma)
+      do j=1,ppg%mps(ia)
+        jx=ppg%jxyz(1,j,ia);jy=ppg%jxyz(2,j,ia);jz=ppg%jxyz(3,j,ia)
+        eu=conjg(ppg%zekr_uv_so(j,ilma,ik,1,1));ed=conjg(ppg%zekr_uv_so(j,ilma,ik,2,1))
+        overlap(ilma)=overlap(ilma)+eu*psi(jx,jy,jz,1)+ed*psi(jx,jy,jz,2)
+      enddo
+    enddo
+  end subroutine
+
+  subroutine spin_projector_current(jspin,overlap,psi,ppg,is_array,ie_array,ik)
+    use structures,only:s_pp_grid
+    implicit none
+    integer,intent(in)::is_array(3),ie_array(3),ik
+    type(s_pp_grid),intent(in)::ppg
+    complex(8),intent(in)::psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3),2)
+    complex(8),intent(in)::overlap(size(ppg%ia_tbl_so))
+    real(8),intent(out)::jspin(3,0:3)
+    complex(8)::eu,ed,pu,pd,sig(0:3),position_overlap(3,0:3)
+    complex(8),parameter::zi=(0d0,1d0)
+    integer::ilma,ia,j,jx,jy,jz,d
+    jspin=0d0
+!$omp parallel do private(ilma,ia,j,jx,jy,jz,eu,ed,pu,pd,sig,position_overlap,d) reduction(+:jspin)
+    do ilma=1,size(ppg%ia_tbl_so)
+      ia=ppg%ia_tbl_so(ilma);position_overlap=(0d0,0d0)
+      do j=1,ppg%mps(ia)
+        jx=ppg%jxyz(1,j,ia);jy=ppg%jxyz(2,j,ia);jz=ppg%jxyz(3,j,ia)
+        eu=conjg(ppg%zekr_uv_so(j,ilma,ik,1,1));ed=conjg(ppg%zekr_uv_so(j,ilma,ik,2,1))
+        pu=psi(jx,jy,jz,1);pd=psi(jx,jy,jz,2)
+        sig(0)=eu*pu+ed*pd;sig(1)=eu*pd+ed*pu
+        sig(2)=-zi*(eu*pd-ed*pu);sig(3)=eu*pu-ed*pd
+        do d=1,3
+          position_overlap(d,:)=position_overlap(d,:)+ppg%rxyz(d,j,ia)*sig(:)
+        enddo
+      enddo
+      jspin=jspin+2d0*aimag(conjg(position_overlap)*overlap(ilma)*ppg%rinv_uvu_so(ilma))
+    enddo
+  end subroutine
+
+  ! Complete overlap within a spatial group, retain local coordinate terms.
+  ! The existing RKO sum in calc_spin_current performs the final aggregation.
+  subroutine calc_spin_current_nonlocal_rdivided(jspin,psi,ppg,is_array,ie_array,ik,icomm_r)
+    use structures,only:s_pp_grid
+    use communication,only:comm_summation
+    implicit none
+    integer,intent(in)::is_array(3),ie_array(3),ik,icomm_r
+    type(s_pp_grid),intent(in)::ppg
+    complex(8),intent(in)::psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3),2)
+    real(8),intent(out)::jspin(3,0:3)
+    complex(8)::overlap(size(ppg%ia_tbl_so)),summed(size(ppg%ia_tbl_so))
+    call spin_projector_overlap(overlap,psi,ppg,is_array,ie_array,ik)
+    call comm_summation(overlap,summed,size(overlap),icomm_r)
+    call spin_projector_current(jspin,summed,psi,ppg,is_array,ie_array,ik)
+  end subroutine calc_spin_current_nonlocal_rdivided
+
   subroutine calc_spin_current_nonlocal( jspin, psi, ppg, is_array, ie_array, ik )
     !$acc routine worker
     use structures, only: s_pp_grid
@@ -264,6 +332,14 @@ contains
     complex(8) :: uVpsi0,uVpsi_r(3,0:3),jtmp(3,0:3)
     real(8) :: j0_x,j0_y,j0_z, j1_x,j1_y,j1_z, j2_x,j2_y,j2_z, j3_x,j3_y,j3_z
 
+#ifndef USE_OPENACC
+    block
+      complex(8)::overlap(size(ppg%ia_tbl_so))
+      call spin_projector_overlap(overlap,psi,ppg,is_array,ie_array,ik)
+      call spin_projector_current(jspin,overlap,psi,ppg,is_array,ie_array,ik)
+    end block
+
+#else
     Nlma = size(ppg%ia_tbl_so)
 
     j0_x = 0d0
@@ -365,6 +441,7 @@ contains
     jspin(2,3) = j3_y
     jspin(3,3) = j3_z
     return
+#endif
   end subroutine calc_spin_current_nonlocal
 
 end module pseudo_pt_current_so

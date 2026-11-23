@@ -225,3 +225,37 @@ Converged-GS trial on2026-11-24: internal MPI2 × 4 threads passed mode and step
 ### Normal SOC output closure
 
 Run `tools/test_nickel_tddft_retry.py BUILD_JSON NEW_OUTPUT --potential PINNED_NI_UPF --size 2 --close-outputs` explicitly with MPI2 ranks to verify that normal closure alone makes all five spin rows for steps0..4 readable and preserves closed sibling streams. This short software probe uses an unconverged GS, without an additional flush or protective backup. Internal MPI1/2 passed on2026-11-24; pre/post-fix current rows matched exactly.
+
+## SOC orbital and mixed MPI validation (2026-11-24)
+
+The fixed Ni input uses18 electrons,36 states,300 K and SALMON's2×2×2 k mesh. Internal `(k, orbital, x, y, z)` layouts tested are `(1,2,1,1,1)` with2 ranks and `(2,2,1,1,1)` with4 ranks. Checked mode verifies recovery from an actual overflow caused by a large finite A/c: accepted A, current, electron number and output remain intact, and a normal retry matches an independent control. Performance mode does not automatically detect numerical faults; it verifies explicit rollback after a handled host exception. Charge current, magnetization, spin current and sibling isolation are checked. Five spin samples are compared. These are software checks using a short unconverged GS, not physical convergence tests; electronic state files are not saved.
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python tools/test_nickel_tddft_retry.py \
+  BUILD_JSON NEW_OUTPUT --potential PINNED_NI_UPF --size 4 \
+  --decomposition 2 2 1 1 1 --numerical-overflow
+```
+
+For performance mode, replace `--numerical-overflow` with `--execution-mode performance`. The test tool no longer caps rank counts at2; the decomposition product must match the launched rank count.
+
+### CPU spatial SOC with orthogonal cells
+
+The CPU calculation library aggregates distributed nonlocal projector overlaps and computes spatial spin current.
+Python requires `sp_tddft_soc_spatial_protocol()` to return1 before enabling this layout; unsupported libraries are rejected before initialization.
+GPU builds return0 and are outside this validation. SALMON does not support spatial splitting of the nonorthogonal primitive Ni cell; use cubic fcc Ni.
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 2 python tools/test_nickel_tddft_retry.py \
+  BUILD_JSON NEW_OUTPUT --potential PINNED_NI_UPF --size 2 \
+  --decomposition 1 1 2 1 1 --conventional-cell --numerical-overflow
+```
+
+The cubic test has4 atoms,72 electrons,144 states,300 K,2×2×2 k points and a16³ grid.
+Two-way x and y spatial splits verify Pauli0 versus matter current Jm, actual overflow recovery, output preservation and normal retry.
+Performance mode verifies explicit protected rollback. Use `--decomposition 1 1 1 2 1` for y splitting.
+
+### Checking outputs
+
+The Pauli identity channel matches native matter current Jm at matching times and units. Python charge current is j=-Jm.
+Read magnetization and spin current with their own time arrays and units.
+For research calculations, check grid, k-point, timestep and simulation-duration convergence for the observable of interest.

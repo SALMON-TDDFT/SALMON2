@@ -199,3 +199,6 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 保存配列は `time_current`・`charge_current`・`time_spin`・`magnetization`・`spin_current`・`pauli_current` です。
 電流とスピンでサンプル数が違う場合も、別の時刻配列を保持します。時間ステップを再開した出力の接合は自動で行いません。
 同じ状態を別のプロセスが書き込み中のファイルは読み取らず、書き出し完了後のファイルを渡してください。
+
+Pauliの0成分は、同じ時刻・単位の物質電流Jmと一致します。Pythonの電荷電流はj=-Jmです。
+出力の読み取り方と対応条件は[NICKEL_SOC.md](NICKEL_SOC.md)を参照してください。

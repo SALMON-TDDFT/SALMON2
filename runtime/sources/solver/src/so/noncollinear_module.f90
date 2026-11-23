@@ -631,7 +631,7 @@ contains
   subroutine calc_spin_current(system,mg,stencil,info,psi,ppg,spin_curr_micro,spin_curr_band)
     use structures
     use communication, only: comm_summation
-    use pseudo_pt_current_so, only: calc_spin_current_nonlocal
+    use pseudo_pt_current_so, only: calc_spin_current_nonlocal,calc_spin_current_nonlocal_rdivided
     use stencil_sub, only: calc_gradient_psi
     implicit none
     type(s_dft_system)   ,intent(in) :: system
@@ -655,10 +655,12 @@ contains
                        & ,mg%is_array(2):mg%ie_array(2) &
                        & ,mg%is_array(3):mg%ie_array(3),2)
 
-    if(info%if_divide_rspace) then
-    !!!! future work
-      stop ("calc_spin_current_density: r-space parallelization for spin-noncollinear systems is not implemented")
-    end if
+#ifdef USE_OPENACC
+    if(info%if_divide_rspace)error stop 'spatial SOC spin current: OpenACC implementation not validated'
+#endif
+    ! Real-time callers compute charge current first, refreshing psi halos via
+    ! update_overlap_complex8 before these gradients. No extra halo exchange.
+
 
     wrk_micro = 0d0
     wrk_band = 0d0
@@ -694,7 +696,12 @@ contains
       end do
       end do
       
-      call calc_spin_current_nonlocal(jspin_nl,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik )
+      if(info%if_divide_rspace)then
+        call calc_spin_current_nonlocal_rdivided(jspin_nl,psi%zwf(:,:,:,:,io,ik,im),ppg, &
+          mg%is_array,mg%ie_array,ik,info%icomm_r)
+      else
+        call calc_spin_current_nonlocal(jspin_nl,psi%zwf(:,:,:,:,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+      endif
       wrk_band(:,:,io,ik) = ( jspin_l + jspin_nl ) / dble(system%ngrid)
       
     end do ! io

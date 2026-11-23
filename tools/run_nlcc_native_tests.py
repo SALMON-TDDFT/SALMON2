@@ -9,6 +9,7 @@ from pathlib import Path
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('build',type=Path);p.add_argument('output',type=Path)
 p.add_argument('--test',default='test_nlcc_xc_variation')
+p.add_argument('--compile-flag',action='append',default=[],help='explicit extra Fortran test compilation flag; retained in record')
 p.add_argument('--expect-failure',action='store_true')
 p.add_argument('--ranks',type=int,nargs='+',default=[1])
 p.add_argument('--input',type=Path,help='explicit stdin namelist for short solver tests')
@@ -25,7 +26,7 @@ a.output.mkdir(parents=True,exist_ok=False);out=a.output.resolve()
 obj=out/(a.test+'.o');exe=out/a.test
 link=shlex.split((build/'src/CMakeFiles/salmon.dir/link.txt').read_text())
 compiler=link[0]
-subprocess.run([compiler,'-cpp','-fopenmp','-ffree-line-length-none','-I'+str(build),'-c',
+subprocess.run([compiler,'-cpp','-fopenmp','-ffree-line-length-none','-I'+str(build),*a.compile_flag,'-c',
                 str(root/'tests/runtime'/(a.test+'.f90')),'-o',str(obj)],check=True)
 check('--object-tree',build/'src')
 check('--object-tree',out)
@@ -42,7 +43,8 @@ subprocess.run(cmd,cwd=build/'src',check=True)
 source_marker=Path(source)/'salmonpy-runtime-source.json'
 if not source_marker.is_file():source_marker=Path(source)/'salmonpy-hse-rt-state.json'
 source_spec=json.loads(source_marker.read_text())
-record={'test':a.test,'source_root':source,'executable_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),
+record={'test':a.test,'test_compile_flags':a.compile_flag,
+        'test_source_sha256':hashlib.sha256((root/'tests/runtime'/(a.test+'.f90')).read_bytes()).hexdigest(),'source_root':source,'executable_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),
         'runtime_executable_sha256':hashlib.sha256((build/'salmon').read_bytes()).hexdigest(),
         'runtime_source_patch_sha256':source_spec['patch_sha256'],
         'runtime_source_marker_sha256':hashlib.sha256(source_marker.read_bytes()).hexdigest(),

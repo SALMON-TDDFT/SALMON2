@@ -899,6 +899,15 @@ integer(c_int) function sp_tddft_step_transaction(mode) bind(C)
   sp_tddft_step_transaction=status
 end function
 
+! Local feature query; no MPI initialization or state selection required.
+integer(c_int) function sp_tddft_soc_spatial_protocol() bind(C)
+#ifdef USE_OPENACC
+  sp_tddft_soc_spatial_protocol=0
+#else
+  sp_tddft_soc_spatial_protocol=1
+#endif
+end function
+
 integer(c_int) function sp_tddft_error_protocol() bind(C)
   sp_tddft_error_protocol=1
 end function

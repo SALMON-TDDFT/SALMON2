@@ -125,6 +125,8 @@ class NativeTDDFTRegistry:
             if _manifest(initial.directory)!=initial.manifest:raise InputError('initial bundle changed')
             if _digest(self.backend.library)!=self.backend.sha256:raise InputError('native library changed')
             base=_profile(initial)
+            from ._shared_tddft import _check_soc_decomposition
+            _check_soc_decomposition(_spin_orbit(initial),dec,self.lib)
             descriptor=(initial.manifest,initial.input_file,dt,count,dec,execution_mode)
         except Exception as exc:error=str(exc)
         _agree(comm,error)

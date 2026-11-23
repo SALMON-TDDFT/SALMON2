@@ -16,6 +16,17 @@ def _agree(comm,error,runtime=False):
     if any(errors):raise (RuntimeFailure if runtime else InputError)(str(errors))
 
 
+def _check_soc_decomposition(spin_orbit,decomposition,library):
+    """Admit CPU spatial SOC only when explicitly declared by the library."""
+    if spin_orbit and any(n>1 for n in decomposition[2:]):
+        query=getattr(library,'sp_tddft_soc_spatial_protocol',None)
+        if query is None:
+            raise InputError('SOC spatial MPI requires a rebuilt CPU calculation library with spatial spin-current protocol1')
+        query.argtypes=[];query.restype=c.c_int
+        if query()!=1:
+            raise InputError('SOC spatial MPI is not declared for this calculation library; GPU spatial spin current is not validated')
+
+
 def _profile(initial):
     groups=_input_groups((initial.directory/initial.input_file).read_text())
     body='\n'.join(text for name,text in groups.items() if name not in ('atomic_coor','atomic_red_coor','reentrance'))

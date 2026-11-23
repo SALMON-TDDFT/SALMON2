@@ -287,3 +287,7 @@ For the added noncollinear SOC path see [Ni integration validation](NICKEL_SOC.e
 
 
 SOC `checked` mode now recovers supported deep numerical failures; `performance` omits diagnostic checks and automatic backups. Ni PBE k-point MPI1/2 verifies accepted-state/output preservation and retry. See [NICKEL_SOC.en.md](NICKEL_SOC.en.md).
+
+CPU SOC supports k-point, orbital and spatial MPI. Spatial MPI requires an orthogonal cell and a supporting calculation library.
+Checked mode preserves state and output on supported numerical failures; performance mode supports explicitly protected rollback.
+See [NICKEL_SOC.en.md](NICKEL_SOC.en.md) for conditions and examples.
