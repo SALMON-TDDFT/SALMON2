@@ -113,3 +113,7 @@ they are not yet implemented by this ASE entry.
 ### SOC input preparation
 
 `dft_from_atoms(..., spin_orbit=True)` constructs an SOC DFT model with fully relativistic NC-UPFs and spinor state-count checks. `prepare_dft` only stages the input. The `prepare_wse2_soc` example reads an explicit structure file. This does not establish SOC forces in Calculator, SOC band support or SOC `tddft_from_atoms`. See the current [Ni smoke-test scope](NICKEL_SOC.en.md).
+
+
+SOC input requires fully relativistic NC-UPFs for every element. Omitted states default to twice the electron count; use, for example, `electronic_temperature_k=300` for temperature. ASE initial magnetic moments and initial charges are not imported. SOC input generation does not imply SOC forces in ASE Calculator or SOC support in `tddft_from_atoms`.
+Structure conversion and calculation do not download potentials automatically. Obtain them explicitly beforehand with the [pseudopotential download interface](PSEUDOPOTENTIALS.en.md).

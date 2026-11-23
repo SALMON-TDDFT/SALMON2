@@ -273,7 +273,18 @@ Pythonは版付きの仕様と全ランク一致を確認できた拒否だけ�
 
 Pythonの `NativeTDDFTBackend` が返す状態の `advance(A_old,A_new)` は、版付き仕様と全ランク一致を確認できた復帰だけを `NumericalError` で通知します。`A` と `steps` はそのままで、原因を修正して同じ受理時刻から再試行できます。不正な波形を自動的に弱めたり、固定dtを変更したりしません。旧ライブラリや未知のエラーは `RuntimeFailure` の保守的な扱いを維持し、復帰を推定しません。
 
-対象は周期・非スピン分極・固定イオン・中点伝播のPZ、TB-mBJ（自動／固定係数）、Libxc-PZ/PBEです。SOC、+U、jellium、イオン運動／力出力、Gram–Schmidt、projection/unfold、microscopic Maxwell結合などの保護対象外設定は更新前に15を返します。標準バッチ計算は従来の演算経路を使います。既存の外部checkpoint形式も変更しません。メモリ退避・有限性検査の費用が毎ステップ増えるため、資源見積もりには余裕を残してください。予算は警告のみです。
+監査付きの`execution_mode="checked"`で、対応する計算ライブラリを使う場合の範囲です。
+
+| 電子状態 | 対応条件 |
+|---|---|
+| 非スピン分極 | 周期・固定イオン・中点伝播のPZ、TB-mBJ（自動／固定係数）、Libxc-PZ/PBE |
+| SOC・非共線スピン | 周期・固定イオン・CPUのPZ／Libxc-PZ/PBE。保持GSからの`gs.tddft_model(...)`など、SOC対応の入口を使う |
+
+SOCのSCFで補助磁場を使った場合は、TDDFTを始める前に`state.set_scf_spin_field([0., 0., 0.])`でゼロへ戻し、無磁場でSCFを続けて収束と残差・磁化の変化を確認してください。補助磁場が非ゼロのままでは`gs.tddft_model(...)`は開始を拒否します。磁場の解除だけでは無磁場の収束を確認したことにはなりません。手順は[NATIVE_GS.md](NATIVE_GS.md#socのscfを補助磁場で整える)を参照してください。
+
+SOCでも、対応する数値異常からの復帰は波動関数・密度・磁化／スピン流・電流出力を保持し、同じ完了ステップから再試行できます。CPU空間分割SOCには直交セルと`sp_tddft_soc_spatial_protocol()==1`が必要です。試験条件は[NICKEL_SOC.md](NICKEL_SOC.md)を参照してください。
+`execution_mode="performance"`では、この自動検査・自動復帰を保証しません。必要なら明示的な保護付きステップか保存状態へ戻します。
++U、jellium、イオン運動／力出力、Gram–Schmidt、projection/unfold、微視的Maxwell結合などの未対応設定には、この保証を適用しません。退避・検査のメモリと時間の費用を見込み、予算超過は警告として扱います。
 
 これはTDDFT群の状態保証です。FDTD・他の物質がすでに進んだ混在ステップ全体を自動巻き戻しする仕様ではありません。MPI／プロセス停止、確保失敗、未制御の外部ライブラリSTOP、初期化深部のSTOPや出力装置障害は未対応です。試験専用の一部ランク障害注入は `SALMONPY_RECOVERY_TESTING` を明示して別ビルドした場合のみで、本番ビルドには注入用C入口がありません。
 

@@ -1,6 +1,15 @@
 # GS配列の可搬アーカイブ（GS/2）
 
-`salmonpy.gs_archive` は、呼び出し側が用意したGS配列をZarr v3互換形式へ保存する部品です。`save_ground_state` と `GroundStateArchive.open` を使います。既存の `GroundStateResult`（`salmonpy.gs/1`）とは別の入口です。SALMONpy生成のΓ点GS/1からの明示的書き出しに対応します。SCFの再実行や収束の再認定は行いません。GS/2からのTDDFT初期化は、末尾のΓ点・専用変換器の条件で利用できます。
+`salmonpy.gs_archive.save_ground_state`はGS配列をZarr v3互換形式で保存し、`GroundStateArchive.open`で読みます。`GroundStateResult`の`salmonpy.gs/1`とは別の保存形式です。SCFの再実行や収束の再認定は行いません。
+
+| 入力・用途 | 使用する入口と条件 |
+|---|---|
+| GS配列を保存・読む | `save_ground_state`／`GroundStateArchive.open`。メタデータと配列の整合性を検査 |
+| Γ点のGS/1から書き出す・TDDFTへ渡す | `GammaRestartConverter`。下記の直列・単一軌道ファイルなどの条件を確認 |
+| 複数k点のGS/1から書き出す・TDDFTへ渡す | `SerialRestartConverter`。対応する変換器・計算プログラム・擬ポテンシャルを明示 |
+| 保持中のGSから書き出す・GS/2を読み込む | `NativeGSState.export_archive`／`NativeGSSession.load_archive`。保持GSガイドの通常k点メッシュの条件を確認 |
+
+各入口のスピン・MPI・ファイル形式の制約は以下の節と[NATIVE_GS.md](NATIVE_GS.md)で確認してください。複数k点対応はΓ点専用の変換器にも適用される、という意味ではありません。
 
 ## 合成配列での例
 

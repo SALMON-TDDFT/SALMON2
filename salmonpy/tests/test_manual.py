@@ -21,6 +21,36 @@ class ManualTest(unittest.TestCase):
         self.assertIn('同じMPI分割',guide)
         self.assertIn('円偏光',guide)
         self.assertIn('docs/development/',guide)
+        ja=files('salmonpy').joinpath('DFT.md').read_text(encoding='utf-8')
+        self.assertNotIn('UPFのPAW、ultrasoft、SOCは拒否',ja)
+        self.assertNotIn('擬ポテンシャルをダウンロードする処理はありません',ja)
+        self.assertIn('spin_orbit=True',ja)
+        self.assertIn('PSEUDOPOTENTIALS.md',ja)
+        for name in ('README.md','README.en.md'):
+            text=files('salmonpy').joinpath(name).read_text(encoding='utf-8')
+            self.assertIn('mpi_mixed_native',text)
+        self.assertIn('Configuration of this sample',files('salmonpy').joinpath('README.en.md').read_text(encoding='utf-8'))
+
+        retained=next(t for t in d['tasks'] if t['id']=='retained_native_gs')
+        constraints=' '.join(retained['constraints'])
+        self.assertNotIn('Full SCF checkpoints, SOC/+U/DC GS',constraints)
+        self.assertNotIn('legacy sources/default preparation',constraints)
+        self.assertIn('save_scf',constraints)
+        from salmonpy.native_gs import NativeGSState
+        self.assertTrue(callable(NativeGSState.set_scf_spin_field))
+        for id_ in ('checkpoint_compatibility','retained_native_gs','shared_standard_tddft','nickel_soc_smoke'):
+            task=next(t for t in d['tasks'] if t['id']==id_)
+            self.assertTrue(any('set_scf_spin_field([0., 0., 0.])' in c
+                                and 'continue SCF at zero field' in c for c in task['constraints']))
+
+        for name in ('GS_ARCHIVE.md','GS_ARCHIVE.en.md'):
+            text=files('salmonpy').joinpath(name).read_text(encoding='utf-8')
+            self.assertIn('SerialRestartConverter',text.split('```')[0])
+        for name in ('CHECKPOINTING.md','CHECKPOINTING.en.md'):
+            text=files('salmonpy').joinpath(name).read_text(encoding='utf-8')
+            self.assertIn('execution_mode="checked"',text)
+            self.assertIn('SOC',text)
+
 
     def test_material_guides_are_packaged(self):
         from importlib.resources import files

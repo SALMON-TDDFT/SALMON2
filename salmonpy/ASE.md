@@ -141,3 +141,7 @@ python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --v
 ### SOC入力の準備
 
 `dft_from_atoms(..., spin_orbit=True)` は完全相対論NC-UPFとスピノル状態数の検査を行い、SOC用DFTモデルを作ります。`prepare_dft` はこの入力を配置するだけで計算を始めません。`prepare_wse2_soc` のサンプルは明示した構造ファイルを使います。これはCalculatorのSOC力、バンド、`tddft_from_atoms` のSOC対応を完了したという意味ではありません。現在の小規模検査は[Ni](NICKEL_SOC.md)を参照してください。
+
+
+SOC入力には全元素の完全相対論NC-UPFを用意します。状態数は省略時に電子数の2倍で、電子温度は`electronic_temperature_k=300`のように指定できます。ASEの初期磁気モーメント・初期電荷の指定は引き継ぎません。SOC入力を作れることと、ASE CalculatorのSOC力や`tddft_from_atoms`のSOC対応は別です。
+擬ポテンシャルは構造変換時・計算時には自動取得しません。必要なら計算前に[専用取得手順](PSEUDOPOTENTIALS.md)で用意します。

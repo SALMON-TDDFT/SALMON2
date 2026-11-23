@@ -319,7 +319,18 @@ New standard TDDFT called directly from Python exposes `sp_tddft_recovery_protoc
 
 A state returned by Python `NativeTDDFTBackend` raises `NumericalError` from `advance(A_old,A_new)` only for protocol-declared unanimous recovery. Its `A` and `steps` remain accepted; correct the cause and retry from that time. No automatic pulse weakening or dt changes are applied. Old libraries and unknown errors retain conservative `RuntimeFailure` handling without inferred recovery.
 
-Supported: periodic, unpolarized, fixed-ion middlepoint PZ, automatic/fixed TB-mBJ, Libxc-PZ/PBE. SOC,+U,jellium, ionic motion/force output, Gram–Schmidt, projection/unfold and microscopic Maxwell coupling are outside the protected configuration and return15 before updating. Ordinary batch calculations retain their existing route; external checkpoint encoding is unchanged. Per-step copies/checks add memory and runtime overhead: leave resource headroom. Budgets remain warning-only.
+The following scope requires `execution_mode="checked"` and a supporting calculation library.
+
+| Electronic state | Supported conditions |
+|---|---|
+| Unpolarized | Periodic fixed-ion middlepoint PZ, automatic/fixed TB-mBJ, Libxc-PZ/PBE |
+| SOC / noncollinear spin | Periodic fixed-ion CPU PZ / Libxc-PZ/PBE, through a SOC-enabled interface such as retained-GS `gs.tddft_model(...)` |
+
+If SOC SCF used an auxiliary spin field, set it to zero with `state.set_scf_spin_field([0., 0., 0.])` before starting TDDFT, then continue SCF without the field and inspect convergence, residuals and magnetization changes. `gs.tddft_model(...)` rejects a nonzero auxiliary field. Removing the field alone does not establish zero-field convergence. See [the auxiliary-field SCF procedure](NATIVE_GS.en.md#stabilize-soc-scf-with-an-auxiliary-spin-field).
+
+Handled SOC numerical failures preserve wavefunctions, density, magnetization/spin-current and current output, allowing retry from the same completed step. CPU spatial SOC requires an orthogonal cell and `sp_tddft_soc_spatial_protocol()==1`. See [NICKEL_SOC.en.md](NICKEL_SOC.en.md) for tested conditions.
+`execution_mode="performance"` does not promise this automatic checking or recovery. Use explicit guarded steps or restore a saved state when needed.
+This guarantee does not cover +U, jellium, ionic motion/force output, Gram–Schmidt, projection/unfold or microscopic Maxwell coupling. Allow for backup/checking memory and runtime cost; budgets remain warning-only.
 
 This is a TDDFT-group guarantee, not automatic rollback of an entire mixed FDTD step whose other components may have advanced. MPI/process death, allocation failures, uncontrolled third-party STOP, deep initialization STOP and output-device failures are excluded. One-rank fault injection exists only in a separately compiled `SALMONPY_RECOVERY_TESTING` build; production builds export no injection entry.
 

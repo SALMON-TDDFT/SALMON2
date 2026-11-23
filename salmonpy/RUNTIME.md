@@ -48,8 +48,8 @@ python -m salmonpy.runtime verify my-runtime --require tddft
 公開されたHTTPSカタログも使えますが、privateリポジトリの資産はアクセス権のある方法で事前に取得します。
 
 Actions成果物は外側のZIPを展開し、中の `catalog.json` と計算プログラムZIPを上記へ渡します。
-[旧Si入門](SI_INTRO.md)の専用 `prepare` は外側ZIPを受け取る別の手順で、混同しません。
-Si例は2026-11-23に新しいApple Silicon用ZIPでローカル再検証済みですが、公開Releaseは未作成です。旧2026-11-14配布物は現行の電子数付き応答と合わず、現在の入口では受け付けません。
+[Si入門](SI_INTRO.md)の専用 `prepare` は外側ZIPを受け取る別の手順で、混同しません。
+Si入門例は、同梱の配布物一覧に登録された対応ZIPを使います。提供環境と入手方法は[Si入門](SI_INTRO.md)で確認してください。
 
 ## 配布物を作る開発者向け
 

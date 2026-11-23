@@ -49,8 +49,7 @@ For private assets, download through an authorized account before installing loc
 
 For Actions artifacts, unpack the outer ZIP and use the inner runtime ZIP plus `catalog.json`.
 The dedicated `prepare` in the [Si starter](SI_INTRO.en.md) instead takes the outer ZIP.
-A new Apple Silicon ZIP was locally revalidated on 2026-11-23; its public Release is pending.
-The old 2026-11-14 distribution is incompatible with the current TDDFT worker reply.
+For the Si starter, use a matching ZIP from its packaged distribution inventory. See [Si starter](SI_INTRO.en.md) for platform availability and obtaining the files.
 
 ## For developers preparing distributions
 

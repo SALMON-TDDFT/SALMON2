@@ -38,3 +38,8 @@ the pinned upstream SALMON source URL; it is not a distribution link.
 The calculation sources are maintained in `runtime/sources/solver` for standard exchange-correlation functionals and fast PR HSE. See [source layout and build instructions](../../runtime/README.md).
 
 Implementation notes: [日本語](hse-symmetry-notes.ja.md) / [English](hse-symmetry-notes.en.md).
+
+Additional implementation and distribution notes (historical context):
+
+- GS model inputs: [日本語](gs-model-input-notes.ja.md) / [English](gs-model-input-notes.en.md)
+- Si starter distributions: [日本語](si-intro-distribution-notes.ja.md) / [English](si-intro-distribution-notes.en.md)

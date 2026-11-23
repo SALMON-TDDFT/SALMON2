@@ -1,6 +1,15 @@
 # Portable GS array archive (GS/2)
 
-`salmonpy.gs_archive.save_ground_state` writes caller-supplied arrays; `GroundStateArchive.open` provides verified metadata and lazy reads. This is separate from solver `GroundStateResult` (`salmonpy.gs/1`). Explicit export of DFT-generated Gamma GS/1 is supported below; SCF is not rerun or recertified. GS/2→TDDFT initialization is available under the explicit Gamma converter conditions below.
+`salmonpy.gs_archive.save_ground_state` stores GS arrays in a Zarr v3-compatible archive; `GroundStateArchive.open` reads them. This is separate from the `salmonpy.gs/1` format of `GroundStateResult`. It neither reruns SCF nor recertifies convergence.
+
+| Input or purpose | Interface and conditions |
+|---|---|
+| Store/read GS arrays | `save_ground_state` / `GroundStateArchive.open`; metadata and array consistency are checked |
+| Export Gamma GS/1 or initialize TDDFT | `GammaRestartConverter`; see serial and single-orbital-file conditions below |
+| Export multi-k GS/1 or initialize TDDFT | `SerialRestartConverter`; supply the supported converter, calculation program and potentials explicitly |
+| Export a retained GS or import GS/2 | `NativeGSState.export_archive` / `NativeGSSession.load_archive`; check regular-k-mesh scope in the retained-GS guide |
+
+Check spin, MPI and file-format restrictions in the sections below and [NATIVE_GS.en.md](NATIVE_GS.en.md). Multi-k support does not extend the Gamma-only converter itself.
 
 ```python
 from salmonpy.gs_archive import GroundStateArchive

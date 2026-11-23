@@ -83,7 +83,10 @@ validation are in [PACKAGING.md](PACKAGING.md).
 
 ## Choosing a parallel workflow
 
-| Goal | Launch | Available scope |
+The rank and point counts below describe the examples, not package-wide limits. Check the supported MPI layouts of each calculation component.
+To combine LD, SBE and TDDFT in light-propagation calculations, start with [the mixed-calculation guide](COUPLED.en.md) and `salmonpy.examples.mpi_mixed_native`. It assembles material IDs, order, thickness and per-electronic-calculation rank settings. Prepare inputs separately and run calculations on compute nodes.
+
+| Goal | Sample launch | Configuration of this sample |
 |---|---|---|
 | Light propagation through multiple LD materials | Serial Python, `fdtd_mpi_layers` | Existing spatial MPI FDTD; many local LD states per field rank |
 | Your own internally parallel A-to-J model | `mpiexec -n 5`, `mpi_response` | Two material groups, each with two ranks and one material/point |
