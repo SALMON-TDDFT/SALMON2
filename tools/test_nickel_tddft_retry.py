@@ -29,12 +29,50 @@ class SpinProbeDFT(InMemoryDFT):
 
 
 
+def close_output_probe(gs,comm):
+    """Read completed spin streams while the calling program remains attached."""
+    from salmonpy.outputs import read_spin_dynamics
+    with gs.tddft_model(dt=.001,max_steps=4) as model:
+        first=model.new_state('close-first');sibling=model.new_state('close-sibling')
+        traces=[]
+        try:
+            for i in range(1,5):traces.append(first.step(np.array([1e-5*i,0.,0.])).tolist())
+            first.close();error=None;before={}
+            if comm.rank==0:
+                try:
+                    for name in first.output_files:before[name]=(first.work/name).read_bytes()
+                    name=next(n for n in first.output_files if n.endswith('_rt_spin.data'))
+                    spin=read_spin_dynamics(first.work/name)
+                    if len(spin.time)!=5:raise AssertionError('missing final spin observations after close')
+                except Exception as exc:error=type(exc).__name__+': '+str(exc)
+            errors=comm.allgather(error)
+            if any(errors):raise AssertionError('SOC close output probe: '+str(errors))
+            for i in range(1,5):sibling.step(np.array([-1e-5*i,0.,0.]))
+            sibling.close();error=None
+            if comm.rank==0:
+                try:
+                    if any((first.work/n).read_bytes()!=data for n,data in before.items()):
+                        raise AssertionError('closed sibling output changed')
+                    name=next(n for n in sibling.output_files if n.endswith('_rt_spin.data'))
+                    if len(read_spin_dynamics(sibling.work/name).time)!=5:raise AssertionError('sibling final spin observations missing')
+                except Exception as exc:error=type(exc).__name__+': '+str(exc)
+            errors=comm.allgather(error)
+            if any(errors):raise AssertionError('SOC sibling close probe: '+str(errors))
+            return {'status':'passed','spin_rows_per_state':5,'closed_sibling_files_unchanged':True,
+                    'streams_read_while_host_attached':True,'explicit_flush_or_transaction_used':False,
+                    'GS_exported':False,'current_trace':traces}
+        finally:
+            for state in (first,sibling):
+                if not state.closed:state.close()
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('build',type=Path);p.add_argument('output',type=Path)
     p.add_argument('--potential',type=Path,required=True)
     p.add_argument('--size',type=int,choices=(1,2),default=1)
     p.add_argument('--execution-mode',choices=('checked','performance'),default='checked')
+    p.add_argument('--close-outputs',action='store_true',help='normal close must finalize SOC output without transaction or explicit flush')
     p.add_argument('--deep-faults',action='store_true',help='requires explicit SALMONPY_RECOVERY_TESTING build')
     args=p.parse_args();comm=MPI.COMM_WORLD
     if args.deep_faults and args.execution_mode!='checked':p.error('deep faults require checked mode')
@@ -59,6 +97,10 @@ def main():
     def rows(path):return [line for line in path.read_text().splitlines() if line.strip() and not line.startswith('#')]
     with backend.open(context) as session:
         with session.run(calc,scf=scf,steps=4,material_id='ni-soc-retry-probe') as gs:
+            if args.close_outputs:
+                result=close_output_probe(gs,comm)
+                if comm.rank==0:(args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                return
             with gs.tddft_model(dt=.001,max_steps=8) as model:
                 control=model.new_state('control');retry=model.new_state('retry',execution_mode=args.execution_mode)
                 sibling=model.new_state('sibling');sibling_control=model.new_state('sibling-control')

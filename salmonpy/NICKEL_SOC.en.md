@@ -213,7 +213,7 @@ Inspect energy and magnetic-moment changes as well as the residual. Reduce mixin
 ### TDDFT from the converged GS
 
 Add `--rt-steps 8` to pass the successful final zero-field GS directly from memory to TDDFT.
-Fortran explicitly flushes observation streams, which are read after closing the calculation. Charge current covers all eight updates; default spin observations cover steps0,1,8.
+Read observation streams after closing states and the model. Use a rebuilt calculation library containing the normal SOC spin-output close fix. Charge current covers all eight updates; default spin observations cover steps0,1,8.
 Checked and performance states receive three-component A/c; charge current, electron number,
 magnetization and Pauli spin current are compared. Capture a memory backup midway, run the second half,
 roll back and compare repeated values with `rtol=2e-12, atol=2e-14`; byte equality is recorded separately. No SCF replay or electronic disk checkpoint is used.
@@ -221,3 +221,7 @@ TDDFT is not started if final SCF targets are unmet. This short connection/recov
 certify spectra or timestep accuracy.
 
 Converged-GS trial on2026-11-24: internal MPI2 × 4 threads passed mode and step4 direct-memory rollback comparisons. Maximum current/electron-number difference was3.55e-15; flushed observation files, including magnetization and spin current, also agreed within the declared tolerance. This is not bitwise identity. GS counters were unchanged and no electronic disk data were saved. The auxiliary-field-free control remained unconverged; its overall review status is separate from the successful field-ramp/TDDFT route.
+
+### Normal SOC output closure
+
+Run `tools/test_nickel_tddft_retry.py BUILD_JSON NEW_OUTPUT --potential PINNED_NI_UPF --size 2 --close-outputs` explicitly with MPI2 ranks to verify that normal closure alone makes all five spin rows for steps0..4 readable and preserves closed sibling streams. This short software probe uses an unconverged GS, without an additional flush or protective backup. Internal MPI1/2 passed on2026-11-24; pre/post-fix current rows matched exactly.

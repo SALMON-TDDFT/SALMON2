@@ -1,0 +1,260 @@
+{
+  "date": "2026-11-24",
+  "status": "passed",
+  "change": "Close owned SOC spin output in normal TDDFT close; no numerical update changes",
+  "old_runtime_sha256": "a0f9b9339079e289f1e76158f624e0ed303356b38861bef1923cf385c7606f30",
+  "runtime_sha256": "5c09e3cbb7582388d0f8ba12451e4bc954eaacfedc6680252b69198772d4bb06",
+  "git_only_runtime_sha256": "7bc1ef223cfdef0c124e7000bc3d6fa138674f7002bbcde4990f6439adbf948a",
+  "source_tree_sha256": "cc02128f9e57110a141937e7d4280321d0c18ac20a80ab2fa720282d7e6cdc74",
+  "tests": {
+    "before": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-close-before-20261124",
+      "log_sha256": "88cfbbea04f08fe22135b2fab033746485081fcfa9f3c8ebb0029e209fead767",
+      "electronic_disk_data_saved": false
+    },
+    "MPI1": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-close-r1-20261124",
+      "log_sha256": "3cadfe4404b3fcdcd7b3d011440fe20756c17924c3f54ec6c23d9395a33739c2",
+      "result": {
+        "status": "passed",
+        "spin_rows_per_state": 5,
+        "closed_sibling_files_unchanged": true,
+        "streams_read_while_host_attached": true,
+        "explicit_flush_or_transaction_used": false,
+        "GS_exported": false,
+        "current_trace": [
+          [
+            0.00234001542595904,
+            -0.000591081917425056,
+            -0.001122099344527501
+          ],
+          [
+            0.002333818837117905,
+            -0.0005895854389349538,
+            -0.0011172654343750065
+          ],
+          [
+            0.0023275742896849147,
+            -0.0005880024219230085,
+            -0.0011123994763856668
+          ],
+          [
+            0.0023212839474895074,
+            -0.0005863238589273625,
+            -0.001107511274499069
+          ]
+        ]
+      },
+      "result_sha256": "110f2f73b7706dd70e2d3f915907eb48d5d3d76eabe95b8bfdc257ed6e5b3e3e",
+      "electronic_disk_data_saved": false
+    },
+    "MPI2": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-close-r2-20261124",
+      "log_sha256": "47340de188c6b70fd4ae7da1104032172de532e2ae624efc3a8fe89cbdd22c8c",
+      "result": {
+        "status": "passed",
+        "spin_rows_per_state": 5,
+        "closed_sibling_files_unchanged": true,
+        "streams_read_while_host_attached": true,
+        "explicit_flush_or_transaction_used": false,
+        "GS_exported": false,
+        "current_trace": [
+          [
+            0.00045537019328421163,
+            -0.0003958381748211321,
+            0.00030248200949120987
+          ],
+          [
+            0.00045538776393656746,
+            -0.00039591315366060867,
+            0.00031564976080400865
+          ],
+          [
+            0.0004554138220311246,
+            -0.00039597451280712175,
+            0.00032884459486645775
+          ],
+          [
+            0.00045544643963859547,
+            -0.00039602194022864774,
+            0.0003420646777913401
+          ]
+        ]
+      },
+      "result_sha256": "ba2fe94c61b2af33061e25982cdd1096776a4d5a137fa1cbb8051fbdf1d6020a",
+      "electronic_disk_data_saved": false
+    },
+    "Git_MPI2": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-close-git-r2-20261124",
+      "log_sha256": "47340de188c6b70fd4ae7da1104032172de532e2ae624efc3a8fe89cbdd22c8c",
+      "result": {
+        "status": "passed",
+        "spin_rows_per_state": 5,
+        "closed_sibling_files_unchanged": true,
+        "streams_read_while_host_attached": true,
+        "explicit_flush_or_transaction_used": false,
+        "GS_exported": false,
+        "current_trace": [
+          [
+            0.00045537019328421163,
+            -0.0003958381748211321,
+            0.00030248200949120987
+          ],
+          [
+            0.00045538776393656746,
+            -0.00039591315366060867,
+            0.00031564976080400865
+          ],
+          [
+            0.0004554138220311246,
+            -0.00039597451280712175,
+            0.00032884459486645775
+          ],
+          [
+            0.00045544643963859547,
+            -0.00039602194022864774,
+            0.0003420646777913401
+          ]
+        ]
+      },
+      "result_sha256": "ba2fe94c61b2af33061e25982cdd1096776a4d5a137fa1cbb8051fbdf1d6020a",
+      "electronic_disk_data_saved": false
+    },
+    "checked_retry": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-close-retry-checked-20261124",
+      "log_sha256": "9f2b4bdca4218924477bd555b251837248f7885fd2eb0d367c8bfdefb91be8e8",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 2,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "GS_exported": false,
+        "execution_mode": "checked",
+        "deep_cases": [],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "result_sha256": "daa3eb7325bab9e27d93dd87ac3fe0e4b5c8fec3f0c121e4ff275585778bcc04",
+      "electronic_disk_data_saved": false
+    },
+    "performance_retry": {
+      "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-close-retry-performance-20261124",
+      "log_sha256": "3c1a33a80f0b770b71746f243c48ff34cb3f7dfa316d47bbd7c2e8d6780a2ac3",
+      "result": {
+        "status": "passed",
+        "MPI_ranks": 2,
+        "state_preserved": true,
+        "all_three_streams_byte_preserved": true,
+        "retry_currents_and_streams_exact": true,
+        "sibling_unaffected": true,
+        "GS_exported": false,
+        "execution_mode": "performance",
+        "deep_cases": [],
+        "performance_skips_stage_checks": false,
+        "scope": "checked automatic numerical recovery or explicit performance rollback; not crash/MPI failure recovery"
+      },
+      "result_sha256": "7453dbc25b1c19c97e964ff1865d962fabd6c5f2c3ae259fb1f6cca608c56bfa",
+      "electronic_disk_data_saved": false
+    }
+  },
+  "old_new_current_table_exact": true,
+  "old_new_current_shape": [
+    4,
+    16
+  ],
+  "native_fixed_density_tests": {
+    "test_nlcc_xc_variation": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-soc-close-test_nlcc_xc_variation-20261124/test-record.json",
+      "sha256": "18d3eb5b7bbc64eb0ce7f2d232783d54451e2451c86662b7b89514ba2d20a58a",
+      "record": {
+        "test": "test_nlcc_xc_variation",
+        "source_root": "/private/tmp/salmonpy-soc-close-source-20261124",
+        "executable_sha256": "1019360e0ef34496fa86b7470d33ac8d88ce4729058c1af942c2e7a9890dec07",
+        "runtime_executable_sha256": "2ee9c753a09b1744b5f008875f8c3c645d1cd9b76959b4b1f867e63bd9839a73",
+        "runtime_source_patch_sha256": "a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8",
+        "runtime_source_marker_sha256": "bb292947dcaad2e278049779e8d9dedaf909352c4593e97d46a1fdac82426e85",
+        "runtime_source_profile": "fast-pr",
+        "runs": [
+          {
+            "ranks": 1,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": "XC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\n"
+          },
+          {
+            "ranks": 1,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": "XC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": "XC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\nXC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": "XC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\nXC_VARIATION pz 0  -2.5549527014945284E+00  -2.5549527017624603E+00   2.6793189888962843E-10\nXC_VARIATION libxc_pz 0  -2.5549527018497997E+00  -2.5549527016970099E+00   1.5278978082733374E-10\nXC_VARIATION libxc_pbe 0  -2.5574370995329332E+00  -2.5574370996010640E+00   6.8130834307567056E-11\nXC_VARIATION pz 1  -2.7288437542338784E+00  -2.7288437545399131E+00   3.0603475309476380E-10\nXC_VARIATION libxc_pz 1  -2.7288437544825683E+00  -2.7288437544831350E+00   5.6665783176867990E-13\nXC_VARIATION libxc_pbe 1  -2.7313463155209661E+00  -2.7313463158062867E+00   2.8532065599051748E-10\n NLCC_XC_VARIATION_PASS\n"
+          }
+        ]
+      }
+    },
+    "test_nlcc_core_force": {
+      "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-soc-close-test_nlcc_core_force-20261124/test-record.json",
+      "sha256": "aa1fab0c89924faaacc9f9160bf4f82ffe5cf3465033ac49e044cb863234a6c1",
+      "record": {
+        "test": "test_nlcc_core_force",
+        "source_root": "/private/tmp/salmonpy-soc-close-source-20261124",
+        "executable_sha256": "d567d1812b1ffe9852fb932d25f4761265bd4e69b51c49ae3145075cf27f9855",
+        "runtime_executable_sha256": "2ee9c753a09b1744b5f008875f8c3c645d1cd9b76959b4b1f867e63bd9839a73",
+        "runtime_source_patch_sha256": "a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8",
+        "runtime_source_marker_sha256": "bb292947dcaad2e278049779e8d9dedaf909352c4593e97d46a1fdac82426e85",
+        "runtime_source_profile": "fast-pr",
+        "runs": [
+          {
+            "ranks": 1,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": " CORE_FORCE_VARIATION           1   1.0010409168259571E-010\n CORE_FORCE_VARIATION           2   6.1708876897270670E-010\n CORE_FORCE_VARIATION           3   7.6315460201259455E-010\n CORE_FORCE_VARIATION           4   3.1242757270177890E-009\n CORE_FORCE_VARIATION           5   5.2107002354844639E-008\n CORE_FORCE_VARIATION           6   3.8074185632736533E-008\n NLCC_CORE_FORCE_PASS\n"
+          },
+          {
+            "ranks": 1,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": " CORE_FORCE_VARIATION           1   1.0853515308717476E-010\n CORE_FORCE_VARIATION           2   5.9477105879279790E-010\n CORE_FORCE_VARIATION           3   6.5532475973517634E-010\n CORE_FORCE_VARIATION           4   2.3025109596730431E-009\n CORE_FORCE_VARIATION           5   5.3591061947941970E-008\n CORE_FORCE_VARIATION           6   4.3853417506720116E-008\n NLCC_CORE_FORCE_PASS\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 1,
+            "returncode": 0,
+            "stdout": " CORE_FORCE_VARIATION           1   1.0010409168259571E-010\n CORE_FORCE_VARIATION           1   1.0010409168259571E-010\n CORE_FORCE_VARIATION           2   6.1708876897270670E-010\n CORE_FORCE_VARIATION           2   6.1708876897270670E-010\n CORE_FORCE_VARIATION           3   7.6315460201259455E-010\n CORE_FORCE_VARIATION           3   7.6315460201259455E-010\n CORE_FORCE_VARIATION           4   3.1242757270177890E-009\n CORE_FORCE_VARIATION           4   3.1242757270177890E-009\n CORE_FORCE_VARIATION           5   5.2107002354844639E-008\n CORE_FORCE_VARIATION           5   5.2107002354844639E-008\n CORE_FORCE_VARIATION           6   3.8074185632736533E-008\n CORE_FORCE_VARIATION           6   3.8074185632736533E-008\n NLCC_CORE_FORCE_PASS\n NLCC_CORE_FORCE_PASS\n"
+          },
+          {
+            "ranks": 2,
+            "threads": 2,
+            "returncode": 0,
+            "stdout": " CORE_FORCE_VARIATION           1   1.0853515308717476E-010\n CORE_FORCE_VARIATION           2   5.9477105879279790E-010\n CORE_FORCE_VARIATION           1   1.0853515308717476E-010\n CORE_FORCE_VARIATION           2   5.9477105879279790E-010\n CORE_FORCE_VARIATION           3   6.5532475973517634E-010\n CORE_FORCE_VARIATION           4   2.3025109596730431E-009\n CORE_FORCE_VARIATION           3   6.5532475973517634E-010\n CORE_FORCE_VARIATION           4   2.3025109596730431E-009\n CORE_FORCE_VARIATION           5   5.3591061947941970E-008\n CORE_FORCE_VARIATION           5   5.3591061947941970E-008\n CORE_FORCE_VARIATION           6   4.3853417506720116E-008\n CORE_FORCE_VARIATION           6   4.3853417506720116E-008\n NLCC_CORE_FORCE_PASS\n NLCC_CORE_FORCE_PASS\n"
+          }
+        ]
+      }
+    }
+  },
+  "source_unit_tests": 15,
+  "installed_wheel_tests": {
+    "total": 729,
+    "passed": 684,
+    "skipped": 45,
+    "log": "/private/tmp/salmonpy-soc-close-wheel-20261124/tests.log"
+  },
+  "physical_convergence_claimed": false,
+  "Fujitsu_tested": false,
+  "HSE_SOC_tested": false,
+  "remote_CI_dispatched": false,
+  "source_and_application_object_prohibition_audits": "passed on both fresh builds and native test links",
+  "Git_only_source_tree": "772867b639a655145a7fe5e02c2b904bca13d9be"
+}

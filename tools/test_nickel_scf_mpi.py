@@ -76,13 +76,6 @@ def converged_rt_probe(gs,comm,steps):
         errors=comm.allgather(error)
         if any(errors):raise AssertionError(name+': '+str(errors))
         metrics[name]=record
-    def finish_state(state):
-        # The existing native transaction capture/release explicitly flushes all
-        # owned streams (including SOC spin), without advancing any RT step.
-        flush=_NativeBackup(state,comm,'sp_tddft_step_transaction',state.work,
-                            ('A','steps','failed','closed','current'))
-        token=flush.capture();flush.release(token)
-        state.close()
     def paths(state):return {str(i):state.work/n for i,n in enumerate(state.output_files)}
     def drive(i):return np.array([1e-5*np.sin(.3*i),7e-6*(np.cos(.2*i)-1),1e-5*np.sin(.17*i)])
     def advance(state,i):return [*state.step(drive(i)).tolist(),state.electron_number]
@@ -95,7 +88,7 @@ def converged_rt_probe(gs,comm,steps):
                 for mode,state in states.items():traces[mode].append(advance(state,i))
             for mode,state in states.items():
                 reference[mode]=np.array(traces[mode]);reference_paths[mode]=paths(state)
-                finish_state(state)
+                state.close()
             compare_values('checked_performance_current_electrons',reference['checked'],reference['performance'])
             file_checks.append(('checked_performance_observations',reference_paths['checked'],reference_paths['performance']))
             states={}
@@ -110,12 +103,12 @@ def converged_rt_probe(gs,comm,steps):
                 if state.steps!=steps//2:raise AssertionError('wrong restored TDDFT step')
                 replay=[advance(state,i) for i in range(steps//2+1,steps+1)]
                 compare_values(mode+'_restored_current_electrons',replay,reference[mode][steps//2:])
-                resumed_paths=paths(state);finish_state(state)
+                resumed_paths=paths(state);state.close()
                 file_checks.append((mode+'_restored_observations',resumed_paths,reference_paths[mode]))
             if gs.scf_status!=before:raise AssertionError('TDDFT changed GS iteration counters')
             result={'status':'passed','steps':steps,'dt_au':.001,'rtol':rtol,'atol':atol,
                     'comparisons':metrics,'GS_counters_unchanged':True,'electronic_disk_data_saved':False,
-                    'observations_explicitly_flushed_and_model_closed':True,
+                    'observations_read_after_close':True,
                     'traces':{k:v.tolist() for k,v in reference.items()}}
         finally:
             for mode,backup in backups.items():

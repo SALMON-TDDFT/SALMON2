@@ -1255,6 +1255,7 @@ integer(c_int) function tddft_close_impl()
     else
       close(state%ofl%fh_rt)
       close(state%ofl%fh_rt_energy)
+      if(yn_spinorbit=='y')close(state%ofl%fh_rt_spin)
     endif
   endif
   if(allocated(state%step_saved))deallocate(state%step_saved,state%step_saved_xc)
