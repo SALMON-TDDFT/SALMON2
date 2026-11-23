@@ -4,9 +4,10 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 Bundled LD/SBE kernels and independent regression references originate from
 SALMON-TDDFT/SALMON2. Exact upstream and integration revisions are recorded in
-runtime/source.json. Complete solver snapshots are now bundled under runtime/sources with their own
-LICENSE, LICENSE.THIRD-PARTY and ACKNOWLEDGEMENTS. Stage-specific complete changes
-are maintained in runtime/overrides. HSE support uses only the pinned fast PR.
+runtime/source.json. The single maintained solver tree is runtime/sources/solver, with its own
+LICENSE, LICENSE.THIRD-PARTY and ACKNOWLEDGEMENTS. Completed changes are integrated
+there. Frozen source/override histories are recorded in runtime/source-history
+and Git history. HSE support uses only the fast-PR implementation.
 
 Binary wheels may bundle compiler/BLAS runtimes under their respective licenses;
 see packaging/ld/licenses and LICENSE.THIRD-PARTY.
@@ -23,7 +24,8 @@ Independent repository migration (2026-11-14):
   inspect earlier work. Historical validation dates/links identify the original
   environment and do not certify a later build or platform.
   runtime/source.json continues to identify the separate upstream application
-  source and compatibility patch, not the SALMONpy distribution repository.
+  source provenance; patch digests identify historical inputs, not a current
+  compatibility-patch installation procedure or the SALMONpy distribution repository.
 
 2026-11-15 source ownership migration: compatibility patches were replaced by
 complete bundled sources and verified replacement files. Original commits and

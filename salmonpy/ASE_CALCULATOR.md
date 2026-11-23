@@ -63,7 +63,7 @@ forces = atoms.get_forces()
 gs = atoms.calc.last_ground_state
 ```
 
-`electrons` は省略可能です。各構造の擬ポテンシャル価電子数の合計から決定し、明示値が異なれば計算処理計算前に拒否します。`states`・`grid`・`kmesh` は明示指定です。
+`electrons` は省略可能です。各構造の擬ポテンシャル価電子数の合計から決定し、明示値が異なれば計算開始前に拒否します。`states`・`grid`・`kmesh` は明示指定です。
 
 上の格子はSiの例であり、任意の系や目標精度への推奨値ではありません。
 実行ファイルにはGS収束報告と `gs_forces.dat` の `SALMONPY_FORCES_V1` 報告を含めます。

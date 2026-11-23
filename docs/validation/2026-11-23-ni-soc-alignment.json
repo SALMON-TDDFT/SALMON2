@@ -1,0 +1,466 @@
+{
+  "schema": "salmonpy.ni-alignment-long/1",
+  "execution_status": "completed",
+  "convergence_status": "SCF review required",
+  "runtime_sha256": "a0f9b9339079e289f1e76158f624e0ed303356b38861bef1923cf385c7606f30",
+  "MPI_ranks": 2,
+  "OMP_threads": 4,
+  "BLAS_threads": 1,
+  "Ni": {
+    "electrons": 18,
+    "states": 36,
+    "temperature_K": 300,
+    "kmesh": [
+      2,
+      2,
+      2
+    ],
+    "grid": [
+      16,
+      16,
+      16
+    ],
+    "potential_catalog_id": "pseudodojo-pbe-0.4-fr-standard-ni"
+  },
+  "initial_comparison": {
+    "rtol": 2e-12,
+    "atol": 2e-14,
+    "ranks": [
+      {
+        "bitwise_equal": false,
+        "differences": {
+          "density": 6.661338147750939e-16,
+          "occupations": 0.0,
+          "eigenvalues": 1.0658141036401503e-14,
+          "orbitals": 3.8882579728510553e-16,
+          "scf_history": 6.661338147750939e-16
+        }
+      },
+      {
+        "bitwise_equal": false,
+        "differences": {
+          "density": 6.661338147750939e-16,
+          "occupations": 0.0,
+          "eigenvalues": 1.0658141036401503e-14,
+          "orbitals": 3.650675994272796e-16,
+          "scf_history": 6.661338147750939e-16
+        }
+      }
+    ]
+  },
+  "zero_control": {
+    "stage": 0,
+    "field_au": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "start_iteration": 1,
+    "end_iteration": 1001,
+    "charge_converged": false,
+    "moment_stable_over_last_sample": false,
+    "moment_change_muB": 0.00023495875855762465,
+    "sample_interval": 25,
+    "info": {
+      "energy_hartree": -167.6960789589619,
+      "residual": 0.029753869124439572,
+      "tolerance": 1e-09,
+      "iterations": 1001,
+      "converged": false,
+      "atoms": 1,
+      "bands": 36
+    },
+    "spin": {
+      "field_au": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "zeeman_energy_hartree": 0.0,
+      "spin_magnetic_moment_muB": [
+        0.3889738470937444,
+        0.31189679210621574,
+        0.002613386564677079
+      ],
+      "energy_without_auxiliary_hartree": -167.6960789589619
+    },
+    "mixing": {
+      "rate": 0.01,
+      "min_rate": 0.01,
+      "growth": 1.2,
+      "best_residual": 0.006890335136235653,
+      "enabled": true,
+      "patience": 3,
+      "cooldown": 20,
+      "remaining": 0,
+      "streak": 3,
+      "changes": 5,
+      "last_iteration": 232,
+      "coefficient": "mixrate"
+    }
+  },
+  "fixed_B_0002": {
+    "stage": 0,
+    "field_au": [
+      0.0,
+      0.0,
+      0.002
+    ],
+    "start_iteration": 1,
+    "end_iteration": 1001,
+    "charge_converged": false,
+    "moment_stable_over_last_sample": true,
+    "moment_change_muB": 4.716648528760303e-06,
+    "sample_interval": 25,
+    "info": {
+      "energy_hartree": -167.6618686408141,
+      "residual": 4.032565853700827e-06,
+      "tolerance": 1e-09,
+      "iterations": 1001,
+      "converged": false,
+      "atoms": 1,
+      "bands": 36
+    },
+    "spin": {
+      "field_au": [
+        0.0,
+        0.0,
+        0.002
+      ],
+      "zeeman_energy_hartree": -0.0004934648786682449,
+      "spin_magnetic_moment_muB": [
+        0.03491926343234395,
+        0.0473948513776859,
+        0.4934648786682416
+      ],
+      "energy_without_auxiliary_hartree": -167.66137517593543
+    },
+    "mixing": {
+      "rate": 0.3,
+      "min_rate": 0.01,
+      "growth": 1.2,
+      "best_residual": 4.027889565100179e-06,
+      "enabled": true,
+      "patience": 3,
+      "cooldown": 20,
+      "remaining": 0,
+      "streak": 0,
+      "changes": 0,
+      "last_iteration": 0,
+      "coefficient": "mixrate"
+    }
+  },
+  "taper_stages": [
+    {
+      "stage": 0,
+      "field_au": [
+        0.0,
+        0.0,
+        0.002
+      ],
+      "start_iteration": 1,
+      "end_iteration": 401,
+      "charge_converged": false,
+      "moment_stable_over_last_sample": true,
+      "stage_target_met": true,
+      "preliminary_stage": true,
+      "residual_target": 1e-05,
+      "moment_change_target_muB": 0.001,
+      "moment_change_muB": 0.0004900976864994216,
+      "sample_interval": 25,
+      "info": {
+        "energy_hartree": -167.66186810288215,
+        "residual": 7.637179665421141e-06,
+        "tolerance": 1e-09,
+        "iterations": 401,
+        "converged": false,
+        "atoms": 1,
+        "bands": 36
+      },
+      "spin": {
+        "field_au": [
+          0.0,
+          0.0,
+          0.002
+        ],
+        "zeeman_energy_hartree": -0.0004933378341165148,
+        "spin_magnetic_moment_muB": [
+          0.03584809668626893,
+          0.048045697963082404,
+          0.49333783411651494
+        ],
+        "energy_without_auxiliary_hartree": -167.66137476504804
+      },
+      "mixing": {
+        "rate": 0.3,
+        "min_rate": 0.01,
+        "growth": 1.2,
+        "best_residual": 7.637179665421141e-06,
+        "enabled": true,
+        "patience": 3,
+        "cooldown": 20,
+        "remaining": 0,
+        "streak": 0,
+        "changes": 0,
+        "last_iteration": 0,
+        "coefficient": "mixrate"
+      }
+    },
+    {
+      "stage": 1,
+      "field_au": [
+        0.0,
+        0.0,
+        0.0005
+      ],
+      "start_iteration": 401,
+      "end_iteration": 951,
+      "charge_converged": false,
+      "moment_stable_over_last_sample": true,
+      "stage_target_met": true,
+      "preliminary_stage": true,
+      "residual_target": 1e-05,
+      "moment_change_target_muB": 0.001,
+      "moment_change_muB": 0.0006064807536328154,
+      "sample_interval": 25,
+      "info": {
+        "energy_hartree": -167.6615279887286,
+        "residual": 9.508779603730548e-06,
+        "tolerance": 1e-09,
+        "iterations": 951,
+        "converged": false,
+        "atoms": 1,
+        "bands": 36
+      },
+      "spin": {
+        "field_au": [
+          0.0,
+          0.0,
+          0.0005
+        ],
+        "zeeman_energy_hartree": -0.00011472719947206926,
+        "spin_magnetic_moment_muB": [
+          0.11886656369340413,
+          0.1494918709899872,
+          0.4589087978882774
+        ],
+        "energy_without_auxiliary_hartree": -167.66141326152913
+      },
+      "mixing": {
+        "rate": 0.3,
+        "min_rate": 0.01,
+        "growth": 1.2,
+        "best_residual": 9.508779603730548e-06,
+        "enabled": true,
+        "patience": 3,
+        "cooldown": 20,
+        "remaining": 0,
+        "streak": 0,
+        "changes": 0,
+        "last_iteration": 0,
+        "coefficient": "mixrate"
+      }
+    },
+    {
+      "stage": 2,
+      "field_au": [
+        0.0,
+        0.0,
+        0.0001
+      ],
+      "start_iteration": 951,
+      "end_iteration": 1801,
+      "charge_converged": false,
+      "moment_stable_over_last_sample": true,
+      "stage_target_met": true,
+      "preliminary_stage": true,
+      "residual_target": 1e-05,
+      "moment_change_target_muB": 0.001,
+      "moment_change_muB": 0.0005058434566366232,
+      "sample_interval": 25,
+      "info": {
+        "energy_hartree": -167.66146146185173,
+        "residual": 9.222415915916981e-06,
+        "tolerance": 1e-09,
+        "iterations": 1801,
+        "converged": false,
+        "atoms": 1,
+        "bands": 36
+      },
+      "spin": {
+        "field_au": [
+          0.0,
+          0.0,
+          0.0001
+        ],
+        "zeeman_energy_hartree": -1.7893732727589333e-05,
+        "spin_magnetic_moment_muB": [
+          0.2333639632141131,
+          0.2545660067478743,
+          0.35787465455178796
+        ],
+        "energy_without_auxiliary_hartree": -167.661443568119
+      },
+      "mixing": {
+        "rate": 0.3,
+        "min_rate": 0.01,
+        "growth": 1.2,
+        "best_residual": 9.15329426610144e-06,
+        "enabled": true,
+        "patience": 3,
+        "cooldown": 20,
+        "remaining": 0,
+        "streak": 0,
+        "changes": 0,
+        "last_iteration": 0,
+        "coefficient": "mixrate"
+      }
+    },
+    {
+      "stage": 3,
+      "field_au": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "start_iteration": 1801,
+      "end_iteration": 2801,
+      "charge_converged": false,
+      "moment_stable_over_last_sample": false,
+      "stage_target_met": false,
+      "preliminary_stage": false,
+      "residual_target": 1e-09,
+      "moment_change_target_muB": 1e-05,
+      "moment_change_muB": 0.00014582135705720756,
+      "sample_interval": 25,
+      "info": {
+        "energy_hartree": -167.66144472501097,
+        "residual": 5.9222402575663665e-06,
+        "tolerance": 1e-09,
+        "iterations": 2801,
+        "converged": false,
+        "atoms": 1,
+        "bands": 36
+      },
+      "spin": {
+        "field_au": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zeeman_energy_hartree": 0.0,
+        "spin_magnetic_moment_muB": [
+          0.2844129736683731,
+          0.28767894036910613,
+          0.2893435771769811
+        ],
+        "energy_without_auxiliary_hartree": -167.66144472501097
+      },
+      "mixing": {
+        "rate": 0.15,
+        "min_rate": 0.01,
+        "growth": 1.2,
+        "best_residual": 5.794893477566411e-06,
+        "enabled": true,
+        "patience": 3,
+        "cooldown": 20,
+        "remaining": 0,
+        "streak": 0,
+        "changes": 1,
+        "last_iteration": 2610,
+        "coefficient": "mixrate"
+      }
+    }
+  ],
+  "final_zero_field": {
+    "stage": 3,
+    "field_au": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "start_iteration": 1801,
+    "end_iteration": 2801,
+    "charge_converged": false,
+    "moment_stable_over_last_sample": false,
+    "stage_target_met": false,
+    "preliminary_stage": false,
+    "residual_target": 1e-09,
+    "moment_change_target_muB": 1e-05,
+    "moment_change_muB": 0.00014582135705720756,
+    "sample_interval": 25,
+    "info": {
+      "energy_hartree": -167.66144472501097,
+      "residual": 5.9222402575663665e-06,
+      "tolerance": 1e-09,
+      "iterations": 2801,
+      "converged": false,
+      "atoms": 1,
+      "bands": 36
+    },
+    "spin": {
+      "field_au": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "zeeman_energy_hartree": 0.0,
+      "spin_magnetic_moment_muB": [
+        0.2844129736683731,
+        0.28767894036910613,
+        0.2893435771769811
+      ],
+      "energy_without_auxiliary_hartree": -167.66144472501097
+    },
+    "mixing": {
+      "rate": 0.15,
+      "min_rate": 0.01,
+      "growth": 1.2,
+      "best_residual": 5.794893477566411e-06,
+      "enabled": true,
+      "patience": 3,
+      "cooldown": 20,
+      "remaining": 0,
+      "streak": 0,
+      "changes": 1,
+      "last_iteration": 2610,
+      "coefficient": "mixrate"
+    }
+  },
+  "target_residual": 1e-09,
+  "target_moment_change_muB": 1e-05,
+  "preliminary_residual": 1e-05,
+  "preliminary_moment_change_muB": 0.001,
+  "electron_datasets_collected": false,
+  "TDDFT_started": false,
+  "interpretation": "Auxiliary field aligns the spin moment and improves the residual for this coarse fixed-input trial; the final zero-field SCF has not converged. No physical-material/grid/k convergence certification. Adaptive mixing differs in response to field/no-field trajectories; this is a strategy comparison, not an isolated field-only benchmark.",
+  "records": [
+    "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-alignment-long-v2-20261123/result.json",
+    "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-alignment-taper-20261123/result.json"
+  ],
+  "record_sha256": [
+    "8cee997ae21ff374dfdc55f5e51af62ac9ab975b102bf7b3c79679ae7d9124f5",
+    "37f08b17293e92c12416fa5df46f2590048bd9382d9988da48b29fae8b1de408"
+  ],
+  "plot_status": "complete",
+  "plot_sha256": "959df0f91dec5850ecdd59d9f8fa26926aa58f53abbaa5e055f6ef96b3b79174",
+  "CSV_sha256": {
+    "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-alignment-long-v2-20261123/history.csv": "df7db728682475151a0f088a67a569d500f5446798585e1ed34b4895036f1933",
+    "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-alignment-taper-20261123/history.csv": "cd2d67035cc45030fca5502b038e8de5c283e7f51535ca2c2cfdfca8fdc70121"
+  },
+  "plot_note": "Auxiliary field drawn as a step after accepted iteration; original interpolated plot retained.",
+  "verification": {
+    "legacy_Ni_MPI_interleaving": "passed,3 groups x2 ranks",
+    "final_short_runner": "completed; unresolved SCF correctly classified",
+    "manual_tests": 11,
+    "CI_configuration_tests": 5,
+    "remote_CI_dispatched": false,
+    "installed_wheel": {
+      "tests": 729,
+      "passed": 684,
+      "skipped": 45,
+      "failed": 0,
+      "platform": "macOS arm64 Python3.14"
+    }
+  }
+}

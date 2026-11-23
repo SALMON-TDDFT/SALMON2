@@ -41,7 +41,7 @@ install(CODE [[
 install(FILES "${ROOT}/salmonpy/__init__.py" "${ROOT}/salmonpy/ld.py"
   "${ROOT}/salmonpy/fields.py" "${ROOT}/salmonpy/geometry.py"
   "${ROOT}/salmonpy/salmon_vr.py" "${ROOT}/salmonpy/SALMON_VR.md" "${ROOT}/salmonpy/SALMON_VR.en.md" "${ROOT}/salmonpy/doctor.py" "${ROOT}/salmonpy/AGENTS.md" "${ROOT}/salmonpy/manual.py" "${ROOT}/salmonpy/manual.json" "${ROOT}/salmonpy/ase_calculator.py" "${ROOT}/salmonpy/dft.py" "${ROOT}/salmonpy/ase.py" "${ROOT}/salmonpy/bands.py" "${ROOT}/salmonpy/analysis.py" "${ROOT}/salmonpy/outputs.py" "${ROOT}/salmonpy/fdtd.py" "${ROOT}/salmonpy/crystal.py" "${ROOT}/salmonpy/sbe.py" "${ROOT}/salmonpy/tddft.py"
-  "${ROOT}/salmonpy/ASE_CALCULATOR.md" "${ROOT}/salmonpy/ASE_CALCULATOR.en.md" "${ROOT}/salmonpy/DFT.md" "${ROOT}/salmonpy/ASE.md" "${ROOT}/salmonpy/ASE.en.md" "${ROOT}/salmonpy/BANDS.md" "${ROOT}/salmonpy/WORKFLOWS.md" "${ROOT}/salmonpy/OUTPUTS.md" "${ROOT}/salmonpy/PACKAGING.md" "${ROOT}/salmonpy/README.md" "${ROOT}/salmonpy/README.en.md" "${ROOT}/salmonpy/AI_USAGE.md" "${ROOT}/salmonpy/INPUT_CONTRACT.md"
+  "${ROOT}/salmonpy/ASE_CALCULATOR.md" "${ROOT}/salmonpy/ASE_CALCULATOR.en.md" "${ROOT}/salmonpy/DFT.md" "${ROOT}/salmonpy/ASE.md" "${ROOT}/salmonpy/ASE.en.md" "${ROOT}/salmonpy/BANDS.md" "${ROOT}/salmonpy/WORKFLOWS.md" "${ROOT}/salmonpy/OUTPUTS.md" "${ROOT}/salmonpy/OUTPUTS.en.md" "${ROOT}/salmonpy/PACKAGING.md" "${ROOT}/salmonpy/README.md" "${ROOT}/salmonpy/README.en.md" "${ROOT}/salmonpy/AI_USAGE.md" "${ROOT}/salmonpy/INPUT_CONTRACT.md"
   DESTINATION salmonpy)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/licenses/" DESTINATION salmonpy/licenses)
 
@@ -325,3 +325,13 @@ install(FILES "${ROOT}/tests/native/test_fdtd_coordinates.f90" DESTINATION salmo
 install(FILES "${ROOT}/salmonpy/gs_initial_guess.py" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/tools/test_molecular_feedback_mpi.py" "${ROOT}/tools/test_molecular_feedback_schedule.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/pseudopotentials.py" "${ROOT}/salmonpy/PSEUDOPOTENTIALS.md" "${ROOT}/salmonpy/PSEUDOPOTENTIALS.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/pseudopotential_catalog.json" DESTINATION salmonpy)
+
+# Explicit short SOC smoke tools reuse an already audited Libxc runtime.
+install(FILES "${ROOT}/tools/test_nickel_scf_mpi.py" "${ROOT}/tools/test_nickel_scf_disk.py" "${ROOT}/tools/test_nickel_tddft_mpi.py" "${ROOT}/tools/test_nickel_tddft_disk.py" "${ROOT}/tools/test_nickel_tddft_retry.py" "${ROOT}/tools/validate_soc_material.py" "${ROOT}/tools/test_nickel_soc.py" "${ROOT}/tools/run_nlcc_native_tests.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/runtime/test_nickel_soc.f90" "${ROOT}/tests/runtime/test_soc_resources.f90" DESTINATION salmonpy/_runtime_source/tests/runtime)
+
+install(FILES "${ROOT}/salmonpy/NICKEL_SOC.md" "${ROOT}/salmonpy/NICKEL_SOC.en.md" DESTINATION salmonpy)

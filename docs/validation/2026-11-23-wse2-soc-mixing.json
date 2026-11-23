@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "GS": {
+    "iterations": 565,
+    "converged": true,
+    "residual": 8.904806964427398e-09,
+    "energy_hartree": -319.4002651875967,
+    "elapsed_seconds": 589.5945840409258
+  },
+  "MPI_ranks": 4,
+  "response_steps": 16,
+  "dt": 0.001,
+  "performance_max_abs_current_difference": 1.8126505071242027e-19,
+  "resume_max_abs_current_difference": 1.8126505071242027e-19,
+  "electron_number_min": 45.999999999999815,
+  "electron_number_max": 46.000000000000455,
+  "elapsed_seconds": 660.1983511659782,
+  "physical_convergence_verified": false,
+  "schema": "salmonpy.wse2-soc-mixing-validation/1",
+  "initial_iteration": 400,
+  "initial_residual": 8.578130756029325e-07,
+  "broyden_before": 0.75,
+  "broyden_after": 0.1,
+  "electrons": 46,
+  "states": 92,
+  "electronic_temperature_k": 300,
+  "kmesh": [
+    2,
+    2,
+    1
+  ],
+  "automatic_mixing": false,
+  "records": "calc2026/salmonpy-wse2-soc-20261123/gs-n92-t300-mix01/result.json"
+}

@@ -99,7 +99,7 @@ module structures
     character(32) :: method='simple'
     character(1) :: auto_mixing='n'
     integer :: nmemory_p=4,initial_no_mix_steps=1
-    real(8) :: mixrate=0.5d0,alpha_mb=0.75d0,beta_p=0.75d0,update_ratio=3d0
+    real(8) :: mixrate=0.3d0,alpha_mb=0.3d0,beta_p=0.3d0,update_ratio=3d0
   end type
 
   ! Convergence normalization only; these values never set orbital occupations.
@@ -110,6 +110,7 @@ module structures
   type s_gs_run_config
     type(s_gs_normalization_config) :: normalization
     type(s_mixing_config) :: mixing
+    real(8) :: spin_field(3)=0d0 ! Auxiliary spin-only B in atomic units; H_B=B.sigma/2
     character(32) :: convergence_metric='rho_dne'
     integer :: max_iterations=1,pre_scf_steps=1
     real(8) :: threshold=0d0,pre_scf_threshold=0d0
@@ -621,7 +622,14 @@ module structures
     integer :: stop_after=0,mixing_age=0
   end type s_scf_iteration_progress
 
+  ! Per-SCF coefficient controller, including all state needed for exact resume.
+  type s_adaptive_mixing
+    real(8) :: min_rate=0.01d0,growth=1.2d0,best=huge(1d0)
+    integer :: patience=3,cooldown=20,remaining=0,streak=0,changes=0,last_iteration=0
+  end type
+
   type s_mixing
+    type(s_adaptive_mixing) :: adaptive
     type(s_scf_iteration_progress) :: scf_progress
     logical :: scf_converged=.false.
     type(s_mixing_config) :: input

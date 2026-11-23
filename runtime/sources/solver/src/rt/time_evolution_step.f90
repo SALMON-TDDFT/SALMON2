@@ -25,7 +25,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #if defined(USE_HSE) || defined(USE_SCALAPACK)
   use ptcn_native,only:native_ptcn_step
 #endif
-  use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear
+  use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear,noncollinear_finite
 #ifdef USE_HSE
   use exx_native,only:exx_context,exx_system_energy,exx_recovery_status
   use exx_native, only: exx_taylor_stage,exx_factor_begin,exx_factor_endpoint
@@ -86,11 +86,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   integer :: ix,iy,iz,iatom,is,nspin,Mit
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe  !, FionE(3,system%nion)
+  real(8) :: spin_observation(15)
+  logical :: spin_prepared
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
   character(100) :: comment_line
   logical :: rion_update,pbeh_mesh_md,hybrid_mesh_rt
   real(8) :: rion_endpoint(3,system%nion)
   integer :: ihpsieff
+  spin_prepared=.false.
   call nvtxStartRange('time_evolution_step', __LINE__)
 #ifdef USE_HSE
   call exx_factor_begin(itt,system,mg,info,spsi_in)
@@ -348,7 +351,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #ifdef USE_HSE
     rt%step_error=max(rt%step_error,exx_recovery_status(system))
 #endif
-    call recovery_scalar(mg,info,Vxc(1),23,rt%step_error)
+    if(yn_spinorbit=='y')then
+      call recovery_scalar(mg,info,Vxc(1),23,rt%step_error,extra_bad=.not.noncollinear_finite())
+    else
+      call recovery_scalar(mg,info,Vxc(1),23,rt%step_error)
+    endif
     if(rt%step_error/=0)then
       call nvtxEndRange
       return
@@ -429,7 +436,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end select
 
   if(rt%recover_errors)then
-    call recovery_values(info,[rt%curr(:,itt),energy%E_tot],24,rt%step_error)
+    if(yn_spinorbit=='y'.and.(itt==1.or.itt==itotNtime.or.mod(itt,out_rt_spin_step)==0))then
+      call observe_rt_spin(system,mg,info,stencil,ppg,spsi_out,spin_observation)
+      spin_prepared=.true.
+      call recovery_values(info,[rt%curr(:,itt),energy%E_tot,spin_observation],24,rt%step_error)
+    else
+      call recovery_values(info,[rt%curr(:,itt),energy%E_tot],24,rt%step_error)
+    endif
     if(rt%step_error/=0)then
       call nvtxEndRange
       return
@@ -537,7 +550,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
   
   if(yn_spinorbit=='y' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_rt_spin_step)==0)) then
-    call write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,spsi_out)
+    if(spin_prepared)then
+      call write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,spsi_out,observation=spin_observation)
+    else
+      call write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,spsi_out)
+    endif
   end if
   
   if(yn_out_current_decomposed=='y' &
@@ -635,7 +652,11 @@ contains
 #ifdef USE_HSE
       rt%step_error=max(rt%step_error,exx_recovery_status(system))
 #endif
+      if(yn_spinorbit=='y')then
+      call recovery_scalar(mg,info,Vxc(1),23,rt%step_error,extra_bad=.not.noncollinear_finite())
+    else
       call recovery_scalar(mg,info,Vxc(1),23,rt%step_error)
+    endif
       if(rt%step_error/=0)then
         call nvtxEndRange
         return

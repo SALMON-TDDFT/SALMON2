@@ -1,93 +1,49 @@
-# Si入門：wheel導入から電荷電流まで
+# Si入門例：基底状態から電流へ
 
 [English](SI_INTRO.en.md)
 
-実際のSi基底状態をSCF計算し、指定したA/cパルスで時間発展させ、電荷電流を固定の
-期待値と比較する入門例です。入力・Si擬ポテンシャル・期待値・出典はwheelに含めます。
-計算本体は別のビルド済み計算プログラムを使います。この手順にコンパイルやソース取得は不要です。
+固定Si入力でSCFを計算し、A/cで駆動した21時刻の電荷電流を期待値と比べます。
+2026-11-23に、現行ソースから作った電子数付き応答の計算プログラムで再検証しました。
+入力・擬ポテンシャル・期待値・許容誤差は以前と同じです。
 
-## 1. 配布されたwheelを導入する
+## 必要な配布物
 
-OS・CPU・Python版に対応するwheelを用意してください。この新しい例を含む
-`salmonpy.examples.si_intro` が必要です。コミット `6f8b36c6` の既存wheelには
-まだこの例が入っていません。ソースの更新だけではwheelは公開されないため、
-更新済みwheelを配布者から受け取ってください。
+- OS・CPU・Python版に合う、更新済みSALMONpy wheel。Python依存はNumPyです。
+- `provenance.json` の現在の `runtime_artifacts` に登録された外側ZIP。
 
-macOS／Linuxでは次を実行します。
+現時点で新しく検証したのはApple Silicon Macで作成したローカル配布物です。公開Releaseにはまだ置いていません。配布者からwheelと対応ZIPを受け取ってください。保存先URLを推測しないでください。新ZIPがない環境では、まずwheelだけの [LD/SBEテスト](README.md)を使います。
+
+旧 `runtime-2026.11.14` Releaseは現在の電子数付き応答と合いません。過去のハッシュと出典は `historical_runtime_artifacts` 等に保持し、現在の入口では受け付けません。Intel Mac・Linux用の新しい配布物については再検証が必要です。WindowsのDFT/TDDFT配布を保証しません。
+
+## 導入・準備・実行
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
 python -m pip install --only-binary=:all: ./SALMONPY_WHEEL.whl
-python -m salmonpy.doctor --json
-python -m salmonpy.examples.si_intro --help
-```
-
-`SALMONPY_WHEEL.whl` は仮名です。実際のPython版・プラットフォーム名付きファイル名に
-置き換えます。対応wheelがない場合にソースビルドへ進まないよう、`--only-binary=:all:`
-を保持してください。この例のPython依存はNumPyのみです。Windows用計算本体はこの
-入門例では提供しません。Windows版LD/SBE wheelの対応とTDDFTの対応は別です。
-
-## 2. 対応するビルド済み計算プログラムを取得する
-
-[SALMONpy計算プログラム試用版Release](https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14)から取得します。[CI 43554502676](https://github.com/otobetomohito/SALMONpy/actions/runs/43554502676)で3環境が成功したコミット `8006261b9e48541b591e496a813b3f06ca5fc1b1` の配布物です。
-
-| Machine / 環境 | ZIP |
-|---|---|
-| Apple Silicon Mac | [salmonpy-runtime-macos-15.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15.zip) |
-| Intel Mac | [salmonpy-runtime-macos-15-intel.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15-intel.zip) |
-| Linux x86_64 / glibc | [salmonpy-runtime-ubuntu-22.04.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-ubuntu-22.04.zip) |
-
-非公開リポジトリのため、アクセス権のあるアカウントでログインします。Release資産にはActions成果物の有効期限はありません。**外側ZIPをそのまま保持**し、自動展開されたフォルダは渡さないでください。`RUNTIME_ARTIFACT.zip` は実際のファイル名に置き換えます。単一ランク・PZ／TB-mBJ用でLibxcは含みません。準備時にOS互換性を検査します（arm64 Mac >=15.8.2、Intel Mac >=15.7.9、Linux glibc >=2.35）。ハッシュ検査を無効化したり未検証のZIPで代用したりしません。
-
-## 3. 準備して計算する
-
-ソースツリー外の新規保存先を選びます。準備では外側ZIPの固定ハッシュを照合し、通常の
-計算プログラム導入処理で内側ZIP・実行ファイル・依存ライブラリを検証します。固定入力と
-擬ポテンシャルも手元にコピーします。暗黙のダウンロードはありません。
-
-```sh
+python -m salmonpy.quickstart
 python -m salmonpy.examples.si_intro prepare new-si --runtime-artifact RUNTIME_ARTIFACT.zip
 python -m salmonpy.examples.si_intro run new-si --threads 1 --memory-budget-gib 4
 ```
 
-この例では**ジョブ全体で4 GiB**の許容量を記録し、ソルバー1スレッドで実行します。
-4 GiBはプロセスごとの許容量ではありません。利用許可のある予算を指定してください。
-`--threads` は1〜4で、他の数値ライブラリのスレッド数は例の中で制限します。
-DFTとTDDFTは順番に実行します。メモリ予算は記録値であり、OSによるハード上限ではありません。
-計測不能は計算失敗と分けて報告されますが、予算内の証明にはなりません。未測定の見積もりを
-根拠に規模を拡大しないでください。
+仮名のwheelとZIPを受け取った実ファイル名に置き換えます。外側ZIPは自動展開せず、そのまま渡します。`prepare` はZIP・実行ファイル・依存ライブラリ・入力を検査して配置するだけで、計算を始めません。管理ノードでここまで実行し、`run` は割当済み計算資源で実行します。暗黙の通信・ビルドはありません。既存フォルダを上書きしません。
 
-既存の保存先を上書きしません。再試行には別の新規保存先を使い、失敗ログを残してください。
+`--threads` は1〜4。メモリ4 GiBはジョブ全体の申告予算で、OSによるハード上限ではありません。計測不能を計算失敗とは扱わず、未計測値で予算内とも判定しません。
 
-## 4. 結果を確認する
+## 確認する結果
 
-`new-si/result/report.json` に結果を保存します。計算・期待値検証・任意の資源計測の
-成否は別々に確認します。本体が正常終了しても期待値検証の失敗を成功扱いしません。
-`result/gs/native/stdout.log` がGSログ、`result/rt` が応答アーカイブです。
-`result/current.csv` と `result/current.npz` に時刻・A/c・jを保存します。CSV列は
-`time_au, Ac_x_au, Ac_y_au, Ac_z_au, j_x_au, j_y_au, j_z_au` です。
-出力は原子単位の**電荷電流密度 j**です。SALMONの電子物質電流はJ = −jであり、返された
-電流を再度符号反転してはいけません。
+`new-si/result/report.json` の `calculation` と `validation` が共に `passed` なら成功です。資源計測は `resources` で別に報告します。
 
-`examples/si_intro_data/expected.json` に全21時刻の期待値を保存しています。
-基準のエネルギーは約 **−31.7465390575 Hartree**、電流成分の絶対最大値は約
-**1.47275×10⁻⁶ a.u.** です。自動照合の許容差はエネルギー絶対誤差1e−7 Hartree、
-電流の各成分が `atol=1e-9`、`rtol=1e-5` です。SCF反復数は診断値で、完全一致の条件ではありません。
-期待値は固定したmacOS arm64計算プログラムで作成しています。他OSの成果物があることだけでは、
-この入門例のOS間の数値一致を検証したことにはなりません。
+- GSと再開データ：`result/gs/`、ログ：`result/gs/native/stdout.log`
+- 電流：`result/current.csv`、`result/current.npz`、応答アーカイブ：`result/rt/`
+- CSV列：`time_au,Ac_x_au,Ac_y_au,Ac_z_au,j_x_au,j_y_au,j_z_au`
 
-設定は立方Si 8原子、セル長10.26 bohr、32電子・32状態、実空間格子16³、k点2³、PZです。
-GS残差の基準は1e−10です。時間発展はdt=0.02 a.u.で20ステップのみで、短いz偏光パルスは
-接続を学ぶための設定です。**格子・k点・時間刻みについて収束した光学物性データではありません。**
-研究用途では格子・k点・状態数・時間刻み・伝播時間・パルス条件を別途検証してください。
+原子単位の**電荷電流密度j**です。ソルバーの電子物質電流Jとは `J = -j` の関係で、返値を再度反転しません。
 
-## 同梱データの出典
+期待GSエネルギーは約−31.7465390575 Hartree。エネルギー絶対誤差1e−7 Hartree、電流各成分は `atol=1e-9, rtol=1e-5`、時刻は丸め誤差だけを許します。反復数は診断値で完全一致を要求しません。2026-11-23のソース実行では54反復、全21時刻の電流・エネルギーの期待値との差はゼロでした。
 
-`examples/si_intro_data/input.json` に固定条件、`provenance.json` に入手元と
-計算プログラム識別子・各ファイルのハッシュを保存します。`Si_rps.dat` はSALMONの固定コミット
-`3322d0561c0cad5180679136b3eddbe8b909487c` の `samples/exercise_04_bulkSi_gs` から取得しています。
-SHA256は `8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c` です。
-元のApache-2.0ライセンスを `LICENSE.txt` として保持します。旧KY書式には生成時のXCメタデータが
-ないため、固定されたPZ Si例という出典を根拠とし、生成条件を自動認定したとは扱いません。
-GS→RTは同じ物理条件・擬ポテンシャルを引き継ぎます。この例は任意の外部GSの整合性判定器ではありません。
+## この例が検証する範囲
+
+立方Si 8原子、セル長10.26 bohr、32電子・32状態、16³格子、2³ k点、PZ、SCF基準1e−10です。dt=0.02 a.u.で20ステップ（0.4 a.u.）だけ進めます。これは導入・接続の確認で、実際のレーザーパルスや収束した光学物性ではありません。
+
+次の実計算では波形を数周期、観測を目的に必要な時間へ伸ばし、[収束診断](CONVERGENCE.md)で格子・k点・dtを調べます。格子はdtを収束させた電流の相対RMS差5%をスクリーニング基準とし、dtは電子数減少率1e−5を目安にします。誘電率や高次高調波の精度保証とは区別します。
+
+擬ポテンシャルは既にwheel内に同梱されています。個別取得や他の参照データの準備は[擬ポテンシャル取得](PSEUDOPOTENTIALS.md)を参照してください。

@@ -1,0 +1,78 @@
+{
+  "schema": "salmonpy.adaptive-mixing-validation/1",
+  "status": "passed",
+  "runtime_sha256": "4747f260eace0ce4d208956ce8c1f3ba3c2368d8b09ead8961f0a01d6380fa17",
+  "source_tree_sha256": "6d513d18c2558bb5d61ab1347afb42e1f57a706ecf8104fba6d59620355d9ae0",
+  "default_rate": 0.3,
+  "automatic_default": false,
+  "SCF_stream_format": 3,
+  "policy": {
+    "min_rate": 0.01,
+    "growth": 1.2,
+    "patience": 3,
+    "cooldown": 20
+  },
+  "native_unit": {
+    "ranks": [
+      1,
+      2
+    ],
+    "OMP_threads": [
+      1,
+      2
+    ],
+    "cases": [
+      "isolated growth ignored",
+      "persistent growth halves coefficient",
+      "cooldown respected",
+      "floor respected",
+      "fixed mode unchanged",
+      "copy/restore exact",
+      "state independence"
+    ]
+  },
+  "Ni_SOC": {
+    "ranks": 2,
+    "independent_groups": 3,
+    "memory_restore_exact": true,
+    "disk_fresh_process_restore_exact": true,
+    "restore_SCF_iterations": 0,
+    "changed_policy_snapshot_restore": true,
+    "different_per_rank_policy_rejected": true,
+    "fixed_explicit_rate_before_after_arrays_exact": true,
+    "scope": "short unconverged Ni PBE SOC software tests; no assertion that adaptive mixing improves physical convergence"
+  },
+  "baseline_XC_core_probes": {
+    "ranks": [
+      1,
+      2
+    ],
+    "OMP_threads": [
+      1,
+      2
+    ],
+    "passed": true,
+    "SOC_forces_certified": false
+  },
+  "records": [
+    "calc2026/salmonpy-default03-controller-20261123",
+    "calc2026/salmonpy-default03-adaptive-disk-r2-20261123",
+    "calc2026/salmonpy-default03-interleaved-r2-20261123",
+    "calc2026/salmonpy-default03-fixed-r2-20261123",
+    "calc2026/salmonpy-default03-nlcc-xc-20261123",
+    "calc2026/salmonpy-default03-nlcc-core-20261123"
+  ],
+  "limitations": [
+    "fast-HSE adaptive path not built/tested",
+    "no old stream fallback",
+    "default-rate change can change SCF iteration trajectory"
+  ],
+  "installed_wheel_tests": {
+    "total": 728,
+    "passed": 683,
+    "skipped": 45,
+    "failed": 0,
+    "platform": "macOS arm64 Python3.14",
+    "route": "source distribution -> wheel -> isolated installed environment"
+  }
+}

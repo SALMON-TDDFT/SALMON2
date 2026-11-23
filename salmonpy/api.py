@@ -43,6 +43,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.quickstart': ('run',), 'salmonpy.subpix
  'salmonpy.coupled': ('NativeEHField', 'MultiscaleField', 'CoupledStepper', 'PacketCoupledStepper'),
  'salmonpy.crystal': ('AResponseState', 'AInitialState', 'CrystalResponse', 'respond'),
  'salmonpy.native_gs': ('NativeGSBackend','NativeGSSession','NativeGSState','NativeGSArray','NativeGSInfo','NativeSCFSnapshot'),
+ 'salmonpy.pseudopotentials': ('PseudopotentialReference', 'silicon_reference', 'list_references', 'catalog_reference', 'download'),
  'salmonpy.dft': ('Pseudopotential', 'SCFSettings', 'SymmetryOperations', 'DFT', 'GroundStateResult'),
  'salmonpy.distributed': ('SolverGroup',
                           'ParallelPlan',
@@ -96,7 +97,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.quickstart': ('run',), 'salmonpy.subpix
                       'CoupledResponse',
                       'couple'),
  'salmonpy.preparation': ('prepare_inputs', 'prepare_fdtd', 'prepare_dft', 'prepare_tddft', 'verify_inputs', 'preflight_inputs', 'check_job'),
- 'salmonpy.outputs': ('CubeGrid',
+ 'salmonpy.outputs': ('SpinDynamics', 'read_spin_dynamics', 'CubeGrid',
                       'read_cube',
                       'DecomposedCurrent',
                       'read_decomposed_current',
@@ -382,7 +383,13 @@ def _gs_operations():
         'read':[('state','int64'),('quantity','int'),('real','buffer'),('imag','buffer'),('length','int64')],
         'close':[('state','int64')], 'resources':[('counts','buffer')],
         'scf_protocol':[], 'start':[('path','string'),('steps','int'),('state','int64*')],
-        'continue':[('state','int64'),('steps','int')], 'scf_info':[('state','int64'),('values','buffer')],
+        'continue':[('state','int64'),('steps','int')],
+        'scf_spin_field':[('state','int64'),('field','buffer')],
+        'scf_spin_info':[('state','int64'),('values','buffer')],
+        'scf_adaptive_mixing':[('state','int64'),('enabled','int'),('min_rate','double'),('growth','double'),('patience','int'),('cooldown','int')],
+        'scf_mixing_info':[('state','int64'),('values','buffer'),('counts','buffer')],
+        'scf_set_mixing':[('state','int64'),('rate','double')],
+        'scf_extend_limit':[('state','int64'),('new_limit','int')], 'scf_info':[('state','int64'),('values','buffer')],
         'scf_snapshot':[('state','int64'),('snapshot','int64*')],
         'scf_restore':[('state','int64'),('snapshot','int64')],
         'scf_snapshot_close':[('state','int64'),('snapshot','int64')],
@@ -414,6 +421,7 @@ def _gs_operations():
         if name=='array_info':entry['layout']='ndim int32; shape/lower int64[7]; quantity1 density,2 occupation,3 eigenvalue,4 force,5 orbitals,6 SCF history'
         if name=='read':entry['layout']='float64 real/imag arrays of length; Fortran order; use array_info first; local arrays can include halos'
         if name=='resources':entry['layout']='int32[3]: states/live child communicators/slot high-water; rank-local'
+        if name=='scf_extend_limit':entry['scope']='increase only the owned SCF total-iteration cap; no SCF, wave/density/mixing reset or input-model mutation; serialized gs_input retains the new runtime cap'
         if name=='scf_info':entry['layout']='int32[6]: paused/iterations/total cap/initializations/executed main iterations/live snapshots'
         if name in ('scf_snapshot','scf_restore','scf_snapshot_close'):
             entry['scope']='same live GS owner; numerical/mixing/HSE history only; no portable files or text-output rewind; restore does not rewind lifetime execution/init counters'
@@ -440,7 +448,7 @@ def _bind_gs_operations(library,names):
         fn=getattr(library,name,None)
         if fn is None:raise InputError('runtime lacks required GS operation '+name)
         functions.append((fn,specs[name]['arguments']))
-    types={'string':c.c_char_p,'int':c.c_int,'int64':c.c_int64,'buffer':c.c_void_p,
+    types={'double':c.c_double,'string':c.c_char_p,'int':c.c_int,'int64':c.c_int64,'buffer':c.c_void_p,
            'int*':c.POINTER(c.c_int),'int64*':c.POINTER(c.c_int64)}
     for fn,args in functions:
         fn.argtypes=[types[a] for a in args];fn.restype=c.c_int

@@ -65,7 +65,7 @@ management slot high-water. Closing one owner preserves siblings; closing all
 returns live children to zero. Retained management slots are distinct from leaks.
 
 Python scope is periodic full-k unpolarized fixed-ion PZ/Libxc-PZ/PBE and HSE06
-with a declared fast-PR compute runtime. HSE uses k-only MPI by default; explicit Gamma orbital GS is described below. SOC/+U/DC GS,
+with a declared fast-PR compute runtime. HSE uses k-only MPI by default; explicit Gamma orbital GS is described below. See [Ni validation](NICKEL_SOC.en.md) for the added SOC PBE SCF independence/restart scope. +U/DC GS,
 full SCF checkpoint/restart and threaded GS/TDDFT are separate; sequential
 GS/RT interleaving and portable array export are described below.
 One solver electronic attachment lifetime per process. Info, arrays and close are
@@ -1500,3 +1500,143 @@ truncating. Reader errors/mismatches fail the fresh candidate without changing
 existing owners. This does not guarantee recovery from arbitrary MPI/process/OS
 OOM failures. The data interface does not certify every solver physics profile;
 normal unconverged-SCF residual review remains required.
+
+### Continue SCF with a different mixing coefficient
+
+`state.set_scf_mixing(0.1)` changes only this state's effective mixing coefficient;
+wavefunctions, density, mixing history and iteration counters are retained.
+Broyden uses `alpha_mb`, Pulay `beta_p`, and other methods `mixrate`.
+`SCFSettings(mixing_rate=...)` writes the corresponding parameter; omission preserves
+SALMON defaults. All ranks in the solver group must supply the same value.
+Snapshots and disk checkpoints retain the change. Increase the total iteration cap
+separately with `extend_scf_limit(2000)`. Review residual history before explicitly
+continuing an unconverged state; this does not authorize automatic TDDFT continuation.
+The WSe2 trial resumes iteration400 (residual approximately8.6e-7), lowering Broyden
+from0.75 to0.1. This is not a grid/k convergence certification.
+Optional downward adaptation is described below; coefficient optimization and auxiliary magnetic alignment remain unimplemented.
+
+### Reduce mixing when SCF residuals oscillate
+
+If residuals repeatedly oscillate without decreasing, or grow strongly, try a
+**smaller mixing coefficient** rather than only raising the iteration limit.
+Inspect the saved residual CSV/plot and compare the trend before and after the change.
+Allow several iterations at a fixed coefficient; do not repeatedly react to isolated increases.
+
+| Mixing method | SALMON input coefficient | Python setting |
+|---|---|---|
+| Broyden (default if omitted) | `alpha_mb` | `SCFSettings(mixing_method="broyden", mixing_rate=0.1)` |
+| Pulay | `beta_p` | `SCFSettings(mixing_method="pulay", mixing_rate=0.1)` |
+| simple / simple_dm / simple_potential | `mixrate` | `SCFSettings(mixing_method="simple_dm", mixing_rate=0.1)` |
+
+`0.1` is a trial value, not a universal optimum. Changing only `mixrate` in a
+SALMON input does not reduce Broyden's `alpha_mb`. For a retained SCF state,
+all ranks in its solver group call the following in the same order with the same coefficient:
+
+```python
+state.set_scf_mixing(0.1)  # Change the effective coefficient; execute no SCF iteration
+state.continue_scf(steps=25)  # Run the next 25 iterations, then inspect residuals
+```
+
+Wavefunctions, density and existing mixing history are retained. If the total
+iteration limit has been reached, explicitly review the residuals before separately
+extending it with `state.extend_scf_limit(...)`. Excessively small coefficients
+can slow progress; if reduction does not help, review mixing history and other
+calculation conditions. Do not loosen tolerances to label a state converged or
+automatically start TDDFT from an unconverged state. See the next section for optional downward adaptation; automatic optimization is not implemented.
+
+### Optional residual-based reduction of mixing
+
+Use `SCFSettings(adaptive_mixing=True)` for a new calculation; omission retains fixed mixing.
+For an existing SCF state, all solver-group ranks call:
+
+```python
+state.set_scf_adaptive_mixing(
+    enabled=True, min_rate=0.01, growth=1.2, patience=3, cooldown=20)
+policy = state.scf_mixing  # Query on every rank; print/save only on the reporting rank
+```
+
+When the residual exceeds `growth` times the reference for `patience` consecutive
+iterations, halve the effective coefficient. The reference is the best residual
+observed since initialization or the last coefficient change, including cooldown.
+An isolated rise does not trigger reduction. Improvement or recovery near the
+reference resets the worsening streak. After a change, wait `cooldown` iterations
+before another reduction. Never reduce below `min_rate` or increase a coefficient
+that is already smaller. This is downward-only stabilization, not automatic
+optimization, coefficient increases or magnetic alignment. A flat plateau alone
+also does not trigger a change.
+
+Fortran owns the decision and controller state. It uses the already available
+group-consistent residual with no additional application-wide communication.
+Each method changes its effective coefficient; the log records iteration,
+old/new coefficients and residual. `scf_mixing` reports the rate, settings,
+worsening streak, cooldown remaining, change count and last change iteration.
+Mixing history is retained. Snapshots and disk checkpoints include controller
+state. Manual coefficient changes or controller reconfiguration reset the
+observation baseline without running an SCF iteration.
+
+The current SCF stream format is4; no reader fallback for format2 is provided.
+Explicitly supply a compatible calculation library. Ni SOC internal MPI2 tests
+cover independence and exact resume. This does not guarantee convergence for
+every material; fast-HSE validation remains separate work.
+
+### Current default mixing coefficient
+
+Python and Fortran both default to an effective coefficient of **0.3**:
+`alpha_mb` for Broyden, `beta_p` for Pulay and `mixrate` for simple methods.
+This lowers the previous0.75 (Broyden/Pulay) and0.5 (simple) defaults.
+Explicit coefficients are unchanged. Default SCF trajectories/iteration counts
+may change; convergence tolerances are unchanged. Try0.1 if oscillation persists,
+and inspect residual history. Downward adaptation remains opt-in, disabled by default.
+
+## Stabilize SOC SCF with an auxiliary spin field
+
+A retained SOC state can own an auxiliary spin-only magnetic field, zero by default.
+The example below conservatively waits for SCF convergence at each stage; see NICKEL_SOC.en.md for separately declared preliminary alignment targets.
+Scope: CPU and full k points. Nonzero fields with symmetry reduction, GPU execution,
+orbital magnetic effects and FDTD H coupling are outside this interface.
+Fortran owns all numerical operations, state and field-energy accounting.
+
+```python
+# state is a retained SOC SCF state. All solver-group ranks make these calls.
+state.set_scf_spin_field([0.0, 0.0, 1e-3])  # B in atomic units
+state.continue_scf(steps=25)
+spin = state.scf_spin_field
+if not state.info.converged:
+    raise RuntimeError("Inspect residuals and moment; continue SCF at this field first")
+# Inspect residuals and spin_magnetic_moment_muB before reducing the field.
+state.set_scf_spin_field([0.0, 0.0, 5e-4])
+state.continue_scf(steps=25)
+if not state.info.converged:
+    raise RuntimeError("Continue and review SCF at this field before removing B")
+state.set_scf_spin_field([0.0, 0.0, 0.0])
+state.continue_scf(steps=25)  # Recheck zero-field convergence;25 is not a sufficient-count claim.
+```
+
+The spin Zeeman Hamiltonian is `H_B = B.sigma/2` in atomic units (electron g=2,
+mu_B=1/2). Do not pass Tesla values directly. The sign favors alignment of the
+**spin magnetic moment** with B; its magnitude is not constrained.
+`scf_spin_field` returns `field_au`, `zeeman_energy_hartree`,
+`spin_magnetic_moment_muB` and `energy_without_auxiliary_hartree`.
+Only the spin contribution is included, not orbital magnetism.
+`E_Z = -B.m/2` with m in Bohr magnetons. Existing SOC magnetization output M is
+unchanged; its native convention maps to this moment as `m=(-2Mx,+2My,-2Mz)`.
+Always distinguish these output conventions and units.
+
+Changing B retains orbitals, density and iteration counters but restarts mixing
+extrapolation across the changed Hamiltonian. It resets the adaptive coefficient
+observation baseline and clears convergence. The total iteration cap is separate.
+Setting the same field again is a no-op. Query on all solver-group ranks; only
+the reporting rank writes/displays results. Record B, moment and residuals at each
+stage; advance only after its declared targets are met. Preliminary alignment targets
+may be looser than final SCF targets, but preliminary states are not converged GSs. After removing the field,
+check charge residuals and changes of magnetic moment again. Charge convergence
+alone does not establish convergence of magnetic direction. GS-to-TDDFT creation
+with a nonzero auxiliary field is rejected without changing the state.
+
+Snapshots/disk checkpoints carry the field, mixing controls and electronic state.
+The current SCF disk format is4, with no reader fallback for earlier formats.
+Ni18-electron/36-spinor,300 K,2x2x2 internal MPI1/2 tests cover field reduction,
+independent states, memory restore and exact fresh-process direct resume.
+Longer fixed-input Ni trials also show alignment and staged removal, but final
+zero-field residual remains about5.9e-6, unconverged. This does not establish grid/k
+or physical-material convergence. See the observations in NICKEL_SOC.en.md.

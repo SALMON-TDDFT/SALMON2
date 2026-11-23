@@ -1738,11 +1738,11 @@ contains
     ncg           = 4
     ncg_init      = 4
     method_mixing = 'broyden'
-    mixrate       = 0.5d0
+    mixrate       = 0.3d0
     nmemory_mb    = 8
-    alpha_mb      = 0.75d0
+    alpha_mb      = 0.3d0
     nmemory_p     = 4
-    beta_p        = 0.75d0
+    beta_p        = 0.3d0
     yn_auto_mixing = 'n'
     update_mixing_ratio = 3.d0
     nscf          = 300

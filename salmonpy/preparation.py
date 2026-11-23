@@ -155,6 +155,11 @@ def prepare_dft(calculation,directory,*,scf=None,save_restart=True,initial_guess
     scf=SCFSettings() if scf is None else scf
     text=_restart_output_text(calculation.input_text(scf),save_restart)
     metadata={'xc':calculation.xc,'save_restart':save_restart}
+    if calculation.spin_orbit:metadata['spin_orbit']=True
+    if any(p.reference is not None for p in calculation.pseudopotentials):
+        from dataclasses import asdict
+        metadata['pseudopotential_sources']=[None if p.reference is None else asdict(p.reference)
+                                           for p in calculation.pseudopotentials]
     if calculation.xc=='hse06':metadata['required_runtime_profile']='fast-pr'
     assets=dict(calculation.input_assets);expected={}
     if initial_guess is not None:

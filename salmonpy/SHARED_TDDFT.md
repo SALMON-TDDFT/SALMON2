@@ -227,3 +227,9 @@ MPI1／2で実施でき、GSデータは不要です。新旧計算処理のXC�
 合成入力で通常・性能状態の交互更新、独立実行との比較、4種類のXC、異なる
 PZ↔TB-mBJ・Libxc-PZ↔PBEの登録切替を内部1・2ランクで確認しています。
 実材料の収束検証や速度評価ではありません。
+
+
+SOC非共線の追加範囲は[Niの接続検証](NICKEL_SOC.md)を参照してください。PZ/Libxc-PZ/PBEの入口を追加し、Ni Libxc-PBE・内部MPI 1/2で状態独立性と直接復元を検証済みです。TB-mBJ・高速HSEのSOCは対象外です。
+
+
+SOCの深部数値異常からの自動復帰は `checked`、検査・保護用コピーを省く更新は `performance` を使います。Ni PBE・k点MPI 1/2で状態・出力の保持と再試行を確認しました。詳しくは[NICKEL_SOC.md](NICKEL_SOC.md)を参照してください。

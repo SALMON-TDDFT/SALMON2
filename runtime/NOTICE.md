@@ -1,7 +1,7 @@
 # Small-gradient HSE formula provenance
 
-The small-gradient WPBEh algebra in the complete replacement
-`overrides/hse-explicit-routing/src/xc/hybrid_semilocal.f90` derives from Libxc
+The small-gradient WPBEh algebra in the maintained source
+`sources/solver/src/xc/hybrid_semilocal.f90` derives from Libxc
 5.2.3 `maple/gga_exc/gga_x_wpbeh.mpl` (Copyright (C) 2017 M.A.L. Marques).
 The derived formula and constants retain the Mozilla Public License 2.0;
 see `licenses/Libxc-MPL-2.0.txt`. SALMONpy's modification combines the E1/log

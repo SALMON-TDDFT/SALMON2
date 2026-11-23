@@ -6,7 +6,7 @@ The native format is versioned and binary/topology-pinned, not a portable GS arc
 import argparse,re
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]/'runtime/sources/solver/src'
-FILES=['common/structures.f90','io/model_inputs.f90','gs/main_dft.f90','xc/exx_rt_state.f90','xc/exx_ace.f90','xc/exx_symmetry.f90','xc/exx_factor_history.f90','xc/exx_spatial.f90','xc/exx_distributed_gauge.f90','xc/exx_sparse_orbitals.f90']
+FILES=['common/structures.f90','io/model_inputs.f90','gs/main_dft.f90','so/noncollinear_module.f90','xc/exx_rt_state.f90','xc/exx_ace.f90','xc/exx_symmetry.f90','xc/exx_factor_history.f90','xc/exx_spatial.f90','xc/exx_distributed_gauge.f90','xc/exx_sparse_orbitals.f90']
 SKIP={('s_dft_system','salmonpy_hse_owner'),('s_exx_rt_state','native_kernel'),('s_exx_ace','metric_comm'),('spatial_exx_state','local_batch'),('spatial_exx_state','create_local_backend'),('s_exx_gauge','comm')}
 
 def split(text):
@@ -94,6 +94,7 @@ def generate():
         content+=r
         if t in hsetypes:content+='#endif\n'
     outputs[ROOT/'gs/scf_disk_io.inc']=content
+    outputs[ROOT/'rt/noncollinear_disk_io.inc']=routine('s_noncollinear_state').replace('scf_io_s_noncollinear_state','checkpoint_io_noncollinear')
     return outputs
 
 def main():

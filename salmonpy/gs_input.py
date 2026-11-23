@@ -163,6 +163,7 @@ def describe_gs_input(text,*,assets,material_id='material',origin='declared',con
     if not potentials:notes.append('pseudopotential species mapping not declared')
     if 'xc' not in functional:notes.append('XC default/effective selection unknown')
     settings={'unit_system':units,'periodic':system.get('yn_periodic'),'spin':system.get('spin'),
+        'spin_orbit':system.get('yn_spinorbit'),
         'cell_bohr':cell,'atomic_numbers':numbers,'fractional_positions':positions,
         'electrons':system.get('nelec'),'states':system.get('nstate'),
         'grid_counts':grid.get('num_rgrid'),'grid_spacing_bohr':spacing,

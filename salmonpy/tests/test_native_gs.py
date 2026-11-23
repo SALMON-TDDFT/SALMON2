@@ -7,6 +7,42 @@ import unittest
 
 class NativeGSTests(unittest.TestCase):
 
+    def test_spin_field_rejects_nonreal_inputs_before_loading_library(self):
+        import numpy as np
+        from types import SimpleNamespace
+        from salmonpy.native_gs import NativeGSState
+        from salmonpy.errors import InputError
+        state=NativeGSState.__new__(NativeGSState)
+        state._scf_ready=lambda:None
+        state.session=SimpleNamespace(comm=SimpleNamespace(allgather=lambda value:[value]))
+        for value in (np.array([1+2j,0,0]),[True,False,False],[np.nan,0,0],[np.inf,0,0],[1,2]):
+            with self.subTest(value=value),self.assertRaisesRegex(InputError,'three finite real'):
+                state.set_scf_spin_field(value)
+
+    def test_scf_stream_contract_uses_session_library(self):
+        from types import SimpleNamespace
+        from salmonpy.native_gs import _scf_runtime_contract
+        from salmonpy.errors import InputError
+
+        class Fn:
+            def __init__(self, result):
+                self.result = result
+            def __call__(self, *args):
+                return self.result
+
+        lib = SimpleNamespace(sp_gs_scf_format_protocol=Fn(1),
+                              sp_gs_scf_format_signature=Fn(0),
+                              sp_gs_scf_state_revision=Fn(2))
+        session = SimpleNamespace(lib=lib, backend=SimpleNamespace(
+            _scf_source_digest='source', _scf_codec_digest='codec'))
+        contract = _scf_runtime_contract(session)
+        self.assertEqual(contract['state_revision'], 2)
+        self.assertEqual(contract['source_sha256'], 'source')
+        self.assertEqual(len(lib.sp_gs_scf_format_signature.argtypes), 2)
+        lib.sp_gs_scf_format_signature.result = 1
+        with self.assertRaisesRegex(InputError, 'representation unavailable'):
+            _scf_runtime_contract(session)
+
     def test_array_guess_owned_values_and_provider_tiles(self):
         import numpy as np
         from salmonpy.gs_initial_guess import GSInitialGuess
@@ -57,6 +93,11 @@ class NativeGSTests(unittest.TestCase):
         self.assertTrue(spec['known']);self.assertTrue(spec['multiple_live_states'])
         operations=spec['gs_operations']
         self.assertEqual(operations['sp_gs_info']['collective'],'solver group')
+        self.assertEqual(operations['sp_gs_scf_spin_field']['arguments'],['int64','buffer'])
+        self.assertEqual(operations['sp_gs_scf_adaptive_mixing']['arguments'],['int64','int','double','double','int','int'])
+        self.assertEqual(operations['sp_gs_scf_set_mixing']['arguments'],['int64','double'])
+        self.assertEqual(operations['sp_gs_scf_extend_limit']['arguments'],['int64','int'])
+        self.assertEqual(operations['sp_gs_scf_extend_limit']['collective'],'solver group')
         self.assertEqual(operations['sp_gs_resources']['collective'],'local')
         self.assertEqual(operations['sp_gs_scf_candidate']['modes'][3],'publish')
         class Fn:

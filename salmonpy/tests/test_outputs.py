@@ -4,6 +4,36 @@ from pathlib import Path
 import numpy as np
 
 class OutputTests(unittest.TestCase):
+    def test_spin_dynamics_axes_units_and_owned_arrays(self):
+        from salmonpy.outputs import read_spin_dynamics
+        names=['Time','mag_x','mag_y','mag_z']+[
+            'spin_curr_'+spin+'_'+direction for spin in ('0','x','y','z') for direction in ('x','y','z')]
+        units=['fs']+['none']*3+['au']*12
+        header='# '+' '.join(f'{i+1}:{n}[{u}]' for i,(n,u) in enumerate(zip(names,units)))
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'spin.data'
+            path.write_text(header+'\n'+' '.join(str(i) for i in range(16))+'\n')
+            result=read_spin_dynamics(path)
+            self.assertEqual(result.time_unit,'fs')
+            self.assertEqual(result.magnetization_unit,'none')
+            self.assertEqual(result.current_unit,'au')
+            np.testing.assert_array_equal(result.magnetization,[[1,2,3]])
+            self.assertEqual(result.pauli_current.shape,(1,4,3))
+            self.assertEqual(result.spin_current.shape,(1,3,3))
+            self.assertEqual(result.spin_current[0,1,2],12)
+            self.assertEqual(result.pauli_current[0,0,0],4)
+            with self.assertRaises(ValueError):result.spin_current[0,0,0]=0
+            from salmonpy.examples.outputs_roundtrip import save_spin_arrays
+            rt=Path(tmp)/'rt.data'
+            rt.write_text('# 1:Time[fs] 2:Jm_x[au] 3:Jm_y[au] 4:Jm_z[au]\n0.1 2 -3 4\n')
+            archive=save_spin_arrays(rt,path,Path(tmp)/'archive')
+            np.testing.assert_array_equal(archive.array('charge_current'),[[-2,3,-4]])
+            np.testing.assert_array_equal(archive.array('time_current'),[.1])
+            np.testing.assert_array_equal(archive.array('time_spin'),[0])
+            self.assertEqual(archive.array('spin_current').shape,(1,3,3))
+            path.write_text(header.replace('spin_curr_z_z','other')+'\n'+' '.join(str(i) for i in range(16))+'\n')
+            with self.assertRaisesRegex(ValueError,'spin dynamics columns'):read_spin_dynamics(path)
+
     def test_roundtrip_and_no_overwrite(self):
         from salmonpy.outputs import save_arrays, OutputArchive
         with tempfile.TemporaryDirectory() as tmp:

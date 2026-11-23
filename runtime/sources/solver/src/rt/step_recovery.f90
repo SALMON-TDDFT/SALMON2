@@ -79,14 +79,18 @@ contains
     call finish_check(info,20,bad,status)
   end subroutine
 
-  subroutine recovery_scalar(mg,info,value,stage,status)
+  subroutine recovery_scalar(mg,info,value,stage,status,extra_bad)
     type(s_rgrid),intent(in)::mg
     type(s_parallel_info),intent(in)::info
     type(s_scalar),intent(in)::value
     integer,intent(in)::stage
     integer,intent(inout)::status
+    logical,optional,intent(in)::extra_bad
     integer::ix,iy,iz,bad
     bad=0
+    if(present(extra_bad))then
+      if(extra_bad)bad=stage
+    endif
     if(.not.allocated(value%f))then
       bad=stage
     else

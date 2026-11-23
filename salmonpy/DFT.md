@@ -4,6 +4,14 @@ GS計算本体の入口はASEに依存しない `salmonpy.dft` です。
 `salmonpy.ase.dft_from_atoms` はASE構造をこのモデルへコピーする薄い変換です。
 ASEを使わない場合は `DFT` に原子番号、行ベクトルのセル（bohr）、分数座標を直接渡せます。
 
+## SOCと金属の明示的な入力
+
+`DFT(..., spin_orbit=True)` は完全相対論NC-UPFを使い、非共線スピノルの入力を生成します。状態数はスピノル本数で、省略時は電子数の2倍です。スカラー擬ポテンシャルとの暗黙の置換はしません。正の電子温度は `electronic_temperature_k=300`（K）または `electronic_temperature`（Hartree）の一方でモデルごとに指定します。
+
+`SCFSettings` では、反復数・許容差に加え `mixing_method`、`mixing_rate`、`initial_wavefunction`、`random_seed` を明示できます。混合率の既定値は0.3です。方法は省略時にBroydenを使い、明示した係数を優先します。`simple_dm` は非共線密度行列の混合です。
+
+[NiのSOC検証](NICKEL_SOC.md)には、セミコア付きUPF・2×2×2・300 Kの短いSCF試験、SCFの独立性・別プロセス再開、TDDFTの独立性・直接復元・同じMPI分割での別プロセス再開を含みます。収束した物性、SOCの力・高速HSE・TDDFTのMPI分割変更は未検証です。
+
 ## ASEからの使用例
 
 ```python
@@ -134,6 +142,8 @@ Siサンプルは--no-restartと--max-iterationsに対応します。
 管理ノードで入力保存だけを行う場合はpreparation.prepare_dftを使います。実行とは独立した入口で、自動的に計算へ進みません。initial_guessを明示すれば、同じwarm start検査と入力生成を使って3ファイルの初期推定も準備できます。日英のPREPARATION.md／PREPARATION.en.mdを参照してください。
 
 
+SCF残差が振動して下がらない場合は、混合率を下げて試します。Broydenでは`alpha_mb`、Pulayでは`beta_p`が対象です。Pythonの指定例と保持状態からの継続は[NATIVE_GS.mdの混合率変更手順](NATIVE_GS.md#残差が振動するときは混合率を下げる)を参照してください。反復数を増やすだけで押し切らず、残差の変化を確認します。
+
 ## SCF未収束時の確認待ち（2026-11-21）
 
 `DFT.run()` と `NativeGSSession.run()` は、反復上限で未収束なら警告し、
@@ -166,3 +176,13 @@ AIが自動的にこの指定で再実行してはいけません。既存結果
 確認待ちになります。確認待ち後もFortran/Cで保持する計算状態は閉じず、保存や診断に利用できます。
 ランク間で `allow_unconverged` の指定を揃えます。計算の更新順・収束閾値は変更しません。
 この方針は以前の「未収束でも警告のみで自動継続」を置き換えます。
+
+## 混合率の既定値
+
+SALMONpyの混合率は**0.3**を既定とします。Pythonの`SCFSettings()`、
+Fortran入力パーサー、状態ごとの設定で揃えています。
+Broydenは`alpha_mb=0.3`、Pulayは`beta_p=0.3`、simple系は`mixrate=0.3`です。
+明示的な`mixing_rate`や対応するSALMON入力係数があれば、その指定を使います。
+以前のBroyden／Pulayの0.75、simple系の0.5から下げたため、既定値を使うSCFの
+反復経路・反復数は変わり得ます。収束許容差は変更しません。
+振動が残る場合は0.1などを試し、残差の推移を確認します。任意の自動低下は既定では無効です。

@@ -32,6 +32,12 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 ### 残る作業と対象拡大
 
+- **SOCの小規模CI：fcc Ni**：k点はユーザー指定の2×2×2（全8点）、SALMON本体の標準分割。初期磁化・占有数／温度を明示し、短い状態操作の検査に限定する。実材料の磁性・光学物性の再現は手動検証。WSe₂の実用途検証は継続。固定版SOC NC-UPF（3s/3pセミコア・18電子）で1/2スレッドの短いSCFとSOC作業配列の復元をローカル検証済み。既存の手動CIへ統合済み、遠隔実行は未実施。SCF全体・TDDFTの再開は別件。
+
+- **SOCを通常経路に整備（最優先、単層WSe₂・SALMON標準2×2×1）**：完全相対論W/Seカタログ・SOC用DFT入力・スピノル状態数・参照保持を実装。非共線スピン配列の状態所有、GS／バンド／TDDFT／MPI／保存・再開の接続と実測は未完。スカラー版へ自動代替しない。[計画](2026-11-23-wse2-soc.md)。
+
+- **Si入門の配布範囲拡大**：2026-11-23にApple Silicon用の現行ランタイムをローカル再検証。公開Releaseへの配置、Intel Mac・Linux用の新ランタイム検証は残る。旧2026-11-14 ZIPは現在の入口から除外し、来歴として保持。
+
 **分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消はワーカー内保存点から直接復元します。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。光源・吸収層を除いた内側の箱について、六面流束を含む場・等方LD・分子の離散エネルギー収支と実MPI2分割を確認済みです。単一分子用の一般利用向け入口はMolecularFeedbackとして実装済みです。正の背景誘電率・透磁率と対角LDの収支観測まで完了しました。背景誘電率が対角の場合は非対角LD極の収支観測も実装・ソース検証済みです。非対角の背景誘電率の収支観測も接続・検証済みです。LD界面平滑化の収支観測も実装・検証済みです。Ohmic伝導の散逸観測も実装・検証済みです。広い物理条件での収束確認は残件です。以下はそれと区別する運用・対象拡大の残件です。
 
 1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
@@ -4699,3 +4705,87 @@ f4cc1b03はローカルcommit済み・未push。その後の対角背景／非�
 - [x] Final Mac sdist-to-wheel checks:713 tests/712 pass/one skip; core53 pass; NumPy-only51 pass/two skips. First calculations complete in under one second with dependencies installed; LD output and SBE arrays match the prechange wheel. Catalog-driven first-use command also passes.
 - [ ] Other-platform first-use runs and distribution availability remain separate work. No remote CI or GS calculations launched.
 - Record: docs/first-use-review-2026-11-23.md and calc2026/salmonpy-first-calculation-review-20261123/review-summary.json. Cloud sync not confirmed.
+
+## 2026-11-23：擬ポテンシャル取得とSi入門の更新
+
+- [x] 明示的許可付きの取得API/CLI。HTTPS転送・64 MiB上限・SHA256・新規保存先を検査し、出典とライセンスを保存。既定Si参照と利用者指定参照を同じ入口で処理。計算時の自動取得なし。
+- [x] Si固定URLからの実取得と同梱データとのハッシュ一致。拒否・改変・HTTP転送・上限・既存保存先の検査。
+- [x] 現行ソースを禁止固有値ソルバーのソース／全オブジェクト監査付きでビルドし、依存ライブラリ・ライセンスを含む再配置可能ZIPを作成。
+- [x] 許可されたSi GSを1回計算し、PZ・54反復で収束。期待エネルギーと全21時刻の電流が差ゼロ。期待値・入力・許容誤差は変更なし。
+- [x] 更新wheel導入環境から保存GSを再利用し、SCF再計算なしで21時刻の電流がソース実行・期待値と完全一致。取得APIもwheelから実通信で確認。
+- [ ] 新ZIPの公開Release配布と他OS版の検証。ローカル成功を公開済み・全OS成功と解釈しない。
+
+
+### 2026-11-23 Ni SOC SCF memory ownership
+
+- [x] Ni FR NC-UPF with 3s/3p semicore, 18 electrons/36 states, 300 K and SALMON original 2×2×2 mesh. No Python k-point generation or temperature conversion.
+- [x] Noncollinear mutable arrays travel with SCF contexts/payloads; projector construction scratch is call-local. Two different-cell/mixing states match independent controls exactly, including restored continuation, with 1/2 internal MPI ranks. Restore executes zero SCF iterations; GS data are not exported.
+- [x] New source/application-object prohibition audits; prescribed-density XC and core-force tests pass with MPI 1/2 and OMP 1/2. Source identity 7bb2c01834cb12473f22fa442c01ba7a96dae4d83a189e8fd0d5efeb976eb743.
+- [ ] SOC disk/process restart, RT ownership, physical convergence, forces and HSE remain separate validation tasks. Stream schema2 now carries noncollinear payloads but SOC disk round-trip has not been validated. No old-stream fallback.
+- Records: calc2026/salmonpy-ni-scf-memory-v4-n36-t300-20261123 and salmonpy-ni-scf-memory-mpi2-v4-n36-t300-20261123; XC/core records salmonpy-ni-scf-nlcc-{xc,core}-v4-20261123.
+
+
+### 2026-11-23 Ni SOC fresh-process SCF disk restart
+
+- [x] Explicit Ni disk test saves after2 SCF iterations; fresh-process restore executes zero SCF iterations and continued iteration4 arrays match a continuous control bitwise. Internal MPI1/2 both pass at18 electrons/36 states/300 K/2×2×2. Electronic checkpoint storage explicitly authorized by the user for this campaign.
+- [x] Fixed the undefined library reference in the SCF stream-signature binding. Added direct successful/failing signature-query regression coverage. No numerical equations changed.
+- [x] Manual tools registered for source/wheel distribution; day-to-day CI does not run Ni physical calculations.
+- Records: calc2026/salmonpy-ni-soc-disk-r1-v2-20261123 and salmonpy-ni-soc-disk-r2-20261123. First failed trial preserved in salmonpy-ni-soc-disk-r1-20261123.
+- [ ] Changed SOC MPI layouts, TDDFT state ownership/restart and converged Ni/WSe2 physical validation remain. This supersedes only the same-layout SOC disk/process-restart item above.
+
+
+### 2026-11-23 Ni SOC shared TDDFT connection
+
+- [x] Embedded standard PZ/Libxc-PZ/PBE SOC/noncollinear admission; scalar and process-worker restrictions retained. Per-handle noncollinear ownership preserves host workspace and releases arrays at close. In-step backup and stream3 include all five numerical arrays, with generated bounded codec. No old-stream fallback.
+- [x] Ni18e/36 states/300 K/original2×2×2, eight three-component-A steps: interleaved states versus independent controls and step4 disk restoration into new live states match exactly on internal MPI1/2. Unconverged four-iteration GS is comparison-only, not a physical result. User authorized this campaign's RT checkpoint/current/log storage.
+- [x] Scalar Si currents match prior library exactly. Prescribed-density XC/core tests pass MPI1/2 × OMP1/2 on final source45532ca5d431e305a13790a80ddfaa14afebea9eff8db59f1ed893a8ffdcb56e.
+- Records: calc2026/salmonpy-ni-soc-tddft-r{1,2}-v2-20261123 and salmonpy-soc-scalar-rt-regression-final-20261123.
+- [ ] SOC RT restart after process exit, changed topology, deep-failure recovery, spin-output transaction coverage, converged Ni/WSe2 physics and fast HSE SOC remain. Same-process fresh-state restore is not fresh-process restart.
+
+
+### 2026-11-23 Ni SOC TDDFT fresh-process disk restart
+
+- [x] Manual three-host test: save software-probe GS once at SCF4; continuous RT8 control; separate host loads GS with zero SCF, runs RT4 and saves; final host loads GS with zero SCF, restores RT4 and runs only RT5..8.
+- [x] Charge currents and measured electron numbers match exactly at internal MPI1/2, same binary/layout, Ni18e/36 states/300 K/original2×2×2. User instructed proceeding with the concrete additional-GS-storage test after the explicit storage question. Work arrays/potentials/communicators still initialize; no SCF or RT replay.
+- [x] Tool packaged; Japanese/English guides and AI catalog synchronized. No new Fortran build or remote CI needed: unchanged audited runtime SHA verified by loader.
+- Records: calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123 and salmonpy-ni-soc-tddft-fresh-r2-20261123.
+- [ ] Changed SOC RT MPI topology, spin-output transaction coverage/deep numerical recovery, physical Ni/WSe2 convergence and fast HSE SOC remain. This closes the fresh-process RT restart item above only.
+
+
+### 2026-11-23 SOC spin-output ownership and time-series reading
+
+- [x] Reproduced missing spin stream in protected-step ownership; Fortran now captures/closes/reconnects the SOC spin stream, updates its owning unit and rejects existing spin-file collisions. Scalar two-stream behavior retained. Shared Python model/GS/registry paths declare all three owned files.
+- [x] Handled post-step host exception: byte-preserved current/energy/spin streams, numerical retry equality and sibling isolation at internal MPI1/2. Explicit out_rt_spin_step=1 probe compares magnetization/spin-current arrays and all emitted rows, including step0. Source7fe07eefa2e707ef11914b913f5856eb269f011fdeeb9365c10b465006fbac5e.
+- [x] Existing outputs module exposes SpinDynamics/read_spin_dynamics; existing outputs_roundtrip sample saves charge current, magnetization and spin current with separate time axes/units. Native mag_x/y/z component-sign and Pauli-current definitions retained; no implicit magnetic-moment/spin normalization conversion. Fortran computes observables; NumPy C kernel only performs explicit Jm-to-charge sign conversion in the sample.
+- [x] Scalar Si current regression against old library and scalar two-stream retry pass. Prescribed-density XC/core tests pass MPI1/2 × OMP1/2.
+- Records: calc2026/salmonpy-ni-soc-retry-spin1-r{1,2}-20261123; scalar-output-retry and spin-scalar-regression records. Failed-before record preserved in salmonpy-ni-soc-retry-before-20261123.
+- [ ] Deep SOC numerical failure recovery, changed RT MPI topology, automatic stitching of restart observation segments, physical Ni/WSe2 convergence and fast-HSE SOC remain unvalidated.
+
+
+### 2026-11-23 SOC deep numerical recovery and execution modes
+
+- [x] Scalar IEEE loops inspect all five noncollinear work arrays (complex real/imaginary components included). Finite/NaN/positive-negative Inf native tests pass MPI1/2 × OMP1/2, including final elements and nondefault lower bounds. SOC finite failure joins the existing XC agreement; no new outer/global numerical-failure vote.
+- [x] Checked SOC computes total magnetization/Pauli spin-current observables before any step output; finite checks share observable stage24 and the writer reuses those values. Performance retains the original unchecked update/writer path, with no SOC finite scan or backup.
+- [x] Separate production and SALMONPY_RECOVERY_TESTING builds audited. Production has no injection hook. Fault build verifies performance leaves a stage20 fault unconsumed, then checked mode detects it; checked mode also handles actual overflow and stages20/21/22/23/24 from one selected rank.
+- [x] Ni18e/36 states/300 K/original2×2×2 PBE: internal MPI1/2 deep-retry and performance/control tests preserve accepted state, current/energy/spin files and sibling independence; subsequent current/magnetization/spin-current/energy match controls. Explicit performance host-exception protection also passes. GS and electronic checkpoints are not exported.
+- [x] MPI2 normal currents and all observation rows match pre-change runtime exactly; scalar Si currents also match. Native XC/core regression passes MPI1/2 × OMP1/2. Source d1939403e264594b51ce87d7463372a05f8b3e1be460b3b0e836993a4f6b8a8d. GNU/Mac tested; no Fujitsu compiler run claimed.
+- Records: calc2026/salmonpy-ni-soc-deep-probe-r{1,2}-20261123, salmonpy-ni-soc-performance-r{1,2}-20261123, salmonpy-ni-soc-deep-baseline-r2-20261123, salmonpy-ni-soc-finite-workspaces-20261123.
+- [ ] Changed SOC RT MPI topology, spatial/orbital SOC recovery coverage, observation-segment stitching, physical Ni/WSe2 convergence, fast-HSE SOC, process/MPI-crash recovery remain unvalidated. This closes only the standard PBE k-point SOC deep-recovery item above.
+
+
+### 2026-11-23 SCF混合率の変更
+
+- [x] `mixing_rate`を実際の混合方法の係数へ対応付け。既定Broydenでは`alpha_mb`を指定。
+- [x] 保持／復元したSCF状態の混合係数を、履歴を保って変更する共通入口。Ni SOC内部MPI2で数値状態不変、ランク間不一致拒否、復元後の連続実行一致を確認。
+- [x] WSe₂：400回からBroyden0.1で継続し565回・残差8.9e-9で収束。内部MPI4・16更新の通常／性能・直接復元の電流差は最大1.8e-19。物理的格子/k/dt収束は未検証。
+- [x] 残差の持続的悪化・観察期間・下限・変更記録を持つ任意の自動低下をFortranへ実装。旧単発半減処理を置換。Ni SOC内部MPI2で状態独立性・保存/再開一致を確認。SCF保存形式3のみ。高速HSEの検証は未実施。
+- [x] SOC補助磁場の状態所有・段階的解除・混合外挿の再開を実装。短いNi内部MPI1/2で保存／再開一致を検証。長いSCFでのゼロ磁場最終収束は別の未完項目。
+
+
+### 2026-11-23 混合率の既定値低下
+
+- [x] ユーザー指定で混合率の既定値を0.3に統一。Python、Fortran入力、状態設定を同期。明示値を優先し、収束許容差は変更しない。
+- [x] SOC整列用のスピンZeeman項・状態ごとの3成分磁場・段階的解除を実装。Ni内部MPI1/2の独立性・メモリ／別プロセス復元は一致。短い未収束SCFの接続検証で、長いSCFでの整列効果は未検証。
+
+- [x] Niで1000回単位の長いSCFを比較。磁場なし1001回で残差3.0e-2、固定補助場1001回で4.0e-6。段階的解除後2801回でも5.9e-6で未収束。波動関数・密度・再開データは保存せず、残差・磁気モーメント・エネルギー・図を記録。
+- [ ] 最終ゼロ磁場のSCF収束（1e-9）と磁気モーメントの安定性。残差停滞を内側軌道解法と混合の寄与に切り分ける。

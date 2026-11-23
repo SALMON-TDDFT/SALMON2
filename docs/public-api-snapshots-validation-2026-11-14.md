@@ -1,5 +1,11 @@
 # Public API and state snapshots validation
 
+This is a historical validation record, not current setup instructions. Its
+limitations and pending work describe 2026-11-14 only. For current supported
+APIs and restart capabilities, read [API](../salmonpy/API.en.md),
+[snapshots](../salmonpy/SNAPSHOTS.en.md) and
+[checkpointing](../salmonpy/CHECKPOINTING.en.md).
+
 Date: 2026-11-14. Local macOS arm64, Python 3.14. Package 0.1.0a5.
 This implements the user-approved lightweight, fixed-dt, in-memory checkpoint
 scope after reading docs/plans/2026-11-14-handoff.md. Full solver source import,

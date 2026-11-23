@@ -11,6 +11,52 @@ from .analysis import read_table
 from .fields import _readonly
 
 
+@dataclass(frozen=True,slots=True)
+class SpinDynamics:
+    """Native SOC time series; no unit, sign or spin-normalization conversion.
+
+    pauli_current axes: (sample, Pauli index 0/x/y/z, flow direction x/y/z).
+    Magnetization retains native mag_x/y/z and its component-sign convention,
+    not a converted magnetic moment in Bohr magnetons. Spin-current columns retain the
+    native Pauli-matrix convention, without an extra hbar/2 factor.
+    """
+    time: np.ndarray
+    magnetization: np.ndarray
+    pauli_current: np.ndarray
+    time_unit: str
+    magnetization_unit: str
+    current_unit: str
+    headers: tuple
+    source: str
+
+    @property
+    def spin_current(self):
+        """(sample, spin polarization x/y/z, flow direction x/y/z)."""
+        return self.pauli_current[:,1:,:]
+
+
+def read_spin_dynamics(path):
+    """Read SALMON *_rt_spin.data as owned, immutable arrays.
+
+    Sampling times belong to this file. Do not align with current/energy by
+    row number: output strides and inclusion of step0 may differ.
+    Channel0 is retained, not silently relabeled as charge current j=-Jm.
+    All physical observables are computed by the existing Fortran writer.
+    """
+    table=read_table(path)
+    names=('Time','mag_x','mag_y','mag_z')+tuple(
+        'spin_curr_'+spin+'_'+direction for spin in ('0','x','y','z') for direction in ('x','y','z'))
+    if set(table.columns)!=set(names):raise InputError('expected native spin dynamics columns')
+    indices=[table.columns.index(n) for n in names]
+    units=tuple(table.units[i] for i in indices)
+    if any(u is None for u in units) or len(set(units[1:4]))!=1 or len(set(units[4:]))!=1:
+        raise InputError('consistent labeled spin dynamics units required')
+    values=table.values[:,indices]
+    return SpinDynamics(_readonly(values[:,0]),_readonly(values[:,1:4]),
+                        _readonly(values[:,4:].reshape(-1,4,3)),units[0],units[1],units[4],
+                        table.headers,table.source)
+
+
 def _indices(value):
     a=np.asarray(value,dtype=np.int64)
     return np.frombuffer(a.tobytes(),dtype=a.dtype).reshape(a.shape)

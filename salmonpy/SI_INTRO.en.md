@@ -1,106 +1,46 @@
-# Si: from an installed wheel to charge current
+# Si starter: ground state to current
 
 [日本語](SI_INTRO.md)
 
-This starter calculates a real self-consistent Si ground state, then propagates
-it under a prescribed A/c pulse and checks the charge current against a fixed
-reference. The wheel supplies the input, Si pseudopotential, reference values
-and provenance. The full solver is a separate prebuilt runtime; this route does
-not compile or require a source checkout.
+Compute the fixed Si SCF input and compare 21 samples of A/c-driven charge current against the reference. The current electron-number-bearing worker protocol was revalidated with a newly built calculation program on 2026-11-23. Inputs, potential, expected results and tolerances were unchanged.
 
-## 1. Install the supplied wheel
+## Required distributions
 
-Use a Python version and wheel matching your operating system and CPU. This new
-sample requires a wheel containing `salmonpy.examples.si_intro`; the earlier
-wheel workflow at commit `6f8b36c6` predates this sample. A source change alone
-does not publish an updated wheel. Obtain the updated wheel from the distributor.
+Obtain an updated SALMONpy wheel for your OS, CPU and Python, plus an outer runtime ZIP listed in the current `runtime_artifacts` of `provenance.json`. NumPy is the only Python dependency of this example.
 
-On macOS or Linux:
+The new locally validated distribution was built on Apple Silicon macOS. It has not been uploaded to a public Release. Obtain the matching wheel and ZIP from the distributor; do not invent a download URL. Use the wheel-only [LD/SBE test](README.en.md) if the matching new ZIP is unavailable.
+
+The old `runtime-2026.11.14` Release lacks the current electron-number reply. Its hashes and origins remain under `historical_runtime_artifacts` and related fields, but the current entry rejects it. New Intel Mac and Linux distributions still need validation. Windows DFT/TDDFT distribution is not established.
+
+## Install, prepare, run
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
 python -m pip install --only-binary=:all: ./SALMONPY_WHEEL.whl
-python -m salmonpy.doctor --json
-python -m salmonpy.examples.si_intro --help
-```
-
-Replace `SALMONPY_WHEEL.whl` with the actual downloaded wheel filename, including
-its Python/platform tags. Keep `--only-binary=:all:`: a missing compatible wheel
-must not trigger a source build. NumPy is the only Python dependency needed for
-this example. Full-solver Windows binaries are not provided by this starter;
-Windows LD/SBE wheels do not establish Windows TDDFT support.
-
-## 2. Download the matching prebuilt runtime
-
-Download from the [SALMONpy runtime preview Release](https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14). All three platform jobs passed in [CI run 43554502676](https://github.com/otobetomohito/SALMONpy/actions/runs/43554502676), commit `8006261b9e48541b591e496a813b3f06ca5fc1b1`.
-
-| Machine / 環境 | ZIP |
-|---|---|
-| Apple Silicon Mac | [salmonpy-runtime-macos-15.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15.zip) |
-| Intel Mac | [salmonpy-runtime-macos-15-intel.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15-intel.zip) |
-| Linux x86_64 / glibc | [salmonpy-runtime-ubuntu-22.04.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-ubuntu-22.04.zip) |
-
-This is a private repository: sign in with an account granted access. Release assets do not have the Actions artifact expiry. Keep the outer ZIP intact; do not pass an automatically extracted directory. Use its actual filename for `RUNTIME_ARTIFACT.zip`. These single-rank PZ/TB-mBJ runtimes do not include Libxc. OS compatibility is checked during preparation (macOS arm64 >=15.8.2, Intel >=15.7.9, Linux glibc >=2.35). Do not disable checksums or substitute unverified archives.
-
-## 3. Prepare and calculate
-
-Choose a new directory outside the source checkout. Preparation verifies the
-pinned outer ZIP, then checks the inner runtime and its libraries through the
-normal runtime installer. It copies the fixed input and pseudopotential locally.
-Nothing is downloaded implicitly.
-
-```sh
+python -m salmonpy.quickstart
 python -m salmonpy.examples.si_intro prepare new-si --runtime-artifact RUNTIME_ARTIFACT.zip
 python -m salmonpy.examples.si_intro run new-si --threads 1 --memory-budget-gib 4
 ```
 
-The example above records a **4 GiB total-job allowance** and uses one solver
-thread; it is not a 4 GiB per-process allowance. Set a budget you have permission
-to use. `--threads` is limited to 1–4; other numerical-library threads are limited
-by the example. DFT and TDDFT run sequentially. The memory budget is recorded,
-not enforced as a hard operating-system limit. Unavailable resource measurements
-are reported separately and do not prove budget compliance. Do not scale this
-example based on an unmeasured memory estimate.
+Replace the wheel and ZIP placeholders with actual supplied files. Pass the outer ZIP without unpacking it. `prepare` verifies and places files; it never starts a calculation. Prepare on a management machine and invoke `run` within allocated compute resources. There is no implicit download/build or overwrite of existing directories.
 
-Preparation and calculation preserve existing directories. A retry uses a new
-prepared directory; do not erase failed outputs to make the command succeed.
+Threads may be 1–4. The 4 GiB budget describes the whole job and is not an OS-enforced cap. Unavailable resource measurements are separate from calculation failure and do not certify compliance with the budget.
 
-## 4. Check the result
+## Inspect results
 
-The calculation report is `new-si/result/report.json`. Read calculation and
-numerical-validation outcomes separately from optional resource measurements.
-A validation failure is a failure even when the solver calculation completed.
-`result/gs/native/stdout.log` keeps the GS log; `result/rt` keeps the response
-archive. `result/current.csv` and `result/current.npz` contain time, A/c and j.
-CSV columns are `time_au, Ac_x_au, Ac_y_au, Ac_z_au, j_x_au, j_y_au, j_z_au`. The current is **physical charge-current density j**, in atomic
-units. SALMON's electronic matter current is J = −j; do not negate the returned
-current again.
+Both `calculation` and `validation` must be `passed` in `new-si/result/report.json`. Resource measurements appear separately under `resources`.
 
-The fixed reference in `examples/si_intro_data/expected.json` contains all 21 time
-samples. The reference energy is about **−31.7465390575 Hartree**, and the largest
-absolute current component is about **1.47275×10⁻⁶ a.u.** The automatic checks use
-an energy absolute tolerance of 1e−7 Hartree and per-component current tolerances
-`atol=1e-9`, `rtol=1e-5`. An SCF iteration count is diagnostic, not an exact
-acceptance value. The reference was generated with the pinned prebuilt macOS
-arm64 runtime; availability of another platform artifact alone does not certify
-this starter's cross-platform numerical agreement.
+- GS and restart: `result/gs/`; GS log: `result/gs/native/stdout.log`.
+- Current: `result/current.csv`, `result/current.npz`; response archive: `result/rt/`.
+- CSV columns: `time_au,Ac_x_au,Ac_y_au,Ac_z_au,j_x_au,j_y_au,j_z_au`.
 
-This is eight-atom cubic Si, cell length 10.26 bohr, 32 electrons/32 states,
-16³ real-space grid, 2³ k mesh, PZ. The GS residual must satisfy 1e−10. The real-time
-run is only 20 steps at dt=0.02 a.u.; its short z-polarized pulse is an interface
-exercise. This **is not converged optical material data**. Research use requires
-separate grid, k-point, state-count, time-step, duration and pulse checks.
+Output is atomic-unit physical charge-current density **j**, with solver matter current `J = -j`. Do not negate the returned current again.
 
-## Included provenance
+Expected GS energy is approximately −31.7465390575 Hartree. Acceptance uses energy absolute error 1e−7 Hartree and component-wise current `atol=1e-9, rtol=1e-5`; time differences are roundoff-only. Iteration count is diagnostic. The source run on 2026-11-23 took 54 iterations and matched the expected energy and all 21 current samples exactly.
 
-`examples/si_intro_data/input.json` fixes every starter setting.
-`provenance.json` records source and runtime identities and file hashes.
-`Si_rps.dat` comes from SALMON's `samples/exercise_04_bulkSi_gs` at upstream
-commit `3322d0561c0cad5180679136b3eddbe8b909487c`; its SHA256 is
-`8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c`.
-The upstream Apache-2.0 license is retained as `LICENSE.txt`. This legacy KY file
-has no in-process generator-XC metadata; its provenance is the pinned PZ Si
-example, not an inferred metadata certification. GS→RT uses the same saved
-physical input and pseudopotential. The fixed starter is not an arbitrary-GS
-compatibility validator.
+## Scope and next calculations
+
+The case is cubic Si with 8 atoms, cell length 10.26 bohr, 32 electrons/states, a 16³ grid, 2³ k points, PZ, and SCF threshold 1e−10. It propagates only 20 steps at dt=0.02 a.u. (0.4 a.u.). This checks installation and interfaces, not a realistic laser pulse or converged optical properties.
+
+For research, extend the pulse to several periods and the observation time to the target phenomenon. Use [convergence diagnostics](CONVERGENCE.en.md) to assess grid, k points and dt. Grid screening compares current waveforms at converged dt, using 5% relative RMS as the default; dt screening uses measured relative electron-number decrease of 1e−5. These do not certify dielectric or harmonic spectra.
+
+The Si potential is already bundled in the wheel. For separate acquisition and other referenced files, see [pseudopotential downloads](PSEUDOPOTENTIALS.en.md).

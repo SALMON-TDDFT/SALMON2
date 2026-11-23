@@ -1,0 +1,90 @@
+{
+  "schema": "salmonpy.spin-field-validation/1",
+  "status": "passed",
+  "source_tree_sha256": "0e83ee3a77c5365b625dddb15f49f6c9a7a397512145d38fbbe2bd1533325210",
+  "runtime_sha256": "a0f9b9339079e289f1e76158f624e0ed303356b38861bef1923cf385c7606f30",
+  "field_units": "atomic magnetic field",
+  "hamiltonian": "H_B=B.sigma/2, spin-only g=2",
+  "moment_units": "Bohr magneton",
+  "SCF_stream_format": 4,
+  "kernel_cases": [
+    "Hermitian matrix",
+    "matrix-density energy matches spinor expectation",
+    "energy derivative all3 components",
+    "zero matrix exact"
+  ],
+  "Ni_SOC": {
+    "solver_ranks": [
+      1,
+      2
+    ],
+    "electrons": 18,
+    "states": 36,
+    "temperature_k": 300,
+    "kmesh": [
+      2,
+      2,
+      2
+    ],
+    "stage_B_au": [
+      [
+        0.001,
+        -0.0005,
+        0.002
+      ],
+      [
+        0.0005,
+        -0.00025,
+        0.001
+      ],
+      [
+        0,
+        0,
+        0
+      ]
+    ],
+    "continuous_iterations": 8,
+    "restored_iterations": 4,
+    "restore_recalculated_iterations": 0,
+    "all_arrays_exact": true,
+    "independent_state_preserved": true,
+    "memory_field_restore": true,
+    "different_per_rank_fields_rejected": true,
+    "TDDFT_with_field_rejected": true,
+    "zero_field_before_after_exact": true,
+    "scalar_energy_residual_resume_exact": true,
+    "zero_field_before_after_scalar_info_exact": true,
+    "overflowing_field_energy_preserves_state": true
+  },
+  "baseline_XC_core_probes": {
+    "passed": true,
+    "ranks": [
+      1,
+      2
+    ],
+    "threads": [
+      1,
+      2
+    ],
+    "SOC_forces_certified": false
+  },
+  "records": [
+    "calc2026/salmonpy-spin-field-final-kernel-20261123",
+    "calc2026/salmonpy-spin-field-final-ni-r1-20261123",
+    "calc2026/salmonpy-spin-field-final-ni-r2-20261123",
+    "calc2026/salmonpy-spin-field-final-zero-r2-20261123",
+    "calc2026/salmonpy-spin-field-before-energy-r2-20261123",
+    "calc2026/salmonpy-spin-field-final-xc-20261123",
+    "calc2026/salmonpy-spin-field-final-core-20261123"
+  ],
+  "scope": "short unconverged Ni software checks; physical long-SCF alignment benefit, spatial/orbital MPI, HSE SOC, GPU and symmetry-reduced finite fields unverified",
+  "installed_wheel_tests": {
+    "total": 729,
+    "passed": 684,
+    "skipped": 45,
+    "failed": 0,
+    "platform": "macOS arm64 Python3.14",
+    "route": "sdist -> wheel -> separate installed environment"
+  },
+  "compiler_scope": "gfortran15/OpenMPI; Fujitsu compiler not available or tested"
+}

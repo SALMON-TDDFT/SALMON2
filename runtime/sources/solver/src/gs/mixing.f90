@@ -50,6 +50,7 @@ logical function valid_mixing_input(value)
   if(.not.ieee_is_finite(value%alpha_mb))return
   if(.not.ieee_is_finite(value%beta_p))return
   if(.not.ieee_is_finite(value%update_ratio))return
+  if(value%auto_mixing=='y'.and.value%update_ratio<=1d0)return
   valid_mixing_input=.true.
 end function
 
@@ -538,6 +539,7 @@ subroutine init_mixing(nspin,mg,mixing)
   mixing%alpha_mb=mixing%input%alpha_mb
   mixing%beta_p=mixing%input%beta_p
   mixing%convergence_value_prev=1.d10
+  mixing%adaptive%growth=mixing%input%update_ratio
 
   allocate(mixing%rho_in(1:mixing%num_rho_stock+1))
   allocate(mixing%rho_out(1:mixing%num_rho_stock+1))
@@ -690,49 +692,50 @@ end subroutine copy_density
 !===================================================================================================================================
 subroutine check_mixing_half(Miter,convergence_value,mixing)
   use structures, only: s_mixing
-  use parallelization, only: nproc_id_global, nproc_group_global
-  use communication, only: comm_is_root, comm_bcast
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root
   implicit none
-  integer, intent(in) :: Miter
-  real(8), intent(in) :: convergence_value
-  type(s_mixing), intent(inout) :: mixing
-  integer :: icheck
-  
-  if(comm_is_root(nproc_id_global)) then
-    if(convergence_value > mixing%input%update_ratio * mixing%convergence_value_prev)then
-      icheck=1
-    else
-      icheck=0
-    end if
-  end if
-
-  call comm_bcast(icheck,nproc_group_global)
-
-  if(icheck==1)then
-    select case(mixing%input%method)
-    case('simple')
-      if(comm_is_root(nproc_id_global)) then
-        write(*,'(" mixrate decreased from",e16.8," to",e16.8," at iter = ", i6,"." )')  &
-          mixing%mixrate, mixing%mixrate*0.5d0, Miter
-      end if
-      mixing%mixrate=mixing%mixrate*0.5d0
-    case('broyden')
-      if(comm_is_root(nproc_id_global)) then
-        write(*,'(" alpha_mb decreased from",e16.8," to",e16.8," at iter = ", i6,"." )')  &
-          mixing%alpha_mb, mixing%alpha_mb*0.5d0, Miter 
-      end if
-      mixing%alpha_mb=mixing%alpha_mb*0.5d0
-    case('pulay')
-      if(comm_is_root(nproc_id_global)) then
-        write(*,'(" beta_p decreased from",e16.8," to",e16.8," at iter = ", i6,"." )')  &
-          mixing%beta_p, mixing%beta_p*0.5d0, Miter 
-      end if
-      mixing%beta_p=mixing%beta_p*0.5d0
-    end select
-  end if
-
-  mixing%convergence_value_prev=convergence_value
-
+  integer,intent(in)::Miter
+  real(8),intent(in)::convergence_value
+  type(s_mixing),intent(inout)::mixing
+  real(8)::old_rate,new_rate
+  ! The residual is already group-consistent. No additional broadcast is needed.
+  if(mixing%input%auto_mixing/='y')return
+  if(.not.ieee_is_finite(convergence_value))return
+  if(convergence_value<0d0)return
+  associate(a=>mixing%adaptive)
+   if(a%remaining>0)then
+    a%remaining=a%remaining-1
+    a%best=min(a%best,convergence_value)
+    return
+   endif
+   if(convergence_value<a%best)then
+    a%best=convergence_value;a%streak=0
+   else if(convergence_value/a%growth>a%best)then
+    a%streak=min(a%patience,a%streak+1)
+   else
+    a%streak=0
+   endif
+   if(a%streak<a%patience)return
+   select case(mixing%input%method)
+   case('broyden');old_rate=mixing%alpha_mb
+   case('pulay');old_rate=mixing%beta_p
+   case default;old_rate=mixing%mixrate
+   end select
+   ! Never increase a small or nonpositive user-specified coefficient.
+   if(old_rate<=a%min_rate)return
+   new_rate=max(a%min_rate,old_rate*0.5d0)
+   select case(mixing%input%method)
+   case('broyden');mixing%alpha_mb=new_rate
+   case('pulay');mixing%beta_p=new_rate
+   case default;mixing%mixrate=new_rate
+   end select
+   a%streak=0;a%remaining=a%cooldown;a%best=convergence_value
+   a%changes=a%changes+1;a%last_iteration=Miter
+   if(comm_is_root(nproc_id_global))write(*,'(a,i0,3(a,es18.10))') &
+    'SCF mixing change at iteration ',Miter,': old=',old_rate,', new=',new_rate,', residual=',convergence_value
+  end associate
 end subroutine check_mixing_half
 
 subroutine reset_mixing_rate(mixing)
@@ -744,6 +747,8 @@ subroutine reset_mixing_rate(mixing)
   mixing%alpha_mb = mixing%input%alpha_mb
   mixing%beta_p   = mixing%input%beta_p
   mixing%convergence_value_prev = 1.d10
+  mixing%adaptive%best=huge(1d0)
+  mixing%adaptive%remaining=0;mixing%adaptive%streak=0
 
 end subroutine reset_mixing_rate
 

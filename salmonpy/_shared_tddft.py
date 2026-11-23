@@ -19,14 +19,20 @@ def _agree(comm,error,runtime=False):
 def _profile(initial):
     groups=_input_groups((initial.directory/initial.input_file).read_text())
     body='\n'.join(text for name,text in groups.items() if name not in ('atomic_coor','atomic_red_coor','reentrance'))
-    required={'yn_periodic':('y','n'),'spin':('unpolarized','unpolarized'),
-              'yn_symmetry':('n','n'),'yn_md':('n','n'),'yn_spinorbit':('n','n'),
+    required={'yn_periodic':('y','n'),
+              'yn_symmetry':('n','n'),'yn_md':('n','n'),
               'yn_jm':('n','n'),'propagator':('middlepoint','middlepoint'),
               'trans_longi':('tr','tr'),'projection_option':('no','no'),'dm_unfold_option':('no','no')}
     for name,(wanted,default) in required.items():
         value=_string(body,name,default).lower()
         if name=='yn_symmetry' and value and set(value)=={'n'}:continue
         if value!=wanted:raise InputError('shared standard TDDFT requires '+name+'='+wanted)
+    spin=_string(body,'spin','unpolarized').lower()
+    soc=_string(body,'yn_spinorbit','n').lower()
+    if (spin,soc) not in (('unpolarized','n'),('noncollinear','y')):
+        raise InputError('TDDFT requires scalar/unpolarized or SOC/noncollinear inputs')
+    if soc=='y' and _string(body,'xc','pz').lower()=='tbmbj':
+        raise InputError('SOC TDDFT requires PZ/Libxc-PZ/PBE')
     if _string(body,'xc','pz').lower() not in ('pz','tbmbj','libxc_pz','libxc_pbe'):
         raise InputError('shared standard TDDFT requires PZ/TB-mBJ/Libxc-PZ/PBE')
     for name in ('yn_out_dns_rt','yn_out_dns_ac_je','yn_out_micro_je','yn_out_elf_rt',
@@ -37,6 +43,11 @@ def _profile(initial):
     base=_relative(_string(body,'base_directory','./'))
     _relative(_string(body,'sysname','default'))
     return base
+
+
+def _spin_orbit(initial):
+    groups=_input_groups((initial.directory/initial.input_file).read_text())
+    return _string(groups.get('system',''),'yn_spinorbit','n').lower()=='y'
 
 
 def _configure(lib):
@@ -74,9 +85,10 @@ class _Lease:
 
 class NativeTDDFTModel:
     """One immutable full-k model, common dt/capacity/decomposition, independent states."""
-    def __init__(self,native,lib,work,initial,dt,decomposition,identity,base,*,execution_mode="checked"):
+    def __init__(self,native,lib,work,initial,dt,decomposition,identity,base,*,execution_mode="checked",spin_orbit=False):
         from .ld import _execution_mode_name
         self._default_execution_mode=_execution_mode_name(execution_mode)
+        self._spin_orbit=spin_orbit
         self._native=native;self.lib=lib;self.work=work;self._initial=initial
         self._dt=float(dt);self._capacity=initial.max_steps;self._decomposition=decomposition;self.base=base
         self.closed=False;self.failed=False;self._initialized=False;self._attempted=False;self._serial=0;self._states=set()
@@ -145,7 +157,8 @@ class NativeTDDFTModel:
             code=self._call(self.lib.sp_tddft_handle_label,token.value,label,len(label))
             _agree(comm,'native TDDFT label failed' if code else None,runtime=True)
             prefix=label.value.decode()
-            files=tuple(str(self.base/(prefix+suffix)) for suffix in ('_rt.data','_rt_energy.data'))
+            suffixes=('_rt.data','_rt_energy.data')+(('_rt_spin.data',) if self._spin_orbit else ())
+            files=tuple(str(self.base/(prefix+suffix)) for suffix in suffixes)
             for name in files:_relative(name)
             state.output_files=files
             state._refresh();state.initial_current=j.copy();self._serial+=1

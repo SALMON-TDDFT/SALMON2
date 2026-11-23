@@ -11,6 +11,8 @@ p.add_argument('build',type=Path);p.add_argument('output',type=Path)
 p.add_argument('--test',default='test_nlcc_xc_variation')
 p.add_argument('--expect-failure',action='store_true')
 p.add_argument('--ranks',type=int,nargs='+',default=[1])
+p.add_argument('--input',type=Path,help='explicit stdin namelist for short solver tests')
+p.add_argument('--asset',nargs=2,action='append',default=[],metavar=('NAME','FILE'),help='explicit input asset copied into each case')
 p.add_argument('--mpiexec',default='mpiexec',help='MPI launcher name or path')
 a=p.parse_args();root=Path(__file__).resolve().parents[1];build=a.build.resolve()
 source=dict(line.split('=',1) for line in (build/'CMakeCache.txt').read_text().splitlines()
@@ -51,7 +53,15 @@ for ranks in a.ranks:
     launcher=shutil.which(a.mpiexec) if ranks>1 else None
     if ranks>1 and launcher is None: raise FileNotFoundError('MPI launcher not found: '+a.mpiexec)
     command=[str(exe)] if ranks==1 else [launcher,'--bind-to','none','-n',str(ranks),str(exe)]
-    run=subprocess.run(command,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+    work=out
+    if a.input is not None:
+        work=out/f'ranks{ranks}-threads{threads}';work.mkdir(exist_ok=False)
+        for name,path in a.asset:
+            if Path(name).name!=name or name in ('.','..') or any(c in name for c in '/\\:'):
+                raise ValueError('asset name must be one file name')
+            shutil.copy2(path,work/name)
+        (work/'input.inp').write_bytes(a.input.read_bytes())
+    run=subprocess.run(command,cwd=work,input=None if a.input is None else a.input.read_text(),text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
         env={**os.environ,'OMP_NUM_THREADS':str(threads),'OPENBLAS_NUM_THREADS':'1'},timeout=120)
     print(run.stdout,flush=True)
     results.append(dict(ranks=ranks,threads=threads,returncode=run.returncode,stdout=run.stdout))

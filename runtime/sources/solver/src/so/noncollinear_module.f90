@@ -6,6 +6,7 @@ module noncollinear_module
   public :: calc_dm_noncollinear
   public :: rot_dm_noncollinear
   public :: rot_vxc_noncollinear
+  public :: spin_field_matrix,spin_field_density_energy,spin_field_local_energy,op_spin_field
   public :: op_xc_noncollinear
   public :: calc_magnetization
   public :: calc_magnetization_micro
@@ -13,6 +14,15 @@ module noncollinear_module
   public :: calc_spin_current
   public :: simple_mixing_so
   public :: snapshot_xc_noncollinear,average_xc_noncollinear,snapshot_density_noncollinear
+
+  ! The arrays below are the active execution workspace. State owners transfer
+  ! all five together; no rank-local cache may outlive the selected state.
+  type,public :: s_noncollinear_state
+    complex(8),allocatable :: den_mat(:,:,:,:,:),vxc_mat(:,:,:,:,:)
+    complex(8),allocatable :: old_mat(:,:,:),dmat_old(:,:,:,:,:)
+    real(8),allocatable :: rot_ang(:,:,:,:)
+  end type
+  public :: swap_noncollinear_state,snapshot_noncollinear_state,noncollinear_finite
 
   complex(8),allocatable :: den_mat(:,:,:,:,:)
   complex(8),allocatable :: vxc_mat(:,:,:,:,:)
@@ -22,6 +32,106 @@ module noncollinear_module
   complex(8),allocatable :: dmat_old(:,:,:,:,:) ! for mixing of GS
 
 contains
+
+  subroutine swap_noncollinear_state(owner)
+    type(s_noncollinear_state),intent(inout)::owner
+    type(s_noncollinear_state)::temporary
+    call move_alloc(den_mat,temporary%den_mat)
+    call move_alloc(owner%den_mat,den_mat)
+    call move_alloc(temporary%den_mat,owner%den_mat)
+    call move_alloc(vxc_mat,temporary%vxc_mat)
+    call move_alloc(owner%vxc_mat,vxc_mat)
+    call move_alloc(temporary%vxc_mat,owner%vxc_mat)
+    call move_alloc(old_mat,temporary%old_mat)
+    call move_alloc(owner%old_mat,old_mat)
+    call move_alloc(temporary%old_mat,owner%old_mat)
+    call move_alloc(rot_ang,temporary%rot_ang)
+    call move_alloc(owner%rot_ang,rot_ang)
+    call move_alloc(temporary%rot_ang,owner%rot_ang)
+    call move_alloc(dmat_old,temporary%dmat_old)
+    call move_alloc(owner%dmat_old,dmat_old)
+    call move_alloc(temporary%dmat_old,owner%dmat_old)
+  end subroutine swap_noncollinear_state
+
+  subroutine snapshot_noncollinear_state(snapshot)
+    type(s_noncollinear_state),intent(out)::snapshot
+    if(allocated(den_mat))snapshot%den_mat=den_mat
+    if(allocated(vxc_mat))snapshot%vxc_mat=vxc_mat
+    if(allocated(old_mat))snapshot%old_mat=old_mat
+    if(allocated(rot_ang))snapshot%rot_ang=rot_ang
+    if(allocated(dmat_old))snapshot%dmat_old=dmat_old
+  end subroutine snapshot_noncollinear_state
+
+  logical function noncollinear_finite() result(ok)
+    use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+    integer :: i1,i2,i3,i4,i5
+    ok=.false.
+    if(.not.allocated(den_mat).or..not.allocated(vxc_mat))return
+    if(allocated(den_mat))then
+      do i5=lbound(den_mat,5),ubound(den_mat,5)
+      do i4=lbound(den_mat,4),ubound(den_mat,4)
+      do i3=lbound(den_mat,3),ubound(den_mat,3)
+      do i2=lbound(den_mat,2),ubound(den_mat,2)
+      do i1=lbound(den_mat,1),ubound(den_mat,1)
+        if(.not.ieee_is_finite(real(den_mat(i1,i2,i3,i4,i5),8)))return
+        if(.not.ieee_is_finite(aimag(den_mat(i1,i2,i3,i4,i5))))return
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+    endif
+    if(allocated(vxc_mat))then
+      do i5=lbound(vxc_mat,5),ubound(vxc_mat,5)
+      do i4=lbound(vxc_mat,4),ubound(vxc_mat,4)
+      do i3=lbound(vxc_mat,3),ubound(vxc_mat,3)
+      do i2=lbound(vxc_mat,2),ubound(vxc_mat,2)
+      do i1=lbound(vxc_mat,1),ubound(vxc_mat,1)
+        if(.not.ieee_is_finite(real(vxc_mat(i1,i2,i3,i4,i5),8)))return
+        if(.not.ieee_is_finite(aimag(vxc_mat(i1,i2,i3,i4,i5))))return
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+    endif
+    if(allocated(old_mat))then
+      do i3=lbound(old_mat,3),ubound(old_mat,3)
+      do i2=lbound(old_mat,2),ubound(old_mat,2)
+      do i1=lbound(old_mat,1),ubound(old_mat,1)
+        if(.not.ieee_is_finite(real(old_mat(i1,i2,i3),8)))return
+        if(.not.ieee_is_finite(aimag(old_mat(i1,i2,i3))))return
+      enddo
+      enddo
+      enddo
+    endif
+    if(allocated(rot_ang))then
+      do i4=lbound(rot_ang,4),ubound(rot_ang,4)
+      do i3=lbound(rot_ang,3),ubound(rot_ang,3)
+      do i2=lbound(rot_ang,2),ubound(rot_ang,2)
+      do i1=lbound(rot_ang,1),ubound(rot_ang,1)
+        if(.not.ieee_is_finite(rot_ang(i1,i2,i3,i4)))return
+      enddo
+      enddo
+      enddo
+      enddo
+    endif
+    if(allocated(dmat_old))then
+      do i5=lbound(dmat_old,5),ubound(dmat_old,5)
+      do i4=lbound(dmat_old,4),ubound(dmat_old,4)
+      do i3=lbound(dmat_old,3),ubound(dmat_old,3)
+      do i2=lbound(dmat_old,2),ubound(dmat_old,2)
+      do i1=lbound(dmat_old,1),ubound(dmat_old,1)
+        if(.not.ieee_is_finite(real(dmat_old(i1,i2,i3,i4,i5),8)))return
+        if(.not.ieee_is_finite(aimag(dmat_old(i1,i2,i3,i4,i5))))return
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+    endif
+    ok=.true.
+  end function noncollinear_finite
 
   subroutine calc_dm_noncollinear( psi, system, info, mg )
     use structures, only : s_dft_system, s_parallel_info, s_rgrid, s_orbital
@@ -266,6 +376,65 @@ contains
     if(.not.allocated(vxc_mat))error stop 'SOC XC matrix is not initialized'
     if(any(shape(snapshot)/=shape(vxc_mat)))error stop 'SOC XC midpoint shape mismatch'
     vxc_mat=0.5d0*(snapshot+vxc_mat)
+  end subroutine
+
+  pure subroutine spin_field_matrix(field,matrix)
+    real(8),intent(in)::field(3)
+    complex(8),intent(out)::matrix(2,2)
+    ! Electron spin Zeeman term in atomic units, g=2, mu_B=1/2.
+    matrix(1,1)=0.5d0*field(3);matrix(2,2)=-0.5d0*field(3)
+    matrix(1,2)=0.5d0*cmplx(field(1),-field(2),8)
+    matrix(2,1)=conjg(matrix(1,2))
+  end subroutine
+
+  pure real(8) function spin_field_density_energy(field,density,hvol) result(energy)
+    real(8),intent(in)::field(3),hvol
+    complex(8),intent(in)::density(:,:,:,:,:)
+    integer::i,j,k
+    energy=0d0
+    do k=1,size(density,3)
+    do j=1,size(density,2)
+    do i=1,size(density,1)
+      energy=energy+field(1)*real(density(i,j,k,1,2),8)-field(2)*aimag(density(i,j,k,1,2)) &
+       +0.5d0*field(3)*real(density(i,j,k,1,1)-density(i,j,k,2,2),8)
+    enddo
+    enddo
+    enddo
+    energy=energy*hvol
+  end function
+
+  real(8) function spin_field_local_energy(field,hvol) result(energy)
+    real(8),intent(in)::field(3),hvol
+    energy=0d0
+    if(allocated(den_mat))energy=spin_field_density_energy(field,den_mat,hvol)
+  end function
+
+  subroutine op_spin_field(tpsi,hpsi,info,mg,field)
+    use structures,only:s_orbital,s_parallel_info,s_rgrid
+    type(s_orbital),intent(in)::tpsi
+    type(s_orbital),intent(inout)::hpsi
+    type(s_parallel_info),intent(in)::info
+    type(s_rgrid),intent(in)::mg
+    real(8),intent(in)::field(3)
+    complex(8)::matrix(2,2),up,down
+    integer::ix,iy,iz,io,ik,im
+    call spin_field_matrix(field,matrix)
+!$omp parallel do collapse(3) private(ix,iy,iz,io,ik,im,up,down)
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      up=tpsi%zwf(ix,iy,iz,1,io,ik,im);down=tpsi%zwf(ix,iy,iz,2,io,ik,im)
+      hpsi%zwf(ix,iy,iz,1,io,ik,im)=hpsi%zwf(ix,iy,iz,1,io,ik,im)+matrix(1,1)*up+matrix(1,2)*down
+      hpsi%zwf(ix,iy,iz,2,io,ik,im)=hpsi%zwf(ix,iy,iz,2,io,ik,im)+matrix(2,1)*up+matrix(2,2)*down
+    enddo
+    enddo
+    enddo
+    enddo
+    enddo
+    enddo
   end subroutine
 
   subroutine op_xc_noncollinear( tpsi, hpsi, info, mg )

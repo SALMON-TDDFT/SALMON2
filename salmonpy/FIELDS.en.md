@@ -142,7 +142,7 @@ the whole-grid A agrees as well. See `docs/maxwell-field-validation-2026-11-14.m
 Uniform fields need at least N+1 endpoint samples, from t=0 through N*dt, for N steps.
 An incident wave requires an `abc` left boundary. Other left boundaries require `incident=None`.
 
-## calling program API and state snapshots
+## Use from another Python program
 
 See [public API and errors](API.en.md) and [in-memory snapshots](SNAPSHOTS.en.md).
 LD, SBE and the four Python fields support fixed-dt snapshot/restore since 0.1.0a5.

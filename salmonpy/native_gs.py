@@ -180,7 +180,7 @@ def _scf_runtime_contract(session):
     if probe()!=1:return None
     fn=session.lib.sp_gs_scf_format_signature
     from .api import _bind_gs_operations
-    _bind_gs_operations(lib,('sp_gs_scf_format_signature',))
+    _bind_gs_operations(session.lib,('sp_gs_scf_format_signature',))
     kinds=np.zeros(8,dtype=np.int32);payload=np.zeros(128,dtype=np.int8)
     if fn(kinds.ctypes.data,payload.ctypes.data)!=0:raise InputError('native SCF stream representation unavailable')
     abi=hashlib.sha256(json.dumps(kinds.tolist()).encode()+payload.tobytes()).hexdigest()
@@ -953,6 +953,121 @@ class NativeGSState:
         target=self.checkpoint_target(directory=directory)
         candidate=target.stage_restore()
         return candidate.publish()
+
+    @property
+    def scf_spin_field(self):
+        """Collectively report auxiliary B(au), Zeeman energy and spin moment(mu_B)."""
+        self._scf_ready()
+        from .api import _bind_gs_operations
+        _bind_gs_operations(self.session.lib,('sp_gs_scf_spin_info',))
+        values=np.empty(8,dtype=np.float64)
+        self.session._check(self.session._gs_call(self.directory,
+            self.session.lib.sp_gs_scf_spin_info,self._token,values.ctypes.data))
+        return {'field_au':values[:3].tolist(),'zeeman_energy_hartree':float(values[3]),
+                'spin_magnetic_moment_muB':values[4:7].tolist(),
+                'energy_without_auxiliary_hartree':float(values[7])}
+
+    def set_scf_spin_field(self,field):
+        """Set spin-only B in atomic units; preserve orbitals, restart mixing extrapolation.
+
+        Full-k CPU SOC only. Changing B requires fresh SCF convergence, including
+        the final zero-field stage. This is not an orbital/FDTD magnetic field.
+        """
+        self._scf_ready();error=None
+        try:
+            value=np.asarray(field)
+            if value.shape!=(3,) or value.dtype.kind not in 'iuf' or not np.isfinite(value).all():
+                raise InputError('spin field requires three finite real components in atomic units')
+            value=np.array(value,dtype=np.float64,copy=True)
+            if getattr(self,'_restore_candidate',None) is not None:
+                raise InputError('SCF restore candidate owns this state')
+            from .api import _bind_gs_operations
+            _bind_gs_operations(self.session.lib,('sp_gs_scf_spin_field',))
+        except Exception as exc:error=str(exc)
+        _agree(self.session.comm,error)
+        code=self.session._gs_call(self.directory,
+            self.session.lib.sp_gs_scf_spin_field,self._token,value.ctypes.data)
+        if code==4:raise NumericalError('Auxiliary spin-field energy is nonfinite; state unchanged')
+        self.session._check(code)
+        self._metadata_converged=self.info.converged
+        return self.scf_spin_field
+
+    @property
+    def scf_mixing(self):
+        """Current effective coefficient and per-state adaptive controller."""
+        self._scf_ready()
+        from .api import _bind_gs_operations
+        _bind_gs_operations(self.session.lib,('sp_gs_scf_mixing_info',))
+        values=np.empty(4,dtype=np.float64);counts=np.empty(8,dtype=np.int32)
+        self.session._check(self.session._gs_call(self.directory,
+            self.session.lib.sp_gs_scf_mixing_info,self._token,values.ctypes.data,counts.ctypes.data))
+        result=dict(zip(('rate','min_rate','growth','best_residual'),map(float,values)))
+        result.update(zip(('enabled','patience','cooldown','remaining','streak','changes','last_iteration'),map(int,counts[:7])))
+        result['enabled']=bool(result['enabled'])
+        result['coefficient']=('mixrate','alpha_mb','beta_p')[counts[7]]
+        return result
+
+    def set_scf_adaptive_mixing(self,*,enabled=True,min_rate=.01,growth=1.2,patience=3,cooldown=20):
+        """Configure downward-only SCF mixing; no numerical iteration or history reset."""
+        self._scf_ready();error=None
+        try:
+            if type(enabled) is not bool:raise InputError('enabled must be bool')
+            from .dft import _positive
+            min_rate=_positive(min_rate,'min_rate');growth=_positive(growth,'growth')
+            if growth<=1:raise InputError('growth must exceed 1')
+            patience=_integer(patience,'patience',1,2**31-2)
+            cooldown=_integer(cooldown,'cooldown',0,2**31-2)
+            if getattr(self,'_restore_candidate',None) is not None:
+                raise InputError('SCF restore candidate owns this state')
+            from .api import _bind_gs_operations
+            _bind_gs_operations(self.session.lib,('sp_gs_scf_adaptive_mixing',))
+        except Exception as exc:error=str(exc)
+        _agree(self.session.comm,error)
+        self.session._check(self.session._gs_call(self.directory,
+            self.session.lib.sp_gs_scf_adaptive_mixing,self._token,int(enabled),min_rate,growth,patience,cooldown))
+        return self.scf_mixing
+
+    def set_scf_mixing(self,rate):
+        """Set the method's effective coefficient, preserving numerical history.
+
+        Broyden uses alpha_mb, Pulay beta_p, other methods mixrate.
+        This collective control is included in subsequent SCF checkpoints.
+        """
+        self._scf_ready();error=None
+        try:
+            from .dft import SCFSettings
+            rate=SCFSettings(mixing_rate=rate).mixing_rate
+            if getattr(self,'_restore_candidate',None) is not None:
+                raise InputError('SCF restore candidate owns this state')
+            from .api import _bind_gs_operations
+            _bind_gs_operations(self.session.lib,('sp_gs_scf_set_mixing',))
+        except Exception as exc:error=str(exc)
+        _agree(self.session.comm,error)
+        self.session._check(self.session._gs_call(self.directory,
+            self.session.lib.sp_gs_scf_set_mixing,self._token,rate))
+
+    def extend_scf_limit(self,max_iterations):
+        """Collectively increase this state's total SCF budget without iterations.
+
+        Wavefunctions, density, mixing history and counters are unchanged.
+        The initial input descriptor stays immutable; snapshots/checkpoints carry
+        the current owned runtime cap. A converged state remains converged.
+        """
+        self._scf_ready();error=None
+        try:
+            limit=_integer(max_iterations,'max_iterations',1,2**31-2)
+            if getattr(self,'_restore_candidate',None) is not None:
+                raise InputError('SCF restore candidate owns this state')
+            from .api import _bind_gs_operations
+            _bind_gs_operations(self.session.lib,('sp_gs_scf_extend_limit',))
+        except Exception as exc:error=str(exc)
+        _agree(self.session.comm,error)
+        if limit<self.scf_status['max_iterations']:
+            error='SCF extension cannot decrease the total iteration limit'
+        _agree(self.session.comm,error)
+        self.session._check(self.session._gs_call(self.directory,
+            self.session.lib.sp_gs_scf_extend_limit,self._token,limit))
+        return self.scf_status
 
     def continue_scf(self,*,steps,allow_unconverged=False):
         self._live();error=None

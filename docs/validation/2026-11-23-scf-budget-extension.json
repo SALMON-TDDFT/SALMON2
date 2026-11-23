@@ -1,0 +1,21 @@
+{
+  "schema": "salmonpy.scf-budget-validation/1",
+  "status": "passed",
+  "source_tree_from": "d1939403e264594b51ce87d7463372a05f8b3e1be460b3b0e836993a4f6b8a8d",
+  "source_tree_to": "f1027b38f0c9318b99dc627f947d5cb578d35c13548663b4d73fcce8c2b2a49e",
+  "runtime_from_sha256": "f237e83e8443142c066859fe48af0bdebc5a0d5dca4a078497b4d2bb69218992",
+  "runtime_to_sha256": "21c690339de03505efcb1daef68b8a8a122b17a974261ec89ab87b44d36a42f4",
+  "MPI_ranks": 2,
+  "extended_limit": 2000,
+  "arrays_exact": true,
+  "restore_SCF_iterations": 0,
+  "cases": [
+    "old-source checkpoint direct load",
+    "increase cap without SCF",
+    "mixed-rank limits rejected before mutation",
+    "terminal cap2 extended without wave/density/history reset",
+    "continued iteration4 equals continuous control"
+  ],
+  "scope": "Ni PBE SOC; same layout/platform/codec; no automatic generic source compatibility",
+  "records": "calc2026/salmonpy-scf-budget-transition-r2-20261123"
+}

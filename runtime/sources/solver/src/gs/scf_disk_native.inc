@@ -1,4 +1,4 @@
-! SCF rank-local disk v1. Host authenticates binary/input/topology and all files.
+! SCF rank-local disk v4 (includes SOC, adaptive mixing and auxiliary spin field). Host authenticates binary/input/topology and all files.
 integer(c_int) function sp_gs_hse_orbital_protocol() bind(C)
 #ifdef USE_HSE
  sp_gs_hse_orbital_protocol=2
@@ -9,7 +9,7 @@ end function
 ! Native stream representation probe; no calculation state, files or collectives.
 ! Bump when the meaning of accepted serialized numerical state changes.
 integer(c_int) function sp_gs_scf_state_revision() bind(C)
- sp_gs_scf_state_revision=1
+ sp_gs_scf_state_revision=4
 end function
 integer(c_int) function sp_gs_scf_format_protocol() bind(C)
  sp_gs_scf_format_protocol=1
@@ -37,6 +37,186 @@ integer(c_int) function sp_gs_scf_format_signature(kinds,bytes) bind(C) result(s
  n=4*kinds(6);bytes(97:96+n)=transfer('aZ09',bytes(97:96+n))
  status=0
 end function
+! Explicit live control for continued/restored SCF owners. No numerical fields
+! or serialized layout change; the extended cap is carried by system%gs_input.
+integer(c_int) function sp_gs_scf_extend_limit(token,new_limit) bind(C) result(status)
+ integer(c_int64_t),value::token
+ integer(c_int),value::new_limit
+ integer::index,group,rank,nproc,reference
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ call comm_get_globalinfo(group,rank,nproc)
+ reference=new_limit;call comm_bcast(reference,group)
+ if(new_limit/=reference.or.new_limit<1.or.new_limit>=huge(0))status=11
+ if(.not.scf_context_ok(gs_handles(index)%context))status=15
+ if(allocated(gs_handles(index)%context%scf_pending))status=11
+ if(new_limit<gs_handles(index)%context%system%gs_input%max_iterations)status=11
+ call comm_get_max(status,group)
+ if(status/=0)return
+ associate(ctx=>gs_handles(index)%context)
+  if(new_limit>ctx%system%gs_input%max_iterations)then
+   ctx%system%gs_input%max_iterations=new_limit
+   if(.not.ctx%converged)ctx%mixing%scf_progress%paused=.true.
+  endif
+ end associate
+end function
+
+! Change the effective coefficient without resetting density or mixing history.
+integer(c_int) function sp_gs_scf_set_mixing(token,rate) bind(C) result(status)
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ integer(c_int64_t),value::token
+ real(c_double),value::rate
+ real(8)::reference
+ integer::index,group,rank,nproc
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ call comm_get_globalinfo(group,rank,nproc)
+ reference=rate;call comm_bcast(reference,group)
+ if(.not.ieee_is_finite(rate))status=11
+ if(rate/=reference)status=11
+ if(.not.scf_context_ok(gs_handles(index)%context))status=15
+ if(allocated(gs_handles(index)%context%scf_pending))status=11
+ call comm_get_max(status,group)
+ if(status/=0)return
+ associate(m=>gs_handles(index)%context%mixing)
+ select case(trim(m%input%method))
+ case('broyden')
+  m%alpha_mb=rate;m%input%alpha_mb=rate
+ case('pulay')
+  m%beta_p=rate;m%input%beta_p=rate
+ case default
+  m%mixrate=rate;m%input%mixrate=rate
+ end select
+ m%adaptive%best=huge(1d0);m%adaptive%streak=0;m%adaptive%remaining=0
+ end associate
+end function
+
+integer(c_int) function sp_gs_scf_adaptive_mixing(token,enabled,min_rate,growth,patience,cooldown) bind(C) result(status)
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ integer(c_int64_t),value::token
+ integer(c_int),value::enabled,patience,cooldown
+ real(c_double),value::min_rate,growth
+ integer::index,group,rank,nproc,selection(3)
+ real(8)::parameters(2)
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ call comm_get_globalinfo(group,rank,nproc)
+ selection=[enabled,patience,cooldown];parameters=[min_rate,growth]
+ call comm_bcast(selection,group);call comm_bcast(parameters,group)
+ if(any(selection/=[enabled,patience,cooldown]).or.any(parameters/=[min_rate,growth]))status=11
+ if(enabled/=0.and.enabled/=1)status=11
+ if(.not.ieee_is_finite(min_rate).or..not.ieee_is_finite(growth))status=11
+ if(min_rate<=0d0.or.growth<=1d0.or.patience<1.or.patience>=huge(0).or.cooldown<0)status=11
+ if(.not.scf_context_ok(gs_handles(index)%context))status=15
+ if(allocated(gs_handles(index)%context%scf_pending))status=11
+ call comm_get_max(status,group)
+ if(status/=0)return
+ associate(m=>gs_handles(index)%context%mixing)
+  m%input%auto_mixing=merge('y','n',enabled==1)
+  m%adaptive%min_rate=min_rate;m%adaptive%growth=growth;m%input%update_ratio=growth
+  m%adaptive%patience=patience;m%adaptive%cooldown=cooldown
+  m%adaptive%best=huge(1d0);m%adaptive%streak=0;m%adaptive%remaining=0
+ end associate
+end function
+
+integer(c_int) function sp_gs_scf_mixing_info(token,values,counts) bind(C) result(status)
+ integer(c_int64_t),value::token
+ real(c_double),intent(out)::values(4)
+ integer(c_int),intent(out)::counts(8)
+ integer::index,kind
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ if(.not.scf_context_ok(gs_handles(index)%context))then
+  status=15;return
+ endif
+ associate(m=>gs_handles(index)%context%mixing,a=>gs_handles(index)%context%mixing%adaptive)
+  kind=0;values(1)=m%mixrate
+  if(m%input%method=='broyden')then
+   kind=1;values(1)=m%alpha_mb
+  else if(m%input%method=='pulay')then
+   kind=2;values(1)=m%beta_p
+  endif
+  values(2:4)=[a%min_rate,a%growth,a%best]
+  counts=[merge(1,0,m%input%auto_mixing=='y'),a%patience,a%cooldown,a%remaining,a%streak,a%changes,a%last_iteration,kind]
+ end associate
+end function
+
+integer(c_int) function sp_gs_scf_spin_field(token,field) bind(C) result(status)
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ use noncollinear_module,only:spin_field_density_energy
+ integer(c_int64_t),value::token
+ real(c_double),intent(in)::field(3)
+ real(8)::reference(3),delta(3),local_energy,total_energy,next_energy
+ integer::index,group,rank,nproc,i
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ call comm_get_globalinfo(group,rank,nproc)
+ reference=field;call comm_bcast(reference,group)
+ do i=1,3
+  if(.not.ieee_is_finite(field(i)))status=11
+ enddo
+ if(any(reference/=field))status=11
+ if(.not.scf_context_ok(gs_handles(index)%context))status=15
+ if(allocated(gs_handles(index)%context%scf_pending))status=11
+ associate(ctx=>gs_handles(index)%context)
+  if(any(field/=0d0))then
+#ifdef USE_OPENACC
+   status=15
+#endif
+   if(ctx%system%occupation_input%spinorbit/='y'.or.ctx%system%kpoint_input%use_symmetry)status=15
+  endif
+  call comm_get_max(status,group)
+  if(status/=0)return
+  delta=field-ctx%system%gs_input%spin_field
+  if(.not.any(delta/=0d0))return
+  local_energy=0d0
+  if(allocated(ctx%noncollinear%den_mat)) &
+   local_energy=spin_field_density_energy(delta,ctx%noncollinear%den_mat,ctx%system%hvol)
+  call comm_summation(local_energy,total_energy,ctx%info%icomm_r)
+  next_energy=ctx%energy%E_tot+total_energy
+  if(.not.ieee_is_finite(total_energy).or..not.ieee_is_finite(next_energy))status=4
+  call comm_get_max(status,group)
+  if(status/=0)return
+  ctx%energy%E_tot=next_energy
+  ctx%system%gs_input%spin_field=field
+  ! Preserve orbitals/density, discard extrapolation across a changed Hamiltonian.
+  ctx%converged=.false.;ctx%residual=huge(1d0)
+  ctx%mixing%scf_converged=.false.;ctx%mixing%scf_progress%converged=.false.
+  ctx%mixing%scf_progress%paused=.true.;ctx%mixing%scf_progress%mixing_age=0
+  ctx%mixing%scf_progress%residual=huge(1d0)
+  ctx%mixing%adaptive%best=huge(1d0);ctx%mixing%adaptive%streak=0;ctx%mixing%adaptive%remaining=0
+  if(rank==0)write(*,'(a,i0,a,3es20.11)') &
+   'SCF auxiliary spin field after iteration ',ctx%iterations,': B(au)=',field
+ end associate
+end function
+
+integer(c_int) function sp_gs_scf_spin_info(token,values) bind(C) result(status)
+ use noncollinear_module,only:spin_field_density_energy
+ integer(c_int64_t),value::token
+ real(c_double),intent(out)::values(8)
+ real(8)::local_values(4),global_values(4),axis(3)
+ integer::index,i
+ call gs_lookup(token,index,status)
+ if(status/=0)return
+ if(.not.scf_context_ok(gs_handles(index)%context))then
+  status=15;return
+ endif
+ local_values=0d0
+ associate(ctx=>gs_handles(index)%context)
+  if(allocated(ctx%noncollinear%den_mat))then
+   local_values(1)=spin_field_density_energy(ctx%system%gs_input%spin_field,ctx%noncollinear%den_mat,ctx%system%hvol)
+   do i=1,3
+    axis=0d0;axis(i)=1d0
+    local_values(i+1)=-2d0*spin_field_density_energy(axis,ctx%noncollinear%den_mat,ctx%system%hvol)
+   enddo
+  endif
+  call comm_summation(local_values,global_values,4,ctx%info%icomm_r)
+  values(:3)=ctx%system%gs_input%spin_field
+  values(4:7)=global_values
+  values(8)=ctx%energy%E_tot-global_values(1)
+ end associate
+end function
+
 integer(c_int) function sp_gs_scf_disk_protocol() bind(C)
  sp_gs_scf_disk_protocol=1
 end function
@@ -73,7 +253,7 @@ integer(c_int) function sp_gs_scf_disk(token,path,mode) bind(C) result(status)
  allocate(value)
  associate(ctx=>gs_handles(index)%context)
  if(.not.reading)call scf_copy(ctx,value,.false.)
- expected=[1,rank,nproc,storage_size(0),storage_size(0d0)]
+ expected=[4,rank,nproc,storage_size(0),storage_size(0d0)]
  header=expected;counters=[ctx%initializations,ctx%executed_iterations]
  if(reading)then
   open(newunit=u,file=resolve_path(trim(filename)),status='old',action='read',access='stream',form='unformatted',iostat=ios)
@@ -226,7 +406,7 @@ integer(c_int) function scf_repartition(token,path,old_size,kbounds,axis) result
    inquire(unit=u,size=limit)
    read(u,iostat=ios)header,counters
    if(ios==0)then
-    if(any(header/=[1,j-1,old_size,storage_size(0),storage_size(0d0)]).or.any(counters<0))ios=1
+    if(any(header/=[4,j-1,old_size,storage_size(0),storage_size(0d0)]).or.any(counters<0))ios=1
    endif
    if(ios==0)call scf_io_s_scf_payload(u,.true.,donor,ios,limit)
    if(ios==0)then
@@ -700,7 +880,7 @@ integer(c_int) function scf_grid_repartition(token,path,old_size,boxes,tiles) re
    inquire(unit=u,size=limit)
    read(u,iostat=ios)header,counters
    if(ios==0)then
-    if(any(header/=[1,j-1,old_size,storage_size(0),storage_size(0d0)]).or.any(counters<0))ios=1
+    if(any(header/=[4,j-1,old_size,storage_size(0),storage_size(0d0)]).or.any(counters<0))ios=1
    endif
    if(ios==0)call scf_io_s_scf_payload(u,.true.,donor,ios,limit)
    if(ios==0)then

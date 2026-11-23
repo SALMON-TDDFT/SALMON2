@@ -137,3 +137,7 @@ python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --v
 資源計測は別扱いで、サンプル自体はピークメモリを測定・強制制限しません。
 
 結晶TDDFTの標準は **transverse**（`trans_longi='tr'`）です。Longitudinalは明示的に場の部品を選ぶ場合だけ使います。孤立系・non-collinear・Ehrenfestは初版の目標に含まれますが、現時点のこの入口では未対応です。
+
+### SOC入力の準備
+
+`dft_from_atoms(..., spin_orbit=True)` は完全相対論NC-UPFとスピノル状態数の検査を行い、SOC用DFTモデルを作ります。`prepare_dft` はこの入力を配置するだけで計算を始めません。`prepare_wse2_soc` のサンプルは明示した構造ファイルを使います。これはCalculatorのSOC力、バンド、`tddft_from_atoms` のSOC対応を完了したという意味ではありません。現在の小規模検査は[Ni](NICKEL_SOC.md)を参照してください。

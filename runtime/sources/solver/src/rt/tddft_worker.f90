@@ -5,7 +5,7 @@ module tddft_worker
   implicit none
   private
   public :: worker_requested, worker_configure, worker_initial_A, worker_next_A, worker_reply
-  public :: worker_performance_requested
+  public :: worker_performance_requested,worker_spin_supported
   public :: worker_E_requested, worker_reply_E,worker_norm_requested,worker_electron_number,worker_state_reply
   ! Embedded mode is set only by the explicit host-MPI ABI, once per process.
   logical,public,save :: worker_embedded=.false.
@@ -41,6 +41,13 @@ contains
     worker_E_requested=.not.worker_embedded.and.status==0.and.trim(value)=='E3'
   end function
 
+  logical function worker_spin_supported()
+    use salmon_global,only:spin,yn_spinorbit,xc
+    worker_spin_supported=spin=='unpolarized'.and.yn_spinorbit=='n'
+    if(worker_embedded.and.spin=='noncollinear'.and.yn_spinorbit=='y') &
+      worker_spin_supported=xc=='pz'.or.xc=='libxc_pz'.or.xc=='libxc_pbe'
+  end function
+
   subroutine worker_configure()
     use salmon_global
     use parallelization, only: nproc_size_global
@@ -63,7 +70,7 @@ contains
       error stop 'SALMONpy TDDFT requires middlepoint and transverse supplied total A'
     if(yn_restart/='n'.or.yn_dc/='n'.or.yn_conventional_from_dcdft/='n') &
       error stop 'SALMONpy TDDFT requires a fresh conventional GS initial state'
-    if(yn_spinorbit/='n'.or.yn_jm/='n'.or.spin/='unpolarized') &
+    if(.not.worker_spin_supported().or.yn_jm/='n') &
       error stop 'SALMONpy TDDFT requires unpolarized scalar pseudopotentials'
     if(xname/='none'.or.cname/='none') error stop 'SALMONpy: separate exchange/correlation unsupported'
     select case(xc)

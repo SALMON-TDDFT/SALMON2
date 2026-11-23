@@ -1,5 +1,7 @@
 # 後処理用の出力と実行場所
 
+[English](OUTPUTS.en.md)
+
 ## プロセス／CPUの分離
 
 TDDFTの状態ごとに専用プロセスと作業ディレクトリを持ちます。同一マシンの
@@ -160,3 +162,40 @@ epsilon = dielectric_function(sigma)
 `optical_linearity(reference, candidate, rtol=...)` は利用者が渡した異なる振幅の伝導率を共通の有効周波数で比較し、相対RMSを返します。材料・偏光・駆動形状の一致は利用者が確認してください。電流が全てゼロなら相対誤差を定義せず判定も未定義とします。`optical_sum_rule(sigma, expected_weight=..., normalization="...")` は有効な隣接周波数間のRe sigmaを台形積分します。正周波数の全電子系では期待値pi*n/2が基準ですが、擬ポテンシャル・非局所電流・不足バンドに応じた基準は利用者が指定します。欠損帯域を補外せず、物理精度の合格証明にはしません。追加のSCF/TDDFT計算やダウンロードは起動しません。
 
 合成データのサンプル: `python -m salmonpy.examples.optical_response`。実材料の収束済み光学定数の例ではありません。
+
+## 電流・磁化・スピン流の時間発展
+
+SOCの計算はFortranが `*_rt.data` と `*_rt_spin.data` に出力します。
+電流は前者の `Jm_x/y/z`（物質電流）で、電荷電流は `j=-Jm` です。
+Pythonの `state.step(A)`／`state.current` は電荷電流なので、もう一度符号を反転しません。
+スピン出力の間隔は入力の `&analysis out_rt_spin_step=1 /` で毎ステップに指定できます。
+既定値は100ステップで、ステップ0・1・最終ステップの出力規則もあります。
+読み込み時に行番号で合わせたり、暗黙に補間したりしません。
+
+```python
+from salmonpy.outputs import read_spin_dynamics
+spin = read_spin_dynamics('material_rt_spin.data')
+t = spin.time
+m = spin.magnetization       # (時刻, x/y/z)
+js = spin.spin_current       # (時刻, スピン偏極x/y/z, 流れる方向x/y/z)
+js_zx = js[:, 2, 0]          # z偏極のスピンがx方向へ流れる成分
+print(spin.time_unit, spin.magnetization_unit, spin.current_unit)
+```
+
+磁化は本体の `mag_x/y/z` を成分の符号規約も含めて保持します。磁気モーメントのμB単位へ変換した値ではありません。
+本体は積分密度行列から `Mx=Re(rho12+rho21)/2`、`My=Re(-i*rho12+i*rho21)/2`、`Mz=Re(rho11-rho22)/2` を出力します。
+読み込み側で別のスピン座標規約へ解釈し直しません。
+スピン流は本体のPauli行列による定義を保持し、追加のħ/2因子や符号変更を加えません。
+`pauli_current` は `(時刻, 0/x/y/z, 流れる方向x/y/z)` で、0成分も保持します。
+全配列は読み取り専用で、単位名は元ファイルのヘッダーを引き継ぎます。
+観測量の計算は既存のFortranが行い、Pythonは読み込みと整理を担当します。
+
+既存サンプルで3種類の時間発展をまとめて保存できます。これは後処理だけで、計算を起動しません。
+
+```sh
+python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.data --spin-data material_rt_spin.data
+```
+
+保存配列は `time_current`・`charge_current`・`time_spin`・`magnetization`・`spin_current`・`pauli_current` です。
+電流とスピンでサンプル数が違う場合も、別の時刻配列を保持します。時間ステップを再開した出力の接合は自動で行いません。
+同じ状態を別のプロセスが書き込み中のファイルは読み取らず、書き出し完了後のファイルを渡してください。

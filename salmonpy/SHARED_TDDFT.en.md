@@ -281,3 +281,9 @@ retry guarantee is implied for performance failures.
 Synthetic regression covers interleaved checked/performance states, independent
 controls, PZ/TB-mBJ/Libxc-PZ/PBE, heterogeneous PZ↔TB-mBJ and Libxc-PZ↔PBE, and
 1/2 internal ranks. This is not a real-material convergence or speed benchmark.
+
+
+For the added noncollinear SOC path see [Ni integration validation](NICKEL_SOC.en.md). PZ/Libxc-PZ/PBE inputs are admitted; Ni Libxc-PBE with1/2 internal MPI ranks validates independent states and direct restoration. SOC TB-mBJ/fast HSE are excluded.
+
+
+SOC `checked` mode now recovers supported deep numerical failures; `performance` omits diagnostic checks and automatic backups. Ni PBE k-point MPI1/2 verifies accepted-state/output preservation and retry. See [NICKEL_SOC.en.md](NICKEL_SOC.en.md).

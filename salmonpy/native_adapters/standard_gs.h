@@ -37,9 +37,9 @@ int sp_gs_create_from_arrays(const char*,int,sp_gs_array_reader,void*,int64_t*);
 int sp_gs_create_from_gs(const char *filename,int64_t source,int steps,int64_t *token);
 /* Additive active-SCF1: CPU periodic nonsymmetric scalar PZ/Libxc-PZ/PBE, fast-PR HSE06.
  * HSE needs its explicit compute profile; Gamma orbital GS additionally requires sp_gs_hse_orbital_protocol()==1. Imports, symmetry,
- * SOC, +U, DC and ionic evolution are outside this entry.
+ * SOC PBE CPU k-point SCF is validated separately in NICKEL_SOC; +U, DC and ionic evolution remain outside.
  * All calls are collective in the same order. Start reads/initializes once;
- * continue skips initialization/no-mix warmup and retains the original total cap.
+ * continue skips initialization/no-mix warmup and retains the current owned cap.
  * Snapshot tokens retain complete numerical copies in this live GS owner only;
  * no file/process/topology portability or allocation-failure atomicity claimed.
  * scf_info: paused,iterations,total cap,initializations,executed main iterations,
@@ -52,6 +52,19 @@ int sp_gs_create_from_gs(const char *filename,int64_t source,int steps,int64_t *
 int sp_gs_scf_protocol(void);
 int sp_gs_start(const char *filename,int steps,int64_t *token);
 int sp_gs_continue(int64_t token,int steps);
+/* Increase only this owner's total SCF cap, including after reaching it.
+ * No SCF execution or wave/density/mixing-history reset. Reject decreases,
+ * pending restore candidates and mismatched rank parameters before mutation. */
+/* Effective coefficient: Broyden alpha_mb, Pulay beta_p, otherwise mixrate. */
+int sp_gs_scf_adaptive_mixing(int64_t token,int enabled,double min_rate,double growth,int patience,int cooldown);
+/* values[4]: rate/floor/growth/best; counts[8]: enabled/patience/cooldown/remaining/streak/changes/last_iteration/coefficient_kind */
+int sp_gs_scf_mixing_info(int64_t token,double *values,int *counts);
+/* Spin-only Zeeman field B (atomic units); H_B = B.sigma/2. */
+int sp_gs_scf_spin_field(int64_t token,const double *field);
+/* B[3], auxiliary energy(Ha), spin magnetic moment[3](mu_B), energy excluding auxiliary(Ha). */
+int sp_gs_scf_spin_info(int64_t token,double *values);
+int sp_gs_scf_set_mixing(int64_t token,double rate);
+int sp_gs_scf_extend_limit(int64_t token,int new_limit);
 int sp_gs_scf_info(int64_t token,int values[6]);
 int sp_gs_scf_snapshot(int64_t token,int64_t *snapshot);
 int sp_gs_scf_restore(int64_t token,int64_t snapshot);

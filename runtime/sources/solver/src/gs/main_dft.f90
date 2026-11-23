@@ -24,13 +24,14 @@ use timer,only:s_timer_context,timer_context_swap,timer_context_get,timer_initia
  LOG_TOTAL,LOG_INIT_GS,LOG_GS_ITERATION,LOG_WRITE_GS_RESULTS
 use structures
 use salmonpy_model_inputs,only:s_model_inputs
+use noncollinear_module,only:s_noncollinear_state,swap_noncollinear_state
 use salmonpy_gs_seed,only:s_gs_seed,s_array_guess,read_array_guess
 use sym_sub,only:s_hse_symmetry_workspace
 use sym_rho_sub,only:s_hse_density_workspace
 use sendrecv_grid,only:dealloc_cache
 #ifdef USE_MPI
 use communication,only:comm_begin_children,comm_end_children,comm_release_children, &
- comm_is_attached,comm_get_globalinfo,comm_get_max,comm_bcast,comm_child_counts
+ comm_is_attached,comm_get_globalinfo,comm_get_max,comm_bcast,comm_child_counts,comm_summation
 #endif
 use salmon_xc,only:finalize_xc
 #ifdef USE_HSE
@@ -53,6 +54,7 @@ public::gs_seed_from_handle
 ! Never copy a live context; global inputs remain shared.
 ! Numerical-only snapshots; static communicators/Libxc/FFT handles stay live.
 type s_scf_payload
+ type(s_noncollinear_state)::noncollinear
 #ifdef USE_HSE
  type(s_exx_rt_state) :: hse
 #endif
@@ -77,6 +79,7 @@ end type
 integer(c_int64_t),save :: scf_snapshot_serial=0
 type s_gs_context
  private
+ type(s_noncollinear_state)::noncollinear
  type(s_timer_context)::timers
  logical::active=.false.,imported=.false.,scf_capable=.false.
  integer :: initializations=0,executed_iterations=0
@@ -821,12 +824,17 @@ subroutine gs_probe_write(ctx,unit)
 #endif
 end subroutine
 #ifdef USE_MPI
-subroutine gs_seed_from_handle(token,seed,status)
+subroutine gs_seed_from_handle(token,seed,status,require_zero_field)
  integer(c_int64_t),intent(in)::token
  type(s_gs_seed),intent(out)::seed
  integer,intent(out)::status
+ logical,optional,intent(in)::require_zero_field
  integer::index
  call gs_lookup(token,index,status)
+ if(status/=0)return
+ if(present(require_zero_field))then
+  if(require_zero_field.and.any(gs_handles(index)%context%system%gs_input%spin_field/=0d0))status=11
+ endif
  if(status==0)call gs_export_seed(gs_handles(index)%context,seed,status)
 end subroutine
 logical function scf_supported() result(ok)
@@ -836,8 +844,12 @@ logical function scf_supported() result(ok)
 #ifdef USE_OPENACC
  return
 #endif
- if(theory/='dft'.or.yn_periodic/='y'.or.spin/='unpolarized')return
- if(yn_spinorbit/='n'.or.yn_dc/='n'.or.yn_opt/='n'.or.yn_md/='n')return
+ if(theory/='dft'.or.yn_periodic/='y')return
+ if(.not.((spin=='unpolarized'.and.yn_spinorbit=='n').or. &
+          (spin=='noncollinear'.and.yn_spinorbit=='y')))return
+ if(yn_dc/='n'.or.yn_opt/='n'.or.yn_md/='n')return
+ ! SOC exchange resources have a separate lifetime and are not yet admitted.
+ if(yn_spinorbit=='y'.and.xc=='hse06')return
  if(PLUS_U_ON.or.yn_jm/='n'.or.xname/='none'.or.cname/='none')return
  select case(trim(xc))
  case('pz','libxc_pz','libxc_pbe')
@@ -904,6 +916,7 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
  type(s_timer_context)::host_timers
  type(s_hse_symmetry_workspace)::previous_symmetry
  type(s_hse_density_workspace)::previous_density_symmetry
+ type(s_noncollinear_state)::previous_noncollinear
  integer::index,status,old_iter,group,rank,nproc,reference_steps,restore_status
  real(8)::residual
  character(len(calc_mode))::old_mode
@@ -930,8 +943,10 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
   endif
   call swap_hse_symmetry_workspace(previous_symmetry)
   call swap_hse_density_workspace(previous_density_symmetry)
+  call swap_noncollinear_state(previous_noncollinear)
   call swap_hse_symmetry_workspace(ctx%symmetry)
   call swap_hse_density_workspace(ctx%density_symmetry)
+  call swap_noncollinear_state(ctx%noncollinear)
   old_mode=calc_mode;calc_mode='GS'
   old_iter=ctx%iterations
   ctx%mixing%scf_progress%continuing=.true.
@@ -964,8 +979,10 @@ integer(c_int) function sp_gs_continue(token,steps) bind(C)
   call timer_context_swap(host_timers)
   calc_mode=old_mode
   call swap_hse_density_workspace(ctx%density_symmetry)
+  call swap_noncollinear_state(ctx%noncollinear)
   call swap_hse_symmetry_workspace(ctx%symmetry)
   call swap_hse_density_workspace(previous_density_symmetry)
+  call swap_noncollinear_state(previous_noncollinear)
   call swap_hse_symmetry_workspace(previous_symmetry)
   call previous%activate(restore_status)
   call comm_get_max(restore_status,group)
@@ -977,6 +994,7 @@ subroutine scf_copy(ctx,value,restore)
  type(s_scf_payload),intent(inout)::value
  logical,intent(in)::restore
  if(restore)then
+  ctx%noncollinear=value%noncollinear
   ctx%continuation_inputs=value%continuation_inputs
   ctx%system=value%system;ctx%spsi=value%spsi;ctx%shpsi=value%shpsi;ctx%sttpsi=value%sttpsi
   ctx%cg=value%cg;ctx%mixing=value%mixing;ctx%rho=value%rho;ctx%rho_jm=value%rho_jm
@@ -991,6 +1009,7 @@ subroutine scf_copy(ctx,value,restore)
   endif
 #endif
  else
+  value%noncollinear=ctx%noncollinear
   value%continuation_inputs=ctx%continuation_inputs
   value%system=ctx%system;value%spsi=ctx%spsi;value%shpsi=ctx%shpsi;value%sttpsi=ctx%sttpsi
   value%cg=ctx%cg;value%mixing=ctx%mixing;value%rho=ctx%rho;value%rho_jm=ctx%rho_jm
@@ -1231,6 +1250,7 @@ integer(c_int) function create_gs(path,token,reading_only,steps,guess_token,arra
  type(s_timer_context)::host_timers
  type(s_hse_symmetry_workspace)::old_symmetry
  type(s_hse_density_workspace)::old_density_symmetry
+ type(s_noncollinear_state)::old_noncollinear
  type(s_gs_context),pointer::candidate
  type(gs_handle_slot),allocatable::enlarged(:)
  character(len(calc_mode))::previous_mode
@@ -1285,12 +1305,14 @@ integer(c_int) function create_gs(path,token,reading_only,steps,guess_token,arra
  candidate%scf_capable=scf_supported()
  call swap_hse_symmetry_workspace(old_symmetry)
  call swap_hse_density_workspace(old_density_symmetry)
+  call swap_noncollinear_state(old_noncollinear)
  call read_sw_symmetry(yn_symmetry)
  previous_mode=calc_mode;calc_mode='GS'
  if(present(steps))then
   if(steps<0.or..not.scf_supported())then
    calc_mode=previous_mode
    call swap_hse_density_workspace(old_density_symmetry)
+  call swap_noncollinear_state(old_noncollinear)
    call swap_hse_symmetry_workspace(old_symmetry)
    deallocate(candidate);create_gs=15;return
   endif
@@ -1311,9 +1333,11 @@ integer(c_int) function create_gs(path,token,reading_only,steps,guess_token,arra
  call timer_context_swap(candidate%timers)
  call timer_context_swap(host_timers)
  call swap_hse_density_workspace(candidate%density_symmetry)
+  call swap_noncollinear_state(candidate%noncollinear)
  call swap_hse_symmetry_workspace(candidate%symmetry)
  calc_mode=previous_mode
  call swap_hse_density_workspace(old_density_symmetry)
+  call swap_noncollinear_state(old_noncollinear)
  call swap_hse_symmetry_workspace(old_symmetry)
  call comm_get_max(status,group)
  if(status/=0)then

@@ -109,3 +109,7 @@ The standard crystalline TDDFT configuration is **transverse** (`trans_longi='tr
 Longitudinal is an explicit alternative field component, not the default.
 Isolated systems, non-collinear spin and Ehrenfest remain first-release targets;
 they are not yet implemented by this ASE entry.
+
+### SOC input preparation
+
+`dft_from_atoms(..., spin_orbit=True)` constructs an SOC DFT model with fully relativistic NC-UPFs and spinor state-count checks. `prepare_dft` only stages the input. The `prepare_wse2_soc` example reads an explicit structure file. This does not establish SOC forces in Calculator, SOC band support or SOC `tddft_from_atoms`. See the current [Ni smoke-test scope](NICKEL_SOC.en.md).

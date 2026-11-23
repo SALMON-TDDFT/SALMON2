@@ -34,7 +34,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use nonlocal_potential
   use pseudo_pt_plusU_sub, only: pseudo_plusU, PLUS_U_ON
   use pseudo_pt_so_sub, only: pseudo_so
-  use noncollinear_module, only: op_xc_noncollinear
+  use noncollinear_module, only: op_xc_noncollinear,op_spin_field
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
   use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil, &
           absorbing_boundary, yn_spinorbit
@@ -451,6 +451,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     if(yn_jm=='n') then
       if ( yn_spinorbit=='y' ) then
         call op_xc_noncollinear( tpsi, htpsi, info, mg )
+        if(system%gs_input_owned.and.any(system%gs_input%spin_field/=0d0)) &
+          call op_spin_field(tpsi,htpsi,info,mg,system%gs_input%spin_field)
         call pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)
       else
       ! pseudopotential

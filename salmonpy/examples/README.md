@@ -10,10 +10,10 @@ python -m salmonpy.quickstart
 
 対応するwheel導入後、この一コマンドでLD・合成SBEの短い計算を各1スレッドで完了します。
 追加入力は不要です。`SALMONpy first calculations: PASS` と表示された保存先を確認してください。
-ログと `summary.json` が残ります。以下のSi例は、追加の計算プログラムを準備してから行う次の段階です。
+ログと `summary.json` が残ります。電子計算・FDTDの追加プログラムは、初回テストとは別に準備します。
 
 対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、
-[Si入門：wheelから電流まで](../SI_INTRO.md)は、固定の擬ポテンシャル・入力・期待値を同梱し、配布済み計算プログラムを明示して使う手順です。
+[Si固定入力例](../SI_INTRO.md)は現行ランタイムで再検証済みです。対応する更新wheelと新しいApple Silicon用ZIPを配布者から受け取った場合に進みます（公開Releaseは未作成）。
 
 LD/SBEにはビルド済みの計算用共有ライブラリが必要です。import時にコンパイルは行いません。
 下記の `python` はSALMONpyをインストールした環境のPythonを指します。
@@ -29,7 +29,7 @@ LDと内蔵SBEはwheel同梱のFortran/Cの共有ライブラリを使います�
 
 1. **LD単独応答**：`python -m salmonpy.examples.ld_response`。wheelだけで材料応答を試します。
 2. **SBE単独応答**：`python -m salmonpy.examples.sbe_response new-sbe-output`。合成模型でA→jと独立状態を試します。実材料の物性例ではありません。
-3. **Siの電流**：[Si入門](../SI_INTRO.md)。対応する配布済み計算プログラムを準備して、wheelから電流までを確認します。短い動作確認であり、物理量の収束保証ではありません。
+3. **SBEと場の結合**：`python -m salmonpy.examples.field_coupling new-field-output`。追加の計算プログラムなしで、合成模型を場と結合します。
 
 初めて使う場合はこの順で十分です。以下の一覧は目的別の追加例、MPIで計算を結合する例は応用向けです。出力先にはコードツリー外の新しい場所を使ってください。
 
@@ -280,3 +280,12 @@ epsilon = dielectric_function(sigma)
 `isolated_response.py`は`--stop-after 7 --direct-checkpoint NEW`で分子を途中保存できます。同じ入力で別途`--resume-direct NEW`を実行すると残りのEだけを計算します。最大ステップ数と実行ファイルは同一にし、revision5の検証記録を使います。
 
 分子と場の一括再開：`molecular_feedback.py --stop-after 30 --checkpoint NEW`で保存し、同じ入力・容量・MPI数の別ジョブから`--resume NEW`で再開します。各回の出力先は別にします。
+
+
+## 電流・磁化・スピン流を保存済みSOC出力から読む
+
+```sh
+python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.data --spin-data material_rt_spin.data
+```
+
+[詳細と単位](../OUTPUTS.md)。この入口は後処理だけで計算を起動しません。

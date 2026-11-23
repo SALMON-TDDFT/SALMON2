@@ -21,22 +21,20 @@ module prep_pp_so_sub
   private
   public :: calc_uv_so
 
-  integer,allocatable :: lma_tbl_so(:,:,:)
-  integer :: Nlma_so
-  integer,allocatable :: ll_tbl_so(:)
-  real(8),allocatable :: jj_tbl_so(:), mj_tbl_so(:)
 
 contains
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 
-  subroutine set_nlma_so( pp, ppg, hvol )
+  subroutine set_nlma_so( pp, ppg, hvol, lma_tbl_so )
     use salmon_global,only : natom,kion
     use structures,only : s_pp_info,s_pp_grid
     implicit none 
     type(s_pp_info) :: pp
     type(s_pp_grid) :: ppg
     real(8),intent(in) :: hvol
+    integer,allocatable,intent(out) :: lma_tbl_so(:,:,:)
+    integer :: Nlma_so
     integer :: lma, lm, lm_max, n_mj
     integer :: a,ik,m,l,ll,l0,j_angular_momentum
 
@@ -79,9 +77,6 @@ contains
     allocate( ppg%ia_tbl_so(Nlma_so) ); ppg%ia_tbl_so=0
     allocate( ppg%rinv_uvu_so(Nlma_so) ); ppg%rinv_uvu_so=0.0d0
 
-    allocate( ll_tbl_so(Nlma_so) ); ll_tbl_so=0
-    allocate( jj_tbl_so(Nlma_so) ); jj_tbl_so=0.0d0
-    allocate( mj_tbl_so(Nlma_so) ); mj_tbl_so=0.0d0
 
     call set_lma_tbl( lma_tbl_so, ppg%ia_tbl_so, ppg%rinv_uvu_so, pp, hvol )
 
@@ -123,9 +118,6 @@ contains
                    lma=lma+1
                    lma_tbl_so(lm,a,j_angular_momentum)=lma
                    ia_tbl_so(lma)=a
-                   ll_tbl_so(lma)=ll
-                   jj_tbl_so(lma)=ll+0.5d0
-                   mj_tbl_so(lma)=n_mj-(ll+0.5d0)-1
                    rinv_uvu_so(lma)=pp%inorm(l,ik)*hvol
                 end do
              case(2)
@@ -134,9 +126,6 @@ contains
                    lma=lma+1
                    lma_tbl_so(lm,a,j_angular_momentum)=lma
                    ia_tbl_so(lma)=a
-                   ll_tbl_so(lma)=ll
-                   jj_tbl_so(lma)=ll-0.5d0
-                   mj_tbl_so(lma)=n_mj-(ll-0.5d0)-1
                    rinv_uvu_so(lma)=pp%inorm_so(l,ik)*hvol
                 end do
              end select
@@ -168,6 +157,8 @@ contains
     real(8) :: save_udvtbl_b(pp%nrmax,0:2*pp%lmax+1,natom)
     real(8) :: save_udvtbl_c(pp%nrmax,0:2*pp%lmax+1,natom)
     real(8) :: save_udvtbl_d(pp%nrmax,0:2*pp%lmax+1,natom)
+    ! Projector construction scratch belongs to this call, not the process.
+    integer,allocatable :: lma_tbl_so(:,:,:)
     integer :: a,ik,j,l,lm,m,ll,l0,n_mj
     integer :: lma,ilma,intr,ir,j_angular_momentum
     real(8),allocatable :: xn(:),yn(:),an(:),bn(:),cn(:),dn(:)  
@@ -198,7 +189,7 @@ contains
        rshift(3)=-hgs(3)
     end if
 
-    call set_nlma_so( pp, ppg, hvol )
+    call set_nlma_so( pp, ppg, hvol, lma_tbl_so )
 
     lma=0
 

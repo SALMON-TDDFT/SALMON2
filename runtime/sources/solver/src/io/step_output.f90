@@ -1,5 +1,5 @@
 ! Copyright 2026 SALMONpy contributors. Apache-2.0.
-! Metadata for the two audited live RT streams. No duplicated owning handles.
+! Metadata for the audited live RT streams (plus spin for SOC). No duplicated owning handles.
 module salmonpy_step_output
   use filesystem,only:resolve_path
   use structures,only:s_ofile
@@ -7,21 +7,32 @@ module salmonpy_step_output
   private
   public::step_output_state,step_output_capture,step_output_close,step_output_reopen,step_output_flush
   type step_output_state
-    integer::units(2)=0
-    character(256)::names(2)=''
-    logical::opened(2)=.false.,closed(2)=.false.
+    integer::streams=2
+    integer::units(3)=0
+    character(256)::names(3)=''
+    logical::opened(3)=.false.,closed(3)=.false.
   end type
 contains
   subroutine step_output_capture(value,ofl,status)
+    use salmon_global,only:yn_spinorbit
     type(step_output_state),intent(out)::value
     type(s_ofile),intent(in)::ofl
     integer,intent(out)::status
-    integer::i,ios
+    integer::i,ios,n
     character(256)::name,actual
-    value%units=[ofl%fh_rt,ofl%fh_rt_energy]
-    value%names=[ofl%file_rt_data,ofl%file_rt_energy_data]
+    value%units(1:2)=[ofl%fh_rt,ofl%fh_rt_energy]
+    value%names(1:2)=[ofl%file_rt_data,ofl%file_rt_energy_data]
     status=0
-    do i=1,2
+    if(yn_spinorbit=='y')then
+      n=len_trim(ofl%file_rt_data)
+      if(n<8)then
+        status=15;return
+      endif
+      value%streams=3
+      value%units(3)=ofl%fh_rt_spin
+      value%names(3)=ofl%file_rt_data(:n-5)//'_spin.data'
+    endif
+    do i=1,value%streams
       name=trim(value%names(i))
       if(name(1:2)=='./')name=name(3:)
       if(len_trim(name)<6.or.index(name,'/')/=0.or.index(name,achar(92))/=0)status=max(status,15)
@@ -44,7 +55,7 @@ contains
     integer,intent(out)::status
     integer::i,ios
     status=0
-    do i=1,2
+    do i=1,value%streams
       if(value%opened(i).and..not.value%closed(i))then
         flush(value%units(i),iostat=ios)
         if(ios/=0)status=90
@@ -56,7 +67,7 @@ contains
     integer,intent(out)::status
     integer::i,ios
     status=0
-    do i=1,2
+    do i=1,value%streams
       if(value%opened(i).and..not.value%closed(i))then
         close(value%units(i),iostat=ios)
         if(ios/=0)then
@@ -74,7 +85,7 @@ contains
     integer,intent(out)::status
     integer::i,ios,unit
     status=0
-    do i=1,2
+    do i=1,value%streams
       if(value%closed(i))then
         ! Another context may have reused the old positive unit while closed.
         ! Select an available unit and update the owning ofile after reconnection.
@@ -87,6 +98,7 @@ contains
           value%units(i)=unit
           if(i==1)ofl%fh_rt=unit
           if(i==2)ofl%fh_rt_energy=unit
+          if(i==3)ofl%fh_rt_spin=unit
           value%closed(i)=.false.
         endif
       endif

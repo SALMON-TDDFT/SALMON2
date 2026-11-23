@@ -2,7 +2,7 @@
 
 [English](README.en.md)
 
-LD、SBE、DFT、TDDFT、FDTDを目的に合わせて使えます。構造や光パルスの作成、既存の結果の解析だけでも利用できます。現在は開発版で、PyPIには未公開です。
+物質の光応答、電子の動き、光の伝播を単独で計算し、文書化した接続仕様で組み合わせられます。自作の電流計算コードの接続、構造・光パルスの準備、既存結果の解析にも使えます。現在は開発版で、PyPIには未公開です。
 
 | 使い方 | できること | 準備 |
 |---|---|---|
@@ -11,8 +11,6 @@ LD、SBE、DFT、TDDFT、FDTDを目的に合わせて使えます。構造や光
 | Pythonから一ステップずつ計算を進める | 電子計算とFDTDの結合、自作コードとの連携 | 対応する共有ライブラリとMPIを追加 |
 
 初めての場合は最初の行から進めます。追加の計算プログラムは[準備手順](RUNTIME.md)で導入します。対応するビルド済み配布物を優先し、ない場合だけ同梱ソースを明示的にビルドします。別のSALMONリポジトリを取得する必要はありません。
-
-SALMONpyは、物質中の電子の応答と光の伝播を、単独でも組み合わせても使える計算部品集です。軽い材料模型から第一原理計算まで選べ、自分の電流計算コードも接続できます。入力準備や既存結果の解析だけでも利用できます。
 
 ## 最初の計算：二つのコマンド
 
@@ -36,10 +34,12 @@ python -m salmonpy.quickstart
 失敗時はログを読み、別の計算プログラムの構築や導入を自動で始めないでください。
 
 次は下の目的別一覧か[サンプル集](examples/README.md)を使います。
-[Siの電流計算](SI_INTRO.md)には対応する追加の計算プログラムが必要です。最初のテスト完了の条件ではありません。
+基底状態や電子計算へ進む場合は[DFT](DFT.md)と[計算プログラムの準備](RUNTIME.md)を参照してください。[Si固定入力例](SI_INTRO.md)は現行ランタイムで再検証済みです。新しい対応wheel・ZIPを配布者から受け取って利用します（新ZIPの公開Releaseは未作成）。擬ポテンシャルの個別取得は[こちら](PSEUDOPOTENTIALS.md)。
 導入状態だけを調べる場合は `python -m salmonpy.doctor --json` を使います。
 
 ## 目的から選ぶ
+
+A/cは光のベクトルポテンシャルを光速で割った量、Eは電場、Hは磁場強度です。GSは、時間発展の初期条件として保存する基底状態を指します。
 
 | やりたいこと | 入口 | 必要な準備 |
 |---|---|---|
@@ -47,10 +47,10 @@ python -m salmonpy.quickstart
 | 結晶のA/c→j応答（SBE） | `salmonpy.sbe` | wheel、実材料にはバンド・遷移行列データ |
 | 場（j→A）と物質の結合：横波／縦波／薄膜／1次元伝播 | `salmonpy.maxwell` | NumPy、物質側の部品。[FIELDS.md](FIELDS.md) |
 | 光パルス・構造・解析・結果読み込み | `fields` / `geometry` / `analysis` / `outputs` | NumPy、描画にはMatplotlib |
-| DFTの基底状態・力 | `salmonpy.dft` | 対応外部SALMON・擬ポテンシャル |
-| 結晶のA/c→j応答（TDDFT） | `salmonpy.tddft` | 対応外部SALMON・整合する基底状態 |
-| 光伝播（FDTD） | `salmonpy.fdtd` | 対応外部SALMON |
-| バンド計算・描画 | `salmonpy.bands` | 対応外部SALMON・基底状態・Matplotlib |
+| DFTの基底状態・力 | `salmonpy.dft` | 対応する計算プログラム・擬ポテンシャル |
+| 結晶のA/c→j応答（TDDFT） | `salmonpy.tddft` | 対応する計算プログラム・整合する基底状態 |
+| 光伝播（FDTD） | `salmonpy.fdtd` | 対応する計算プログラム |
+| バンド計算・描画 | `salmonpy.bands` | 対応する計算プログラム・基底状態・Matplotlib |
 | ASEの構造・経路・energy/forces | `salmonpy.ase` / `salmonpy.ase_calculator` | 上記に加え任意のASE依存 |
 
 [Pythonサンプルと実行方法](examples/README.md)から始めてください。
@@ -83,7 +83,7 @@ python -m salmonpy.manual レーザーによる電子の動き
 python -m salmonpy.doctor --json
 ```
 
-検索で一致しない場合も `task_catalog` と `getting_started` に案内があります。
+検索は上位5件と開始案内を返します。完全なガイドと機能一覧 `task_catalog` は `--full QUERY`、またはPythonの `search` で取得できます。
 `sample_files` が実行例、`beginner_intake` が資源上限の確認手順です。
 環境診断で検出したCPU数を、そのまま利用許可と解釈しません。
 対応する計算ではメモリ見積もりと実測を利用できます。見積もりが上限を超えた場合は警告し、自動では停止しません。未測定の条件では上限を保証しません。
@@ -136,6 +136,13 @@ PとJは全振動子の和です。FDTD更新用の補助量Qとは区別して�
 計算中のP・JなどはFortran側で保持され、`step` のたびに計算状態を作り直す必要はありません。使い終わった状態は `close()` または `with` で終了します。同じ状態を複数スレッドから同時に操作しないでください。
 
 SBE、TDDFT、FDTDの実行例は[サンプル集](examples/README.md)から選べます。結晶のTDDFTとSBEはA駆動です。物質ごとに固定する設定と呼び出しごとに渡す値の区別は[入力設定](INPUT_CONTRACT.md)を参照し、確定した設定は `material.config` と `state.config` で確認できます。
+
+## 電子計算の対応範囲
+
+別プロセス型DFTは周期・固定イオン・非スピン偏極のPZ、TB-mBJ、Libxc-PZ/PBEに対応します。
+TB-mBJは模型ポテンシャルで、全エネルギーと力は未検証の診断値です。高速HSEは[別のGS計算入口](NATIVE_GS.md)を使います。
+結晶の別プロセス型TDDFTは整合する基底状態と中点伝播を使います。分子のE駆動は[固定イオン・PZの別入口](ISOLATED_TDDFT.md)です。
+対応するPython入口があることと、すべての条件・環境で検証済みであることを区別します。
 
 ## 実行環境と出力先
 

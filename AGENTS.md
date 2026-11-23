@@ -1,12 +1,31 @@
 # SALMONpy repository
 
-Current entry points: README.md, salmonpy/AI_USAGE.md and the rules below.
-Remaining state-isolation work: docs/plans/2026-11-15-state-isolation-checklist.md.
-docs/plans/2026-11-14-handoff.md is a historical record; its §1 policies 1-6
-(the project lead's design decisions) still apply, but its status columns,
-build commands and next-step list do not.
+## Start with the current instructions
 
-Read salmonpy/AGENTS.md and salmonpy/AI_USAGE.md before changing public APIs.
+Read README.md for the repository overview, then salmonpy/AGENTS.md and
+salmonpy/AI_USAGE.md before using or changing the public interfaces. For an
+installed-wheel first calculation, use `python -m salmonpy.manual` and
+`python -m salmonpy.quickstart`; no historical plan or solver build is required.
+
+Current implementation scope is documented in the topic guides under salmonpy/.
+For remaining development work, read the current-status section and latest
+records in docs/plans/2026-11-15-state-isolation-checklist.md; do not count
+historical unchecked items as separate current tasks.
+
+The dated docs/plans/2026-11-14-handoff.md is historical context, not the setup
+procedure, current feature list or authorization checklist. Its pending source
+import approval and fixed-upstream-plus-patches workflow were superseded by the
+project lead's 2026-11-15 approval. Its section 7 has a dated status cross-reference.
+Do not execute obsolete commands or restore the superseded source-import ban.
+This does not relax the maintained eigensolver audits, scalar IEEE inquiries,
+source inventories, licensing or evidence-preservation rules.
+The handoff's six design principles remain the baseline; use current API and
+execution-mode contracts for their supported guarantees.
+Follow the user's current instructions and applicable AGENTS.md rules; confirm
+supported conditions in the current topic guide and the implementation.
+
+## Repository and source ownership
+
 This repository is for independent SALMONpy distribution. Do not merge it into
 SALMON upstream. The project lead authorized bundled solver sources on 2026-11-15.
 

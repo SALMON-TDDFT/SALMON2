@@ -875,7 +875,7 @@ integer(c_int) function sp_fast_hse_model_from_gs(gs_token,path,timestep,capacit
  type(s_gs_seed)::seed
  integer::status
  model_token=0;state_token=0;J=0d0
- call gs_seed_from_handle(gs_token,seed,status)
+ call gs_seed_from_handle(gs_token,seed,status,require_zero_field=.true.)
  if(status==0)then
   if(any(seed%decomposition/=[nproc_size_global,1,1,1,1]))status=11
  endif

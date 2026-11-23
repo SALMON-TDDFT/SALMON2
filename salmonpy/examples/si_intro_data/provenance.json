@@ -11,6 +11,31 @@
   },
   "runtime_artifacts": [
     {
+      "name": "salmonpy-runtime-macos-arm64-20261123",
+      "platform": {
+        "system": "darwin",
+        "machine": "arm64",
+        "libc": "",
+        "version": "26.7.3"
+      },
+      "outer_sha256": "f30987c984414917df65dec2d860214b9ce1464424f33b74084ca687f987f775",
+      "archive_member": "salmonpy-runtime-darwin-arm64.zip",
+      "distribution_status": "local validation artifact; no public release URL"
+    }
+  ],
+  "files": {
+    "Si_rps.dat": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c",
+    "input.json": "62a4139648f23212ea2c5fbb543c49e86838abacd1d6fc499955fe685de147fc",
+    "expected.json": "c5a838a801720457a47f2579daffcd266ad93db88b3c5c815b85b1cf9cf0a976",
+    "LICENSE.txt": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+  },
+  "reference_runtime": {
+    "runtime_commit": "6f8b36c6c04f7f1f3be4e68e718a35cd22f6453c",
+    "runtime_run_url": "https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653",
+    "expires_at": "2027-02-12T01:37:54Z"
+  },
+  "historical_runtime_artifacts": [
+    {
       "name": "salmonpy-runtime-macos-15",
       "release_url": "https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15.zip",
       "platform": {
@@ -68,18 +93,20 @@
       "archive_member": "salmonpy-runtime-linux-x86_64.zip"
     }
   ],
-  "files": {
-    "Si_rps.dat": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c",
-    "input.json": "62a4139648f23212ea2c5fbb543c49e86838abacd1d6fc499955fe685de147fc",
-    "expected.json": "c5a838a801720457a47f2579daffcd266ad93db88b3c5c815b85b1cf9cf0a976",
-    "LICENSE.txt": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
-  },
-  "reference_runtime": {
-    "runtime_commit": "6f8b36c6c04f7f1f3be4e68e718a35cd22f6453c",
-    "runtime_run_url": "https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653",
-    "expires_at": "2027-02-12T01:37:54Z"
-  },
-  "runtime_commit": "8006261b9e48541b591e496a813b3f06ca5fc1b1",
-  "runtime_run_url": "https://github.com/otobetomohito/SALMONpy/actions/runs/43554502676",
-  "runtime_release_url": "https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14"
+  "historical_runtime_commit": "8006261b9e48541b591e496a813b3f06ca5fc1b1",
+  "historical_runtime_run_url": "https://github.com/otobetomohito/SALMONpy/actions/runs/43554502676",
+  "historical_runtime_release_url": "https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14",
+  "runtime_commit": "ed9cfb40373ba417ed6a62a6d6c5de55fc54fd41",
+  "runtime_source_tree_sha256": "ed1839ac5d7adc2c4409789e8e4e7d11138f5ecb04073576b017dad88f51d774",
+  "runtime_validation_status": "fixed-input-source-and-installed-wheel-passed-2026-11-23",
+  "runtime_validation": {
+    "scope": "Apple Silicon local distribution; other OS and public release pending",
+    "gs_calculations": 1,
+    "scf_iterations": 54,
+    "expected_values_changed": false,
+    "energy_absolute_error_hartree": 0.0,
+    "current_max_absolute_error_au": 0.0,
+    "wheel_reused_saved_gs": true,
+    "wheel_current_matches_source_bitwise": true
+  }
 }

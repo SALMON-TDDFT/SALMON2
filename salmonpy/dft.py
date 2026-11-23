@@ -1,6 +1,6 @@
 """ASE-independent, fixed-ion periodic ground-state workflow (one MPI rank)."""
 from .errors import InputError, InputTypeError, RuntimeFailure, SCFReviewRequired
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 import hashlib
 import json
@@ -62,26 +62,43 @@ class Pseudopotential:
     local_channel: int
     suffix: str
     data: bytes=field(repr=False)
+    reference: object=field(default=None,repr=False)
 
     def __post_init__(self):
         object.__setattr__(self,'atomic_number',_integer(self.atomic_number,'atomic_number',1,118))
         object.__setattr__(self,'local_channel',_integer(self.local_channel,'local_channel',0,4))
         if self.suffix not in ('_rps.dat','.upf'): raise InputError('supported formats: KY _rps.dat and NC UPF')
         if not isinstance(self.data,bytes) or not self.data: raise InputError('nonempty immutable pseudopotential bytes required')
+        if self.reference is not None:
+            from .pseudopotentials import PseudopotentialReference, _check_upf
+            if not isinstance(self.reference, PseudopotentialReference):
+                raise InputTypeError('reference must be a PseudopotentialReference')
+            if self.reference.atomic_number != self.atomic_number or self.reference.sha256 != self.sha256:
+                raise InputError('pseudopotential identity differs from its reference')
+            if self.reference.file_format == 'UPF2':
+                _check_upf(self.reference, self.data)
         if self.suffix=='.upf':
             import xml.etree.ElementTree as ET
             try:
                 header=ET.fromstring(self.data).find('PP_HEADER')
                 if header is None or header.get('pseudo_type','').strip().upper()!='NC': raise InputError('NC UPF required')
-                for name in ('is_paw','is_ultrasoft','has_so'):
-                    if header.get(name,'F').strip().lower() not in ('f','false','.false.'): raise InputError('scalar NC UPF required')
+                for name in ('is_paw','is_ultrasoft'):
+                    if header.get(name,'F').strip().lower() not in ('f','false','.false.'): raise InputError('norm-conserving UPF required')
             except ET.ParseError as exc: raise InputError('UPF XML could not be parsed') from exc
 
     @classmethod
-    def from_file(cls,filename,*,atomic_number,local_channel):
+    def from_file(cls,filename,*,atomic_number,local_channel,reference=None):
         path=Path(filename)
         suffix='_rps.dat' if path.name.endswith('_rps.dat') else path.suffix.lower()
-        return cls(atomic_number,local_channel,suffix,path.read_bytes())
+        return cls(atomic_number,local_channel,suffix,path.read_bytes(),reference)
+
+    @property
+    def has_spin_orbit(self):
+        if self.suffix != '.upf':
+            return False
+        import xml.etree.ElementTree as ET
+        header = ET.fromstring(self.data).find('PP_HEADER')
+        return header.get('has_so', 'F').strip().lower() in ('t', 'true', '.true.')
 
     @property
     def sha256(self): return hashlib.sha256(self.data).hexdigest()
@@ -113,10 +130,29 @@ class Pseudopotential:
 class SCFSettings:
     max_iterations: int=300
     tolerance: float=1e-9
+    mixing_method: str | None=None
+    mixing_rate: float | None=0.3
+    adaptive_mixing: bool=False
+    initial_wavefunction: str | None=None
+    random_seed: int | None=None
 
     def __post_init__(self):
+        if type(self.adaptive_mixing) is not bool:raise InputError('adaptive_mixing must be bool')
         object.__setattr__(self,'max_iterations',_integer(self.max_iterations,'max_iterations',1,2**31-1))
         object.__setattr__(self,'tolerance',_positive(self.tolerance,'tolerance'))
+        if self.mixing_method is not None and self.mixing_method not in ('simple','simple_dm','broyden','pulay','simple_potential'):
+            raise InputError('unsupported mixing_method')
+        if self.initial_wavefunction is not None and self.initial_wavefunction not in ('random','gauss','gauss2','gauss3','gauss4','gauss5','gauss10','pp'):
+            raise InputError('unsupported initial_wavefunction')
+        if self.mixing_rate is not None:
+            rate=np.asarray(self.mixing_rate)
+            if rate.shape!=() or rate.dtype.kind not in 'iuf' or not np.isfinite(rate):
+                raise InputError('mixing_rate must be a finite real scalar')
+            object.__setattr__(self,'mixing_rate',float(rate))
+            if not 0<=float(rate)<=1:
+                warnings.warn('mixing_rate outside [0,1]; solver acceptance and stability must be checked',RuntimeWarning,stacklevel=2)
+        if self.random_seed is not None:
+            object.__setattr__(self,'random_seed',_integer(self.random_seed,'random_seed',0,2**31-1))
 
 
 _GUESS_FILES=('info.bin','occupation.bin','wfn.bin')
@@ -211,6 +247,9 @@ class DFT:
     xc: str='pz'
     symmetry: SymmetryOperations | None=None
     cval: float | None=None
+    spin_orbit: bool=False
+    electronic_temperature: float | None=None
+    electronic_temperature_k: float | None=None
 
     def __post_init__(self):
         if self.symmetry is not None and not isinstance(self.symmetry,SymmetryOperations):
@@ -222,8 +261,18 @@ class DFT:
         if len({p.atomic_number for p in pseudos})!=len(pseudos) or {p.atomic_number for p in pseudos}!=set(numbers):
             raise InputError('exactly one pseudopotential per atomic species required')
         electrons=_integer(self.electrons,'electrons',2,2**31-1)
-        states=_integer(self.states,'states',1,2**31-1)
-        if electrons%2 or states<electrons//2: raise InputError('closed-shell even electrons and enough states required')
+        states=_integer(2*electrons if self.spin_orbit and self.states is None else self.states,'states',1,2**31-1)
+        if type(self.spin_orbit) is not bool:
+            raise InputTypeError('spin_orbit must be boolean')
+        if any(p.has_spin_orbit != self.spin_orbit for p in pseudos):
+            raise InputError('spin_orbit must match every pseudopotential; no scalar/SOC substitution')
+        if self.spin_orbit:
+            if states < electrons:
+                raise InputError('SOC requires at least electrons spinor states')
+            if states<2*electrons:
+                warnings.warn('SOC default is twice the electron count; retaining explicitly supplied states',RuntimeWarning,stacklevel=2)
+        elif electrons%2 or states<electrons//2:
+            raise InputError('closed-shell even electrons and enough states required')
         cell=_frozen(self.cell,(3,3))
         if np.linalg.det(cell)<=1e-12: raise InputError('positive-volume full periodic cell required')
         positions=_frozen(self.fractional_positions,(len(numbers),3))
@@ -231,6 +280,12 @@ class DFT:
         kmesh=tuple(_integer(n,'kmesh',1,2**20) for n in self.kmesh)
         if len(grid)!=3 or len(kmesh)!=3: raise InputError('three grid and kmesh dimensions required')
         if self.xc.lower() not in ('pz','tbmbj','libxc_pz','libxc_pbe','hse06'): raise InputError('supported xc: pz, tbmbj, libxc_pz, libxc_pbe, hse06 (fast native GS)')
+        if self.electronic_temperature is not None and self.electronic_temperature_k is not None:
+            raise InputError('specify electronic temperature in Hartree or kelvin, not both')
+        if self.electronic_temperature_k is not None:
+            object.__setattr__(self,'electronic_temperature_k',_positive(self.electronic_temperature_k,'electronic_temperature_k'))
+        if self.electronic_temperature is not None:
+            object.__setattr__(self,'electronic_temperature',_positive(self.electronic_temperature,'electronic_temperature'))
         cval=self.cval
         if cval is not None:
             value=np.asarray(cval)
@@ -266,6 +321,17 @@ class DFT:
                         for z,row in zip(self.numbers,self.fractional_positions))
         hybrid_options=', exx_pre_scf_threshold=0' if self.xc=='hse06' else ''
         if self.cval is not None:hybrid_options+=f', cval={self.cval:.17e}'
+        system_options='' if self.electronic_temperature is None else f', temperature={self.electronic_temperature:.17e}'
+        if self.electronic_temperature_k is not None:system_options=f', temperature_k={self.electronic_temperature_k:.17e}'
+        options=[]
+        if scf.adaptive_mixing:options.append("yn_auto_mixing='y', update_mixing_ratio=1.2")
+        if scf.mixing_method is not None:options.append(f"method_mixing='{scf.mixing_method}'")
+        if scf.mixing_rate is not None:
+            coefficient={'broyden':'alpha_mb','pulay':'beta_p'}.get(scf.mixing_method or 'broyden','mixrate')
+            options.append(f'{coefficient}={scf.mixing_rate:.17e}')
+        if scf.initial_wavefunction is not None:options.append(f"method_init_wf='{scf.initial_wavefunction}'")
+        if scf.random_seed is not None:options.append(f'iseed_number_change={scf.random_seed}')
+        scf_extra='' if not options else '\n '+', '.join(options)
         return f"""&calculation
  theory='dft'
 /
@@ -276,7 +342,7 @@ class DFT:
  unit_system='au'
 /
 &system
- yn_periodic='y', spin='unpolarized', nelem={len(index)}, natom={len(self.numbers)}, nelec={self.electrons}, nstate={self.states},
+ yn_periodic='y', {"spin='noncollinear', yn_spinorbit='y'" if self.spin_orbit else "spin='unpolarized'"}, nelem={len(index)}, natom={len(self.numbers)}, nelec={self.electrons}, nstate={self.states}{system_options},
 {lattice}
 /
 &pseudo
@@ -292,7 +358,7 @@ class DFT:
  num_kgrid={','.join(map(str,self.kmesh))}
 /
 &scf
- nscf={scf.max_iterations}, threshold={scf.tolerance:.17e}, convergence='rho_dne'
+ nscf={scf.max_iterations}, threshold={scf.tolerance:.17e}, convergence='rho_dne'{scf_extra}
 /
 &atomic_red_coor
 {atoms}
@@ -307,6 +373,9 @@ class DFT:
                 'pseudopotentials': [{'atomic_number': p.atomic_number,
                                      'sha256': p.sha256, 'local_channel': p.local_channel}
                                     for p in self.pseudopotentials]}
+        if self.spin_orbit:value['spin_orbit']=True
+        if self.electronic_temperature is not None:value['electronic_temperature']=self.electronic_temperature
+        if self.electronic_temperature_k is not None:value['electronic_temperature_k']=self.electronic_temperature_k
         if self.xc=='tbmbj':value['cval']=self.cval
         if self.symmetry is not None:value['symmetry']={'directions':self.symmetry.directions,'sha256':self.symmetry.sha256}
         return value
@@ -341,6 +410,14 @@ class DFT:
                 'cell_bohr':self.cell.tolist(),'fractional_positions':self.fractional_positions.tolist(),'numbers':self.numbers,
                 'pseudopotentials':[{'atomic_number':p.atomic_number,'sha256':p.sha256,'local_channel':p.local_channel} for p in self.pseudopotentials],
                 'max_iterations':scf.max_iterations,'tolerance':scf.tolerance,'threads':threads,'restart_saved':save_restart}
+        if self.spin_orbit:record['spin_orbit']=True
+        if self.electronic_temperature is not None:record['electronic_temperature']=self.electronic_temperature
+        if self.electronic_temperature_k is not None:record['electronic_temperature_k']=self.electronic_temperature_k
+        if scf.adaptive_mixing or any(getattr(scf,k) is not None for k in ('mixing_method','mixing_rate','initial_wavefunction','random_seed')):
+            record['scf_settings']=asdict(scf)
+        if any(p.reference is not None for p in self.pseudopotentials):
+            record['pseudopotential_sources']=[None if p.reference is None else asdict(p.reference)
+                                               for p in self.pseudopotentials]
         if self.xc=='tbmbj':
             record.update(cval=self.cval,cval_mode='automatic' if self.cval is None else 'fixed',
                           observable_scope='states/bands/response; energy/forces are unvalidated diagnostics')

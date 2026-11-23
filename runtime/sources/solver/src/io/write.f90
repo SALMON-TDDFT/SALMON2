@@ -2461,7 +2461,34 @@ contains
 
 !===================================================================================================================================
 
-  subroutine write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,psi)
+  subroutine observe_rt_spin(system,mg,info,stencil,ppg,psi,observation)
+    use structures
+    use noncollinear_module,only:calc_magnetization,calc_spin_current
+    implicit none
+    type(s_dft_system),intent(in)::system
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    type(s_stencil),intent(in)::stencil
+    type(s_pp_grid),intent(in)::ppg
+    type(s_orbital),intent(in)::psi
+    real(8),intent(out)::observation(15)
+    real(8)::m(3),spin_curr(3,0:3)
+    real(8)::micro(3,0:3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
+    real(8)::band(3,0:3,system%no,system%nk)
+    integer::ik,io
+    call calc_magnetization(system,mg,info,m)
+    call calc_spin_current(system,mg,stencil,info,psi,ppg,micro,band)
+    spin_curr=0d0
+    do ik=1,system%nk
+    do io=1,system%no
+      spin_curr=spin_curr+band(:,:,io,ik)*system%rocc(io,ik,1)*system%wtk(ik)
+    enddo
+    enddo
+    observation(1:3)=m
+    observation(4:15)=reshape(spin_curr,[12])
+  end subroutine observe_rt_spin
+
+  subroutine write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,psi,observation)
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
@@ -2482,6 +2509,7 @@ contains
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_orbital)         ,intent(in) :: psi
     !
+    real(8),optional,intent(in)::observation(15)
     integer ik,io,i
     real(8) :: m(3),mag_orb(3,system%no,system%nk),spin_curr(3,0:3)
     real(8) :: m_micro(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
@@ -2496,6 +2524,10 @@ contains
       return
     end if
     
+    if(present(observation))then
+      m=observation(1:3)
+      spin_curr=reshape(observation(4:15),[3,4])
+    else
     call calc_magnetization(system,mg,info,m)
     if(yn_out_mag_decomposed_rt=='y') call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
     if(yn_out_mag_micro_rt=='y') call calc_magnetization_micro(mg,m_micro)
@@ -2509,6 +2541,8 @@ contains
     end do
     end do
   
+    endif
+
     if(comm_is_root(nproc_id_global))then
     
       write(ofl%fh_rt_spin,'(1000(1X,E23.15E3))') dble(itt)*dt*t_unit_time%conv,m(1),m(2),m(3), &

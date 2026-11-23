@@ -26,6 +26,7 @@ module salmonpy_tddft_context
   use filesystem,only:resolve_path
 #endif
 use tddft_worker
+use noncollinear_module,only:s_noncollinear_state,swap_noncollinear_state,snapshot_noncollinear_state
 use salmonpy_gs_seed, only: s_gs_seed
 #ifdef SALMONPY_FAST_CORE
 use salmonpy_gs_context, only: gs_seed_from_handle
@@ -66,6 +67,7 @@ private
 public :: sp_tddft_init,sp_tddft_step,sp_tddft_close,sp_tddft_checkpoint,sp_tddft_step_performance
 ! Only numerical state: communicators, output units and library handles stay in the fresh context.
 type :: checkpoint_payload
+  type(s_noncollinear_state) :: noncollinear
   type(s_orbital) :: spsi_in,spsi_out,tpsi
   type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
   type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
@@ -145,9 +147,11 @@ integer,save :: handle_group=0
 integer(c_int64_t),parameter :: handle_stride=2147483648_c_int64_t
 type(s_timer_context),save :: legacy_timers,legacy_host_timers
 logical,save :: legacy_timers_alive=.false.,legacy_host_alive=.false.,handle_timer_active=.false.
+type(s_noncollinear_state),save :: handle_host_noncollinear
 type(s_timer_context),save :: handle_host_timers
 logical,save :: handle_host_timer_alive=.false.
 type handle_slot
+  type(s_noncollinear_state) :: noncollinear
   type(s_timer_context) :: timers
   logical :: timers_alive=.false.
   type(rt_context),pointer :: context=>null()
@@ -264,7 +268,7 @@ integer(c_int) function sp_tddft_model_from_gs(gs_token,timestep,capacity,decomp
   integer :: status
   model_token=0;state_token=0;J=0d0
 #ifdef SALMONPY_FAST_CORE
-  call gs_seed_from_handle(gs_token,seed,status)
+  call gs_seed_from_handle(gs_token,seed,status,require_zero_field=.true.)
   if(status==0)then
     if(any(decomposition/=seed%decomposition))status=11
     if(associated(pending_gs))status=12
@@ -463,6 +467,7 @@ subroutine handle_reserve(index,token,status)
   integer,intent(out)::index,status
   integer(c_int64_t),intent(out)::token
   type(handle_slot),allocatable::grown(:)
+  type(s_noncollinear_state) :: empty_noncollinear
   type(s_timer_context) :: empty_timers
   integer::i,old,n,allocation_status,group,rank,parts(2),reference(2)
   index=0;status=0;token=0;old=0
@@ -492,6 +497,7 @@ subroutine handle_reserve(index,token,status)
   if(status/=0)return
   handles(index)%generation=handles(index)%generation+1_c_int64_t
   token=handles(index)%generation*handle_stride+int(index,c_int64_t)
+  handles(index)%noncollinear=empty_noncollinear
   handles(index)%timers=empty_timers
   handles(index)%timers_alive=.false.
 end subroutine
@@ -567,6 +573,8 @@ integer(c_int) function sp_tddft_legacy_timers(values) bind(C)
 end function
 subroutine handle_timer_enter(index)
   integer,intent(in) :: index
+  call swap_noncollinear_state(handle_host_noncollinear)
+  call swap_noncollinear_state(handles(index)%noncollinear)
   call timer_context_swap(handle_host_timers)
   call timer_context_swap(handles(index)%timers)
   call timer_initialize
@@ -576,6 +584,8 @@ subroutine handle_timer_enter(index)
 end subroutine
 subroutine handle_timer_leave(index)
   integer,intent(in) :: index
+  call swap_noncollinear_state(handles(index)%noncollinear)
+  call swap_noncollinear_state(handle_host_noncollinear)
   handles(index)%timers_alive=model_timers_alive
   model_timers_alive=handle_host_timer_alive
   call timer_context_swap(handles(index)%timers)
@@ -621,7 +631,7 @@ integer(c_int) function sp_tddft_handle_init(path,timestep,capacity,A,decomposit
     case default
       status=15
     end select
-    if(use_symmetry.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_spinorbit/='n')status=15
+    if(use_symmetry.or..not.worker_spin_supported().or.yn_md/='n')status=15
     if(iperiodic/=3.or.propagator/='middlepoint'.or.trans_longi/='tr')status=15
     if(xname/='none'.or.cname/='none'.or.yn_jm/='n'.or.PLUS_U_ON)status=15
     if(projection_option/='no'.or.dm_unfold_option/='no'.or.state%singlescale%flag_use)status=15
@@ -773,11 +783,13 @@ integer(c_int) function sp_tddft_handle_transaction(token,mode) bind(C)
 end function
 integer(c_int) function sp_tddft_handle_close(token) bind(C)
   integer(c_int64_t),value::token
+  type(s_noncollinear_state) :: empty_noncollinear
   integer::index,status
   call handle_select(token,index,status);sp_tddft_handle_close=status
   if(status/=0)return
   sp_tddft_handle_close=sp_tddft_close()
   call handle_unselect(index)
+  if(sp_tddft_handle_close==0)handles(index)%noncollinear=empty_noncollinear
 end function
 integer(c_int) function sp_tddft_handle_label(token,label,capacity) bind(C)
   integer(c_int64_t),value::token
@@ -1028,6 +1040,10 @@ subroutine open_initial_state(owner,J,status,name)
     if(exists)status=1
     inquire(file=resolve_path(trim(base_directory)//trim(saved_name)//'_rt_energy.data'),exist=exists)
     if(exists)status=1
+    if(yn_spinorbit=='y')then
+      inquire(file=resolve_path(trim(base_directory)//trim(saved_name)//'_rt_spin.data'),exist=exists)
+      if(exists)status=1
+    endif
   endif
   call handle_agree(status)
   if(status/=0)then
@@ -1143,14 +1159,14 @@ integer(c_int) function tddft_step_impl(Aold,Anew,J)
   if(status/=0)then
     tddft_step_impl=status;return
   endif
-  ! The transaction covers fixed-ion periodic scalar semilocal propagation.
+  ! The transaction covers fixed-ion periodic scalar/SOC semilocal propagation.
   select case(trim(xc))
   case('pz','tbmbj','libxc_pz','libxc_pbe')
   case default
     status=15
   end select
   if(xname/='none'.or.cname/='none')status=15
-  if(spin/='unpolarized'.or.yn_spinorbit/='n'.or.yn_md/='n'.or.yn_jm/='n')status=15
+  if(.not.worker_spin_supported().or.yn_md/='n'.or.yn_jm/='n')status=15
   if(iperiodic/=3.or.propagator/='middlepoint'.or.trans_longi/='tr')status=15
   if(projection_option/='no'.or.dm_unfold_option/='no'.or.state%singlescale%flag_use)status=15
   if(yn_out_rvf_rt/='n'.or.PLUS_U_ON.or.gram_schmidt_interval>=1)status=15
@@ -1261,7 +1277,7 @@ integer(c_int) function tddft_close_impl()
   tddft_close_impl=0
 end function
 
-! Native ABI checkpoint v2. Caller authenticates the file, binary, GS and configuration.
+! Native ABI checkpoint v3. Caller authenticates the file, binary, GS and configuration.
 ! XC identity and scalar cval are stored; Libxc resources are rebuilt by initialization.
 ! TB-mBJ's automatic c is evaluation-local, not a persistent mutable XC field.
 ! All ranks call collectively with DISTINCT paths and an unchanged process topology.
@@ -1317,7 +1333,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
     status=2
   end select
   if(xname/='none'.or.cname/='none')status=2
-  if(spin/='unpolarized'.or.yn_spinorbit/='n'.or.yn_md/='n')status=2
+  if(.not.worker_spin_supported().or.yn_md/='n')status=2
   if(.not.ieee_is_finite(cval).or..not.ieee_is_finite(state%xc_func%cval))status=2
   if(iperiodic/=3.or.propagator/='middlepoint'.or.trans_longi/='tr')status=2
   if(projection_option/='no'.or.dm_unfold_option/='no'.or.state%singlescale%flag_use)status=2
@@ -1342,7 +1358,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   if(allocated(state%spsi_in%zwf))state%checkpoint_array_limit=max(state%checkpoint_array_limit,size(state%spsi_in%zwf,kind=8))
   if(allocated(state%spsi_in%rwf))state%checkpoint_array_limit=max(state%checkpoint_array_limit,size(state%spsi_in%rwf,kind=8))
   call checkpoint_copy(copy,.false.)
-  expected=[2,nproc_size_global,nproc_id_global,nt,state%system%nspin,state%system%no,state%system%nk, &
+  expected=[3,nproc_size_global,nproc_id_global,nt,state%system%nspin,state%system%no,state%system%nk, &
     state%lg%num,state%mg%is,state%mg%ie,state%mg%is_array,state%mg%ie_array, &
     state%info%io_s,state%info%io_e,state%info%ik_s,state%info%ik_e,state%info%im_s,state%info%im_e, &
     storage_size(1d0),storage_size(1),storage_size((0d0,0d0)),0,0]
@@ -1353,7 +1369,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   endif
   opened=ios==0
   if(opened)then
-    magic='SALMONPY_TDDFT_NATIVE_V2'
+    magic='SALMONPY_TDDFT_NATIVE_V3'
     header=expected;saved_dt=dt;cell=state%system%primitive_a
     expected_xc_names=[character(256)::xc,xname,cname]
     expected_xc_codes=[state%xc_func%xctype,state%xc_func%ispin]
@@ -1364,7 +1380,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
     if(reading)then
       read(u,iostat=ios)magic,header,saved_dt,cell
       if(ios==0)then
-        if(magic/='SALMONPY_TDDFT_NATIVE_V2'.or.any(header/=expected))ios=1
+        if(magic/='SALMONPY_TDDFT_NATIVE_V3'.or.any(header/=expected))ios=1
         if(saved_dt/=dt.or.any(cell/=state%system%primitive_a))ios=1
       endif
     else
@@ -1384,10 +1400,10 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
     endif
     if(ios==0)call checkpoint_io(u,reading,copy,ios)
     if(ios==0)then
-      magic='SALMONPY_TDDFT_COMPLETE_V2'
+      magic='SALMONPY_TDDFT_COMPLETE_V3'
       if(reading)then
         read(u,iostat=ios)magic
-        if(ios==0.and.magic/='SALMONPY_TDDFT_COMPLETE_V2')ios=1
+        if(ios==0.and.magic/='SALMONPY_TDDFT_COMPLETE_V3')ios=1
         if(ios==0)then
           read(u,iostat=ios)extra
           if(is_iostat_end(ios))then
@@ -1439,7 +1455,10 @@ end subroutine
 subroutine checkpoint_copy(copy,restore)
   type(checkpoint_payload),intent(inout)::copy
   logical,intent(in)::restore
+  type(s_noncollinear_state) :: replacement
   if(restore)then
+    replacement=copy%noncollinear
+    call swap_noncollinear_state(replacement)
     state%spsi_in=copy%spsi_in
     state%spsi_out=copy%spsi_out
     state%tpsi=copy%tpsi
@@ -1567,6 +1586,7 @@ subroutine checkpoint_copy(copy,restore)
     state%system%vec_E=copy%fields(:,3)
     state%system%vec_E_ext=copy%fields(:,4)
   else
+    call snapshot_noncollinear_state(copy%noncollinear)
     copy%spsi_in=state%spsi_in
     copy%spsi_out=state%spsi_out
     copy%tpsi=state%tpsi
@@ -1704,6 +1724,8 @@ subroutine checkpoint_io(unit,reading,value,ios)
   logical::present_array
   integer::lo(7),hi(7),i1,i2,k,allocation_status
   integer(8)::elements,extent
+  if(ios/=0)return
+  call checkpoint_io_noncollinear(unit,reading,value%noncollinear,ios,checkpoint_io_limit())
   if(ios/=0)return
   call checkpoint_io_s_orbital(unit,reading,value%spsi_in,ios)
   if(ios/=0)return
@@ -1912,5 +1934,6 @@ end subroutine
 integer(8) function checkpoint_io_limit()
  checkpoint_io_limit=state%checkpoint_array_limit
 end function
+#include "noncollinear_disk_io.inc"
 #include "checkpoint_arrays.inc"
 end module

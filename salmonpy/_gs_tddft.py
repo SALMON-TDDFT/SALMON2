@@ -26,7 +26,11 @@ def open_model(gs,dt,max_steps):
         return _open_fast_model(gs,dt,max_steps)
     from ._tddft_registry import NativeTDDFTRegistry,_RegisteredModel,_RegisteredLibrary,_RegistryLease,_configure_registry
     from .embedded_tddft import NativeTDDFTInitialState
+    from .bands import _input_groups,_scalar
     gs._live();session=gs.session;comm=session.comm;error=None
+    if _scalar(_input_groups(gs._input_text).get('system',''),'yn_spinorbit','n').lower()=='y':
+        field=gs.scf_spin_field['field_au']
+        _agree(comm,'Set the auxiliary spin field to zero and reconverge before TDDFT' if any(field) else None)
     try:
         dt=_positive(dt,'dt');count=_integer(max_steps,'max_steps',1,2**31-2)
         if getattr(session.backend,'_ordinary_rt',False):
@@ -80,7 +84,7 @@ def open_model(gs,dt,max_steps):
     initial=NativeTDDFTInitialState(work,'memory-gs',(('in-memory-gs',source),),count)
     proxy=_RegisteredLibrary(registry,model_token.value,state_token.value,current)
     model=_RegisteredModel(_RegistryLease(registry),proxy,work,initial,dt,tuple(dec.tolist()),
-        'memory-gs/'+source,Path('.'))
+        'memory-gs/'+source,Path('.'),spin_orbit=_scalar(_input_groups(gs._input_text).get('system',''),'yn_spinorbit','n').lower()=='y')
     model.registry=registry;model.model_token=model_token.value;model.material_id=gs.material_id
     model._initialized=True;model._attempted=True
     registry._models.add(model)

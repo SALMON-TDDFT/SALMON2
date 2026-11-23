@@ -50,6 +50,9 @@ class CIConfiguration(unittest.TestCase):
     def test_physics_campaigns_remain_manual_and_worker_is_consolidated(self):
         for name in ('runtime-bundles.yml','nlcc-consistency.yml'):
             self.assertEqual(set(workflow(name)['on']),{'workflow_dispatch'})
+        nickel='\n'.join(s.get('run','') for s in workflow('nlcc-consistency.yml')['jobs']['nlcc']['steps'])
+        self.assertIn('test_nickel_soc.py',nickel)
+        self.assertEqual(nickel.count('python -m salmonpy.runtime build'),2)
         self.assertFalse((ROOT/'.github/workflows/tddft-worker.yml').exists())
         bundled=workflow('runtime-bundles.yml')
         self.assertEqual(bundled['on']['workflow_dispatch']['inputs']['scope']['options'],['bundle','worker'])

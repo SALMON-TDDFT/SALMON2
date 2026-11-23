@@ -1,0 +1,84 @@
+{
+  "numbers": [
+    74,
+    34,
+    34
+  ],
+  "cell_bohr": [
+    [
+      6.198301691501676,
+      0.0,
+      0.0
+    ],
+    [
+      -3.099150845750838,
+      5.367886725160508,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      37.794522509156565
+    ]
+  ],
+  "fractional_positions": [
+    [
+      0.0,
+      0.0,
+      0.5
+    ],
+    [
+      0.3333333333333333,
+      0.6666666666666666,
+      0.5835
+    ],
+    [
+      0.3333333333333333,
+      0.6666666666666666,
+      0.4165
+    ]
+  ],
+  "electrons": 46,
+  "grid": [
+    24,
+    24,
+    128
+  ],
+  "kmesh": [
+    2,
+    2,
+    1
+  ],
+  "xc": "libxc_pbe",
+  "schema": "salmonpy.soc-validation/1",
+  "material_id": "wse2-monolayer-soc",
+  "states": 92,
+  "temperature_k": 300,
+  "scf": {
+    "max_iterations": 2000,
+    "tolerance": 1e-08
+  },
+  "scf_batch": 25,
+  "response": {
+    "steps": 16,
+    "dt": 0.001,
+    "A": [
+      1e-05,
+      0,
+      0
+    ]
+  },
+  "geometry_source": "Explicit illustrative monolayer geometry; not structurally optimized or convergence-certified",
+  "pseudopotentials": [
+    {
+      "catalog_id": "pseudodojo-pbe-0.4-fr-standard-w",
+      "file": "potentials/W/W-sp_r.upf",
+      "local_channel": 3
+    },
+    {
+      "catalog_id": "pseudodojo-pbe-0.4-fr-standard-se",
+      "file": "potentials/Se/Se-d_r.upf",
+      "local_channel": 2
+    }
+  ]
+}

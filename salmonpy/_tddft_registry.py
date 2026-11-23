@@ -12,7 +12,7 @@ import numpy as np
 from .errors import InputError,RuntimeFailure
 from .fast_hse import _positive
 from .sbe import _integer
-from ._shared_tddft import NativeTDDFTModel,_configure,_profile,_agree
+from ._shared_tddft import NativeTDDFTModel,_configure,_profile,_agree,_spin_orbit
 
 
 def _configure_registry(lib):
@@ -157,7 +157,7 @@ class NativeTDDFTRegistry:
             raise RuntimeFailure('TDDFT model registration failed: '+str(outcomes))
         proxy=_RegisteredLibrary(self,model_token.value,state_token.value,current)
         identity='registry-v1/'+hashlib.sha256(json.dumps([self.backend.sha256,initial.input_file,dec]).encode()).hexdigest()
-        model=_RegisteredModel(_RegistryLease(self),proxy,work,initial,dt,dec,identity,base,execution_mode=execution_mode)
+        model=_RegisteredModel(_RegistryLease(self),proxy,work,initial,dt,dec,identity,base,execution_mode=execution_mode,spin_orbit=_spin_orbit(initial))
         model.registry=self;model.model_token=model_token.value
         model._initialized=True;model._attempted=True
         self._models.add(model)

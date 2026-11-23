@@ -1,0 +1,48 @@
+{
+  "schema": "salmonpy.scf-mixing-validation/1",
+  "status": "passed",
+  "runtime_sha256": "7c56e720302271e22a775a22c5bf23db29292a35e4f495ea1fb0cd1394c12641",
+  "source_tree_sha256": "5b15bb39e7e2b091412650e692d87de6c8d35995d14245b696a75722deac03bf",
+  "MPI_ranks": 2,
+  "methods": [
+    "simple_dm",
+    "broyden"
+  ],
+  "cases": [
+    "coefficient change preserves density/orbitals/occupations/eigenvalues/SCF history",
+    "coefficient change executes no SCF",
+    "different per-rank coefficients rejected",
+    "snapshot restores original mixing and continuation matches uninterrupted control",
+    "old runtime checkpoint direct restore with unchanged codec"
+  ],
+  "records": [
+    "calc2026/salmonpy-scf-mixing-r2-v2-20261123",
+    "calc2026/salmonpy-scf-broyden-transition-r2-20261123"
+  ],
+  "scope": "short Ni SOC software validation, not physical convergence",
+  "baseline_XC_core_probes": {
+    "status": "passed",
+    "ranks": [
+      1,
+      2
+    ],
+    "OMP_threads": [
+      1,
+      2
+    ],
+    "records": [
+      "calc2026/salmonpy-scf-mixing-nlcc-xc-20261123/test-record.json",
+      "calc2026/salmonpy-scf-mixing-nlcc-core-20261123/test-record.json"
+    ],
+    "scope": "prescribed densities; does not certify SOC forces"
+  },
+  "installed_wheel_tests": {
+    "total": 728,
+    "passed": 683,
+    "skipped": 45,
+    "failed": 0,
+    "route": "sdist -> wheel -> separate Python environment outside checkout",
+    "platform": "macOS arm64 Python3.14"
+  },
+  "source_tests_note": "Unbuilt source checkout lacks LD/SBE shared library checksum files; installed-wheel suite supplies compiled kernels. Selected DFT/native GS/SOC source tests37 passed."
+}

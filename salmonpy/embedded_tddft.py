@@ -160,7 +160,7 @@ class NativeTDDFTBackend:
             if _manifest(initial.directory)!=initial.manifest: raise InputError('initial bundle changed')
             if _digest(self.library)!=self.sha256: raise InputError('native library changed')
             if shared:
-                from ._shared_tddft import _profile,_configure
+                from ._shared_tddft import _profile,_configure,_spin_orbit
                 from .fast_hse import _positive
                 if self.work_root.is_relative_to(initial.directory):raise InputError('work root must be outside the initial bundle')
                 dt=_positive(dt,'dt');base=_profile(initial)
@@ -205,7 +205,7 @@ class NativeTDDFTBackend:
         _used=True
         if shared:
             from ._shared_tddft import NativeTDDFTModel
-            return NativeTDDFTModel(native,lib,work,initial,dt,self.decomposition,self.identity,base,execution_mode=self.execution_mode)
+            return NativeTDDFTModel(native,lib,work,initial,dt,self.decomposition,self.identity,base,execution_mode=self.execution_mode,spin_orbit=_spin_orbit(initial))
         state=_NativeState(native,lib,work,initial.max_steps,execution_mode=self.execution_mode)
         if self.execution_mode=="performance":
             from ._native_group import _bind_performance_directory

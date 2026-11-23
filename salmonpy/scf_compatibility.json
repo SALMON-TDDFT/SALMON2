@@ -1,10 +1,11 @@
 {
   "schema": "salmonpy.scf-compatibility/1",
-  "codec_schema": "salmonpy.native-scf-stream/1",
+  "codec_schema": "salmonpy.native-scf-stream/4",
   "codec_sources": [
     "src/common/structures.f90",
     "src/io/model_inputs.f90",
     "src/gs/main_dft.f90",
+    "src/so/noncollinear_module.f90",
     "src/xc/exx_rt_state.f90",
     "src/xc/exx_ace.f90",
     "src/xc/exx_symmetry.f90",

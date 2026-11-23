@@ -11,10 +11,10 @@ python -m salmonpy.quickstart
 After installing a matching wheel, this runs the short LD and synthetic SBE calculations
 with one thread and no additional inputs. Look for `SALMONpy first calculations: PASS`.
 The command prints the output directory and saves both logs and `summary.json`.
-The Si example below is a separate next step requiring an additional solver.
+Continue with the standalone examples below; electronic/FDTD solvers are a separate preparation step.
 
 
-[Si starter: wheel to current](../SI_INTRO.en.md) includes a fixed pseudopotential, input and reference, and explicitly selects a prebuilt runtime.
+[Si starter](../SI_INTRO.en.md) has been revalidated with the current runtime. Continue after obtaining the updated wheel and matching new Apple Silicon ZIP from the distributor; a new public Release is not available yet.
 
 Use the same Python environment in which the wheel was installed. All samples
 below ship in the wheel. The code is shared by both language editions.
@@ -26,7 +26,7 @@ For SALMON input exported by `FieldSamples.write_salmon`, use `ae_shape1='input'
 
 1. **LD response**: `python -m salmonpy.examples.ld_response`. Try material response using only the wheel.
 2. **SBE response**: `python -m salmonpy.examples.sbe_response new-sbe-output`. Learn A-to-j and independent states using a synthetic model, not real-material optical data.
-3. **Si current**: follow the [Si starter](../SI_INTRO.en.md) with a matching prebuilt runtime. This short wheel-to-current check does not certify physical convergence.
+3. **SBE coupled to a field**: `python -m salmonpy.examples.field_coupling new-field-output`. Couple the synthetic model to a field without a separate solver.
 
 These three are enough for a first visit. The table below indexes further tasks; MPI coupling examples are advanced. Use new output locations outside the source checkout.
 
@@ -284,3 +284,12 @@ The mixed solver sample optionally accepts `--planes-x FRONT BACK --plane-stride
 `isolated_response.py`: `--stop-after 7 --direct-checkpoint NEW` saves the molecule at step7; a separate invocation with the same input can use `--resume-direct NEW` to evolve only remaining E samples. Both calls need the same capacity/runtime and a revision5 validation record.
 
 Molecular/field bundle restart: use `molecular_feedback.py --stop-after 30 --checkpoint NEW`, then `--resume NEW` in a new job with identical input/capacity/MPI layout and a new output directory.
+
+
+## Read current, magnetization and spin-current dynamics from existing SOC output
+
+```sh
+python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.data --spin-data material_rt_spin.data
+```
+
+[Details and units](../OUTPUTS.en.md). This is postprocessing only; no solver is launched.

@@ -281,6 +281,7 @@ CONTAINS
 !===================================================================================================================================
 
   SUBROUTINE calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
+    use noncollinear_module,only:spin_field_local_energy
     use structures
     use salmon_math
     use math_constants,only : pi,zi
@@ -301,9 +302,10 @@ CONTAINS
     type(s_dft_energy)                  :: energy
     !
     integer :: ix,iy,iz,iia,ia,ib,zps1,zps2,ipair,ispin,ik,io
-    real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),Gd,sysvol,E_wrk(5),E_sum(5)
+    real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),Gd,sysvol,E_wrk(6),E_sum(6)
     real(8) :: E_wrk_local_1,E_wrk_local_2
     real(8) :: etmp
+    logical :: spin_field_active
     integer :: nion_mg_l
     complex(8) :: rho_e,rho_i
     call nvtxStartRange('calc_Total_Energy_periodic', __LINE__)
@@ -323,6 +325,7 @@ CONTAINS
       return
     end if
 
+    spin_field_active=system%gs_input_owned.and.any(system%gs_input%spin_field/=0d0)
     sysvol = system%det_a
 
     E_tmp = 0d0
@@ -475,7 +478,12 @@ CONTAINS
     if (rion_update) then
       E_wrk(4) = E_tmp_l
       E_wrk(5) = E_tmp
+      if(spin_field_active)then
+        E_wrk(6)=spin_field_local_energy(system%gs_input%spin_field,system%hvol)
+        call comm_summation(E_wrk,E_sum,6,info%icomm_r)
+      else
       call comm_summation(E_wrk,E_sum,5,info%icomm_r)
+      endif
 
   ! ion-ion energy
       zps1 = 0
@@ -499,7 +507,12 @@ CONTAINS
       E_sum(5) = E_sum(5) - Pi*zps1**2/(2*aEwald*sysvol) - sqrt(aEwald/Pi)*zps2
       energy%E_ion_ion = E_sum(5) + E_sum(4)
     else
+      if(spin_field_active)then
+        E_wrk(6)=spin_field_local_energy(system%gs_input%spin_field,system%hvol)
+        call comm_summation(E_wrk,E_sum,6,info%icomm_r)
+      else
       call comm_summation(E_wrk,E_sum,3,info%icomm_r)
+      endif
     end if
 
   ! Hartree energy
@@ -510,6 +523,7 @@ CONTAINS
 
   ! total energy
     energy%E_tot = energy%E_kin + energy%E_h + energy%E_ion_loc + energy%E_ion_nloc + energy%E_xc + energy%E_ion_ion
+    if(spin_field_active)energy%E_tot=energy%E_tot+E_sum(6)
 
 !    if ( comm_is_root(nproc_id_global) ) then
 !      write(*,*) "E_tot     =",energy%E_tot

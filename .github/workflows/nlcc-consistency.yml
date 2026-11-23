@@ -51,6 +51,11 @@ jobs:
             --cmake-arg=-DBLA_VENDOR=OpenBLAS --cmake-arg=-DOPENMP_FLAGS=-fopenmp \
             --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
             --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
+      - name: Short Ni SOC and semicore ownership smoke test
+        shell: bash
+        run: |
+          python tools/test_nickel_soc.py "$RUNNER_TEMP/nlcc-serial/build.json" \
+            "$RUNNER_TEMP/nickel-soc" --allow-download
       - name: Validate XC variations and sampled core forces
         shell: bash
         run: |
@@ -90,6 +95,8 @@ jobs:
         with:
           name: nlcc-native-consistency-linux
           path: |
+            ${{ runner.temp }}/nickel-soc/result.json
+            ${{ runner.temp }}/nickel-soc/execution/test-record.json
             ${{ runner.temp }}/nlcc-results/*.log
             ${{ runner.temp }}/nlcc-results/*.json
             ${{ runner.temp }}/nlcc-xc/test-record.json

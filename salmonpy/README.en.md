@@ -2,8 +2,9 @@
 
 [日本語](README.md)
 
-Use LD, SBE, DFT, TDDFT and FDTD independently or combine them. Structure and pulse
-preparation and analysis of existing results can also be used on their own.
+Use material response, electronic dynamics and light propagation independently
+or through the documented coupling interfaces. Input preparation and analysis
+can also be used on their own.
 This is a development release and is not yet published on PyPI.
 
 | How to use it | Calculations | Preparation |
@@ -15,8 +16,6 @@ This is a development release and is not yet published on PyPI.
 Start with the first row. For additional programs, follow the [installation guide](RUNTIME.en.md).
 Prefer a matching prebuilt distribution; explicitly build the bundled sources only when needed.
 A separate upstream SALMON checkout is not required.
-
-SALMONpy is a set of reusable calculation components for material electron response and light propagation. Use simple material models or first-principles calculations independently, couple them, or connect your own current model. Input preparation and analysis can also be used alone.
 
 ## First calculation: two commands
 
@@ -41,11 +40,15 @@ are never overwritten. These are installation checks, not converged material pro
 If a calculation fails, read its log; do not automatically compile or install other solvers.
 
 Next, choose a task below or inspect the [examples](examples/README.en.md).
-[Si current](SI_INTRO.en.md) additionally needs a matching calculation program; it is
-not a prerequisite for completing this first test. For diagnosis only:
+For ground-state and electronic calculations, continue with [DFT](DFT.md) and
+[compatible calculation programs](RUNTIME.en.md). The [fixed Si starter](SI_INTRO.en.md)
+has been revalidated with the current runtime on Apple Silicon. Obtain the updated wheel and matching new ZIP from the distributor; a new public Release is not available yet. See [explicit pseudopotential downloads](PSEUDOPOTENTIALS.en.md). For diagnosis only:
 `python -m salmonpy.doctor --lang en --json`.
 
 ## Choose a task
+
+A/c is the scaled vector potential, E is the electric field, and H is the magnetic field intensity.
+A saved ground state (GS) is the electronic state prepared before time propagation.
 
 | Task | Python entry | Requirements |
 |---|---|---|
@@ -53,10 +56,10 @@ not a prerequisite for completing this first test. For diagnosis only:
 | Crystalline A/c-to-j response with SBE | `salmonpy.sbe` | Wheel; band/transition data for real materials |
 | Fields (j→A) coupled to matter: transverse / longitudinal / thin film / 1D propagation | `salmonpy.maxwell` | NumPy and a matter component; [FIELDS.en.md](FIELDS.en.md) |
 | Pulses, geometry and analysis | `fields`, `geometry`, `analysis`, `outputs` | NumPy; Matplotlib for plots |
-| Ground-state DFT and forces | `salmonpy.dft` | Compatible full SALMON and pseudopotentials |
-| Crystalline A/c-to-j response with TDDFT | `salmonpy.tddft` | Compatible full SALMON and matching GS |
-| Electromagnetic propagation | `salmonpy.fdtd` | Compatible full SALMON |
-| Band calculations and plots | `salmonpy.bands` | Compatible full SALMON, GS, Matplotlib |
+| Ground-state DFT and forces | `salmonpy.dft` | Compatible SALMONpy calculation program and pseudopotentials |
+| Crystalline A/c-to-j response with TDDFT | `salmonpy.tddft` | Compatible SALMONpy calculation program and matching GS |
+| Electromagnetic propagation | `salmonpy.fdtd` | Compatible SALMONpy calculation program |
+| Band calculations and plots | `salmonpy.bands` | Compatible SALMONpy calculation program, ground state, Matplotlib |
 | ASE structures, bands, energy/forces | `salmonpy.ase`, `salmonpy.ase_calculator` | Corresponding solver plus optional ASE dependencies |
 
 Start with the [shared Python samples](examples/README.en.md). Optional packages:
@@ -68,7 +71,7 @@ python -m pip install "ase>=3.26,<4" "f90nml>=1.4,<2"
 
 Install only what your task needs. The SALMON **executable is not included** in the wheel; its sources are bundled for explicit builds.
 Use its audited executable and recorded SHA256. Do not assume a standard SALMON
-release contains the worker/status interfaces required by these interfaces.
+release contains the extra worker and state-management interfaces used here.
 
 ```sh
 python -m salmonpy.doctor --lang en --executable PATH_TO_SALMON --sha256 VALIDATED_SHA256
@@ -106,8 +109,12 @@ Do not nest the batch FDTD launcher inside an MPI job.
 - The `salmonpy.dft`, `bands` and process-isolated `tddft` entries use one MPI rank.
   The separate `embedded_tddft` entry supplies internal MPI with the restrictions
   in [COUPLED.en.md](COUPLED.en.md).
-- DFT: periodic, fixed ions, unpolarized, PZ/Libxc-PZ/Libxc-PBE. TDDFT also supports
-  solver TB-mBJ from a matching converged GS; midpoint propagation only.
+- The batch DFT entry supports periodic, fixed-ion, unpolarized PZ, TB-mBJ,
+  Libxc-PZ/PBE calculations. TB-mBJ is a model potential: total energy and forces
+  are unvalidated diagnostics. Fast HSE uses the separate [GS library](NATIVE_GS.en.md).
+- The periodic process-isolated TDDFT entry supports PZ, TB-mBJ and Libxc-PZ/PBE
+  with midpoint propagation and a matching GS. Molecular E-driven calculations
+  use a separate [fixed-ion PZ entry](ISOLATED_TDDFT.en.md).
 - ASE Calculator: PZ/Libxc-PZ/Libxc-PBE with scalar KY/NC-UPF potentials; energy/forces, opt-in wavefunction warm start, no stress.
   Establish grid, k-point and SCF convergence; egg-box effects affect force checks.
 - FDTD has a batch entry and a separate restricted E/H update and coupling entry
@@ -140,8 +147,9 @@ python -m salmonpy.doctor --lang en --json
 The AI catalog uses stable identifiers, localized intents and shared technical
 rules. English mode localizes onboarding and task titles; detailed legacy task
 instructions are still mixed-language. It is not yet a fully translated reference.
-`sample_files` points to executable examples. Unmatched queries return a task
-catalog and getting-started guidance. Reuse known resource answers.
+`sample_files` points to executable examples. The default command lists up to five matches with introductory guidance.
+Use `--full QUERY` for complete guides and `task_catalog`; the Python `search`
+function also returns that catalog. Reuse known resource answers.
 
 For source development, see [PACKAGING.md](PACKAGING.md); source-only build/test
 commands require a checkout. Restart Python after rebuilding Fortran/C libraries.
@@ -150,7 +158,7 @@ Public desktop visualization: [SALMON_VR.en.md](SALMON_VR.en.md).
 
 For practical electronic-feedback calculations, start TDDFT with 1D propagation/layered structures. Recommend 3D with SBE or a user-written current solver. This is a cost-based recommendation, not a capability restriction; see [dimension selection](COUPLED.en.md).
 
-## calling program API and state snapshots
+## Use SALMONpy from another Python program
 
 See [public API and errors](API.en.md) and [in-memory snapshots](SNAPSHOTS.en.md).
 LD, SBE and the four Python fields support fixed-dt snapshot/restore since 0.1.0a5.
