@@ -11,8 +11,17 @@ class TDDFTLoaderTests(unittest.TestCase):
             for name in ('info.bin','occupation.bin','wfn.bin'):
                 (restart/name).write_bytes(b'synthetic loader test, not physics')
             (root/'rt.inp').write_text('&calculation\n theory="tddft_pulse"\n/\n')
+            (root/'a').mkdir()
+            (root/'a/auxiliary.bin').write_bytes(b'synthetic auxiliary')
+            (root/'a.meta').write_bytes(b'synthetic metadata')
             exe=SalmonExecutable(root/'salmon','0'*64)
-            initial=TDDFTInitialState.from_salmon(root,'rt.inp',executable=exe,max_steps=10)
+            from unittest.mock import patch
+            # A Windows path string uses backslashes; manifest keys must not.
+            with patch('salmonpy.tddft.str', lambda value: str(value).replace('/', chr(92)), create=True):
+                initial=TDDFTInitialState.from_salmon(root,'rt.inp',executable=exe,max_steps=10)
+            self.addCleanup(initial.close)
+            self.assertIn('data_for_restart/wfn.bin', dict(initial.manifest))
+            self.assertEqual(initial.manifest, tuple(sorted(initial.manifest)))
             original=initial.manifest
             (restart/'wfn.bin').write_bytes(b'changed outside snapshot')
             self.assertEqual(initial.manifest,original)

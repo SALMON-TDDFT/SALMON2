@@ -108,9 +108,9 @@ def _copy_bundle(source,dest):
         if path.is_dir(): target.mkdir(exist_ok=True)
         elif path.is_file():
             shutil.copy2(path,target)
-            records.append((str(path.relative_to(source)),_digest(target)))
+            records.append((path.relative_to(source).as_posix(),_digest(target)))
         else: raise InputError('bundle contains a non-regular file')
-    return tuple(records)
+    return tuple(sorted(records))
 
 
 @dataclass(frozen=True,slots=True,eq=False)
