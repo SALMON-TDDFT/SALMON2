@@ -1,7 +1,10 @@
 # SALMONpy repository
 
-Current direction, decisions and next steps: docs/plans/2026-11-14-handoff.md
-(read it first; it records the project lead's decisions and how to verify).
+Current entry points: README.md, salmonpy/AI_USAGE.md and the rules below.
+Remaining state-isolation work: docs/plans/2026-11-15-state-isolation-checklist.md.
+docs/plans/2026-11-14-handoff.md is a historical record; its §1 policies 1-6
+(the project lead's design decisions) still apply, but its status columns,
+build commands and next-step list do not.
 
 Read salmonpy/AGENTS.md and salmonpy/AI_USAGE.md before changing public APIs.
 This repository is for independent SALMONpy distribution. Do not merge it into
