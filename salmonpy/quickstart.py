@@ -34,7 +34,7 @@ def run(directory=None):
         entry = {'example': example, 'log': str(log)}
         try:
             with log.open('w', encoding='utf-8') as stream:
-                result = subprocess.run([sys.executable, '-I', '-m', 'salmonpy.examples.' + example, *extra],
+                result = subprocess.run([sys.executable, '-I', '-X', 'utf8', '-m', 'salmonpy.examples.' + example, *extra],
                     stdout=stream, stderr=subprocess.STDOUT, env=environment, timeout=60)
             if result.returncode:
                 raise RuntimeFailure(f'{example} failed; read {log}. Install a matching SALMONpy wheel; do not build automatically.')
@@ -52,6 +52,9 @@ def run(directory=None):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, help='new output directory; otherwise create a temporary directory')
     args = parser.parse_args()

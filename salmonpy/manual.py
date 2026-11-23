@@ -41,6 +41,9 @@ def search(query, *, lang='ja'):
 
 
 if __name__ == '__main__':
+    import sys
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--lang', choices=('en', 'ja'), default='ja')

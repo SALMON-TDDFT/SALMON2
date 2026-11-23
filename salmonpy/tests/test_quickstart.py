@@ -1,5 +1,6 @@
 """First calculation orchestration: no solver build or implicit downloads."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -21,7 +22,9 @@ class QuickstartTest(unittest.TestCase):
             self.assertEqual(report['status'], 'passed')
             self.assertEqual(len(invoke.call_args_list), 2)
             for call in invoke.call_args_list:
-                self.assertIn(call.args[0][3], ('salmonpy.examples.ld_response', 'salmonpy.examples.sbe_response'))
+                command = call.args[0]
+                self.assertIn(command[command.index('-m')+1], ('salmonpy.examples.ld_response', 'salmonpy.examples.sbe_response'))
+                self.assertEqual(command[command.index('-X')+1], 'utf8')
                 self.assertEqual(call.kwargs['env']['OMP_NUM_THREADS'], '1')
                 self.assertEqual(call.kwargs['env']['OPENBLAS_NUM_THREADS'], '1')
             with self.assertRaises(FileExistsError):
@@ -47,6 +50,6 @@ class QuickstartTest(unittest.TestCase):
             self.assertTrue(all(c['input'] and c['output'] and c['preparation'] for c in first['capabilities']))
         self.assertEqual(search('first calculation')['tasks'][0]['id'], 'first_calculation')
         import sys
-        result = subprocess.run([sys.executable, '-m', 'salmonpy.manual'], capture_output=True, text=True, timeout=20, check=True)
+        result = subprocess.run([sys.executable, '-m', 'salmonpy.manual'], capture_output=True, text=True, encoding='utf-8', env=dict(os.environ, PYTHONIOENCODING='cp1252'), timeout=20, check=True)
         self.assertLess(len(result.stdout), 10000)
         self.assertEqual(json.loads(result.stdout)['test_command'], 'python -m salmonpy.quickstart')
