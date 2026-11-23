@@ -1770,3 +1770,7 @@ Examples `tddft_response` and `mpi_tddft` accept `--execution-mode performance`.
 Use a matching explicitly built or distributed worker; import does not build it.
 
 Molecular E-driven TDDFT also accepts `new_state(..., execution_mode="performance")`. Default to checked mode; use performance only when explicitly requested. Explicit saves/restores remain validated and retain the receiving mode. Do not promise automatic failure recovery or unchecked outer FDTD coupling.
+
+Outer MPI: `ResponseSession(..., execution_mode="performance")` and `CoupledStepper.from_multiscale(..., execution_mode="performance")` select outer diagnostics independently of backend modes. Every rank must agree. Per-step finite scans and redundant coupling admission are omitted; callback exception synchronization and physical A/J communication remain. Explicit protected steps still create backups and retain rollback. Do not describe this as zero communication or universal failure recovery.
+
+Outer E/H+LD+two-point TDDFT performance validation covers 3/6 local ranks and 96 steps, including explicit protected rollback/retry after native propagation. Do not generalize this synthetic PZ result to HSE, molecular field packets, other platforms, or physical convergence.

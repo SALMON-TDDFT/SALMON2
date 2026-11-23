@@ -14,7 +14,18 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 | 完了 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBE局所試験、MPI2/4、固定Si/PBE比較。今回のソース・バイナリ向け記録も更新。換算定数は変更なし |
 | 完了 | 初期推定の入力準備・保持GSからの受け渡し | 準備と実行を分離し、保持GSの波動関数・占有数を独立コピー。前回実装は8f3a7663までpush済み |
 | 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
-| 完了 | 最新パッケージ・分子接続検証 | 六面収支・x/y/z各2分割まで5d6892c7へpush済み。単一分子の公開結合API・公開保存点・直接取消は3af42587へpush済み。分子単体の直接ディスク再開は54c43c2bへpush済み。二つのFDTDを含む一括再開はf4cc1b03へcommit済み（未push）。対角背景の六面収支も実装・検証済み。ソース・wheelとも693件実行、各1件任意スキップ。末尾の最新記録を参照 |
+| 完了 | 最新パッケージ・分子接続検証 | 二つのFDTD＋分子の直接再開、非対角背景・テンソルLD・界面平滑化・Ohmic散逸の収支観測、各部品の性能モードを7d27edbaまでcommit/push済み。分子E駆動も通常／性能・直接復元で一致。今回の外側MPI対応はwheel707件（706成功・任意スキップ1）。CI結果は未確認 |
+
+### 直近の実装残件（2026-11-23 外側MPI検証後）
+
+- [x] LD／SBE、直列の場、通常TDDFT、高速PR版HSEの単一／共有／登録状態、周期系・分子の別プロセス型の性能モードを、各検証記録の範囲で実装。
+- [x] 外側A→J MPI結合の性能モード。自作物質モデルで3/5ランク、実E/H＋LD＋2点TDDFTで3/6ランクを確認。後者は96ステップ、通常の連続実行と明示的保護復元・再試行が一致。wheel707件中706成功・1スキップ。
+- [ ] **次：高速PR版HSE＋実E/Hの外側性能モード検証**。通常TDDFTでの一致をHSEの証拠としない。
+- [ ] **A/E/Hの場の受け渡し・分子の外側性能スケジュール**。分子ワーカー単体の対応と区別する。
+- [ ] **別プロセス型高速HSEの経路・必要性の確認**。共有／登録型を根拠に対応済みとせず、不要な経路は増やさない。
+- [ ] **保護付き混在計算の規模別計測**。多数点・長時間のメモリ・通信・観測I/O、実際の性能差を測る。
+
+性能モードは明示的に選択し、既定は検査付き。明示的な保護更新は退避・復元を維持する。性能モードの通常更新に同じ異常復帰を約束しない。過去の「次：分子」等は後続の完了記録で更新されている。
 
 ### 残る作業と対象拡大
 
@@ -308,8 +319,8 @@ permission; prior grants remain campaign-specific.
 The active molecular stage resumed2026-11-22. MolecularFeedback, the PZ isolated
 worker, live direct rollback and molecular-only direct disk restart are now verified
 within the latest recorded scope. Coordinated direct restart of both fields, the molecule and accepted step indices
-is now verified for the recorded MPI6 scope. Next: tensor/subpixel/background
-energy-observation coverage and physical convergence. Other
+is now verified for the recorded MPI6 scope. Tensor/subpixel/background energy-observation coverage is completed below.
+Next: outer-MPI performance integration and physical convergence. Other
 operational work remains site-MPI/multinode/receipt filesystem evidence, scale
 and observation I/O, Ag fit refinement, optional storage/GPU and wider physical
 profiles. Preparation-only DFT/TDDFT/FDTD and customizable launcher construction
@@ -4452,3 +4463,23 @@ f4cc1b03はローカルcommit済み・未push。その後の対角背景／非�
 - [x] この変更を含むwheelでの実計算確認。705件成功・1件スキップ。記録: `docs/molecular-performance-wheel-validation-2026-11-23.md`。
 
 検証ログ: `/private/tmp/molecular-perf-native.log`。物理的収束や速度向上を示す試験ではない。
+
+## 2026-11-23 外側A→J結合の性能モード
+
+- [x] ResponseSessionの固定モードと全ランク一致の初期化契約。部品ごとのモードとは独立。
+- [x] A/J有限値走査、有限値検査専用の群内合意、CoupledStepperの重複した開始合意を性能モードで省略。形状・所有者・必要な通信とコールバック例外の合意は維持。
+- [x] 3/5ランク・2物質群・24ステップのMultiscale1D＋自作物質モデルで通常／性能のA/Jが完全一致。明示的な保護更新で途中例外後の状態保持・再試行を確認。ソース／wheelで各707件中706成功・1スキップ。
+- [x] 日英ガイド・AI JSON・MPIサンプルを更新。記録：calc2026/salmonpy-outer-performance-20261123。GSなし、CI手動起動なし。
+- [ ] 次：実際のE/H FDTD＋電子状態で外側モードを検証し、A/E/Hの場の受け渡しと分子の外側スケジュールへ適用範囲を拡張。今回の合成試験をその検証の代用にしない。
+
+通常の性能更新には自動復帰を保証しない。明示的なstep_protectedは性能モードでも退避・復元を行う。速度向上の測定は別。本節と次節の変更を今回のコミットへ収録。
+
+## 2026-11-23 実E/H＋LD＋2点TDDFTの外側性能モード
+
+- [x] 既存ライブラリのSHA照合。GSは読み取りリンクで再利用し新規計算・コピーなし。
+- [x] 3/6ランク、FDTD1/2分割、TDDFT各群1/2ランク、96ステップの通常連続実行・通常／性能の保護復元後がA/E/JおよびLD領域の非ゼロ電場波形で完全一致。ソース6条件・wheel6条件。
+- [x] 65番目の更新中に電子状態を変化させた後の例外を全群へ返し、64ステップ終了時へ直接退避から復元して再試行。
+- [x] wheel707件中706成功・1スキップ、日英・AI JSON・配布ツール一致。記録: docs/outer-eh-tddft-performance-validation-2026-11-23.md。
+- [ ] 次：高速PR版HSEとの実E/H結合、場のA/E/H受け渡し・分子の外側性能スケジュール。今回のPZ合成軌道試験をこれらや物理収束の証拠にしない。
+
+本節の検証・文書を今回のコミットへ収録。CIの追加手動実行なし。施設MPI、多ノード、規模測定などの既存残件は維持する。

@@ -22,6 +22,7 @@ p.add_argument('build_record');p.add_argument('bundle');p.add_argument('input');
 p.add_argument('--field-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--material-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--steps',type=int,default=64)
+p.add_argument('--outer-execution-mode',choices=('checked','performance'),default='checked',help='outer A/J transport diagnostics; backend modes are separate')
 p.add_argument('--matter-execution-mode',choices=('checked','performance'),default='checked',
                help='TDDFT update mode only; field and outer coupling retain their own checks')
 p.add_argument('--sample-h',action='store_true',help='collect raw half-step H; requires H-enabled native ABI')
@@ -54,7 +55,7 @@ try:
     provider=NativeTDDFTMaterialProvider(a.bundle,a.input,max_steps=a.steps)
     backend=NativeTDDFTBackend(a.build_record,output,decomposition=(1,nm,1,1,1),execution_mode=a.matter_execution_mode)
     binding=MaterialBinding('crystal',provider,backend)
-    response=ResponseSession(context,{1:binding,2:binding},dt=dt)
+    response=ResponseSession(context,{1:binding,2:binding},dt=dt,execution_mode=a.outer_execution_mode)
     coupled=CoupledStepper(response,field);history=[];sample_history=[]
     for _ in range(a.steps):
         frame=coupled.step()

@@ -568,7 +568,7 @@ class CoupledStepper:
     and ParallelContext in that order. A step failure invalidates the response.
     """
     @classmethod
-    def from_multiscale(cls, context, bindings, field=None, *, point_record=None, point_map=None):
+    def from_multiscale(cls, context, bindings, field=None, *, point_record=None, point_map=None, execution_mode="checked"):
         """Collective factory. Only the single field rank supplies a fresh state.
 
         Validate A(0) before creating any material state. All ranks call step,
@@ -593,7 +593,7 @@ class CoupledStepper:
         if context.is_leader:
             dt = context.leaders.bcast(dt, root=context.field_group)
         dt = context.solver_comm.bcast(dt, root=0)
-        response = ResponseSession(context, bindings, dt=dt, point_record=point_record, point_map=point_map)
+        response = ResponseSession(context, bindings, dt=dt, point_record=point_record, point_map=point_map, execution_mode=execution_mode)
         try:
             return cls(response, adapter)
         except BaseException:
@@ -718,11 +718,14 @@ class CoupledStepper:
         if r.closed or r.failed:error='response is not usable'
         if r.step_index!=self.step_index or (self.field is not None and self.field.step_index!=self.step_index):
             error='field and response histories are not synchronized'
-        try:r.agree(error)
-        except Exception:
-            r.failed=True
-            raise
-        if self.field is not None:
+        # Performance mode carries local admission failures with A/J instead
+        # of adding a separate outer agreement before every update.
+        if getattr(r,'execution_mode','checked')=='checked':
+            try:r.agree(error)
+            except Exception:
+                r.failed=True
+                raise
+        if self.field is not None and error is None:
             try:
                 if isinstance(self.field,NativeEHField) and getattr(self.field,'current_rows',None) is not None:
                     A=self.field.advance_owned(self.J)

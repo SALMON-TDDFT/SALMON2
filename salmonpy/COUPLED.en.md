@@ -1448,3 +1448,11 @@ GS copying/integrity rules are unchanged; this mode does not reduce startup I/O.
 
 Examples `tddft_response` and `mpi_tddft` accept `--execution-mode performance`.
 Use a matching explicitly built or distributed worker; import does not build it.
+
+## Outer MPI performance mode
+
+Select `ResponseSession(..., execution_mode="performance")` or `CoupledStepper.from_multiscale(..., execution_mode="performance")` on every rank. The default is `"checked"`. Backend execution modes remain separate choices.
+
+Array shape, ownership, step indices, and communication order remain checked. The mode omits per-step A/J finite scans and a redundant pre-update coupling agreement. Callback exception agreements and status-bearing A/J transport remain necessary to keep custom collective backends synchronized. `step_fields` still checks field contracts. Ordinary steps do not promise automatic rollback. Explicit `step_protected(targets)` retains backups, rollback, and its agreements in either mode.
+
+Outer performance mode is also tested with actual E/H FDTD, built-in LD, and two TDDFT points: 3/6 ranks, 1/2 field partitions and 1/2 ranks per material group. All 96 steps of A/E/j match uninterrupted checked execution exactly after explicit protected rollback/retry in checked and performance modes. Existing synthetic initial orbitals test integration, not material convergence or speedup.

@@ -126,8 +126,9 @@ class ResponseSession:
     Every result is tagged implicitly by the fixed plan's point IDs and accepted
     step index. Initial A is zero; current is at the new endpoint. All units a.u.
     """
-    def __init__(self,context,bindings,*,dt,point_record=None,point_map=None,field_contracts=None):
+    def __init__(self,context,bindings,*,dt,point_record=None,point_map=None,field_contracts=None,execution_mode="checked"):
         self.context=context;self.dt=dt;self.step_index=0;self.failed=False;self.closed=False;self._registered=False
+        self._execution_mode = None
         self._measurements = _Measurements()
         self._adapters = {}
         self._point_metadata = None
@@ -137,6 +138,8 @@ class ResponseSession:
         self.states={};self.bindings=dict(bindings);self._A=np.zeros((len(context.plan.point_ids),3))
         error=None;descriptors=None
         try:
+            from .ld import _execution_mode_name
+            self._execution_mode = _execution_mode_name(execution_mode)
             if not np.isfinite(dt) or dt<=0: raise InputError('positive finite dt required')
             if set(bindings)!=set(context.plan.point_ids): raise InputError('binding required for every point')
             self._point_metadata = _point_metadata(context.plan, point_record, point_map)
@@ -188,7 +191,7 @@ class ResponseSession:
         except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self._agree(error)
         # Metadata agreement catches mismatched backend selection before callbacks.
-        descriptors = (descriptors, self._point_metadata, contract_record)
+        descriptors = (descriptors, self._point_metadata, contract_record, self.execution_mode)
         local=context.solver_comm.allgather(descriptors)
         mismatch=any(v!=descriptors for v in local)
         if context.is_leader:
@@ -249,6 +252,11 @@ class ResponseSession:
             self.failed = True
             self.close()
             raise
+
+    @property
+    def execution_mode(self):
+        """Outer transport diagnostics; backend modes are selected separately."""
+        return self._execution_mode
 
     def agree(self,error):
         """Collective validation agreement on all context ranks."""
@@ -503,7 +511,7 @@ class ResponseSession:
                 local_values=np.empty((len(c.group.point_ids),3),dtype=np.float64)
                 if c.group.role=='field' and c.is_leader:
                     field_values=np.array(A,dtype=np.float64,order='C',copy=True)
-                    if field_values.shape!=self._A.shape or not np.isfinite(field_values).all():
+                    if field_values.shape!=self._A.shape or (self.execution_mode=="checked" and not np.isfinite(field_values).all()):
                         raise InputError('finite A array of shape (points,3) required')
                     send=np.ascontiguousarray(field_values[self._transport_rows])
                 elif A is not None:
@@ -548,7 +556,7 @@ class ResponseSession:
             try:
                 raw = self._adapters[point].step_fields(values[point]) if field_packets else self._adapters[point].step(local_values[i].copy())
                 j=np.array(raw,dtype=np.float64,order="C",copy=True)
-                if j.shape!=(3,) or not np.isfinite(j).all(): raise InputError('backend must return finite physical current density (3,)')
+                if j.shape!=(3,) or (self.execution_mode=="checked" and not np.isfinite(j).all()): raise InputError('backend must return finite physical current density (3,)')
             except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             errors=c.solver_comm.allgather(error)
             if any(errors):
@@ -556,11 +564,12 @@ class ResponseSession:
                 error=str(errors);break
             if b.backend.reduction=='sum': c.solver_comm.Allreduce(j,currents[i],op=MPI.SUM)
             elif c.is_leader: currents[i]=j
-            if not np.isfinite(currents[i]).all(): error='nonfinite reduced current'
-            errors=c.solver_comm.allgather(error)
-            if any(errors):
-                error_origin=c.group.ranks[next(i for i,e in enumerate(errors) if e)]
-                error=str(errors);break
+            if self.execution_mode=="checked":
+                if not np.isfinite(currents[i]).all(): error='nonfinite reduced current'
+                errors=c.solver_comm.allgather(error)
+                if any(errors):
+                    error_origin=c.group.ranks[next(i for i,e in enumerate(errors) if e)]
+                    error=str(errors);break
         if transport_status:
             self._measurements.stop('material', started)
             started=self._measurements.start()

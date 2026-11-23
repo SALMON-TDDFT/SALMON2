@@ -49,7 +49,8 @@ def main():
     for name in ('build', 'runtime', 'bundle', 'output'): parser.add_argument(name, type=Path)
     parser.add_argument('--fast-hse-build', type=Path, help='explicit fast-PR serial worker build record for hse-point')
     parser.add_argument('--fast-hse-mpi-build', type=Path, help='explicit native fast-PR host-MPI build record')
-    parser.add_argument('--hse-execution-mode',choices=('checked','performance'),default='checked',help='native HSE updates only; outer coupling retains its checks')
+    parser.add_argument('--outer-execution-mode',choices=('checked','performance'),default='checked',help='outer A/J transport diagnostics; backend modes are separate')
+    parser.add_argument('--hse-execution-mode',choices=('checked','performance'),default='checked',help='native HSE updates only; select outer mode separately')
     parser.add_argument('--hse-bundle', type=Path, help='optional separate fast-PR HSE GS bundle; default is BUNDLE')
     parser.add_argument('--hse-symmetry', action='store_true', help='explicit fast-PR symmetry opt-in; native HSE group1/2 with matching mode capability')
     parser.add_argument('--hse-reference-bundle', type=Path, help='explicit equivalent full-k HSE bundle for serial comparison')
@@ -278,7 +279,7 @@ def main():
             cell_ids={str(number):mid for mid,number in ar['constitutive_material_ids'].items()}
         point_record,point_map,constitutive_identity=sample_records(args.run_id,signature,points,bindings,
             constitutive=ld_definitions,cell_ids=cell_ids,assembly=assembly,constitutive_records=ld_records)
-        session = ResponseSession(context, bindings, dt=dt,point_record=point_record,point_map=point_map)
+        session = ResponseSession(context, bindings, dt=dt,point_record=point_record,point_map=point_map,execution_mode=args.outer_execution_mode)
         for point,binding in bindings.items():
             if binding.key=='hse-point' and np.max(np.abs(session.initial_current[point]))>1e-12:
                 raise ValueError('zero-initial FDTD requires negligible initial HSE current (<=1e-12 au); prepare a zero-current initial state')

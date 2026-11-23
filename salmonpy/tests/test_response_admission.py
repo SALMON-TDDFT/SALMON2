@@ -30,6 +30,13 @@ class ResponseAdmissionTests(unittest.TestCase):
                 provider.prepare.assert_not_called()
                 backend.create_state.assert_not_called()
 
+    def test_invalid_execution_mode_rejected_before_callbacks(self):
+        provider=SimpleNamespace(identity='initial',prepare=Mock())
+        backend=SimpleNamespace(identity='custom',execution='collective',reduction='leader',create_state=Mock())
+        with self.assertRaisesRegex(ValueError,'execution_mode'):
+            ResponseSession(self.context(),{10:MaterialBinding('custom',provider,backend)},dt=.01,execution_mode='fast')
+        provider.prepare.assert_not_called()
+
     def test_packet_wrapper_keeps_live_optional_declaration(self):
         from salmonpy.material_response import packetize_A_binding
         backend=SimpleNamespace(identity='custom',execution='leader_only',reduction='leader',
