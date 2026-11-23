@@ -98,9 +98,9 @@ FortranのSTOP／abortを回復可能なPython例外にする変更ではあり�
 
 直列モデルの共通仕様、適合チェッカー、MPI点分散への接続は[MATERIALS.md](MATERIALS.md)を参照してください。
 
-`fast_hse` の `FastHSEMaterialProvider`／`FastHSEResponseBackend` は明示ビルドした高速PR版serialワーカーを外側MPIの物質応答へ接続するプレビュー入口です。COUPLED.mdを参照してください。HSE内部MPIを初期化しません。
+`fast_hse` の `FastHSEMaterialProvider`／`FastHSEResponseBackend` は明示ビルドしたHSE計算ワーカーを外側MPIの物質応答へ接続するプレビュー入口です。COUPLED.mdを参照してください。HSE内部MPIを初期化しません。
 
-`fast_hse_mpi.NativeFastHSEBackend` は高速PR版HSEの実験的な呼び出し元プログラムが管理するMPI入口です。k点のみ1／2ランクの物質群と、同じ分割での直接保存／復元に対応します。旧create_stateはメインスレッド・1プロセスにつき初期化1回です。open_modelはNativeFastHSEModelを返し、同一の全k点モデルの状態を共有接続で独立に扱います。SHARED_HSE.mdとCOUPLED.mdを参照してください。
+`fast_hse_mpi.NativeFastHSEBackend` はHSEの実験的な呼び出し元プログラムが管理するMPI入口です。k点のみ1／2ランクの物質群と、同じ分割での直接保存／復元に対応します。旧create_stateはメインスレッド・1プロセスにつき初期化1回です。open_modelはNativeFastHSEModelを返し、同一の全k点モデルの状態を共有接続で独立に扱います。SHARED_HSE.mdとCOUPLED.mdを参照してください。
 
 `checkpointing.CheckpointCapability` と `check_checkpoint_compatibility` は、自作の計算コードにも使える保存／復元前の共通宣言・検査です。[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。
 
@@ -116,7 +116,7 @@ FortranのSTOP／abortを回復可能なPython例外にする変更ではあり�
 
 ### ソルバー初期化時の原子入力
 
-標準ソルバーと高速PR版HSEは、原子数・元素数・座標（Cartesian／分数）・元素IDを、内部の
+標準ソルバーとHSEは、原子数・元素数・座標（Cartesian／分数）・元素IDを、内部の
 値オブジェクト `s_ion_initial_config` に取り込みます。`initialize_ions` は選択した状態の
 格子から座標を解決し、独立した所有配列を作ります。形状不一致・非有限座標・範囲外元素ID・
 下限が1でない入力配列は、対象状態を変えずに拒否します。明示的な処理は共有入力を読み書きしません。
@@ -128,7 +128,7 @@ FortranのSTOP／abortを回復可能なPython例外にする変更ではあり�
 
 ### セル・実空間格子の明示的な解決
 
-標準ソルバーにも高速PR版HSEと同じ値型・処理 `s_cell_config`、`s_cell_geometry`、
+標準ソルバーにもHSEと同じ値型・処理 `s_cell_config`、`s_cell_geometry`、
 `s_rgrid_config`、`resolve_cell`、`init_grid_whole_config` を揃えました。両方とも
 入力の取り込みだけを行う `cell_config_from_input` を使い、明示的な解決処理は共有入力を
 読みません。正常入力のセル指定の優先順位・演算順・周期／孤立系の添字・epsilonを含む丸め・
@@ -141,10 +141,10 @@ GS／TDDFTを同一プロセスで自由に初期化できる段階ではなく�
 
 ### 初期軌道構成の明示的な選択
 
-標準版・高速PR版の初期化で、計算モード・周期性・スピン／SOC・状態数／電子数・温度・
+標準版・HSEの初期化で、計算モード・周期性・スピン／SOC・状態数／電子数・温度・
 k点判定を内部の `s_orbital_initial_config` に取り込みます。`resolve_orbital_layout` は
 共有入力を読まずにスピン数・軌道数・実数／複素数格納を選びます。セルの直交性を明示的に渡し、
-高速PR版は所有済みの占有設定・実際のk格子と、従来と同じ取り込み時のhybrid判定を使います。
+HSE実装は所有済みの占有設定・実際のk格子と、入力のhybrid指定を使います。
 標準版のファイル指定k点も、この判定には従来の `-1` 格子印を維持します。
 
 RTの `temperature < -1e-12` 分岐など、正常入力の既存GS／RT選択規則は維持します。
@@ -153,7 +153,7 @@ RTの `temperature < -1e-12` 分岐など、正常入力の既存GS／RT選択�
 異常復帰を保証するものではありません。新しいPython／C公開入口もなく、k点・対称性・
 コミュニケータなどの共有依存は引き続き残ります。
 
-HSEは高速PR版のみです。`NativeFastHSEBackend(build_record, work_root, allow_symmetry=True)` で
+`NativeFastHSEBackend(build_record, work_root, allow_symmetry=True)` で
 対称性を明示的に許可できます。内部kランク1／2・周期・非スピン分極・CPU・full-qのTaylor／PT-CNに対応し、共有の対称化設定は不変、1プロセスにつき初期化1回です。既定値Falseと既存C入口は
 対称性を拒否します。内部2ランクはsp_fast_hse_symmetry_kmpi_protocol()==1が必要。Taylor strict／learned・PT-CNにはsp_fast_hse_symmetry_history_protocol()==1が必要です。学習PT-CNは既存方式どおりinterval=1・predictor_corrector=nを指定します。
 
@@ -200,7 +200,7 @@ assert contract['runtime_verified'] is False
 および`fdtd`の`single`経路を説明します。ライブラリ読込・計算・新しい制限は行いません。
 単一状態の明示設定と明示的モデル所有、MPIの呼出し元所有、メインスレッドの逐次操作、collectiveの順序、電流符号、失敗保証範囲を区別します。
 標準TDDFTのlegacy C入口は物質電流J=-jを返し、Python側は電荷電流jへ変換します。
-高速HSEと標準handleのC入口は電荷電流jです。照会がローカルかcollectiveかは個別ヘッダーに従い、診断を一律collective扱いしません。
+HSEと標準handleのC入口は電荷電流jです。照会がローカルかcollectiveかは個別ヘッダーに従い、診断を一律collective扱いしません。
 
 これは宣言された仕様の情報で、実計算プログラムの能力確認や安定C ABIの宣言ではありません。`runtime_verified`は常にfalseです。
 実際の計算プログラム・保存再開の対応可否は別途照会します。未知の自作コンポーネントや経路名には`known=False`・`status='unverified'`を返し、
@@ -230,17 +230,17 @@ CLIは`python -m salmonpy.doctor --native-build audited-build.json --component t
 CとISO_C_BINDING Fortranの版照会例は`tests/native/test_native_protocol.c`と、
 `tests/native/test_io_ownership.f90`の`SALMONPY_ABI_PROTOCOL_PROBE`モードです。
 開発用の実行入口は`tools/test_io_ownership.py BUILD_RECORD NEW_OUTPUT --abi-contract`で、
-高速HSEの場合は`--fast-hse`を追加します。計算プログラムhashと全リンク対象のアプリケーションオブジェクトを監査し、
+HSEの場合は`--fast-hse`を追加します。計算プログラムhashと全リンク対象のアプリケーションオブジェクトを監査し、
 返却値の一致とMPIが未初期化のままであることを確認します。これは版照会の相互呼出し検証で、モデル・状態・step全体のABI適合確認ではありません。
 C/Fortranの呼び出し規約は引き続き実験段階です。
 
 ### 状態の作成・更新・終了を確認する呼び出し元プログラム試験
 
-`tools/test_io_ownership.py BUILD_RECORD NEW_BUILD_DIR --abi-state --fixture EXISTING_PZ_FIXTURE --state-output NEW_RESULTS_DIR --ranks 2` は、監査済みの通常TDDFTライブラリをCとISO_C_BINDING Fortranから呼びます。高速PR版HSEのビルド記録と既存の全k点HSE入力には`--fast-hse`を付けて同じ検査を実行できます。HSE試験では各実行のk点並列数だけを設定し、渡されたGSは変更しません。縮約k点入力にはさらに`--state-symmetry`を付けます。渡された`sym.dat`を参照し、対称性対応のHSE初期化を使い、この入力の保持対称操作に合うz方向を駆動します。代表k点が実際に出力されたことも確認します。この試験入力の方向指定であり、全k点でのx・y・z駆動を制限しません。MPIの初期化・終了は呼び出し側が所有します。2状態と個別実行の一致、直前Aが不一致のときの状態保持、スロット再利用後の古いハンドルの拒否、新しい状態の独立した初期化を確認します。既存GSはその場で読み、変更されていないことを確認します。GSのコピーや電子状態チェックポイントの保存はしません。結果の保存先は明示してください。
+`tools/test_io_ownership.py BUILD_RECORD NEW_BUILD_DIR --abi-state --fixture EXISTING_PZ_FIXTURE --state-output NEW_RESULTS_DIR --ranks 2` は、監査済みの通常TDDFTライブラリをCとISO_C_BINDING Fortranから呼びます。HSEのビルド記録と既存の全k点HSE入力には`--fast-hse`を付けて同じ検査を実行できます。HSE試験では各実行のk点並列数だけを設定し、渡されたGSは変更しません。縮約k点入力にはさらに`--state-symmetry`を付けます。渡された`sym.dat`を参照し、対称性対応のHSE初期化を使い、この入力の保持対称操作に合うz方向を駆動します。代表k点が実際に出力されたことも確認します。この試験入力の方向指定であり、全k点でのx・y・z駆動を制限しません。MPIの初期化・終了は呼び出し側が所有します。2状態と個別実行の一致、直前Aが不一致のときの状態保持、スロット再利用後の古いハンドルの拒否、新しい状態の独立した初期化を確認します。既存GSはその場で読み、変更されていないことを確認します。GSのコピーや電子状態チェックポイントの保存はしません。結果の保存先は明示してください。
 
 ディレクトリスコープの共通宣言は、両ハンドルヘッダーから取り込む`native_context.h`にあります。macOSではMPI呼び出し元プログラムのリンクにも既存の`tools/build_embedded_tddft.py::mpi_link_command`を使ってください。OpenMPIのFortran COMMON特殊値が実行ファイル内に別配置されると、共有ライブラリとの間でMPI_IN_PLACE処理の判定が変わる場合があります。試験ランナーはこの共通処理を使い、リンク引数と実行ファイルのハッシュを記録します。版の問い合わせだけではこの問題は検出できません。
 
-確認範囲は通常PZと高速PR版HSEの全k点／縮約k点入力、C／Fortran呼び出し元プログラム、MPI 1／2ランク、複数状態と個別実行の電流一致です。HSE固有の引数と拒否コード（直前Aの不一致はHSEで1、通常TDDFTで10）を共通試験内で扱い、公開ABIや数値ソルバーは変更しません。縮約入力は対称性対応PT-CNと学習型交換を使い、全8点を4代表点で扱います。他XC・形状・他環境の検証は別途必要で、公開C/Fortranの呼び出し規約は引き続き実験的です。この小規模入力は接続と状態所有を検査するもので、実材料の収束を保証しません。
+確認範囲は通常PZとHSEの全k点／縮約k点入力、C／Fortran呼び出し元プログラム、MPI 1／2ランク、複数状態と個別実行の電流一致です。HSE固有の引数と拒否コード（直前Aの不一致はHSEで1、通常TDDFTで10）を共通試験内で扱い、公開ABIや数値ソルバーは変更しません。縮約入力は対称性対応PT-CNと学習型交換を使い、全8点を4代表点で扱います。他XC・形状・他環境の検証は別途必要で、公開C/Fortranの呼び出し規約は引き続き実験的です。この小規模入力は接続と状態所有を検査するもので、実材料の収束を保証しません。
 
 ### 呼び出し元プログラム試験のPZ入力を準備する
 
@@ -603,7 +603,7 @@ info/sum/barrierは場・電子状態を変更しません。任意のMPI異常�
 共通表だけで置き換えることはできません。全操作・他環境での保証は残作業です。
 
 
-## TDDFT・高速HSEの状態操作
+## TDDFT・HSEの状態操作
 
 組み込みインターフェースの
 `native_contract(component, route=...)['state_operations']` は、必須C関数の

@@ -71,7 +71,7 @@ failure after field update and an LD failure preserve every checked state;
 Admission, partial capture, rollback and cleanup failure cases are included.
 These are synthetic interface checks, not a physical-material prediction.
 
-Audited aggregate solver E/H/TDDFT/fast-PR HSE protection now connects through the
+Audited aggregate solver E/H/TDDFT/HSE protection now connects through the
 separate versioned contract used by `native_steps.native_step_targets`. See
 [NATIVE_STEPPING.en.md](NATIVE_STEPPING.en.md). This light/custom example itself
 does not validate solver output protection; individual recovery/checkpoint

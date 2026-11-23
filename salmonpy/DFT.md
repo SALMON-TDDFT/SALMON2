@@ -10,7 +10,7 @@ ASEを使わない場合は `DFT` に原子番号、行ベクトルのセル（b
 
 `SCFSettings` では、反復数・許容差に加え `mixing_method`、`mixing_rate`、`initial_wavefunction`、`random_seed` を明示できます。混合率の既定値は0.3です。方法は省略時にBroydenを使い、明示した係数を優先します。`simple_dm` は非共線密度行列の混合です。
 
-[NiのSOC検証](NICKEL_SOC.md)には、セミコア付きUPF・2×2×2・300 Kの短いSCF試験、SCFの独立性・別プロセス再開、TDDFTの独立性・直接復元・同じMPI分割での別プロセス再開を含みます。収束した物性、SOCの力・高速HSE・TDDFTのMPI分割変更は未検証です。
+[NiのSOC検証](NICKEL_SOC.md)には、セミコア付きUPF・2×2×2・300 Kの短いSCF試験、SCFの独立性・別プロセス再開、TDDFTの独立性・直接復元・同じMPI分割での別プロセス再開を含みます。収束した物性、SOCの力・HSE・TDDFTのMPI分割変更は未検証です。
 
 ## ASEからの使用例
 
@@ -101,9 +101,9 @@ TB-mBJの新規GSは直列の `DFT(xc="tbmbj", cval=None).run(...)` で作成で
 
 `info.bin`、`occupation.bin`、`wfn.bin` を専用領域へコピーし、`read_gs_restart_data='wfn'` と反復数リセットを使います。旧原子位置や混合履歴は読み込みません。SCFは新しい原子位置で密度を再計算して始め、元のGSは変更しません。出力の `ground-state.json/initial_guess` に元GSとハッシュを記録します。warm startで必ず高速化するとは限らず、別の局所解への収束や物理量の収束確認は別途必要です。
 
-## 高速HSEの計算処理 GS入口
+## HSEの計算処理 GS入口
 
-DFT(..., xc="hse06")は高速PR版のNativeGSBackend session.run用に使用できます。
+DFT(..., xc="hse06")はHSEのNativeGSBackend session.run用に使用できます。
 HSE06は全k点・k点方向のMPI分割が対象で、計算機能を宣言した新しいビルドが必要です。
 詳細はNATIVE_GS.mdを参照してください。バッチDFT.runのHSE出力は未接続です。
 HSE入力ではPBE予備SCFを無効にし、指定反復をHSEで実行します。未収束時は確認待ちです。
@@ -129,7 +129,7 @@ save_restartを記録していない従来の結果は保存ありとして扱�
 高速版ソースもgs_status.dat（SALMONPY_GS_V1、Hartree）と
 gs_forces.dat（SALMONPY_FORCES_V1、Hartree/Bohr）を出します。SCFや力の計算順は変えません。
 HSEの計算処理入口とCLIもこのレポートを出しますが、DFT.runのHSE選択は
-高速PR版の来歴確認が未接続のため、引き続きNativeGSBackendを使います。
+HSEの来歴確認が未接続のため、引き続きNativeGSBackendを使います。
 
 Siサンプルは--no-restartと--max-iterationsに対応します。
 `python -m salmonpy.examples.dft_si EXECUTABLE SHA256 PSEUDO NEW_OUTPUT --no-restart --max-iterations 4`

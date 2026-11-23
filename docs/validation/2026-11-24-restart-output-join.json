@@ -1,0 +1,167 @@
+{
+  "status": "passed",
+  "method": "current reader applied to retained actual fresh-process disk-restart outputs; no fabricated segmentation or new calculation",
+  "campaigns": {
+    "1": {
+      "source_result": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/result.json",
+      "source_result_sha256": "63c8a8b1352fcb170cb904733e5cbca0ebdfe839d61e42dbcabf3abd6ba75752",
+      "observations": {
+        "rt.data": {
+          "exact": true,
+          "rows": 8,
+          "times": [
+            0.001,
+            0.002,
+            0.003,
+            0.004,
+            0.005,
+            0.006,
+            0.007,
+            0.008
+          ],
+          "files": [
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/save/gs-rt-zj6j1o4z/rt_rt.data",
+              "sha256": "f93aaff82892b68e514cef50339ff59280068498699f6de49dde09638bf5ba62"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/resume/gs-rt-7tvkfgqm/rt_rt.data",
+              "sha256": "93a2c3aaa2f1165d7466e6b9e8076d055cfd91e16607635388c99c2d6d1615be"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/continuous/gs-rt-vw25xhfi/rt_rt.data",
+              "sha256": "f6b537e4735ef1d3ee13b44cc4fe19bfebeb4cd4f7ab80551f332ce46d8c2fa4"
+            }
+          ]
+        },
+        "rt_energy.data": {
+          "exact": true,
+          "rows": 1,
+          "times": [
+            0.0
+          ],
+          "files": [
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/save/gs-rt-zj6j1o4z/rt_rt_energy.data",
+              "sha256": "254fa70b7b96ac4cdcf143017131713feb1cb73af47278a728028ef423e7e195"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/resume/gs-rt-7tvkfgqm/rt_rt_energy.data",
+              "sha256": "254fa70b7b96ac4cdcf143017131713feb1cb73af47278a728028ef423e7e195"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/continuous/gs-rt-vw25xhfi/rt_rt_energy.data",
+              "sha256": "254fa70b7b96ac4cdcf143017131713feb1cb73af47278a728028ef423e7e195"
+            }
+          ]
+        },
+        "rt_spin.data": {
+          "exact": true,
+          "rows": 2,
+          "times": [
+            0.0,
+            0.001
+          ],
+          "files": [
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/save/gs-rt-zj6j1o4z/rt_rt_spin.data",
+              "sha256": "d777fa37a7210f3d9bd56a5fad2cd1ea799c56fb7ed0162540ae5ac37b9317bd"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/resume/gs-rt-7tvkfgqm/rt_rt_spin.data",
+              "sha256": "88df3609825f07f9cd646569ec16bbf3fd75b2d7fde7398b2c695a623f90d0af"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r1-20261123/continuous/gs-rt-vw25xhfi/rt_rt_spin.data",
+              "sha256": "d777fa37a7210f3d9bd56a5fad2cd1ea799c56fb7ed0162540ae5ac37b9317bd"
+            }
+          ]
+        }
+      }
+    },
+    "2": {
+      "source_result": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/result.json",
+      "source_result_sha256": "b7f440ec911f5473cda71c3d3b7282e29fe28fdf7a75fe493443d1bd74f21ea6",
+      "observations": {
+        "rt.data": {
+          "exact": true,
+          "rows": 8,
+          "times": [
+            0.001,
+            0.002,
+            0.003,
+            0.004,
+            0.005,
+            0.006,
+            0.007,
+            0.008
+          ],
+          "files": [
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/save/gs-rt-nnb7uj_l/rt_rt.data",
+              "sha256": "3c96c0c1a77b258b84f1d5bd5a8c79407568d1af90293ee8cbfc9e1693e51511"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/resume/gs-rt-m3dfqqoq/rt_rt.data",
+              "sha256": "8d040aa3705bdf93d9d458b8376b34cc3913cc7faae3b861d7177b31e4ed52e8"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/continuous/gs-rt-z34g_kqa/rt_rt.data",
+              "sha256": "864fdd0c409967de2f301041c308fc894596e702fc46dd373898d6fde3329c90"
+            }
+          ]
+        },
+        "rt_energy.data": {
+          "exact": true,
+          "rows": 1,
+          "times": [
+            0.0
+          ],
+          "files": [
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/save/gs-rt-nnb7uj_l/rt_rt_energy.data",
+              "sha256": "9dbb3cfb4c68fc2c67f390fba2a4b570100f3e62124adc29b721eaba7885dd6d"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/resume/gs-rt-m3dfqqoq/rt_rt_energy.data",
+              "sha256": "9dbb3cfb4c68fc2c67f390fba2a4b570100f3e62124adc29b721eaba7885dd6d"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/continuous/gs-rt-z34g_kqa/rt_rt_energy.data",
+              "sha256": "9dbb3cfb4c68fc2c67f390fba2a4b570100f3e62124adc29b721eaba7885dd6d"
+            }
+          ]
+        },
+        "rt_spin.data": {
+          "exact": true,
+          "rows": 2,
+          "times": [
+            0.0,
+            0.001
+          ],
+          "files": [
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/save/gs-rt-nnb7uj_l/rt_rt_spin.data",
+              "sha256": "1aaf89f3226d18badbe6835945142300ced46f315b8caa6e3aae64cb2bc8fe5a"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/resume/gs-rt-m3dfqqoq/rt_rt_spin.data",
+              "sha256": "073fc69748e1a9683910bbd4c2a171c4da0b940c322e327e8ded3dfe4a09d988"
+            },
+            {
+              "path": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/salmonpy-ni-soc-tddft-fresh-r2-20261123/continuous/gs-rt-z34g_kqa/rt_rt_spin.data",
+              "sha256": "1aaf89f3226d18badbe6835945142300ced46f315b8caa6e3aae64cb2bc8fe5a"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "limitations": [
+    "SOC spin output has only two sampled times in these short campaigns; this is not every-step spin verification",
+    "No physical convergence assertion; source campaigns use short unconverged GS"
+  ],
+  "new_GS_data_saved": false,
+  "array_join": "once after validating all chunks",
+  "reader_sha256": "8a5b3ea683d9b623e24246b0d065114eafc8446e74273be75dfb1d8122151823"
+}

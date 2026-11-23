@@ -2,13 +2,13 @@
 
 ## 日本語
 
-現行ソースは `runtime/sources/solver` の一系統です。高速PR版を基盤として、
-通常XC・高速HSE・SALMONpyの状態分離と出力処理を統合しています。
+計算ソースは `runtime/sources/solver` にあります。
+DFT・TDDFT・FDTDと、対応する交換相関汎関数を構築できます。
 共有LD/SBE計算ルーチンは計算処理側とのバイト一致を検査します。
 `source.json` と `source-trees/solver.json` が出典と全ファイルのSHA256を保持します。
 
 通常の入口は `python -m salmonpy.runtime build NEW_BUILD --jobs N` です。
-既定はUSE_HSE=OFF。高速HSEは必要なFFTW等を準備して明示的に有効化します。
+既定はUSE_HSE=OFF。HSEは必要なFFTW等を準備して明示的に有効化します。
 `tools/prepare_salmon_runtime.py NEW_SOURCE` と旧HSE準備入口は同じファイルを
 新しい外部ディレクトリへ検証コピーします。import時にはビルドしません。
 禁止固有値ソルバーのソース・object監査を維持します。
@@ -21,8 +21,8 @@
 
 ## English
 
-The single maintained tree is `runtime/sources/solver`, based on fast PR HSE,
-with ordinary XC, state ownership and output changes integrated directly.
+Calculation sources are in `runtime/sources/solver`.
+Build DFT, TDDFT and FDTD with the supported exchange-correlation functionals.
 Shared LD/SBE calculation routines are checked byte-for-byte against solver sources.
 `source.json` and `source-trees/solver.json` retain provenance and file hashes.
 
@@ -38,9 +38,9 @@ History archives are excluded from wheel/sdist; reference-only preparation is an
 explicit developer-checkout comparison. Failed binaries remain evidence only.
 Existing runtime validation records and NLCC force certification are unchanged.
 
-## FFTW and offline fast-HSE builds / オフラインでの高速HSEビルド
+## FFTW and offline fast-HSE builds / オフラインでのHSEビルド
 
-FFTW is a dependency of the separately built fast-PR HSE runtime, not of the
+FFTW is a dependency of the separately built HSE runtime, not of the
 lightweight LD/SBE wheel itself. The explicit HSE source build first searches
 `FFTW_INSTALLDIR`, pkg-config and system paths for `fftw3.f03` and FFTW3. If no
 usable installation is found, the current builder downloads/builds pinned
@@ -50,7 +50,7 @@ On offline nodes, provision FFTW beforehand and pass
 `HSE: using installed FFTW` before proceeding. Do not silently replace HSE with
 an ordinary-XC runtime. Ordinary `USE_HSE=OFF` builds do not add this dependency.
 
-FFTWは別途構築する高速PR版HSE計算プログラムの依存で、軽量LD/SBE wheel自体の依存ではありません。
+FFTWは別途構築するHSE計算プログラムの依存で、軽量LD/SBE wheel自体の依存ではありません。
 明示的なHSEソースビルドは、まず`FFTW_INSTALLDIR`、pkg-config、システム内の`fftw3.f03`とFFTW3を探します。
 利用可能なものがない場合は、現行ビルダーが固定版FFTW3.3.10をダウンロード・構築するため通信が必要です。
 import時には行いません。通信できないノードでは事前にFFTWを用意し、

@@ -140,7 +140,7 @@ SBE、TDDFT、FDTDの実行例は[サンプル集](examples/README.md)から選�
 ## 電子計算の対応範囲
 
 別プロセス型DFTは周期・固定イオン・非スピン偏極のPZ、TB-mBJ、Libxc-PZ/PBEに対応します。
-TB-mBJは模型ポテンシャルで、全エネルギーと力は未検証の診断値です。高速HSEは[別のGS計算入口](NATIVE_GS.md)を使います。
+TB-mBJは模型ポテンシャルで、全エネルギーと力は未検証の診断値です。HSEは[別のGS計算入口](NATIVE_GS.md)を使います。
 結晶の別プロセス型TDDFTは整合する基底状態と中点伝播を使います。分子のE駆動は[固定イオン・PZの別入口](ISOLATED_TDDFT.md)です。
 対応するPython入口があることと、すべての条件・環境で検証済みであることを区別します。
 
@@ -164,22 +164,9 @@ python -m salmonpy.build_native
 python -m unittest discover -s salmonpy/tests -v
 ```
 
-## 独立配布と日英ドキュメント
+## AIへの相談と関連資料
 
-このリポジトリはSALMONpyを独立して配布するためのものです。SALMON本体へのマージは行いません。
-`python -m salmonpy.manual --lang en "I want to run TDDFT"` と
-`python -m salmonpy.doctor --lang en` で英語の開始案内・環境診断を利用できます。
-AIカタログの詳細技術説明はまだ言語が混在しており、全リファレンスの翻訳完了ではありません。
-
+`python -m salmonpy.manual --lang ja "TDDFT"` で目的に合う手順を検索できます。
+`python -m salmonpy.doctor --lang ja` で実行環境を確認できます。
+開発・配布方法は[開発者向け資料](../docs/development/README.md)を参照してください。
 公開版SALMON VRへの接続は [SALMON_VR.md](SALMON_VR.md) を参照してください。
-
-電子応答を結合する実用計算では、TDDFTはまず1次元の伝播・層構造を推奨します。3次元はSBEまたはユーザー作成の電流計算コードを使う場合に推奨します。対応可否とは別の計算負荷に基づく方針です。詳しくは[次元の選択](COUPLED.md)を参照してください。
-
-## 呼び出し元プログラム向けAPIと状態保存
-
-[公開API・例外](API.md)と[メモリ上のsnapshot／restore](SNAPSHOTS.md)を参照してください。
-LD・SBE・4種類のPythonの場では、固定dtでメモリ上の状態を保存・復元できます。FDTD・TDDFT・MPI計算をディスクへ保存して再開する方法は[保存・再開ガイド](CHECKPOINTING.md)を参照してください。
-
-自作A駆動モデルは直列・MPIで同じ仕様を使えます。[作り方と適合チェッカー](MATERIALS.md)、`python -m salmonpy.examples.custom_material`を参照してください。
-
-LDの状態保持・解放は [LD.md](LD.md) を参照してください。

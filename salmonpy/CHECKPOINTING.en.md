@@ -30,8 +30,7 @@ The object is immutable. `format` identifies a versioned payload format;
 `modes` is a tuple containing save and/or restore. `decomposition` is a positive
 integer tuple whose product equals the actual group size. Its axis order is part
 of the contract: `(2,1)` differs from `(1,2)`. Pin implementation, fixed model/input
-and runtime identity with `identity`. An empty identity is omitted from metadata
-for compatibility with existing solver-direct/2 archives. Checks compare the
+and runtime identity with `identity`. An empty identity is omitted from metadata; the saving and receiving declarations must agree. Checks compare the
 explicit declarations; model identity and file integrity remain caller-owned.
 
 ## Execute calculation implementation-owned persistence
@@ -205,15 +204,14 @@ preservation of the live states. discarding the prepared restore state never aut
 objects. Under the calculation implementation isolation contract, no original is passed to discard.
 
 `execute_checkpoint(..., operation='restore', atomic=True, live=live)` is the same
-protected path. Existing execute_checkpoint defaults to non-atomic execution for
-compatibility; direct-only targets are rejected by the protected path with zero
-LOAD calls, without fallback. LD/SBE states can be staged via new_state plus
+protected path. `execute_checkpoint` defaults to `atomic=False`, which does not preserve original states on failure.
+Use `restore_checkpoint` for protected restoration. Direct-only targets are rejected before LOAD in that path. LD/SBE states can be staged via new_state plus
 snapshot restore; custom JSON factories are shown in the runnable example.
 
 ### solver numerical candidates (experimental)
 
-Explicitly rebuilt FDTD called directly from Python, standard TDDFT and fast-PR HSE expose
-checkpoint_protocol=1: modes0 save,1 legacy immediate restore,2 stage a detached
+Explicitly rebuilt FDTD called directly from Python, standard TDDFT and HSE expose
+checkpoint_protocol=1: modes0 save,1 immediate restore,2 stage a detached
 numerical candidate,3 publish prepared memory,4 discard. One candidate per solver
 lifetime is allowed. Pause evolution, finish mode2 and agree success across every
 calling program group before mode3. On handled failure every group discards with mode4 and
@@ -241,23 +239,20 @@ Fortran STOP or a calculation implementation which mutates/shares its original s
 ## Existing mixed solver calculations
 
 The solver mixed sample uses both common input checking and execution, retaining solver-specific
-fresh-state and solver-ABI checks. Existing solver-direct/2 compatibility metadata
-is unchanged; pinned solver payloads and numerical update order are unchanged.
+fresh-state and solver-ABI checks. Payload loading checks the format, input identity, MPI layout and file hashes.
 Custom direct-state/1 sample adapters may expose `checkpoint_capability` as an
-object/mapping. The previous checkpoint_format/checkpoint_modes/
-checkpoint_decomposition attributes remain accepted. The sample's callback/clock/
+object/mapping. The declared checkpoint_format/checkpoint_modes/
+checkpoint_decomposition attributes are also inspected. The sample's callback/clock/
 A/current requirements are described in [COUPLED.en.md](COUPLED.en.md).
 
 Current input checking requires the same topology and declared format/identity. Payload
 conversion, changed-topology redistribution, generic archive I/O and atomic rollback
-remain calculation implementation/calling program responsibilities. The execution entry runs supplied functions without certifying the calculation implementation's
-persistence implementation or atomic rollback. Historical solver-direct/1 archives
-without compatibility metadata require their original matching reader.
+remain calculation implementation/calling program responsibilities. The execution entry calls supplied functions. The saving backend owns payload correctness; an immediate LOAD alone does not preserve original states on failure.
 
 ## Protected restore in the ordinary mixed sample
 
 `mpi_mixed_native --direct-resume PATH` now defaults to protected restore.
-Initialized field/standard TDDFT/fast-PR HSE require candidate-capable runtimes.
+Initialized field/standard TDDFT/HSE require candidate-capable runtimes.
 The field candidate includes PML and every LD material's P/J/update history.
 SBE loads snapshots into independent new handles. Python clocks, currents, A,
 response adapters, ownership lists and frames.json are prepared before publication.
@@ -278,13 +273,13 @@ failure during publication, process death and failed MPI remain outside recovery
 
 Older ABIs, process-isolated HSE workers and custom direct-only LOAD targets are
 rejected before loading. The ordinary example always uses protected restoration. The common API still
-allows explicit `protected=False` for custom non-atomic backend operations;
+allows explicit `execute_checkpoint(..., operation="restore", atomic=False)` for custom immediate-load operations;
 that mode does not preserve original states on mid-load failure. There is no automatic fallback.
 
 `tools/test_mixed_protected_restore_mpi.py` takes the ordinary sample arguments,
 injects a rank failure after loading a later electronic candidate, then checks
 original preservation (including two field-local LD materials), continued old
-evolution and exact retry results for SBE plus internal-MPI TDDFT/fast-PR HSE.
+evolution and exact retry results for SBE plus internal-MPI TDDFT/HSE.
 Source-tree tests can explicitly select a built LD/SBE library with `--kernel LIB`;
 installed-wheel users do not need that override.
 
@@ -298,7 +293,7 @@ Memory advice includes concurrent candidate storage; see [MEMORY.en.md](MEMORY.e
 
 `python -m salmonpy.examples.mpi_mixed_native` preserves `--run-id`, logical point IDs, material IDs, material-definition and initial-state SHA256 digests, MPI ownership, and the LD cell-material mapping. The default `mixed-example` is a fixture label; provide an explicit run ID for each experiment. Output and temporary directories are excluded from definition fingerprints.
 
-The same identity appears in `identity.json`, normal-run `result.json`, and the `point-response` archive. Identified direct checkpoints use `salmonpy.native-direct/3`; replay checkpoints use `salmonpy.native-replay/2`. Numerical payload formats and update order are unchanged. Direct restore checks identity and MPI ownership before loading numerical state; save checks agreement across all ranks.
+The same identity appears in `identity.json`, normal-run `result.json`, and the `point-response` archive. Identified direct checkpoints use `salmonpy.native-direct/4`; replay checkpoints use `salmonpy.native-replay/2`. Numerical payload formats and update order are unchanged. Direct restore checks identity and MPI ownership before loading numerical state; save checks agreement across all ranks.
 
 Old arguments, checkpoint schemas and missing-field defaults are not supported. Use the current API and checkpoint writer. The mixed example always records material and initial-state identities.
 
@@ -328,9 +323,9 @@ Supported: periodic, unpolarized, fixed-ion middlepoint PZ, automatic/fixed TB-m
 
 This is a TDDFT-group guarantee, not automatic rollback of an entire mixed FDTD step whose other components may have advanced. MPI/process death, allocation failures, uncontrolled third-party STOP, deep initialization STOP and output-device failures are excluded. One-rank fault injection exists only in a separately compiled `SALMONPY_RECOVERY_TESTING` build; production builds export no injection entry.
 
-## Deep numerical recovery for fast-PR HSE
+## Deep numerical recovery for HSE
 
-New libraries for `NativeFastHSEBackend` declare `sp_fast_hse_recovery_protocol() == 1`. The guarded configuration is periodic, unpolarized, fixed-ion fast-PR HSE06 with Taylor4 / learned PT-CN and internal k-only MPI1/2. Conventional HSE is not a fallback.
+New libraries for `NativeFastHSEBackend` declare `sp_fast_hse_recovery_protocol() == 1`. The guarded configuration is periodic, unpolarized, fixed-ion HSE06 with Taylor4 / learned PT-CN and internal k-only MPI1/2. Conventional HSE is not a fallback.
 
 Each step backs up electronic arrays and ACE, factor/PT-CN histories, exchange caches and counters. FFT plans, MPI communicators and other owning resources are not copied. Collective checks cover finite orbitals, density, Hartree, XC and endpoints, plus handled ACE operator errors, PT-CN convergence/Gram/retraction checks and history updates. Handled failures directly restore accepted numerical state without replaying propagation or exchange history. A, clocks, current and energy remain unchanged; failed attempts append no ordinary RT records. Diagnostic logs may remain.
 
@@ -374,7 +369,7 @@ with saved_run["states"]["film"] as payload:
 Only compatibility metadata is exchanged. NativeSCFSnapshot stays rank-local in
 Fortran memory and must be explicitly closed. JSON metadata alone cannot restore
 it, and it is not a process/disk restart. Ordinary PZ/Libxc-PZ/PBE and full-k CPU
-fast-PR HSE06 retain their existing scope and numerical implementation.
+HSE06 retain their existing scope and numerical implementation.
 
 `execute_checkpoint(operation="restore")` remains **direct execution**.
 Older runtimes without SCF candidate protocol1 provide no stage_restore, so
@@ -384,7 +379,7 @@ changed if a later callback fails; it does not promise group-wide rollback.
 Wrong-owner/closed tokens and incompatible declarations reject before their
 numerical callbacks. Do not substitute destructive restore for candidate staging.
 `python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT` uses this entry;
-add `--xc hse06` with the matching fast-PR HSE build.
+add `--xc hse06` with the matching HSE build.
 
 ### Protected SCF staging and explicit solver publication
 
@@ -423,7 +418,7 @@ No files or numerical propagation are used by publish/discard. Snapshots must
 remain open through staging/publication, and are closed explicitly afterwards.
 
 Use `python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT --protected`;
-add `--xc hse06` for a matching full-k fast-PR HSE build. Old runtimes keep direct
+add `--xc hse06` for a matching full-k HSE build. Old runtimes keep direct
 mode; there is no destructive fallback when protected staging is unavailable.
 
 solver SCF same-build/input/decomposition disk checkpoints bind through
@@ -436,3 +431,61 @@ Prepared solver SCF candidates support close/context-manager discard. GS-owner
 close discards its Python-owned candidate; snapshot close discards a candidate
 derived from that snapshot. Direct C-calling program reservations are not automatically
 discarded. Matching MPI call order is still required.
+
+## Periodic checkpoints and elapsed-time save-and-stop
+
+Automatic checkpoints are disabled by default. Their cadence is separate from current, magnetization and other observation output. `CheckpointSchedule` calls an explicitly supplied save function at accepted step boundaries.
+
+```python
+from salmonpy.checkpointing import CheckpointSchedule
+
+# Use the communicator of the entire coupled calculation; omit it for serial use.
+# Construct before initialization if initialization must count against the budget.
+schedule = CheckpointSchedule(
+    interval_steps=1000,       # optional: save and continue every 1000 steps
+    interval_seconds=600,      # optional: save and continue every 600 wall seconds
+    stop_after_seconds=3300,   # optional: save and stop after 3300 wall seconds
+    initial_step=0, comm=comm)
+
+for step in range(restored_step + 1, final_step + 1):
+    advance_one_step()
+    if schedule.after_step(step, save_all_states):
+        break
+```
+
+The caller supplies `advance_one_step` and `save_all_states(step)`. Use new destinations named by step. Coupled calculations must save the field, LD and electronic states together through their existing bundle-save interface. Saving only the electronic state is insufficient. Storage format remains backend-owned.
+
+- All options default to None: no automatic save or extra loop MPI communication.
+- When multiple intervals are specified, reaching any one triggers one save. Intervals count from the last successful save.
+- Time means wall seconds since construction, not simulated physical time. Rank0's monotonic clock decides; every rank calls at the same completed step. An in-progress step is allowed to finish.
+- A True return means saving succeeded and the caller must leave the loop and close resources. The library never terminates the process or finalizes caller-owned MPI.
+- A save failure is reported to all ranks, not treated as successful completion. Retry at the same step; follow the backend's partial-file rules and use a new destination if needed.
+- Reserve time before the scheduler deadline for one full step, checkpoint I/O and cleanup. Work before constructing the schedule is excluded.
+
+The `mpi_mixed_native`, `mixed_hse_models` and `molecular_feedback` examples accept `--checkpoint-interval-steps N`, `--checkpoint-interval-seconds SECONDS` and `--stop-after-seconds SECONDS`. They save internal states directly into new directories such as `checkpoint-00001000`. Existing step-number save-and-stop options remain available.
+
+Output joining was verified against actual fresh-process Ni SOC disk-restart files at1 and2 ranks: all8 current samples and the2 available magnetization/spin-current times exactly match continuous execution. This checks software restart wiring, not physical convergence.
+
+### Save by elapsed time, then resume in another job
+
+This example uses prepared calculation programs and a GS bundle. Four ranks are the default placement: one field rank, one SBE rank and two TDDFT ranks. Replace input paths with your prepared files and run on a compute node.
+
+```sh
+mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native \
+  BUILD_JSON RUNTIME GS_BUNDLE first-job --steps 128 \
+  --checkpoint-interval-steps 50 --stop-after-seconds 3300
+```
+
+Each destination includes the completed step, such as `first-job/checkpoint-00000050`. On a timed stop, the actual saved path is printed. Substitute that path for `SAVED_CHECKPOINT_DIRECTORY` below; do not predict the step at which the wall-time limit will be reached.
+
+```sh
+mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native \
+  BUILD_JSON RUNTIME GS_BUNDLE second-job --steps 128 \
+  --direct-resume SAVED_CHECKPOINT_DIRECTORY --stop-after-seconds 3300
+```
+
+Keep inputs, GS, calculation programs, total step capacity and MPI placement identical; choose a new output directory. This sample uses `--direct-resume` for timed direct checkpoints; its `--resume` is a separate history-replay route. The molecular and `mixed_hse_models` samples instead use `--resume` for their direct checkpoints. Check the chosen sample's arguments.
+
+If all steps finish before the elapsed-time deadline, no timed final checkpoint is made. Periodic saving occurs only when a requested interval is reached. This is a coupling-verification sample; normal completion also performs independent reference calculations. Include that work in runtime estimates.
+
+`after_step` returns True only for a successful save-and-stop. It returns False when no save is due or a periodic save succeeds and execution continues. Save failures raise an exception.

@@ -134,7 +134,7 @@ SALMONpy の TDDFT ワーカー（`tr`）＋場の部品で計算します。400
 `Transverse`、`Longitudinal`、`ThinFilm`、`Multiscale1D` の
 `new_state(dt=..., steps=..., execution_mode="performance")` が使えます。
 `maxwell.couple(...)` の同じ指定は、場と全物質状態の両方へ渡されます。
-組み込みSBEは対応しています。この入口のTDDFT・高速HSEは未対応です。
+組み込みSBEは対応しています。この入口のTDDFT・HSEは未対応です。
 既定は `"checked"` です。
 
 初期入力・容量・CFL条件・結合前の時間ステップ契約は検査します。更新中は

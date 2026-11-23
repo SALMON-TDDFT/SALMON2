@@ -144,9 +144,7 @@ python -m salmonpy.manual --lang en "I want to run TDDFT"
 python -m salmonpy.doctor --lang en --json
 ```
 
-The AI catalog uses stable identifiers, localized intents and shared technical
-rules. English mode localizes onboarding and task titles; detailed legacy task
-instructions are still mixed-language. It is not yet a fully translated reference.
+The AI catalog finds procedures by task. Select `--lang en` for English guidance.
 `sample_files` points to executable examples. The default command lists up to five matches with introductory guidance.
 Use `--full QUERY` for complete guides and `task_catalog`; the Python `search`
 function also returns that catalog. Reuse known resource answers.
@@ -167,3 +165,5 @@ For saving FDTD, TDDFT or MPI calculations to disk and restarting them, follow t
 Custom A-driven models can use one serial/MPI contract and an explicit conformance checker: [authoring guide](MATERIALS.en.md), `python -m salmonpy.examples.custom_material`.
 
 See [LD.en.md](LD.en.md) for persistent LD state ownership and memory.
+
+Source layout and implementation notes are in the [developer guide](../docs/development/README.md).

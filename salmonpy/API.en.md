@@ -116,9 +116,9 @@ not included. See [state persistence](SNAPSHOTS.en.md).
 
 For one serial model contract, the explicit conformance checker and the point-MPI adapter, see [MATERIALS.en.md](MATERIALS.en.md).
 
-`fast_hse.FastHSEMaterialProvider` / `FastHSEResponseBackend` are preview entries for an explicitly built serial fast-PR worker in outer-MPI response groups; see COUPLED.en.md. They do not initialize inner HSE MPI.
+`fast_hse.FastHSEMaterialProvider` / `FastHSEResponseBackend` are preview entries for an explicitly built serial HSE worker in outer-MPI response groups; see COUPLED.en.md. They do not initialize inner HSE MPI.
 
-`fast_hse_mpi.NativeFastHSEBackend`: experimental MPI managed by the calling program fast-PR HSE, k-only one/two-rank material groups and same-topology direct restart. Legacy create_state has one solver initialization per process. open_model returns NativeFastHSEModel for independent same-model full-k states; see SHARED_HSE.en.md and COUPLED.en.md.
+`fast_hse_mpi.NativeFastHSEBackend`: experimental MPI managed by the calling program HSE, k-only one/two-rank material groups and same-topology direct restart. Legacy create_state has one solver initialization per process. open_model returns NativeFastHSEModel for independent same-model full-k states; see SHARED_HSE.en.md and COUPLED.en.md.
 
 `checkpointing.CheckpointCapability` and `check_checkpoint_compatibility` provide shared declaration and compatibility checking for user calculation implementations; see [CHECKPOINTING.en.md](CHECKPOINTING.en.md).
 
@@ -134,7 +134,7 @@ Advisory memory APIs are MemoryEstimate/MemoryReport/memory_advice/process_memor
 
 ### Ion inputs during solver initialization
 
-The standard solver and fast-PR HSE now capture atom/element counts, positions
+The standard solver and HSE now capture atom/element counts, positions
 (Cartesian or reduced) and species IDs into the internal value object
 `s_ion_initial_config`. `initialize_ions` resolves against the selected system
 lattice and creates independent owned arrays. Invalid dimensions, nonfinite
@@ -150,7 +150,7 @@ allocation failures and global initialization STOP paths remain outside recovery
 
 ### Explicit cell and real-space grid resolution
 
-The standard solver now shares fast-PR HSE's value interfaces: `s_cell_config`,
+The standard solver now shares HSE's value interfaces: `s_cell_config`,
 `s_cell_geometry`, `s_rgrid_config`, `resolve_cell` and `init_grid_whole_config`.
 Both configurations use capture-only `cell_config_from_input`; the explicit resolvers
 read no global input. They preserve valid legacy cell precedence, arithmetic,
@@ -166,11 +166,11 @@ the same value types; preparation verifies its new before/after source hashes.
 
 ### Explicit initial orbital layout
 
-Standard and fast-PR initialization now capture mode, periodicity, spin/SOC,
+Standard and HSE initialization now capture mode, periodicity, spin/SOC,
 state/electron counts, temperature and the k-mesh selection into internal
 `s_orbital_initial_config`. `resolve_orbital_layout` chooses spin count, orbital
 count and real/complex storage without reading shared inputs. Resolved cell
-orthogonality is supplied explicitly; fast-PR uses its owned occupation settings,
+orthogonality is supplied explicitly; HSE uses its owned occupation settings,
 effective k mesh and the same captured legacy hybrid predicate. Standard
 file-supplied k points retain the legacy `-1` mesh sentinel for this decision.
 
@@ -181,7 +181,7 @@ layout, not full occupation-capacity/physical validation, SCF-input ownership or
 recoverable solver initialization. No new public Python/C API is added; remaining
 k-point/symmetry/communicator and other solver dependencies still apply.
 
-Fast-PR is the only supported HSE engine. `NativeFastHSEBackend(build_record, work_root,
+HSE is the only supported HSE engine. `NativeFastHSEBackend(build_record, work_root,
 allow_symmetry=True)` explicitly permits scalar periodic CPU/full-q/internal-k1/2,
 Taylor/PT-CN symmetry with matching mode capability. Shared symmetry settings are immutable, one solver
 lifetime per process. The default False and existing C init remain symmetry-denied.
@@ -283,11 +283,11 @@ the C/Fortran calling interface remains experimental.
 
 ### Explicit state-lifecycle calling program test
 
-`tools/test_io_ownership.py BUILD_RECORD NEW_BUILD_DIR --abi-state --fixture EXISTING_PZ_FIXTURE --state-output NEW_RESULTS_DIR --ranks 2` runs C and ISO_C_BINDING Fortran hosts against an audited standard-TDDFT library. Add `--fast-hse` with a fast-PR-HSE build record and an existing full-k HSE fixture to exercise the same checks. The HSE fixture explicitly sets k-only MPI decomposition for each calling program run; it does not modify the supplied GS. Add `--state-symmetry` for the reduced-k fixture: it references the supplied `sym.dat`, enables the symmetry-aware HSE initializer and drives z, the direction preserved by this fixture's retained operations. The runner checks that representative k points are actually reported. This is a fixture-specific direction, not a restriction on full-k x/y/z driving. The caller initializes/finalizes MPI. The hosts compare two live states with independent runs, reject a mismatched previous A without changing accepted state, reject stale handles after slot reuse, and confirm a fresh state starts independently. Existing GS files are read in place and checked unchanged; this test neither copies GS data nor writes electronic checkpoints. Select results storage explicitly.
+`tools/test_io_ownership.py BUILD_RECORD NEW_BUILD_DIR --abi-state --fixture EXISTING_PZ_FIXTURE --state-output NEW_RESULTS_DIR --ranks 2` runs C and ISO_C_BINDING Fortran hosts against an audited standard-TDDFT library. Add `--fast-hse` with a HSE build record and an existing full-k HSE fixture to exercise the same checks. The HSE fixture explicitly sets k-only MPI decomposition for each calling program run; it does not modify the supplied GS. Add `--state-symmetry` for the reduced-k fixture: it references the supplied `sym.dat`, enables the symmetry-aware HSE initializer and drives z, the direction preserved by this fixture's retained operations. The runner checks that representative k points are actually reported. This is a fixture-specific direction, not a restriction on full-k x/y/z driving. The caller initializes/finalizes MPI. The hosts compare two live states with independent runs, reject a mismatched previous A without changing accepted state, reject stale handles after slot reuse, and confirm a fresh state starts independently. Existing GS files are read in place and checked unchanged; this test neither copies GS data nor writes electronic checkpoints. Select results storage explicitly.
 
 The common directory-scope declarations are in `native_context.h`, included by both handle headers. On macOS, use the existing `tools/build_embedded_tddft.py::mpi_link_command` policy when linking MPI hosts too: private executable copies of OpenMPI Fortran COMMON sentinels can corrupt MPI_IN_PLACE operations across the shared-library boundary. The runner applies this policy and records link commands and executable hashes. Do not infer correctness from a query-only probe.
 
-Verified scope: standard PZ and fast-PR HSE full/reduced-k fixtures, C/Fortran hosts, MPI 1/2 ranks, paired versus independent currents. HSE uses its own documented signatures and rejection status (1 for mismatched previous A, versus 10 in standard TDDFT). The adapters live only in the common calling program test; they do not change either public ABI or numerical solver. The reduced fixture runs symmetry-aware PT-CN with learned exchange, 8 full k points represented by4 points. Other XC configurations, geometries and platforms require their own tests; the public C/Fortran calling interface remains experimental. These small fixtures check interoperability and state ownership, not converged material properties.
+Verified scope: standard PZ and HSE full/reduced-k fixtures, C/Fortran hosts, MPI 1/2 ranks, paired versus independent currents. HSE uses its own documented signatures and rejection status (1 for mismatched previous A, versus 10 in standard TDDFT). The adapters live only in the common calling program test; they do not change either public ABI or numerical solver. The reduced fixture runs symmetry-aware PT-CN with learned exchange, 8 full k points represented by4 points. Other XC configurations, geometries and platforms require their own tests; the public C/Fortran calling interface remains experimental. These small fixtures check interoperability and state ownership, not converged material properties.
 
 ### Prepare the PZ calling program fixture
 

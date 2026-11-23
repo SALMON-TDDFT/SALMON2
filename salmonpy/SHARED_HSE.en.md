@@ -287,13 +287,13 @@ The local-input template is `examples/mixed_hse_models_inputs.json`; replace bun
 
 ## Per-call file resolution
 
-With directory scope2/3, legacy/shared/registered fast-PR HSE calls use each work
+With directory scope2/3, legacy/shared/registered HSE calls use each work
 folder as a solver file-resolution base without calling program chdir. Failure paths release
 the scope. Older runtimes, including scope1, retain the prior route. This shares
 GS call-input checking/cleanup code and does not enable concurrent threaded execution.
 The numerical direct-checkpoint layout is unchanged.
 
-Shared/registered fast-PR HSE states expose `state.timing_seconds` with optional timer protocol1: completed rank-local total, initialization, density and Hartree intervals in seconds. Query collectively on the material communicator. Each handle excludes parked, sibling and calling program work; unfinished intervals are absent, so total may be zero. Timing is not a numerical checkpoint payload, and restore does not erase spent work. Only the new query needs a matching runtime; older runtimes retain ordinary operations. Singleton timing has a separate legacy timer protocol1; threaded concurrency remains unsupported.
+Shared/registered HSE states expose `state.timing_seconds` with optional timer protocol1: completed rank-local total, initialization, density and Hartree intervals in seconds. Query collectively on the material communicator. Each handle excludes parked, sibling and calling program work; unfinished intervals are absent, so total may be zero. Timing is not a numerical checkpoint payload, and restore does not erase spent work. Only the new query needs a matching runtime; older runtimes retain ordinary operations. Singleton timing has a separate legacy timer protocol1; threaded concurrency remains unsupported.
 
 New runtimes also give the fixed-settings initialization guard an explicit model owner: one per registered model or same-material shared factory. Switching models no longer overwrites a process-wide guard. Only successful initialization commits it; failed creation preserves it. Validation predicates, C entry points and numerical checkpoint representation remain unchanged. The standalone legacy path retains its compatibility guard; this does not complete all shared-state isolation.
 
@@ -301,7 +301,7 @@ Reusing a closed model slot for a different material starts a fresh initializati
 
 Checkpoint array-size validation now uses call-local scratch, passed explicitly to each serializer. The existing state-derived bound, malformed-size checks and stream format remain unchanged. This does not add threaded concurrent solver execution.
 
-Fast-PR HSE singleton runtimes with legacy timer protocol1 isolate initialization (with or without symmetry), propagation and close timing from the calling program. `state.timing_seconds` returns the same four completed counters as shared states. Old runtimes retain ordinary calculations; only the query requires this capability. Timing is not numerical checkpoint data, and MPI/update order/lifetime restrictions remain unchanged.
+HSE singleton runtimes with legacy timer protocol1 isolate initialization (with or without symmetry), propagation and close timing from the calling program. `state.timing_seconds` returns the same four completed counters as shared states. Old runtimes retain ordinary calculations; only the query requires this capability. Timing is not numerical checkpoint data, and MPI/update order/lifetime restrictions remain unchanged.
 
 Checkpoint history g, b and coeff now use scalar IEEE inquiries over every element, retaining the existing metadata checks, rejection and format. Finite/NaN/positive- and negative-infinity tests use synthetic history; they are not new real-electronic-state disk-restart or Fujitsu compiler evidence.
 
@@ -309,7 +309,7 @@ Checkpoint history g, b and coeff now use scalar IEEE inquiries over every eleme
 
 `model_settings` is required. Every caller owns its settings, including the single-state and worker paths; there is no implicit process-global fallback. Process selectors still do not permit threaded reentry.
 
-## Fast-PR HSE performance mode
+## HSE performance mode
 
 `NativeFastHSEBackend(..., execution_mode="performance")` selects the
 caller-managed MPI route; the default is `"checked"`. The choice
@@ -362,7 +362,7 @@ With `--second-initial`, the same example uses two registered input models.
 The usual `mpi_mixed_native --hse-execution-mode performance` also permits
 shared HSE points; field/outer-coupling checks have independent settings.
 
-## Choosing process-isolated fast-PR HSE
+## Choosing process-isolated HSE
 
 `FastHSEResponseBackend(..., execution_mode="performance")` selects a fixed per-state mode; the default is `"checked"`. Keep this route when the host needs isolation from Fortran process state, working-directory ownership or MPI/main-thread constraints. It uses one serial CPU child per material point. Prefer `NativeFastHSEBackend` for internal MPI or reduced-k symmetry. The serial process route already requires full k points: reduced inputs cannot initialize, and performance mode does not extend that physical scope.
 

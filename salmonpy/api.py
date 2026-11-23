@@ -17,7 +17,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.quickstart': ('run',), 'salmonpy.subpix
  'salmonpy.native_steps': ('native_step_targets',),
  'salmonpy.stepping': ('StepTarget','StepRecoveryError','guarded_step'),
  'salmonpy.memory': ('MemoryEstimate','MemoryReport','MemoryBudgetWarning','process_memory','memory_advice'),
- 'salmonpy.checkpointing': ('CheckpointCapability', 'check_checkpoint_compatibility', 'CheckpointTarget', 'execute_checkpoint', 'CheckpointState', 'restore_checkpoint', 'AtomicRestoreError'),
+ 'salmonpy.checkpointing': ('CheckpointCapability', 'check_checkpoint_compatibility', 'CheckpointTarget', 'execute_checkpoint', 'CheckpointState', 'restore_checkpoint', 'AtomicRestoreError', 'CheckpointSchedule'),
  'salmonpy.ase': ('BOHR_ANGSTROM', 'explicit_path',
                   'atoms_from_initial',
                   'validate_structure',

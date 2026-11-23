@@ -1,8 +1,8 @@
-# solver fast-PR HSE handles
+# solver HSE handles
 
 [日本語](NATIVE_HANDLES.md)
 
-An explicitly built MPI managed by the calling program fast-PR runtime exports
+An explicitly built MPI managed by the calling program HSE runtime exports
 `sp_fast_hse_handle_protocol()==1` and the declarations in
 `native_adapters/fast_hse_handles.h`. This is a bounded C/C++ entry for multiple
 independent electronic states of **one immutable model** in one attached MPI
@@ -20,7 +20,7 @@ initialize/finalize MPI, change the working directory or compile a runtime.
 | `handle_init(path,dt,capacity,symmetry,&h,j)` | First and only process-model initialization; returns its first state. Use this or the legacy singleton initializer, exclusively. |
 | `model_new(dt,capacity,&h,j)` | With model protocol1, create after zero live states in the retained initialized model; no hidden template. |
 | `handle_new(model,dt,capacity,&h,j)` | Fresh independent state from the original GS of a **live** model token; does not copy its current excitation or propagation. |
-| `handle_step(h,Aold,Anew,j,&energy)` | Existing fast-PR endpoint update on the selected state. |
+| `handle_step(h,Aold,Anew,j,&energy)` | Existing HSE endpoint update on the selected state. |
 | `handle_info(h,&step,A,j)`, `handle_history(h,values)` | Accepted endpoint and eight rank-local history diagnostics. |
 | `handle_transaction(h,mode)` | Modes0 capture,1 numeric rollback/close logs,2 reopen/flush/release,3 reopen. Failed reconnect retains ownership metadata. calling program restores saved file bytes before reopening. |
 | `handle_checkpoint(h,path,mode)` | Modes0 save,1 fresh direct load,2 stage,3 commit,4 cancel; rank-local paths may differ. Existing identity/partition/authentication requirements apply. |
@@ -40,7 +40,7 @@ consumption, so corrected initialization can be retried.
 density** in atomic units (minus SALMON matter current), and energy is total
 energy in Hartree. Aold must exactly equal the accepted endpoint: query info
 after initialization or restore. x/y/z and rotating/circular input are supported;
-retained symmetry must support the actual field. The fast PR engine is the only
+retained symmetry must support the actual field. The HSE implementation is the only
 HSE engine. Same-model symmetry contexts require shared_symmetry_protocol1; different symmetry groups still require further ownership work.
 
 Use [examples/native_fast_hse_handles.c](examples/native_fast_hse_handles.c) with

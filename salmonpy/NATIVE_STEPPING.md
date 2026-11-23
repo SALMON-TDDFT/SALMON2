@@ -22,7 +22,7 @@ except StepRecoveryError as error:
 
 全ランクで参加します。対応は既知の組み込み型に限定します。NativeEHField（PMLと場内の
 全LDを含む）、1ランクのMultiscaleField、周期・非スピン分極・固定イオン・中点伝播の
-標準Pythonから直接呼ぶTDDFT、高速PR版Fortran製HSE、通常サンプルの組み込みSBE端点ラッパーです。
+標準Pythonから直接呼ぶTDDFT、Fortran製HSE、通常サンプルの組み込みSBE端点ラッパーです。
 各Fortran/Cで計算するMPI群が数値退避を保持し、FFTプラン・コミュニケータ・所有資源のハンドルは複製しません。
 波動関数、密度／ポテンシャル、XC状態／係数、ACE／履歴／キャッシュ、場／PML／LD／電流と
 最後に成功した計算時刻を直接戻し、過去の伝播を再実行しません。PythonのA／E／電流／時計／フラグの
@@ -81,14 +81,14 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 7 python -m salmonpy.example
 この40³の3次元例は接続回帰用で、収束した実材料／多層膜計算ではありません。実用TDDFTの
 マルチスケールは引き続き1次元から始め、大きな3次元の電子応答にはSBE／自作コードを推奨します。
 並列数と予算は実際の割当に合わせ、大きなMacの値をそのまま流用しません。
-ローカル検証は標準PZ・TB-mBJ自動／固定係数・Libxc-PZ/PBEと、高速PR版HSE Taylor4／学習PT-CNの
+ローカル検証は標準PZ・TB-mBJ自動／固定係数・Libxc-PZ/PBEと、HSE Taylor4／学習PT-CNの
 内部MPI2、ならびに1次元の独立2 TDDFT群です。測定範囲は検証記録を参照し、今回の小規模系だけで
 新たな他OS対応・物理収束が保証されたとは判断しないでください。
 
 
 ## 大きめの格子で測った保護の負担
 
-64GB・18コアのApple Siliconで、96³のMaxwell＋局所LD＋SBE＋Libxc-PBE2＋高速PR版HSE
+64GB・18コアのApple Siliconで、96³のMaxwell＋局所LD＋SBE＋Libxc-PBE2＋HSE
 PT-CN2を64ステップ進め、保護なし／ありを各2回比較しました。場2／全7ランクの平均は
 12.00／14.38秒、場4／全9ランクでは7.08／7.66秒でした。各ランクのピークRSSの合計の最大値は
 それぞれ2.012／2.692GiB、2.949／4.417GiBです。全配列と通常出力が完全一致しました。
@@ -98,7 +98,7 @@ PT-CN2を64ステップ進め、保護なし／ありを各2回比較しまし�
 ## 同じ物質を複数の点へ配置する
 
 同梱の `examples/mixed_multipoint_layers.json` は、SBE4点・Libxc-PBE TDDFT2点・
-高速PR版HSE2点と、Drude／Lorentz各1,152セルを配置する接続例です。電子物質の各セルに
+HSE2点と、Drude／Lorentz各1,152セルを配置する接続例です。電子物質の各セルに
 独立した状態とMPI群を作り、同じ物質IDを繰り返しても時間発展中の状態は共有しません。
 各点の論理IDと担当情報は保存・再開にも引き継がれます。Maxwell格子は既定の40³ではなく64³です。
 

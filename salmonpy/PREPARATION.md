@@ -222,7 +222,7 @@ python -m salmonpy.examples.prepare_electrons tddft rt.inp NEW_DIRECTORY --asset
 小さなSi入力の作り方で、物理収束を保証しません。計算は割当済みジョブ内で、
 同じ機能を持つ監査済みSALMONへgs.inpまたはrt.inpをstdinから渡して明示的に起動します。
 実行ファイルの記録済みSHA256を照合し、ソース／オブジェクト監査を毎回繰り返しません。
-HSEを使う場合は高速PR版のみで、prepare_dftはそのprovenance／capability検査を
+HSEを使う場合はHSEのみで、prepare_dftはそのprovenance／capability検査を
 置き換えません。従来のDFT.runからHSE batch実行を解禁する変更ではありません。
 
 PythonのA→Jワーカーを使う場合も、準備とは別です。TDDFTInitialState.from_salmonは
@@ -241,6 +241,6 @@ SHA256を選択・確認してから、別のジョブとして起動してく�
 
 セル・格子・k点・元素・擬ポテンシャル・電子数・状態数・XCは一致が必要です。
 原子位置は既存warm start同様に変更可能です。波動関数の初期推定であり、混合履歴を
-含む厳密なSCF再開ではありません。他形式や自作バックエンド、高速HSEの生存状態間の
+含む厳密なSCF再開ではありません。他形式や自作バックエンド、HSEの生存状態間の
 初期推定移行は別作業です。prepare_electronsの例には明示的な
 `--initial-guess GS_DIRECTORY`を追加しました。例と同じ物質モデルのGSを指定します。

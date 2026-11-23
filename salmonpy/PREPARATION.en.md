@@ -255,7 +255,7 @@ Both examples stop after preparation, without run/submit continuation. The small
 Si DFT fixture is not a convergence certificate. Explicitly launch a matching
 audited SALMON in an allocated site job, passing gs.inp or rt.inp through stdin.
 Verify the recorded executable SHA256 without repeating source/object startup
-audits. HSE must use the fast-PR configuration; prepare_dft does not replace provenance
+audits. HSE must use the HSE configuration; prepare_dft does not replace provenance
 or capability checks or enable the existing DFT.run HSE batch path.
 
 Python A→J workers are a separate execution mode: TDDFTInitialState.from_salmon

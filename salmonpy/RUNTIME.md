@@ -13,7 +13,7 @@ DFT・TDDFT・FDTD・バンド計算には、SALMONpyの使用する入口に対
 | LD・SBE・波形・構造・解析 | SALMONpy wheelと必要な任意依存 | [最初の手順](README.md) |
 | 別プロセスでDFT・TDDFT・FDTD・バンド計算 | 対応する実行ファイル | このページ |
 | 同じMPIジョブ内で電子計算とFDTDを結合 | 呼び出し元とMPIが一致する共有ライブラリ | [結合手順](COUPLED.md) |
-| 高速HSEの基底状態・時間発展 | 高速HSEに対応する計算ライブラリ | [保持GS](NATIVE_GS.md)・[高速HSE](SHARED_HSE.md) |
+| HSEの基底状態・時間発展 | HSEに対応する計算ライブラリ | [保持GS](NATIVE_GS.md)・[HSE](SHARED_HSE.md) |
 
 対応するビルド済み配布物を優先し、ない場合だけ明示的に構築します。
 import・入力検査だけで、取得・構築・MPI初期化・計算実行は始まりません。
@@ -81,7 +81,7 @@ Windows用の本体ビルドは、この手順で検証済みとは説明しま�
 
 - Libxc：対応するFortranインターフェースを用意し、`--cmake-arg=-DUSE_LIBXC=ON` と `--cmake-arg=-DLIBXC_INSTALLDIR=LIBXC_PREFIX` を追加します。
 - MPI：施設のMPIと一致する `mpifort`・`mpicc` を指定し、`--cmake-arg=-DUSE_MPI=ON` を追加します。MPI版の構築だけで、単一ランク用のPython入口が並列化されるわけではありません。
-- 高速HSE：`--cmake-arg=-DUSE_HSE=ON` を明示します。既定はOFFです。FFTWが必要で、用意されていなければ構築中に固定版を取得する経路があります。オフラインでは事前に用意し、`--cmake-arg=-DFFTW_INSTALLDIR=FFTW_PREFIX` を指定します。[詳細](../runtime/README.md)。
+- HSE：`--cmake-arg=-DUSE_HSE=ON` を明示します。既定はOFFです。FFTWが必要で、用意されていなければ構築中に固定版を取得する経路があります。オフラインでは事前に用意し、`--cmake-arg=-DFFTW_INSTALLDIR=FFTW_PREFIX` を指定します。[詳細](../runtime/README.md)。
 
 成功時は `build.json` に `built-and-audited`、実行ファイルの場所とSHA256を記録します。
 失敗時も `build.log` と準備したソースを残します。既存の検証済みバイナリを上書きしません。
@@ -153,7 +153,7 @@ print(engine.runtime_validation_report)
 |---|---|
 | 同じ物質の独立したTDDFT状態 | [SHARED_TDDFT.md](SHARED_TDDFT.md) |
 | 異なる物質を同じMPI群で順に使う | [TDDFT_REGISTRY.md](TDDFT_REGISTRY.md) |
-| 高速HSE・対称性 | [SHARED_HSE.md](SHARED_HSE.md)・[FAST_HSE_SYMMETRY.md](FAST_HSE_SYMMETRY.md) |
+| HSE・対称性 | [SHARED_HSE.md](SHARED_HSE.md)・[FAST_HSE_SYMMETRY.md](FAST_HSE_SYMMETRY.md) |
 | 基底状態・SCF途中状態 | [NATIVE_GS.md](NATIVE_GS.md) |
 | 保存・再開と復元失敗時の扱い | [CHECKPOINTING.md](CHECKPOINTING.md) |
 | 自作プログラムからの呼出し | [API.md](API.md)・[C_ABI.md](C_ABI.md) |

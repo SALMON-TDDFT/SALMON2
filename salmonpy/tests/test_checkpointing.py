@@ -7,6 +7,41 @@ from salmonpy.checkpointing import CheckpointCapability, check_checkpoint_compat
 GROUPS=[{'name':'material','role':'material','ranks':[0],'point_ids':[10]}]
 
 class CheckpointingTests(unittest.TestCase):
+    def test_timed_checkpoint_and_periodic_save(self):
+        from unittest.mock import patch
+        from salmonpy.checkpointing import CheckpointSchedule
+        saved=[]
+        with patch('salmonpy.checkpointing.time.monotonic',side_effect=[10.,11.,13.,15.]):
+            schedule=CheckpointSchedule(interval_steps=2,interval_seconds=3.,stop_after_seconds=5.)
+            self.assertFalse(schedule.after_step(1,saved.append))
+            self.assertFalse(schedule.after_step(2,saved.append))
+            self.assertTrue(schedule.after_step(3,saved.append))
+        self.assertEqual(saved,[2,3])
+        self.assertEqual(schedule.last_saved_step,3)
+        self.assertTrue(schedule.stopped)
+        with self.assertRaises(ValueError):schedule.after_step(4,saved.append)
+        disabled=CheckpointSchedule()
+        self.assertFalse(disabled.after_step(1,saved.append))
+        self.assertEqual(saved,[2,3])
+        for kwargs in ({'interval_steps':0},{'stop_after_seconds':float('nan')},
+                       {'interval_seconds':-1},{'initial_step':True}):
+            with self.assertRaises(ValueError):CheckpointSchedule(**kwargs)
+
+    def test_timed_checkpoint_save_failure_can_retry(self):
+        from unittest.mock import patch
+        from salmonpy.checkpointing import CheckpointSchedule
+        from salmonpy.errors import RuntimeFailure
+        with patch('salmonpy.checkpointing.time.monotonic',return_value=0.):
+            schedule=CheckpointSchedule(stop_after_seconds=1.)
+        def fail(step):raise OSError('disk full')
+        with patch('salmonpy.checkpointing.time.monotonic',return_value=2.):
+            with self.assertRaisesRegex(RuntimeFailure,'disk full'):schedule.after_step(7,fail)
+            self.assertFalse(schedule.stopped)
+            self.assertIsNone(schedule.last_saved_step)
+            saved=[]
+            self.assertTrue(schedule.after_step(7,saved.append))
+            self.assertEqual(saved,[7])
+
     def test_serial_roundtrip_is_detached_and_identity_bound(self):
         cap=CheckpointCapability('user-drude/1',('save','restore'),(1,),identity='model-sha256')
         with self.assertRaises(FrozenInstanceError): cap.format='changed'

@@ -16,7 +16,7 @@
 |---|---|
 | 最初の電子計算＋FDTDを試す | [準備](#初回準備と資源) → [実行例](#実行例) |
 | 材料ID・並び・厚みから層構造を作る | [層構造の設定](#物質id並び厚みからmpi構成を準備する) |
-| 同じ物質を複数点で計算する | [TDDFT](SHARED_TDDFT.md)・[高速HSE](SHARED_HSE.md) |
+| 同じ物質を複数点で計算する | [TDDFT](SHARED_TDDFT.md)・[HSE](SHARED_HSE.md) |
 | 異なる物質を同じMPI群で扱う | [TDDFTのモデル登録](TDDFT_REGISTRY.md)・[HSEのモデル登録](SHARED_HSE.md#異なる入力のhseモデルを同一プロセスで扱う) |
 | 保存・再開や失敗時の状態保持を使う | [保存・再開](CHECKPOINTING.md)・[時間更新の失敗処理](NATIVE_STEPPING.md) |
 
@@ -308,9 +308,9 @@ TB-mBJ（自動係数／cval=1.2）とLibxc-PBEで、この構成の再開後65�
 
 直接再開のチェックサム検証はランク間で分担します。全ランクが同じ完了manifestを読み、検証がすべて成功したことを確認してから内部状態を復元します。保存先は全ランクから同じ内容を参照できる共有ディレクトリが必要です。ノードごとの異なるローカルコピーは対象外です。`result.json` の `checkpoint_validation` に各ランクの検証ファイル数・バイト数を記録します。
 
-## 高速PR版HSEを外側MPI／FDTDへ接続する
+## HSEを外側MPI／FDTDへ接続する
 
-`FastHSEMaterialProvider` と `FastHSEResponseBackend` は、高速PR版HSEの専用serialワーカーを既存のA/c→電荷電流j仕様へ接続します。FDTDは既存のMPI入口、LDは場ランク内、各HSE点は1ランクの物質群が独立した子プロセスを所有します。HSE内部MPIは使用しません。呼び出し元プログラムのカレントディレクトリを変更せず、import時にMPI初期化・ビルド・取得はしません。
+`FastHSEMaterialProvider` と `FastHSEResponseBackend` は、HSEの専用serialワーカーを既存のA/c→電荷電流j仕様へ接続します。FDTDは既存のMPI入口、LDは場ランク内、各HSE点は1ランクの物質群が独立した子プロセスを所有します。HSE内部MPIは使用しません。呼び出し元プログラムのカレントディレクトリを変更せず、import時にMPI初期化・ビルド・取得はしません。
 
 ```python
 from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
@@ -324,7 +324,7 @@ binding = MaterialBinding(
 # このbindingを既存のassemble_native_layers / ResponseSessionへ渡します。
 ```
 
-監査済み高速PR版ビルド記録から、ワーカーを新しい外部ディレクトリへ明示構築します。通常版HSEを指定しません。
+監査済みHSEの構築記録から、ワーカーを新しい外部ディレクトリへ明示構築します。対応するHSE計算プログラムを使用してください。
 
 ```sh
 python tools/build_fast_hse_worker.py FAST_PR_BUILD_JSON NEW_WORKER_DIRECTORY
@@ -341,11 +341,11 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.example
 
 HSEワーカーへの入力は原子単位（unit_system=au）に限定します。内部パルスを無効にし、ae_shape1はnoneまたは明示的なゼロimpulse、ae_shape2はnone、trans_longiはtrとします。FDTDからのAと内部パルスの二重駆動を拒否します。状態のtimeは受理済みstep×dtです。
 
-## 高速PR版HSEの内部k点MPI
+## HSEの内部k点MPI
 
-`salmonpy.fast_hse_mpi.NativeFastHSEBackend` は、Python側で用意した物質コミュニケータ内で高速PR版HSEを集合的に実行します。MPIの初期化・終了は呼び出し元プログラムが管理します。import時にMPI読込やビルドは行いません。1群1点、1プロセスにつき初期化1回、メインスレッド専用です。呼出中は作業ディレクトリを一時変更するため、相対パスを使う別スレッドと併用しないでください。
+`salmonpy.fast_hse_mpi.NativeFastHSEBackend` は、Python側で用意した物質コミュニケータ内でHSEを集合的に実行します。MPIの初期化・終了は呼び出し元プログラムが管理します。import時にMPI読込やビルドは行いません。1群1点、1プロセスにつき初期化1回、メインスレッド専用です。呼出中は作業ディレクトリを一時変更するため、相対パスを使う別スレッドと併用しないでください。
 
-`tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing` で新しいソースを準備し、`tools/build_fast_hse_mpi.py PREPARED_SOURCE NEW_OUTPUT --jobs 2 --cmake-arg=...` で明示ビルドします。呼び出し元プログラムと同じMPIのFortran/Cコンパイラ、OpenBLAS/LAPACK、FFTW、必要ならLibxcのパスをRUNTIMEガイドに従って指定します。MPI/HSEを必須とし、GPU・Poisson-FFTW・ScaLAPACK・EigenExa構成は拒否します。記録にはソースとアダプターのハッシュを含めます。実行エンジンは固定した高速PR版のみです。
+`tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing` で新しいソースを準備し、`tools/build_fast_hse_mpi.py PREPARED_SOURCE NEW_OUTPUT --jobs 2 --cmake-arg=...` で明示ビルドします。呼び出し元プログラムと同じMPIのFortran/Cコンパイラ、OpenBLAS/LAPACK、FFTW、必要ならLibxcのパスをRUNTIMEガイドに従って指定します。MPI/HSEを必須とし、GPU・Poisson-FFTW・ScaLAPACK・EigenExa構成は拒否します。記録にはソースとアダプターのハッシュを含めます。実行エンジンは固定したHSEのみです。
 
 ```python
 from salmonpy.fast_hse import FastHSEMaterialProvider
@@ -366,9 +366,9 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.example
 
 場1＋SBE1＋HSE2で4ランクを使い、2種類のLDは場ランク内に保持します。同じ引数で連続実行、`--direct-save-at 127`、新しいジョブで`--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT`を順に実行します。HSEは群サイズ・群内ランク・k範囲を含むランク別ファイルを保存し、全ファイルを検査してから数値状態を反映します。初期化は静的な交換／FFT資源を再構築し、過去の時間発展は行いません。同じバイナリ・元GS・入力・分割と共有保存先が必要です。早期の不正・切断ファイルは数値反映前に拒否します。既定の失敗時に元の状態を保つ復元では、扱える復元用の別状態の準備失敗時も元の全状態を維持します。明示した無保護経路や未処理の計算処理異常には再試行保証がありません。
 
-Apple Siliconで微視的8³格子・4×1×1 k点の合成入力を実測しました。Taylor／学習PT-CNとも場1＋SBE1＋HSE2、dt=.001、256ステップ中127で直接保存し、残り129回の呼出後にA/c・E・jの全履歴がビット単位で一致しました。独立serial高速PR応答との最大HSE電流差は4.07e-16／1.71e-16 auです。接続・再開の回帰検査であり、物理収束・大規模性能の保証ではありません。記録：`docs/fast-hse-kmpi-validation-2026-11-16.md`。
+Apple Siliconで微視的8³格子・4×1×1 k点の合成入力を実測しました。Taylor／学習PT-CNとも場1＋SBE1＋HSE2、dt=.001、256ステップ中127で直接保存し、残り129回の呼出後にA/c・E・jの全履歴がビット単位で一致しました。独立serialHSE応答との最大HSE電流差は4.07e-16／1.71e-16 auです。接続・再開の回帰検査であり、物理収束・大規模性能の保証ではありません。記録：`docs/fast-hse-kmpi-validation-2026-11-16.md`。
 
-層構成時、計算処理は任意で `supported_group_sizes=(1,2)` のように対応ランク数を宣言できます。空でない正の整数の重複なしtupleに限定し、未対応ランク数はMPI・初期状態準備より前に拒否します。高速HSEは `(1,2)` を宣言します。宣言しない自作の計算コードは既存のexecution・分割検査を使います。この属性は数値精度・再開機能の認証ではなく、直接ResponseSessionへ接続する場合にも、同じ検査と宣言のランク間照合を物質準備前に行います。
+層構成時、計算処理は任意で `supported_group_sizes=(1,2)` のように対応ランク数を宣言できます。空でない正の整数の重複なしtupleに限定し、未対応ランク数はMPI・初期状態準備より前に拒否します。HSEは `(1,2)` を宣言します。宣言しない自作の計算コードは既存のexecution・分割検査を使います。この属性は数値精度・再開機能の認証ではなく、直接ResponseSessionへ接続する場合にも、同じ検査と宣言のランク間照合を物質準備前に行います。
 
 ID付き直接保存の既定manifestは`salmonpy.native-direct/3`で、従来の/2と共通の互換情報として、保存方式、save/restore対応、各MPI群の所有ランク・点ID、場の分割と電子状態のk／軌道／実空間分割を記録します。全ランクで現在の状態と照合してからLOADを呼ぶため、総ランク数だけが同じ分割変更も拒否します。初期資源の作成は検査前に行いますが、検査中の伝播・snapshot/restore/LOAD呼出はありません。旧manifest/1には必要な互換情報がないため新しい経路では復元を拒否します。旧保存データは対応する元の版で扱ってください。計算処理ペイロードの形式は変更していません。自作direct-state/1コールバックには、明示的なcheckpoint_format、checkpoint_modes（save/restoreのtuple）、checkpoint_decomposition（群サイズを積に持つ正の整数tuple）が必要です。宣言は利用者の仕様であり、その実装・失敗時の原子的復元を認証するものではありません。単にsnapshotメソッドがあるだけでは直接再開と判定せず、同梱LD/SBE以外の再生方式を混入させません。
 
@@ -376,7 +376,7 @@ ID付き直接保存の既定manifestは`salmonpy.native-direct/3`で、従来�
 
 計算処理混在サンプルの場・電子・LD/SBE保存処理も `CheckpointTarget`／`execute_checkpoint` を通します。保存形式と計算処理-direct/2の互換情報は維持し、コールバック失敗を共有した後は次の処理へ進みません。完了情報の公開失敗も全ランクへ通知します。
 
-通常サンプルの`--direct-resume`は失敗時に元の状態を保つ復元が既定です。場内LD・SBE・Pythonから直接呼ぶTDDFT／高速PR HSEとPython側の時計・電流を、全群の候補成功後に反映します。古いABIと即時LOADのみの対象は読込前に拒否し、自動で従来方式へ切り替えません。通常サンプルは保護付き復元に統一しています。途中失敗からの継続・再試行と保証範囲は[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。
+通常サンプルの`--direct-resume`は失敗時に元の状態を保つ復元が既定です。場内LD・SBE・Pythonから直接呼ぶTDDFT／HSEとPython側の時計・電流を、全群の候補成功後に反映します。古いABIと即時LOADのみの対象は読込前に拒否し、自動で従来方式へ切り替えません。通常サンプルは保護付き復元に統一しています。途中失敗からの継続・再試行と保証範囲は[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。
 
 `--memory-budget-gib 4`は全MPIランク合計4GiBの助言予算です。通常状態と復元用の別状態の同時保持分を報告し、超過時も停止しません。[MEMORY.md](MEMORY.md)を参照してください。
 
@@ -392,7 +392,7 @@ ID付き直接保存の既定manifestは`salmonpy.native-direct/3`で、従来�
 
 新しく準備・ビルドした標準embedded TDDFTには `sp_tddft_error_protocol() == 1` があり、以下を結合先の物質MPI群だけで照合します。10: 不正・非有限入力／古いA／入力ファイル不在、11: ランク間不一致、12: 状態未作成・使用済み初期化、13: ステップ上限、14: 未確定の復元用の別状態あり。これらは数値更新前に全ランク同じコードで返り、既存の最後に成功した計算状態を変更しません。初期化前の10/11は初期化から終了までの期間を消費せず、Pythonからも入力を修正して初期化を再試行できます。失敗時の作業ディレクトリは診断用に残ります。
 
-Pythonは版付きの仕様と全ランク一致を確認できた拒否だけを `InputError` とします。旧ライブラリ・未知のコード・非有限な戻り値は `RuntimeFailure` のままで、状態保持を推定しません。MPI群の全員が同じ入口へ参加する必要があります。無効なポインタ、MPI・プロセス異常、確保失敗は対象外です。本項の更新前検査ではソルバー深部を扱いません（次節の限定した深部復帰を参照）。初期化に入った後は引き続き1プロセス1初期化から終了までの期間です。高速HSEとPythonから直接呼ぶFDTDのエラー仕様はこの変更では拡張していません。
+Pythonは版付きの仕様と全ランク一致を確認できた拒否だけを `InputError` とします。旧ライブラリ・未知のコード・非有限な戻り値は `RuntimeFailure` のままで、状態保持を推定しません。MPI群の全員が同じ入口へ参加する必要があります。無効なポインタ、MPI・プロセス異常、確保失敗は対象外です。本項の更新前検査ではソルバー深部を扱いません（次節の限定した深部復帰を参照）。初期化に入った後は引き続き1プロセス1初期化から終了までの期間です。HSEとPythonから直接呼ぶFDTDのエラー仕様はこの変更では拡張していません。
 
 この保証は個別TDDFT状態の更新前拒否です。結合ドライバで他の部品が既に進んだ場合、全体の巻き戻しを保証せず、従来どおりセッションを失敗扱いにします。通常計算中の一般的な原子性が完成したとは判断しないでください。
 
@@ -418,9 +418,9 @@ Pythonの `NativeTDDFTBackend` が返す状態の `advance(A_old,A_new)` は、�
 
 これはTDDFT群の状態保証です。FDTD・他の物質がすでに進んだ混在ステップ全体を自動巻き戻しする仕様ではありません。MPI／プロセス停止、確保失敗、未制御の外部ライブラリSTOP、初期化深部のSTOPや出力装置障害は未対応です。試験専用の一部ランク障害注入は `SALMONPY_RECOVERY_TESTING` を明示して別ビルドした場合のみで、本番ビルドには注入用C入口がありません。
 
-## 高速PR版HSEの深部数値異常からの復帰
+## HSEの深部数値異常からの復帰
 
-新しい `NativeFastHSEBackend` 用ライブラリは `sp_fast_hse_recovery_protocol() == 1` を宣言します。対応範囲は周期・非スピン分極・固定イオンの高速PR版HSE06、Taylor4／学習PT-CN、物質群内k点分割のMPI1／2です。通常版HSEへの切替はしません。
+新しい `NativeFastHSEBackend` 用ライブラリは `sp_fast_hse_recovery_protocol() == 1` を宣言します。対応範囲は周期・非スピン分極・固定イオンのHSE06、Taylor4／学習PT-CN、物質群内k点分割のMPI1／2です。通常版HSEへの切替はしません。
 
 各ステップ前に電子状態とACE・因子／PT-CN履歴・交換キャッシュ・カウンタを退避します。FFTプランやMPIコミュニケータなどの所有資源はコピーしません。波動関数・密度・Hartree・XC・端点の有限性検査に加え、対応したACE演算エラー、PT-CNの収束／Gram／射影検査、履歴更新エラーを物質群全体で合意して返します。最後に成功した計算状態を直接戻し、過去ステップや交換履歴を再計算しません。失敗試行の通常RT出力を追加せず、A・時計・電流・エネルギーを維持します。診断ログは残ることがあります。
 
@@ -444,7 +444,7 @@ Pythonは宣言された版と全ランクの既知エラーを確認できる�
 
 監査済み計算処理全体の保護は [NATIVE_STEPPING.md](NATIVE_STEPPING.md) の別プロトコルと `--protect-steps` で利用できます。別のHSE GSは `--hse-bundle`、同時TDDFT／HSEの例は `examples/mixed_tddft_hse_layers.json` です。
 
-## 高速PR版HSEの対称性opt-in
+## HSEの対称性opt-in
 
 NativeFastHSEBackend(...,allow_symmetry=True)は内部kランク1／2・Taylor／PT-CNに対応し、学習には新しい履歴capabilityが必要。
 通常混在例は--hse-symmetry --hse-reference-bundle FULL_K_BUNDLEを明示する。
@@ -459,19 +459,19 @@ Aが対称性を破ったときのInputErrorから、全体を戻すには--prot
 
 メモリ・ランク数の予算、推奨規模や物理精度の注意は警告として扱い、実行可能な計算を止めません。入力や刻み幅を自動変更しません。読み出せない・破損したファイル、配列寸法や実際のMPI分割の不整合、計算処理が停止する既知の未対応条件はエラーにします。未検証であることだけを理由に拒否しません。
 
-高速PR入力検査では、有限な占有数の範囲逸脱や電子数との和の不一致は警告のみで、値を切り詰めたり再規格化したりしません。起動時の波動関数検査はバイト数の整合確認にとどめ、巨大ファイルの有限性全走査を毎回追加しません。そのためNaNを含む軌道を起動前に検出する保証はありません。旧GSヘッダーから物理的なGSの同一性を証明することもできません。
+HSE入力検査では、有限な占有数の範囲逸脱や電子数との和の不一致は警告のみで、値を切り詰めたり再規格化したりしません。起動時の波動関数検査はバイト数の整合確認にとどめ、巨大ファイルの有限性全走査を毎回追加しません。そのためNaNを含む軌道を起動前に検出する保証はありません。旧GSヘッダーから物理的なGSの同一性を証明することもできません。
 
 SCF未収束は警告のみです。有限な保存状態は後続計算に使え、`GroundStateResult.converged=False` と保存された残差・閾値・反復数で識別できます。
 
-高速PRの計算処理起動前に、自動生成k格子と保持対称性の適合・代表点数・重み、物質種ごとの擬ポテンシャル参照、GSのヘッダー・占有数・軌道のバイト数を検査します。KYの検査は計算処理と同様に継続レコード・余分な末尾列・Eを省略した指数を扱います。他の認識済みPP形式は参照と読み出し可否までで、内容検査は計算処理に委ねます。対応GS形式は計算処理 endianの4バイトrecord marker・整数／論理値、binary64占有数、単一global real64／complex128軌道ファイルです。任意の `file_kw`、unfolding、偶数Gamma端点格子は現在の高速PR経路の制約です。GSを作ったMPIランク数と今回のランク数の一致は要求しません。直接RT checkpointの分割互換性検査とは別です。
+HSEの計算処理起動前に、自動生成k格子と保持対称性の適合・代表点数・重み、物質種ごとの擬ポテンシャル参照、GSのヘッダー・占有数・軌道のバイト数を検査します。KYの検査は計算処理と同様に継続レコード・余分な末尾列・Eを省略した指数を扱います。他の認識済みPP形式は参照と読み出し可否までで、内容検査は計算処理に委ねます。対応GS形式は計算処理 endianの4バイトrecord marker・整数／論理値、binary64占有数、単一global real64／complex128軌道ファイルです。任意の `file_kw`、unfolding、偶数Gamma端点格子は現在のHSE経路の制約です。GSを作ったMPIランク数と今回のランク数の一致は要求しません。直接RT checkpointの分割互換性検査とは別です。
 
-高速PR版HSEの外場はCartesianの3成分A/cで、x・y・z・円偏光を固定z条件で制限しません。縮約k点では実際のAを各ステップで保持対称性と照合し、不適合なら状態変更前に拒否します。適合群がなければ全k点の初期状態を使います。新コアは一般セルの対称性付き初期化にも対応します。[対称性ガイド](FAST_HSE_SYMMETRY.md)を参照してください。
+HSEの外場はCartesianの3成分A/cで、x・y・z・円偏光を固定z条件で制限しません。縮約k点では実際のAを各ステップで保持対称性と照合し、不適合なら状態変更前に拒否します。適合群がなければ全k点の初期状態を使います。新コアは一般セルの対称性付き初期化にも対応します。[対称性ガイド](FAST_HSE_SYMMETRY.md)を参照してください。
 
 ### 内部RT状態の所有分離（開発用）
 
 失敗時に元の状態を保つ時間更新の数値退避・出力メタデータと直接復元用の別状態は、プロセス共通ではなく
 各 `tddft_context` が所有します。同じ不変の物質入力とコミュニケータを使う、対称性なしの
-内部高速PRコンテキストでは、一方の巻き戻し・候補の確定／取消・終了が他方の候補を
+内部HSEコンテキストでは、一方の巻き戻し・候補の確定／取消・終了が他方の候補を
 消費しません。個別に選んだdt・容量と3成分の波形で交互に進められます。
 出力の再接続は空いている番号を取得し、巻き戻し中の状態を終了しても、他の状態が
 再利用した出力番号を閉じません。
@@ -537,9 +537,9 @@ OpenMPに対応しない場合は、MPIのラッパー設定で対応するも�
 
 標準Pythonから直接呼ぶTDDFTの終了は、状態が所有するRT出力と子コミュニケータだけを解放し、呼び出し元プログラムが開いた固定番号30のファイルを閉じません。新しい計算プログラムで修正済みです。既存バイナリを書き換えず、必要な場合は明示的に対応版を準備してください。一般のI/O異常復帰・スレッド同時実行を保証する変更ではありません。
 
-新規計算プログラムでは、標準TDDFTと高速PR HSEの時間発展中も、初期化時に割り当てた状態のMPI所有範囲を有効にします。更新中に作られた子コミュニケータはその状態の終了で解放し、兄弟状態や呼び出し元プログラムが管理するMPIのものを解放しません。通常のMPI分割・呼出し方・数値保存形式は変更しません。初期化以外の全資源やMPI障害からの復帰、同時スレッド実行まで対応したという意味ではありません。
+新規計算プログラムでは、標準TDDFTとHSEの時間発展中も、初期化時に割り当てた状態のMPI所有範囲を有効にします。更新中に作られた子コミュニケータはその状態の終了で解放し、兄弟状態や呼び出し元プログラムが管理するMPIのものを解放しません。通常のMPI分割・呼出し方・数値保存形式は変更しません。初期化以外の全資源やMPI障害からの復帰、同時スレッド実行まで対応したという意味ではありません。
 
-標準TDDFTの単一状態計算処理経路も、新規計算プログラムでは初期化・更新・終了のタイマーを状態専用に保持し、呼び出し元プログラム側の計測値を維持します。対応するlegacy timer protocol1があれば `state.timing_seconds` からrankローカルの完了区間を照会できます。数値保存形式に計測値は含めません。古い計算プログラムの通常計算は従来どおりで、新照会だけが対応版を必要とします。高速HSEの単一状態経路にも、対応する別のlegacy timer protocol1があります。
+標準TDDFTの単一状態計算処理経路も、新規計算プログラムでは初期化・更新・終了のタイマーを状態専用に保持し、呼び出し元プログラム側の計測値を維持します。対応するlegacy timer protocol1があれば `state.timing_seconds` からrankローカルの完了区間を照会できます。数値保存形式に計測値は含めません。古い計算プログラムの通常計算は従来どおりで、新照会だけが対応版を必要とします。HSEの単一状態経路にも、対応する別のlegacy timer protocol1があります。
 
 FDTDの入力・更新段階の有限値検査は、全要素を明示ループで走査し、IEEE問い合わせにスカラーだけを渡します。NaN・正負InfのMPI全体での拒否と、拒否時の状態保持は維持します。新しい閾値や停止条件は追加しません。GNU/Macで検証済みですが、今回Fujitsuコンパイルは未実施です。
 
@@ -1174,7 +1174,7 @@ A_next = field.advance(J_previous)  # 通常どおり電荷電流密度を渡す
 
 性能モードでは異常値をそのまま返す場合があり、内部ソルバーの異常でジョブ全体が終了する場合もあります。失敗時の元状態保持や、その場での再試行は保証しません。必要な保存点は明示的に作り、再起動できるようにしてください。明示的な保護付き更新・収支観測・保存／復元を呼べば、その処理自身の検査やコピーは実行します。自動で隠して無効化しません。
 
-この指定が省略するのはFDTDとその内部LD更新の診断です。SBE／TDDFT／高速HSEの物質更新や結合ドライバ外側の検査は現時点では変更しません。計算全体が無検査になる指定ではありません。マニフェストの `execution_mode` で場の設定を確認できます。
+この指定が省略するのはFDTDとその内部LD更新の診断です。SBE／TDDFT／HSEの物質更新や結合ドライバ外側の検査は現時点では変更しません。計算全体が無検査になる指定ではありません。マニフェストの `execution_mode` で場の設定を確認できます。
 
 開発用の `tools/test_diagonal_field_energy_mpi.py` も `--execution-mode performance` を受け付けます。収支観測を指定しない実測では `--observe` を付けません。ツールの最終保存・資源計測は開発検査の出力であり、性能モードの毎ステップ処理ではありません。新しい `sp_eh_step_performance` を含む場ライブラリを明示的に再ビルドしてください。
 
@@ -1185,7 +1185,7 @@ MPIを管理する経路で検査を省く指定です。既定は `"checked"` �
 バックエンドと返される状態の設定は読み取り専用です。検証対象は周期系・固定
 イオン・スカラーのPZ、TB-mBJ、Libxc-PZ/PBEで、全A/cを与える横波配置と
 middlepoint時間発展です。単一状態・共有モデル・異なるモデルの登録に対応します。
-別プロセス型・高速HSE・分子には未対応です。
+別プロセス型・HSE・分子には未対応です。
 
 初期化・ライブラリのSHA256照合・明示的な保存／復元は検査します。更新時は
 Pythonの新旧A・有限値・一致の検査通信、作業ディレクトリの検査合意、Fortran
@@ -1227,7 +1227,7 @@ C入口 `sp_tddft_step_performance(Aold,Anew,J_matter)` はSALMONの物質電流
 PZ↔TB-mBJ・Libxc-PZ↔PBEの登録切替を内部1・2ランクで確認しています。
 実材料の収束検証や速度評価ではありません。
 
-## 高速PR版HSEの性能モード
+## HSEの性能モード
 
 `NativeFastHSEBackend(..., execution_mode="performance")` は呼び出し元が
 MPIを管理する更新を切り替えます。既定は `"checked"` です。
@@ -1282,7 +1282,7 @@ point-bを通常モードにし、point-aの再開も例示します。`--second
 `crystal.respond(initial, drive, execution_mode="performance")` でA駆動の
 周期系ワーカーを切り替えます。`TDDFTResponseBackend(execution_mode=...)` も
 応答セッションの各ワーカーへ選択を伝えます。外側セッション・場の検査は別設定
-のままです。既定は `"checked"` で、状態ごとに固定されます。分子と高速HSEの
+のままです。既定は `"checked"` で、状態ごとに固定されます。分子とHSEの
 別プロセス型ワーカーは、この指定の対象ではありません。
 
 ワーカーは専用の `INIT_PERFORMANCE` を受理し、
@@ -1314,7 +1314,7 @@ A/J配列の形と所有者、時間ステップ番号、通信順序は維持�
 
 外側性能モードは、実際のE/H FDTD＋内蔵LD＋2点TDDFTでも検証しています。3／6ランク（FDTD 1／2分割、各TDDFT群1／2ランク）の96ステップで、通常の連続実行と通常／性能モードの明示的な保護復元・再試行後のA/E/Jが完全一致しました。既存の合成初期軌道を用いた接続試験であり、実材料の物理的収束や速度向上の証明ではありません。
 
-高速PR版HSEでも、`NativeFastHSEBackend(..., execution_mode="performance")` と `ResponseSession(..., execution_mode="performance")` を別々に指定します。E/Hの場も性能モードにする場合は `NativeEHField(..., execution_mode="performance")` を指定します。明示的な `step_protected(targets)` は場・LD・高速HSEの内部状態を退避し、処理途中に返された例外から復元して再試行できます。プロセス終了やMPI障害への復帰を意味しません。縮約k点では外場が保つ対称性の条件を引き続き満たす必要があります。
+HSEでも、`NativeFastHSEBackend(..., execution_mode="performance")` と `ResponseSession(..., execution_mode="performance")` を別々に指定します。E/Hの場も性能モードにする場合は `NativeEHField(..., execution_mode="performance")` を指定します。明示的な `step_protected(targets)` は場・LD・HSEの内部状態を退避し、処理途中に返された例外から復元して再試行できます。プロセス終了やMPI障害への復帰を意味しません。縮約k点では外場が保つ対称性の条件を引き続き満たす必要があります。
 
 ### A/E/H受け渡しの性能モード
 
@@ -1322,7 +1322,7 @@ A/J配列の形と所有者、時間ステップ番号、通信順序は維持�
 
 分子の性能モードでも、本計算・自己真空参照FDTDと分子を一括で直接保存／再開できます。保存した時間ステップ番号をFortran側の値と照合し、別MPIジョブでの復元中に時間発展を呼ばないことを検証しています。条件と確認用の出力項目は [分子の放射・結合](DIPOLE_RADIATION.md) を参照してください。
 
-## 別プロセス型高速PR版HSEの使い分け
+## 別プロセス型HSEの使い分け
 
 `FastHSEResponseBackend(..., execution_mode="performance")` で子プロセスの性能モードを選びます。既定は `"checked"`、選択は状態ごとに固定です。Python本体のMPI・作業ディレクトリ・スレッド設定を計算から分離できるので、この経路は維持します。1物質点に1つの直列CPUワーカーを使い、内部MPIを使う大規模計算や縮約k点には `NativeFastHSEBackend` を選びます。別プロセス型は従来から全k点の範囲で、縮約入力は初期化できません。性能モードによってこの物理対応範囲は変えません。
 

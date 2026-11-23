@@ -10,13 +10,14 @@ import json
 from pathlib import PurePosixPath
 from types import MappingProxyType
 import threading
+import time
 
 from .config import _copy_json
 from .errors import InputError, RuntimeFailure
 
 __all__ = ['CheckpointCapability', 'check_checkpoint_compatibility',
            'CheckpointTarget', 'execute_checkpoint', 'CheckpointState',
-           'restore_checkpoint', 'AtomicRestoreError']
+           'restore_checkpoint', 'AtomicRestoreError', 'CheckpointSchedule']
 
 
 def _text(value, name, *, empty=False):
@@ -491,3 +492,89 @@ def restore_checkpoint(comm, groups, *, live, group=None, field=None, states=Non
     return execute_checkpoint(comm, groups, live=live, atomic=True, operation='restore',
         group=group, field=field, states=states, saved=saved, required_files=required_files,
         available_files=available_files, local_error=local_error)
+
+
+class CheckpointSchedule:
+    """Explicit host-loop policy; disabled by default, no background work.
+
+    Call after_step on every rank at the same accepted step. The callback must
+    save all coupled states, using the backend's collective save contract.
+    Returns True only after the wall-time deadline's checkpoint succeeds.
+    Timing uses rank0's monotonic clock. A step and the save itself may exceed
+    the deadline: reserve scheduler time for both. This is not a hard timeout.
+    """
+
+    def __init__(self, *, interval_steps=None, interval_seconds=None,
+                 stop_after_seconds=None, initial_step=0, comm=None):
+        error=None
+        try:
+            if type(initial_step) is not int or initial_step<0:
+                raise InputError('initial_step must be a nonnegative integer')
+            if interval_steps is not None and (type(interval_steps) is not int or interval_steps<1):
+                raise InputError('interval_steps must be a positive integer')
+            for name,value in (('interval_seconds',interval_seconds),('stop_after_seconds',stop_after_seconds)):
+                if value is not None and (isinstance(value,bool) or not isinstance(value,(int,float))
+                                          or not math.isfinite(value) or value<=0):
+                    raise InputError(name+' must be finite positive seconds')
+        except Exception as exc:error=str(exc)
+        signature=(interval_steps,interval_seconds,stop_after_seconds,initial_step)
+        if comm is not None:
+            requests=comm.allgather((signature,error))
+            error=next((err for _,err in requests if err),None)
+            if error is None and any(item!=requests[0][0] for item,_ in requests):
+                error='checkpoint schedules must match on all ranks'
+        if error:raise InputError(error)
+        self.comm=comm
+        self.interval_steps=interval_steps
+        self.interval_seconds=interval_seconds
+        self.stop_after_seconds=stop_after_seconds
+        self.last_saved_step=None
+        self.stopped=False
+        self._previous_step=initial_step
+        self._saved_step=initial_step
+        self._started=time.monotonic() if comm is None or comm.rank==0 else None
+        self._saved_elapsed=0.
+
+    def after_step(self, step, save):
+        """Save once if due; return whether the caller must leave its loop.
+
+        Periodic saves continue the run. A failed save raises RuntimeFailure on
+        all ranks and leaves the schedule retryable at this same step. Backends
+        own partial-file cleanup; retry with a new destination if necessary.
+        """
+        enabled=any(value is not None for value in
+                    (self.interval_steps,self.interval_seconds,self.stop_after_seconds))
+        if not enabled:return False
+        comm=self.comm;decision=None
+        if comm is None or comm.rank==0:
+            error=None;elapsed=0.;stop=False;due=False
+            try:
+                if self.stopped:raise InputError('checkpoint schedule already stopped')
+                if type(step) is not int or step<self._previous_step:
+                    raise InputError('accepted step must be a nondecreasing integer')
+                elapsed=time.monotonic()-self._started
+                stop=self.stop_after_seconds is not None and elapsed>=self.stop_after_seconds
+                due=(stop or (self.interval_steps is not None and step-self._saved_step>=self.interval_steps)
+                     or (self.interval_seconds is not None and elapsed-self._saved_elapsed>=self.interval_seconds))
+            except Exception as exc:error=str(exc)
+            decision=(step,elapsed,due,stop,error)
+        if comm is not None:decision=comm.bcast(decision,root=0)
+        accepted,elapsed,due,stop,error=decision
+        if error:raise InputError(error)
+        if due:
+            if comm is not None:
+                steps=comm.allgather(step)
+                if any(value!=accepted for value in steps):
+                    raise InputError('checkpoint step differs between ranks')
+            error=None
+            try:
+                save(step)
+            except Exception as exc:error=type(exc).__name__+': '+str(exc)
+            errors=[error] if comm is None else comm.allgather(error)
+            if any(errors):raise RuntimeFailure('checkpoint save failed: '+str(errors))
+            self._saved_step=step
+            self._saved_elapsed=elapsed
+            self.last_saved_step=step
+            self.stopped=stop
+        self._previous_step=step
+        return stop

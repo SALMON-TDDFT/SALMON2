@@ -1,8 +1,8 @@
-# 高速PR版HSEの計算処理ハンドル
+# HSEの計算処理ハンドル
 
 [English](NATIVE_HANDLES.en.md)
 
-明示的にビルドした呼び出し元プログラムが管理するMPI高速PR計算プログラムは `sp_fast_hse_handle_protocol()==1` と
+明示的にビルドした呼び出し元プログラムが管理するMPIHSE計算プログラムは `sp_fast_hse_handle_protocol()==1` と
 `native_adapters/fast_hse_handles.h` のC／C++入口を提供します。同じMPI群・作業ディレクトリで、
 **一つの不変な物質モデル**から独立した複数の電子状態を作る範囲です。
 Pythonの旧 `create_state` は1プロセスにつき初期化1回のままです。
@@ -19,7 +19,7 @@ Pythonの旧 `create_state` は1プロセスにつき初期化1回のままで�
 | `handle_init(path,dt,capacity,symmetry,&h,j)` | プロセスで一度だけ物質を初期化し、最初の状態を返す。旧singleton初期化との併用はしない。 |
 | `model_new(dt,capacity,&h,j)` | model protocol1に対応する初期化済みモデルから、全状態終了後も再生成する。隠れたテンプレートは持たない。 |
 | `handle_new(model,dt,capacity,&h,j)` | 生存するモデルの元GSから独立状態を作る。呼び出し元の励起・時間発展履歴はコピーしない。 |
-| `handle_step(h,Aold,Anew,j,&energy)` | 選択した状態で従来の高速PR端点更新を実行する。 |
+| `handle_step(h,Aold,Anew,j,&energy)` | 選択した状態で従来のHSE端点更新を実行する。 |
 | `handle_info(h,&step,A,j)`、`handle_history(h,values)` | 受理済み端点と、ランク内の8要素の履歴診断値を返す。 |
 | `handle_transaction(h,mode)` | 0退避、1数値巻き戻し・ログ閉鎖、2再接続・flush・退避解放、3再接続。再接続失敗時は所有情報を保持する。再接続前に呼び出し元プログラムがログ内容を戻す。 |
 | `handle_checkpoint(h,path,mode)` | 0保存、1新規状態への直接読込、2候補作成、3確定、4取消。ランク別pathは異なってよい。従来の同一性・MPI分割・ファイル検証条件を守る。 |
@@ -37,7 +37,7 @@ dtは原子時間、AはCartesian **A/cの原子単位**、jは**電荷電流密
 （SALMON物質電流の負）、energyはHartree単位の全エネルギーです。
 Aoldは受理済み端点と厳密に一致させます。初期化・復元後はinfoで照会してください。
 x／y／zと回転・円偏光の入力を扱います。縮約時は実際の外場と保持対称性の整合が必要です。
-HSEは高速PR版だけです。同じ対称性の複数状態にはshared_symmetry_protocol1が必要です。異なる対称群の混在には追加の分離が必要です。
+同じ対称性の複数状態にはshared_symmetry_protocol1が必要です。異なる対称群の混在には追加の分離が必要です。
 
 [examples/native_fast_hse_handles.c](examples/native_fast_hse_handles.c) を、計算プログラムと
 同じMPI・ツールチェーンで明示的にコンパイルします。

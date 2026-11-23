@@ -77,6 +77,9 @@ def main():
     parser.add_argument('--resume', type=Path, help='reconstruct and continue a replay checkpoint')
     parser.add_argument('--direct-save-at', type=int, help='save internal states and stop at this step')
     parser.add_argument('--direct-resume', type=Path, help='protected internal-state restore without replay; candidate-capable runtime required')
+    parser.add_argument('--checkpoint-interval-steps',type=int,help='direct checkpoint every N accepted steps; continue')
+    parser.add_argument('--checkpoint-interval-seconds',type=float,help='periodic direct checkpoint in elapsed seconds; continue')
+    parser.add_argument('--stop-after-seconds',type=float,help='save a direct checkpoint and exit after this elapsed wall time')
     args = parser.parse_args()
     try:
         grid,points=_field_layout(args.field_shape)
@@ -113,6 +116,11 @@ def main():
     field_ranks = int(np.prod(args.field_grid))
     from mpi4py import MPI
     world = MPI.COMM_WORLD
+    from salmonpy.checkpointing import CheckpointSchedule
+    schedule=CheckpointSchedule(interval_steps=args.checkpoint_interval_steps,
+        interval_seconds=args.checkpoint_interval_seconds,stop_after_seconds=args.stop_after_seconds,comm=world)
+    if any(v is not None for v in (args.checkpoint_interval_steps,args.checkpoint_interval_seconds,args.stop_after_seconds)) and (args.save_at is not None or args.resume is not None):
+        parser.error('timed checkpoints use direct save/resume; do not combine with replay checkpoint options')
     # Coordinate output admission before any barrier/solver initialization.
     output = args.output.resolve()
     error = None
@@ -325,6 +333,9 @@ def main():
             sample=field.sample_planes()
             if sample:plane_history.append(sample)
         loop_start=_clock()
+        def timed_save(step):
+            from salmonpy.examples._direct_checkpoint import checkpoint
+            checkpoint(world,coupled,output/f'checkpoint-{step:08d}',signature,frames=history)
         for index in range(start, stop):
             frame = coupled.step_protected(step_targets) if step_targets is not None else coupled.step()
             # Whole-step guards have committed/released before any observer runs.
@@ -336,14 +347,17 @@ def main():
                     for key, values in restored.items():
                         np.testing.assert_array_equal(frame[key], values[index])
                 history.append(frame)
+            if schedule.after_step(index+1,timed_save):
+                stop=index+1
+                break
         loop_end=_clock()
         elapsed=None if loop_start is None or loop_end is None else loop_end-loop_start
         loop_seconds=world.allgather(elapsed)
-        if args.direct_save_at is not None:
+        if args.direct_save_at is not None and not schedule.stopped:
             from salmonpy.examples._direct_checkpoint import checkpoint, digest
             destination = output/'direct-checkpoint'
             checkpoint(world, coupled, destination, signature, frames=history)
-        if identity is not None and args.direct_save_at is None and args.save_at is None:
+        if identity is not None and args.direct_save_at is None and args.save_at is None and not schedule.stopped:
             arrays=destination=axes=info=None
             if world.rank==0:
                 destination=output/'point-response'
@@ -374,8 +388,8 @@ def main():
         session.close()
         if field is not None: field.close()
         context.close()
-        if args.direct_save_at is not None:
-            if world.rank == 0: print(output/'direct-checkpoint')
+        if args.direct_save_at is not None or schedule.stopped:
+            if world.rank == 0: print(output/f'checkpoint-{stop:08d}' if schedule.stopped else output/'direct-checkpoint')
             return
         if args.save_at is not None:
             if world.rank == 0:

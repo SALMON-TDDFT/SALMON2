@@ -15,13 +15,44 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 
 
+def verify_observation_segments(root):
+    """Read actual native files; never split/fabricate observations or run SCF."""
+    import hashlib
+    import numpy as np
+    from salmonpy.analysis import read_table
+    from salmonpy.outputs import read_spin_dynamics
+    root=Path(root)
+    record={}
+    for suffix in ('rt.data','rt_energy.data','rt_spin.data'):
+        paths=[]
+        for phase in ('save','resume','continuous'):
+            found=list((root/phase).rglob('*_'+suffix))
+            if len(found)!=1:raise AssertionError(f'exactly one {phase} {suffix} required')
+            paths.append(found[0])
+        joined=read_table(paths[:2]);control=read_table(paths[2])
+        if (joined.columns,joined.units)!=(control.columns,control.units):
+            raise AssertionError('observation definitions differ')
+        np.testing.assert_array_equal(joined.values,control.values)
+        if suffix=='rt_spin.data':
+            spin=read_spin_dynamics(paths[:2]);reference=read_spin_dynamics(paths[2])
+            for name in ('time','magnetization','pauli_current'):
+                np.testing.assert_array_equal(getattr(spin,name),getattr(reference,name))
+        record[suffix]={'exact':True,'rows':len(joined.values),
+            'times':joined.column('Time').tolist(),
+            'files':[{'path':str(p.resolve()),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in paths]}
+    return record
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('build',type=Path);p.add_argument('output',type=Path)
     p.add_argument('--potential',type=Path,required=True)
     p.add_argument('--size',type=int,choices=(1,2),default=1)
     p.add_argument('--worker',choices=('continuous','save','resume'))
+    p.add_argument('--verify-outputs-only',action='store_true',help='read an existing completed campaign; run no calculation and write no files')
     args=p.parse_args()
+    if args.verify_outputs_only:
+        print(json.dumps(verify_observation_segments(args.output),indent=2));return
     if args.worker is None:
         args.output.mkdir(parents=True,exist_ok=False)
         for phase in ('continuous','save','resume'):
@@ -36,6 +67,7 @@ def main():
         result={'status':'passed','MPI_ranks':args.size,'fresh_MPI_processes':3,
                 'electrons':18,'states':36,'temperature_k':300,'kmesh':[2,2,2],
                 'phases':phases,'currents_and_electron_numbers_exact':True,
+                'observation_segments':verify_observation_segments(args.output),
                 'scope':'same binary and topology; short unconverged-GS software probe, not physical convergence'}
         (args.output/'result.json').write_text(json.dumps(result,indent=2)+'\n')
         print('Ni SOC fresh-process TDDFT restart PASS',args.output/'result.json')

@@ -52,6 +52,21 @@ class OutputTests(unittest.TestCase):
             b.write_text(header.replace('Time[au]', 'Time[fs]')+'2 3\n')
             with self.assertRaises(ValueError): read_table([a,b])
             with self.assertRaises(ValueError): read_table([])
+            # Many short restart segments must incur just one final array join.
+            from unittest.mock import patch
+            parts = []
+            for i in range(12):
+                part = Path(tmp)/f'part-{i}.data'
+                part.write_text(header+f'{i} {i+1}\n')
+                parts.append(part)
+            concatenate = np.concatenate
+            with patch('salmonpy.analysis.np.concatenate', wraps=concatenate) as join:
+                joined = read_table(parts)
+                self.assertEqual(join.call_count, 1)
+            np.testing.assert_array_equal(joined.column('Time'), np.arange(12))
+            # Overlap may span several earlier segments, not just the last file.
+            parts[-1].write_text(header+'9 10\n10 11\n11 12\n12 13\n')
+            np.testing.assert_array_equal(read_table(parts).column('Time'), np.arange(13))
             names = ['Time','mag_x','mag_y','mag_z']+[
                 'spin_curr_'+s+'_'+d for s in ('0','x','y','z') for d in ('x','y','z')]
             header = '# '+' '.join(f'{i+1}:{n}[au]' for i,n in enumerate(names))+'\n'

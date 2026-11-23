@@ -33,7 +33,13 @@ def main():
     p.add_argument('--save-at',type=int)
     p.add_argument('--resume',type=Path)
     p.add_argument('--compare',type=Path)
+    p.add_argument('--checkpoint-interval-steps',type=int,help='direct checkpoint every N accepted steps; continue')
+    p.add_argument('--checkpoint-interval-seconds',type=float,help='periodic direct checkpoint in elapsed seconds; continue')
+    p.add_argument('--stop-after-seconds',type=float,help='save a direct checkpoint and exit after this elapsed wall time')
     args=p.parse_args();world=MPI.COMM_WORLD
+    from salmonpy.checkpointing import CheckpointSchedule
+    schedule=CheckpointSchedule(interval_steps=args.checkpoint_interval_steps,
+        interval_seconds=args.checkpoint_interval_seconds,stop_after_seconds=args.stop_after_seconds,comm=world)
     if args.steps<1:p.error('positive steps required')
     if args.save_at is not None and not 0<args.save_at<args.steps:p.error('save-at must lie inside the run')
     output=args.output.resolve()
@@ -79,10 +85,15 @@ def main():
             stop=args.save_at or args.steps
             from salmonpy.native_steps import native_step_targets
             targets=native_step_targets(coupled)
-            for _ in range(start,stop):
+            def timed_save(step):
+                checkpoint(world,coupled,output/f'checkpoint-{step:08d}',signature,frames=history)
+            for index in range(start,stop):
                 frame=coupled.step_protected(targets)
                 if frame is not None:history.append(frame)
-            if args.save_at:checkpoint(world,coupled,output/'checkpoint',signature,frames=history)
+                if schedule.after_step(index+1,timed_save):
+                    stop=index+1
+                    break
+            if args.save_at and not schedule.stopped:checkpoint(world,coupled,output/'checkpoint',signature,frames=history)
         finally:
             if response is not None:response.close()
             if field is not None:field.close()
@@ -93,7 +104,7 @@ def main():
             with np.load(args.compare/'history.npz') as reference:
                 for key,values in arrays.items():np.testing.assert_array_equal(values,reference[key][start:stop])
         (output/'result.json').write_text(json.dumps({'status':'pass','steps':stop,'restored_step':start,
-            'native_steps_this_job':stop-start,'replayed_steps':0,'ranks':world.size,
+            'stopped_for_checkpoint':schedule.stopped,'native_steps_this_job':stop-start,'replayed_steps':0,'ranks':world.size,
             'separate':args.separate,'point_materials':assembly.record()['point_materials'] if 'point_materials' in assembly.record() else {str(k):b.key for k,b in assembly.bindings.items()}},indent=2)+'\n')
         print('LD/SBE/different-HSE layer assembly and protected continuation PASS')
 

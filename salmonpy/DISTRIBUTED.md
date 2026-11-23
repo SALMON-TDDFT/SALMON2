@@ -1,4 +1,4 @@
-# 二階層MPI応答の基盤（実験的API）
+# 二階層MPI応答（実験的API）
 
 [English](DISTRIBUTED.en.md)
 

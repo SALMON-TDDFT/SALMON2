@@ -335,7 +335,7 @@ Use `mpi_mixed_native --direct-save-at 64` to stop at64 and save rank-local stat
 
 Saved state includes solver E/H/PML, LD P/J/Q and old fields, electronic orbital buffers/density/potentials/Hartree/RT histories/A/current, SBE density matrix, and Python integrated A/lagged current/clocks. Initialization rebuilds static coefficients/resources before loading dynamic arrays. A completed file inventory with SHA256 checks is required; changed inputs/library/topology are rejected.
 
-Scope is periodic middlepoint propagation with the same environment/decomposition: PZ, TB-mBJ (automatic/fixed cval), Libxc-PZ/PBE. Libxc requires an explicitly built compatible Fortran/C library. Generic custom-calculation implementation persistence, changed MPI partitions and other XC configurations require further implementation/validation; fast-PR HSE has a separate entry below. Protected candidate restore is now the default and preserves originals on handled staging failures; the explicit unprotected route has no rollback guarantee. Allow storage and memory for full states.
+Scope is periodic middlepoint propagation with the same environment/decomposition: PZ, TB-mBJ (automatic/fixed cval), Libxc-PZ/PBE. Libxc requires an explicitly built compatible Fortran/C library. Generic custom-calculation implementation persistence, changed MPI partitions and other XC configurations require further implementation/validation; HSE has a separate entry below. Protected candidate restore is now the default and preserves originals on handled staging failures; the explicit unprotected route has no rollback guarantee. Allow storage and memory for full states.
 
 Direct checkpoint format v2 validates XC names, derivative settings and input cval while retaining freshly initialized Libxc handles. Preserve runtime/checkpoint hashes. The sample RUNTIME argument also accepts an explicitly built/audited serial SALMON executable for reference validation; do not use an MPI binary as this child process. Use matching GS and RT functional inputs for each XC.
 
@@ -347,9 +347,9 @@ For TB-mBJ (automatic coefficient/fixed cval1.2) and Libxc-PBE, the65 resumed st
 
 Checksum verification on direct restart is partitioned across ranks. Every rank must read the same completed manifest and all checks must succeed before state restoration. Payloads must reside in one shared directory visible with identical contents to all ranks; different node-local copies are outside this contract. `result.json` records per-rank file/byte counts in `checkpoint_validation`.
 
-## Fast-PR HSE in outer MPI / FDTD coupling
+## HSE in outer MPI / FDTD coupling
 
-`FastHSEMaterialProvider` / `FastHSEResponseBackend` connect a dedicated serial fast-PR worker to the existing A/c→charge-current j contract. FDTD keeps its solver MPI entry, LD stays on field ranks, and each HSE point's single-rank group owns an independent child process. This is outer MPI coupling, not internally parallel HSE. calling program cwd is unchanged; import starts no MPI, build or download.
+`FastHSEMaterialProvider` / `FastHSEResponseBackend` connect a dedicated serial HSE worker to the existing A/c→charge-current j contract. FDTD keeps its solver MPI entry, LD stays on field ranks, and each HSE point's single-rank group owns an independent child process. This is outer MPI coupling, not internally parallel HSE. calling program cwd is unchanged; import starts no MPI, build or download.
 
 ```python
 from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
@@ -363,7 +363,7 @@ binding = MaterialBinding(
 # Pass this binding to existing assemble_native_layers / ResponseSession.
 ```
 
-Explicitly link the worker from an audited fast-PR build into a new external directory. Conventional HSE is not an engine option.
+Explicitly link the worker from an audited HSE build into a new external directory. Conventional HSE is not an engine option.
 
 ```sh
 python tools/build_fast_hse_worker.py FAST_PR_BUILD_JSON NEW_WORKER_DIRECTORY
@@ -380,11 +380,11 @@ POSIX macOS/Linux worker uses /dev/stdin; measured here on Apple Silicon. Orbita
 
 Worker inputs must use atomic units (unit_system=au), no internal pulses: ae_shape1=none or explicit zero impulse, ae_shape2=none, trans_longi=tr. Double driving by an internal pulse and external FDTD A is rejected. State time is accepted step×dt.
 
-## Fast-PR HSE with internal k-point MPI
+## HSE with internal k-point MPI
 
-`salmonpy.fast_hse_mpi.NativeFastHSEBackend` runs fast-PR HSE collectively on an explicitly supplied material communicator. The calling program initializes MPI and retains ownership of finalization. Import does not load MPI or compile. Each group owns one point and one solver initialization per process, on the main thread. The call to the Fortran/C library temporarily changes the process working directory: do not use other threads that access relative paths.
+`salmonpy.fast_hse_mpi.NativeFastHSEBackend` runs HSE collectively on an explicitly supplied material communicator. The calling program initializes MPI and retains ownership of finalization. Import does not load MPI or compile. Each group owns one point and one solver initialization per process, on the main thread. The call to the Fortran/C library temporarily changes the process working directory: do not use other threads that access relative paths.
 
-Prepare a new explicit-routing source with `tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing`, then explicitly build it with `tools/build_fast_hse_mpi.py PREPARED_SOURCE NEW_OUTPUT --jobs 2 --cmake-arg=...`. Use matching MPI managed by the calling program Fortran/C compilers, OpenBLAS/LAPACK, FFTW and optional Libxc paths as in the runtime build guide. This build requires MPI/HSE and rejects GPU, Poisson-FFTW, ScaLAPACK and EigenExa configurations. The validation record binds source and adapter hashes. Only the pinned fast-PR configuration is an engine option.
+Prepare a new explicit-routing source with `tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing`, then explicitly build it with `tools/build_fast_hse_mpi.py PREPARED_SOURCE NEW_OUTPUT --jobs 2 --cmake-arg=...`. Use matching MPI managed by the calling program Fortran/C compilers, OpenBLAS/LAPACK, FFTW and optional Libxc paths as in the runtime build guide. This build requires MPI/HSE and rejects GPU, Poisson-FFTW, ScaLAPACK and EigenExa configurations. The validation record binds source and adapter hashes. Only the pinned HSE configuration is an engine option.
 
 ```python
 from salmonpy.fast_hse import FastHSEMaterialProvider
@@ -405,7 +405,7 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.example
 
 This assigns field1,SBE1,HSE2; both LD materials stay local to the field rank. Use three separate jobs with the same arguments: continuous, `--direct-save-at 127`, then `--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT`. Rank-local HSE shards include group size/rank and k ranges; all shards are checked before committing numerical state. Fresh initialization recreates static exchange/FFT resources, not elapsed propagation. Restore requires the same binary, bundle, communicator topology and shared archive directory. Early invalid/truncated shards are rejected before numerical commit. Default protected restore preserves original states on handled staging failures. Explicit unprotected restore and unhandled solver failures have no retry guarantee.
 
-Measured on Apple Silicon with a synthetic 8³ microscopic grid and 4×1×1 k mesh: Taylor/learned PT-CN, field1+SBE1+HSE2, 256 steps at dt=.001, direct split127. All A/c,E,j history arrays matched bit-for-bit after129 resumed calls. Against independent serial fast-PR response, maximum HSE current differences were4.07e-16 and1.71e-16 au. These are connection/restart regressions, not material convergence or scaling certification. Evidence: `docs/fast-hse-kmpi-validation-2026-11-16.md`.
+Measured on Apple Silicon with a synthetic 8³ microscopic grid and 4×1×1 k mesh: Taylor/learned PT-CN, field1+SBE1+HSE2, 256 steps at dt=.001, direct split127. All A/c,E,j history arrays matched bit-for-bit after129 resumed calls. Against independent serial HSE response, maximum HSE current differences were4.07e-16 and1.71e-16 au. These are connection/restart regressions, not material convergence or scaling certification. Evidence: `docs/fast-hse-kmpi-validation-2026-11-16.md`.
 
 During layer planning, calculation implementations may declare `supported_group_sizes=(1,2)`: a nonempty tuple of unique positive integers. Unsupported rank counts are rejected before MPI or initial-state preparation. Fast HSE declares `(1,2)`. user-written calculation implementations without this optional declaration retain existing execution/decomposition checks. This is not certification of numerical/restart capabilities and ResponseSession also validates it and agrees declarations across all groups before preparing materials.
 
@@ -415,7 +415,7 @@ Capability and MPI compatibility checks use the common `salmonpy.checkpointing` 
 
 solver mixed field/electronic/LD/SBE persistence also uses CheckpointTarget/execute_checkpoint. Formats and solver-direct/2 metadata are retained; callback failures stop subsequent slots, and completion-publication errors are agreed on all ranks.
 
-The ordinary sample's `--direct-resume` defaults to protected restoration of field-local LD, SBE, solver TDDFT/fast-PR HSE and Python clocks/currents after all groups prepare candidates. Old ABIs/direct-only targets are rejected before LOAD, without fallback. The ordinary example has no unprotected-restore option. See [CHECKPOINTING.en.md](CHECKPOINTING.en.md) for collective continuation/retry and failure exclusions.
+The ordinary sample's `--direct-resume` defaults to protected restoration of field-local LD, SBE, solver TDDFT/HSE and Python clocks/currents after all groups prepare candidates. Old ABIs/direct-only targets are rejected before LOAD, without fallback. The ordinary example has no unprotected-restore option. See [CHECKPOINTING.en.md](CHECKPOINTING.en.md) for collective continuation/retry and failure exclusions.
 
 `--memory-budget-gib 4` supplies an aggregate4GiB advisory budget. Live/candidate coexistence is reported and excess never stops the run. See [MEMORY.en.md](MEMORY.en.md).
 
@@ -457,9 +457,9 @@ Supported: periodic, unpolarized, fixed-ion middlepoint PZ, automatic/fixed TB-m
 
 This is a TDDFT-group guarantee, not automatic rollback of an entire mixed FDTD step whose other components may have advanced. MPI/process death, allocation failures, uncontrolled third-party STOP, deep initialization STOP and output-device failures are excluded. One-rank fault injection exists only in a separately compiled `SALMONPY_RECOVERY_TESTING` build; production builds export no injection entry.
 
-## Deep numerical recovery for fast-PR HSE
+## Deep numerical recovery for HSE
 
-New libraries for `NativeFastHSEBackend` declare `sp_fast_hse_recovery_protocol() == 1`. The guarded configuration is periodic, unpolarized, fixed-ion fast-PR HSE06 with Taylor4 / learned PT-CN and internal k-only MPI1/2. Conventional HSE is not a fallback.
+New libraries for `NativeFastHSEBackend` declare `sp_fast_hse_recovery_protocol() == 1`. The guarded configuration is periodic, unpolarized, fixed-ion HSE06 with Taylor4 / learned PT-CN and internal k-only MPI1/2. Conventional HSE is not a fallback.
 
 Each step backs up electronic arrays and ACE, factor/PT-CN histories, exchange caches and counters. FFT plans, MPI communicators and other owning resources are not copied. Collective checks cover finite orbitals, density, Hartree, XC and endpoints, plus handled ACE operator errors, PT-CN convergence/Gram/retraction checks and history updates. Handled failures directly restore accepted numerical state without replaying propagation or exchange history. A, clocks, current and energy remain unchanged; failed attempts append no ordinary RT records. Diagnostic logs may remain.
 
@@ -483,7 +483,7 @@ Run `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` with one/two ranks, OM
 
 Audited solver aggregate protection uses the separate protocol and `--protect-steps` described in [NATIVE_STEPPING.en.md](NATIVE_STEPPING.en.md). Use `--hse-bundle` for distinct HSE initial data and `examples/mixed_tddft_hse_layers.json` for simultaneous TDDFT/HSE.
 
-## Fast-PR HSE symmetry opt-in
+## HSE symmetry opt-in
 
 NativeFastHSEBackend(...,allow_symmetry=True) is bounded to internal-k1/2,
 Taylor/PT-CN with matching mode capability. The ordinary mixed sample explicitly selects --hse-symmetry
@@ -499,19 +499,19 @@ Reduced-k symmetry now supports two internal k ranks and same-partition direct r
 
 Memory/rank budgets, recommended scale and physical-accuracy advice are advisory: they do not block executable work. Inputs and timesteps are not automatically changed. Unreadable/corrupt files, incompatible dimensions or actual MPI partitions, and known unsupported conditions that stop solver execution remain errors. Lack of validation alone is not a reason to refuse a calculation.
 
-The fast-PR input checking checks warn on finite occupations outside the expected range or a sum inconsistent with the electron count, without clipping or renormalizing them. Startup checks the orbital byte length without adding a full finiteness scan of potentially huge wavefunction files at every initialization. This does not guarantee detection of NaN orbitals before solver startup. Legacy GS headers cannot authenticate physical GS identity.
+The HSE input checking checks warn on finite occupations outside the expected range or a sum inconsistent with the electron count, without clipping or renormalizing them. Startup checks the orbital byte length without adding a full finiteness scan of potentially huge wavefunction files at every initialization. This does not guarantee detection of NaN orbitals before solver startup. Legacy GS headers cannot authenticate physical GS identity.
 
 SCF non-convergence is advisory. Finite saved states remain usable downstream; `GroundStateResult.converged=False` and saved residual/tolerance/iterations identify unconverged results.
 
-Before fast-PR solver startup, input checking checks generated k meshes against retained symmetry, representative counts/weights, species pseudopotential references and GS header/occupation/orbital byte lengths. KY parsing accepts continuation records, unused trailing columns and implicit signed exponents, following solver list-directed input. Other recognized PP formats receive reference/readability checks; solver owns content parsing. Supported legacy GS records use solver-endian4-byte markers/integers/logicals, binary64 occupations and one global real64/complex128 orbital stream. Arbitrary `file_kw`, unfolding and even Gamma endpoint meshes remain current fast-PR configuration limitations. The original GS producer rank count need not match the new solver group; this differs from direct RT checkpoint partition compatibility.
+Before HSE solver startup, input checking checks generated k meshes against retained symmetry, representative counts/weights, species pseudopotential references and GS header/occupation/orbital byte lengths. KY parsing accepts continuation records, unused trailing columns and implicit signed exponents, following solver list-directed input. Other recognized PP formats receive reference/readability checks; solver owns content parsing. Supported legacy GS records use solver-endian4-byte markers/integers/logicals, binary64 occupations and one global real64/complex128 orbital stream. Arbitrary `file_kw`, unfolding and even Gamma endpoint meshes remain current HSE configuration limitations. The original GS producer rank count need not match the new solver group; this differs from direct RT checkpoint partition compatibility.
 
-Fast-PR HSE receives Cartesian three-component A/c, including x/y/z and circular polarization, without a fixed-z requirement. Reduced-k states check the actual vector against retained symmetry before each update; use a matching full-k initial state when no suitable group exists. The corrected core also supports general-cell symmetry initialization. See the [symmetry guide](FAST_HSE_SYMMETRY.en.md).
+HSE receives Cartesian three-component A/c, including x/y/z and circular polarization, without a fixed-z requirement. Reduced-k states check the actual vector against retained symmetry before each update; use a matching full-k initial state when no suitable group exists. The corrected core also supports general-cell symmetry initialization. See the [symmetry guide](FAST_HSE_SYMMETRY.en.md).
 
 ### Internal RT ownership (development)
 
 Protected-step numerical buffers, output metadata and pending direct-restore
 candidates now belong to their `tddft_context`, rather than a process singleton.
-For internal non-symmetric fast-PR contexts sharing immutable model inputs and
+For internal non-symmetric HSE contexts sharing immutable model inputs and
 one communicator, one context's rollback, staged commit/cancel or close does not
 consume another's candidate. Different selected dt/capacity and three-component
 waveforms can be interleaved. Reopened output streams acquire available units;
@@ -592,7 +592,7 @@ New directory-scope3 runtimes avoid changing the calling program working directo
 
 Standard TDDFT called directly from Python shutdown releases its owned RT output streams and child communicators without closing a calling program-owned file on Fortran unit30. This is fixed in newly built runtimes; prepare a matching runtime explicitly rather than altering fixed binaries. This does not establish general I/O-failure recovery or threaded concurrency.
 
-New runtimes keep the initialization-assigned MPI child owner active during standard TDDFT and fast-PR HSE propagation. Lazily created child communicators then retire with that state, preserving siblings and MPI managed by the calling program. Existing MPI decomposition, caller API and numerical checkpoint format are unchanged. This does not establish ownership of every resource, MPI-failure recovery or threaded concurrency.
+New runtimes keep the initialization-assigned MPI child owner active during standard TDDFT and HSE propagation. Lazily created child communicators then retire with that state, preserving siblings and MPI managed by the calling program. Existing MPI decomposition, caller API and numerical checkpoint format are unchanged. This does not establish ownership of every resource, MPI-failure recovery or threaded concurrency.
 
 New standard TDDFT singleton runtimes also isolate init/step/close timers from the calling program. With legacy timer protocol1, `state.timing_seconds` returns rank-local completed intervals, outside the numerical checkpoint. Older runtimes retain normal calculations; only this query requires the additive capability. Fast-HSE singleton timing has its corresponding legacy timer capability.
 
@@ -1365,7 +1365,7 @@ Synthetic regression covers interleaved checked/performance states, independent
 controls, PZ/TB-mBJ/Libxc-PZ/PBE, heterogeneous PZ↔TB-mBJ and Libxc-PZ↔PBE, and
 1/2 internal ranks. This is not a real-material convergence or speed benchmark.
 
-## Fast-PR HSE performance mode
+## HSE performance mode
 
 `NativeFastHSEBackend(..., execution_mode="performance")` selects the
 caller-managed MPI route; the default is `"checked"`. The choice
@@ -1457,7 +1457,7 @@ Array shape, ownership, step indices, and communication order remain checked. Th
 
 Outer performance mode is also tested with actual E/H FDTD, built-in LD, and two TDDFT points: 3/6 ranks, 1/2 field partitions and 1/2 ranks per material group. All 96 steps of A/E/j match uninterrupted checked execution exactly after explicit protected rollback/retry in checked and performance modes. Existing synthetic initial orbitals test integration, not material convergence or speedup.
 
-For fast-PR HSE, select `NativeFastHSEBackend(..., execution_mode="performance")` independently of `ResponseSession(..., execution_mode="performance")`. Select `NativeEHField(..., execution_mode="performance")` separately for the field. Explicit `step_protected(targets)` retains internal backups of field, LD and HSE states for rollback/retry after a returned exception. It does not recover a terminated process or broken MPI. Reduced-k calculations still require the applied field to preserve the declared symmetry.
+For HSE, select `NativeFastHSEBackend(..., execution_mode="performance")` independently of `ResponseSession(..., execution_mode="performance")`. Select `NativeEHField(..., execution_mode="performance")` separately for the field. Explicit `step_protected(targets)` retains internal backups of field, LD and HSE states for rollback/retry after a returned exception. It does not recover a terminated process or broken MPI. Reduced-k calculations still require the applied field to preserve the declared symmetry.
 
 ### A/E/H transport performance mode
 
@@ -1465,7 +1465,7 @@ Pass `ResponseSession(..., field_contracts=contracts, execution_mode="performanc
 
 Molecular performance mode also supports coordinated direct disk save/resume of total-field FDTD, own-vacuum reference FDTD and the molecule. Separate MPI jobs verify restored Fortran step indices and prohibit propagation during restore. See [molecular coupling](DIPOLE_RADIATION.en.md) for conditions and diagnostic output keys.
 
-## Choosing process-isolated fast-PR HSE
+## Choosing process-isolated HSE
 
 `FastHSEResponseBackend(..., execution_mode="performance")` selects a fixed per-state mode; the default is `"checked"`. Keep this route when the host needs isolation from Fortran process state, working-directory ownership or MPI/main-thread constraints. It uses one serial CPU child per material point. Prefer `NativeFastHSEBackend` for internal MPI or reduced-k symmetry. The serial process route already requires full k points: reduced inputs cannot initialize, and performance mode does not extend that physical scope.
 

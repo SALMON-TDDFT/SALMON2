@@ -1,6 +1,6 @@
 # Retained solver ground states
 
-> Current build layout (2026-11-19): ordinary XC and fast PR HSE both build
+> Current build layout (2026-11-19): ordinary XC and HSE both build
 > from runtime/sources/solver. Below, standard/ordinary identifies the API
 > capability configuration, not a second maintained source tree. Default builds disable HSE.
 
@@ -65,7 +65,7 @@ management slot high-water. Closing one owner preserves siblings; closing all
 returns live children to zero. Retained management slots are distinct from leaks.
 
 Python scope is periodic full-k unpolarized fixed-ion PZ/Libxc-PZ/PBE and HSE06
-with a declared fast-PR compute runtime. HSE uses k-only MPI by default; explicit Gamma orbital GS is described below. See [Ni validation](NICKEL_SOC.en.md) for the added SOC PBE SCF independence/restart scope. +U/DC GS,
+with a declared HSE compute runtime. HSE uses k-only MPI by default; explicit Gamma orbital GS is described below. See [Ni validation](NICKEL_SOC.en.md) for the added SOC PBE SCF independence/restart scope. +U/DC GS,
 full SCF checkpoint/restart and threaded GS/TDDFT are separate; sequential
 GS/RT interleaving and portable array export are described below.
 One solver electronic attachment lifetime per process. Info, arrays and close are
@@ -445,11 +445,11 @@ Each state keeps its material_id; output JSON records unknowns as null. Testing
 uses synthetic inputs and validates state independence, not physical convergence.
 
 
-### Retained GS to fast-PR HSE response
+### Retained GS to HSE response
 
 A newly built fast runtime with `gs_abi.memory_rt == 1` and
 `sp_fast_hse_memory_gs_protocol() == 1` connects `gs.tddft_model(dt=..., max_steps=...)`
-to the fast-PR HSE registry. This slice requires HSE06, atomic units, a compatible
+to the HSE registry. This slice requires HSE06, atomic units, a compatible
 periodic scalar GS and k-only one/two-rank groups. Existing standard GS→TDDFT
 support is unchanged; ordinary PZ/TB-mBJ/Libxc RT is available in the HSE-disabled fast configuration below.
 
@@ -493,7 +493,7 @@ restart without replay. These are implementation checks, not physical convergenc
 
 ### Ordinary XC on the fast source configuration (HSE disabled)
 
-The same prepared fast-PR source can now build a normal CPU MPI managed by the calling program library:
+The same prepared HSE source can now build a normal CPU MPI managed by the calling program library:
 
 ```sh
 python tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing
@@ -558,7 +558,7 @@ PZ/Libxc-PZ and Libxc-PBE with orbital/spatial MPI2. Currents after source GS cl
 match independent execution exactly. A direct checkpoint restored halfway through
 16 steps continues exactly, without replaying time propagation.
 
-### Computed GS with fast-PR HSE
+### Computed GS with HSE
 
 New fast-HSE builds declare run in gs_abi.modes. Older import-only builds are not
 silently upgraded. Pass DFT(..., xc="hse06") to NativeGSBackend session.run with
@@ -601,7 +601,7 @@ than turning a completed calculation into a failure.
 The fast source now emits gs_status.dat (SALMONPY_GS_V1, Hartree) and gs_forces.dat
 (SALMONPY_FORCES_V1, Hartree/Bohr), preserving SCF/force operation order. solver
 HSE and CLI produce these reports too; batch DFT.run HSE selection still requires
-fast-PR provenance integration, so use NativeGSBackend for HSE. The existing
+HSE provenance integration, so use NativeGSBackend for HSE. The existing
 dft_si sample accepts --no-restart and --max-iterations for this workflow.
 
 ### NLCC migration before solver-source consolidation
@@ -639,7 +639,7 @@ at the user's request. No GS datasets are collected by the validation probes.
 ## Active SCF pause and in-memory snapshots
 
 New explicitly built CPU runtimes expose SCF protocol1 for periodic,
-unpolarized fixed-ion PZ/Libxc-PZ/PBE (with or without explicit symmetry), and fast-PR HSE06
+unpolarized fixed-ion PZ/Libxc-PZ/PBE (with or without explicit symmetry), and HSE06
 (full k or the reduced-k scope below). Existing run() remains a
 full SCF call. A steps budget pauses only at an accepted iteration boundary:
 
@@ -675,7 +675,7 @@ remaining numerical copies. Complete copies consume memory. This entry is not a
 disk checkpoint, pickle format or process-restart/repartitioning mechanism. Text
 logs/output positions are not rewound. Invalid/mixed snapshot selections reject
 before numerical writes; general OOM/initialization/process-failure atomicity is
-not established. SOC/+U/DC/ionic-motion continuation is not connected yet. Fast-PR HSE06
+not established. SOC/+U/DC/ionic-motion continuation is not connected yet. HSE06
 requires its compute-capable HSE runtime and k-only MPI decomposition.
 Old runtimes remain usable for ordinary run/load; new APIs require a matching
 explicitly built runtime and never trigger an implicit build.
@@ -688,10 +688,10 @@ The sample performs a small execution check with GS restart output disabled.
 It compares continued/restored numerical values in RAM and saves scalar evidence
 only; it does not collect GS wavefunction/density datasets.
 
-### Fast-PR HSE06 SCF snapshots
+### HSE06 SCF snapshots
 
 The same run(steps=...), snapshot/restore and continue_scf entry supports full-k
-CPU fast-PR HSE06, including Gamma and internal k-MPI. Select
+CPU HSE06, including Gamma and internal k-MPI. Select
 `decomposition=(comm.size, 1, 1, 1, 1)` and a matching HSE build; the ordinary
 HSE-disabled runtime cannot execute this configuration. There is no slow HSE fallback.
 
@@ -741,7 +741,7 @@ Multi-component direct callbacks remain non-atomic.
 explicit fractional rotations and translations. operations has shape (n,3,4):
 the first three columns are the rotation and the fourth is the fractional shift.
 Data are copied and immutable. No symmetry discovery, cell standardization or
-network lookup occurs. solver fast-PR input checking retains the existing fractional
+network lookup occurs. solver HSE input checking retains the existing fractional
 signed-permutation subset and checks that cell/grid/atoms/k stars are compatible.
 The user chooses a subgroup preserving the actual crystal and, for later RT,
 the applied field; this does not impose a global z-polarization restriction.
@@ -760,7 +760,7 @@ calculation = replace(calculation, symmetry=SymmetryOperations(ops, directions="
 inputs write these same owned bytes; MPI checks asset content before entry.
 Symmetry hashes enter model/warm-start identity and assets follow GS→HSE TDDFT.
 Default symmetry=None preserves existing input text and calculation paths.
-Reduced-k solver SCF currently uses CPU fast-PR HSE, full q, one/two internal
+Reduced-k solver SCF currently uses CPU HSE, full q, one/two internal
 k ranks. Pause/continue/snapshot, direct restore and protected numerical staging
 use the same APIs as full k. Explicit symmetric PZ/Libxc-PZ/Libxc-PBE SCF uses the same APIs.
 Internal k-MPI2 and spatial-MPI2 controls verify interleaved-material isolation,
@@ -837,7 +837,7 @@ actually performed in the current process; prior counters remain in the manifest
 FFT handles, pointers and MPI communicator IDs are not serialized. The HSE FFT
 calculation routine is prepared when the next natural iteration needs it, without replay.
 
-PZ/Libxc-PZ/PBE and fast-PR HSE controls cover k-MPI2, ordinary-XC spatial-MPI2,
+PZ/Libxc-PZ/PBE and HSE controls cover k-MPI2, ordinary-XC spatial-MPI2,
 C2 reduced k and the PBE-prestage→HSE boundary: save at3 plus5 iterations in a fresh
 process exactly matches continuous8. A corrupt rank file is rejected before
 state creation; solver read failure preserves the existing state. These are
@@ -926,7 +926,7 @@ them, and solver input checking/refusal remains in effect.
 ### Changing k-MPI rank count at restart
 
 A matching new runtime supports periodic scalar fixed-ion PZ/Libxc-PZ/Libxc-PBE
-and fast-PR HSE06 SCF restart between k-only layouts; measured controls cover1→2 and2→1 ranks.
+and HSE06 SCF restart between k-only layouts; measured controls cover1→2 and2→1 ranks.
 Default restart still requires the same decomposition. Opt in explicitly:
 
 ```python
@@ -954,7 +954,7 @@ initialization with a different decomposition may produce different orbitals.
 Initialization itself is unchanged; a different guess is not the same initial condition. These are execution controls, not physical
 grid/k convergence certification.
 
-Fast-PR HSE additionally reindexes dense ACE factors, source/action caches and
+HSE additionally reindexes dense ACE factors, source/action caches and
 per-k factor/PT-CN histories in Fortran. Full/reduced-k and PBE pre-stage cuts
 cover1↔2 ranks. Packed/distributed ACE and changed-runtime migration remain outside this entry;
 HSE spatial restart uses the explicit Gamma entry below. Common checkpoint_target/protected restore still requires unchanged
@@ -984,10 +984,10 @@ Fast HSE orbital repartition uses the explicit protocol2 entry below. Changes be
 Ordinary spatial/mixed restart uses the entries below; changed-runtime migration remains unsupported.
 Default and common protected restore still require identical MPI layouts.
 
-### Fast-PR HSE Gamma orbital SCF: same-layout direct restart
+### HSE Gamma orbital SCF: same-layout direct restart
 
 A new explicitly built runtime declaring `sp_gs_hse_orbital_protocol()` version1 or2
-accepts retained fast-PR HSE06 GS with `decomposition=(1, comm.size, 1, 1, 1)`
+accepts retained HSE06 GS with `decomposition=(1, comm.size, 1, 1, 1)`
 and Gamma-only sampling. The CPU full-support configuration is periodic, unpolarized,
 fixed-ion, orthogonal-cell, integer fully occupied spin pairs, with no symmetry,
 localization or pair-screening approximation. These are the existing Gamma
@@ -1008,7 +1008,7 @@ uses the explicit entry below.
 Two-rank fresh-process continuation and a cut during the PBE pre-stage are
 execution controls; they do not establish physical grid/k convergence.
 
-### Changing fast-PR HSE orbital rank count
+### Changing HSE orbital rank count
 
 Use the explicit, immutable calculation implementation option `hse_orbital=True` on both saving and
 restoring hosts, including one rank. It selects the same full-support Gamma
@@ -1086,7 +1086,7 @@ Older saves without grid_bounds still support same-layout restoration.
 HSE spatial GS uses the explicit entry below. ordinary mixed migration uses the entry below;
 changed-runtime portability remains unsupported; common protected restore still keeps the same layout.
 
-### Fast-PR HSE spatial rank-count restart
+### HSE spatial rank-count restart
 
 Use immutable `hse_spatial=True` on both hosts, including one rank, to select the
 same full-support CPU Gamma collective exchange algorithm. It excludes
@@ -1168,7 +1168,7 @@ Use `--save-scf NEW_CHECKPOINT`, then `--restart CHECKPOINT --repartition` with
 the new MPI count/layout. Fast HSE uses the Gamma protocol2 entry below; changed-runtime portability and
 common protected restore with changed topology remain outside this entry.
 
-### Fast-PR HSE Gamma orbital × spatial SCF restart
+### HSE Gamma orbital × spatial SCF restart
 
 Use `hse_spatial=True` for both source and target hosts. Compute protocol
 `sp_gs_hse_spatial_protocol()==2` permits simultaneous orbital and Cartesian
@@ -1199,7 +1199,7 @@ continuous8 at unchanged rtol1e-9/atol1e-10. Late donor read failures preserve
 original state/files. Independent mixed owners and previous-runtime pure orbital/
 spatial HSE and ordinary-XC controls verify the retained arithmetic.
 
-### Fast-PR HSE full-k × spatial SCF bridge
+### HSE full-k × spatial SCF bridge
 
 Select `NativeGSBackend(..., decomposition=(K,1,X,Y,Z), hse_kspace=True)` on
 both hosts, including a one-rank source. The explicit runtime must declare
@@ -1341,7 +1341,7 @@ numerical meaning requires a calculation state-revision update and migration/ret
 Legacy contracts without codec information require an explicitly validated exact
 legacy-source pair. Input, assets, material ID and file-integrity checks remain.
 
-The initial ordinary/fast-PR HSE declarations cover only addition of a read-only
+The initial ordinary/HSE declarations cover only addition of a read-only
 state-revision export: arithmetic and serialized fields are unchanged. They do
 not certify arbitrary solver updates or cross-platform migration. Inspect
 `scf_restart_origin["compatibility_declaration"]` for the accepted declaration.
@@ -1390,7 +1390,7 @@ Python FDTD and older-runtime compatibility paths may still switch directories. 
 remain sequential on the main thread; this is not concurrent solver reentrancy.
 
 GS and TDDFT share path input checking/cleanup. Retained GS accepts scope1/2;
-standard TDDFT and fast-PR HSE require scope2 for their expanded RT file paths.
+standard TDDFT and HSE require scope2 for their expanded RT file paths.
 
 
 ## Review pause for unconverged SCF (2026-11-21)
@@ -1435,7 +1435,7 @@ policy of automatically proceeding after an unconverged-SCF warning.
 occupations by value from a live GS in the same session. Atomic positions may
 change; cell, grid, k mesh, electron/band counts, XC, pseudopotentials and MPI
 layout must match. Density and potentials are recomputed; mixing history and
-fast-PR HSE resources start fresh. This is not exact mixing-history restart.
+HSE resources start fresh. This is not exact mixing-history restart.
 Source and receiver are independent: the receiver can continue after its source
 advances or closes. The temporary seed is freed after initialization, but include
 it in peak initialization memory.

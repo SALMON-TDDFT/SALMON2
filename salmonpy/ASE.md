@@ -52,7 +52,7 @@ Fermi準位や価電子帯上端を推定して設定することはしません
 - `GX,MR` のコンマによる区間の切れ目、対称点名、セルをASE結果に保持します。
   計算単位に合わせた末尾の余剰点だけを確認して除きます。
 - `ase-bands.json` はASEの `BandStructure` JSON、`ase-input.json` は構造・経路・
-  エネルギー基準・換算係数の記録です。`native/` と `result/` も従来どおり保存します。
+  エネルギー基準・換算係数の記録です。`native/` と `result/` も保存します。
 - `to_ase_band_structure(bands, path, reference_ev=...)` は既存のSALMONpy結果を
   変換するだけの入口です。実際のCartesian kとASE側のセル・k点が一致しなければ拒否します。
 - ASEの可変な構造・経路・エネルギー配列をコピーし、呼び出し側のオブジェクトを変更しません。

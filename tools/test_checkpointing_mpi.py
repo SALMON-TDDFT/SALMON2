@@ -1,7 +1,7 @@
 """Host-owned MPI checkpoint admission using only the public common API.
 
 mpiexec -n 3 python tools/test_checkpointing_mpi.py
-No native runtime, SALMON ParallelContext, persistence callbacks or file I/O.
+No calculation runtime, SALMON ParallelContext or file I/O; save callbacks are memory-only.
 """
 import copy
 from mpi4py import MPI
@@ -60,3 +60,27 @@ for case in cases:
 assert not MPI.Is_finalized()
 if comm.rank == 0:
     print('common checkpoint API MPI PASS: positive roundtrip; 10 collective rejections; host MPI preserved')
+
+
+# A single root clock decides the accepted step for every rank. No GS or I/O.
+from unittest.mock import patch
+from salmonpy.checkpointing import CheckpointSchedule
+from salmonpy.errors import RuntimeFailure
+with patch('salmonpy.checkpointing.time.monotonic', return_value=0.):
+    timer=CheckpointSchedule(interval_steps=2,stop_after_seconds=10.,comm=comm)
+saved=[]
+with patch('salmonpy.checkpointing.time.monotonic', return_value=1. if comm.rank==0 else 999.):
+    assert not timer.after_step(1,saved.append)
+    assert not timer.after_step(2,saved.append)
+assert saved==[2]
+with patch('salmonpy.checkpointing.time.monotonic', return_value=11. if comm.rank==0 else 0.):
+    def broken_save(step):
+        if comm.rank==2:raise OSError('injected save failure')
+    rejected=False
+    try:timer.after_step(3,broken_save)
+    except RuntimeFailure:rejected=True
+    assert all(comm.allgather(rejected))
+    assert not timer.stopped and timer.last_saved_step==2
+    assert timer.after_step(3,saved.append)
+assert all(comm.allgather(saved==[2,3] and timer.stopped))
+if comm.rank==0:print('checkpoint schedule MPI PASS: root clock; periodic save; failed save; retry; agreed stop')

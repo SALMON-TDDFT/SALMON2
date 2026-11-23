@@ -27,7 +27,7 @@ except StepRecoveryError as error:
 
 All ranks participate. The factory supports exact built-in types: NativeEHField
 (including PML and every field-local LD), one-rank MultiscaleField, standard solver
-periodic/unpolarized/fixed-ion middlepoint TDDFT, fast-PR Fortran HSE calculation and the ordinary
+periodic/unpolarized/fixed-ion middlepoint TDDFT, HSE Fortran HSE calculation and the ordinary
 sample's built-in SBE endpoint wrapper. Independent solver groups retain their
 own numerical backups; FFT plans, communicators and owning resource handles remain
 live. Wavefunctions, density/potentials, XC payload/cval, ACE/history/caches,
@@ -98,7 +98,7 @@ material/slab calculation. Practical TDDFT multiscale use still starts in 1D;
 SBE/user current models are the recommended electronic models for larger 3D runs.
 Select ranks/budgets from the actual allocation, not by copying a larger machine's
 values. Local tests cover standard PZ, automatic/fixed TB-mBJ, Libxc-PZ/PBE and
-fast-PR HSE Taylor4/learned PT-CN with internal MPI2, plus the 1D two-TDDFT-group
+HSE Taylor4/learned PT-CN with internal MPI2, plus the 1D two-TDDFT-group
 route. See the validation record for measured scope; no fresh cross-platform CI
 or general physical-convergence claim follows from these fixtures.
 
@@ -106,7 +106,7 @@ or general physical-convergence claim follows from these fixtures.
 ## Measured larger-grid overhead
 
 On the local 64GB/18-core Apple Silicon calling program, 96³ Maxwell + local LD + SBE +
-Libxc-PBE2 + fast-PR HSE PT-CN2 passed 64-step comparisons with/without protection.
+Libxc-PBE2 + HSE PT-CN2 passed 64-step comparisons with/without protection.
 Two repetitions each: field2/total7 took 12.00/14.38 seconds mean (plain/protected),
 field4/total9 took 7.08/7.66 seconds. Maximum sums of rank peak RSS were
 2.012/2.692 GiB and 2.949/4.417 GiB respectively. All arrays and ordinary streams
@@ -117,7 +117,7 @@ Keep unknown memory allowances unknown and compare on the actual target system.
 ## Multiple points of the same material
 
 The packaged `examples/mixed_multipoint_layers.json` is a larger connection
-fixture: SBE4, Libxc-PBE TDDFT2 and fast-PR HSE2 independent points, plus 1,152
+fixture: SBE4, Libxc-PBE TDDFT2 and HSE2 independent points, plus 1,152
 Drude and 1,152 Lorentz cells owned by FDTD ranks. One electronic cell creates one
 state and its own solver group; repeating a material ID reuses its definition,
 not its evolving state. Distinct logical point IDs and ownership persist through

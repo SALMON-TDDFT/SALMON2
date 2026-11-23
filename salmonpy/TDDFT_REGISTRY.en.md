@@ -50,7 +50,7 @@ Use an explicitly built/verified CPU runtime with `sp_tddft_registry_protocol()=
 The configuration remains periodic, full-k/no symmetry reduction, unpolarized fixed-ion
 PZ/TB-mBJ automatic/fixed-c/Libxc-PZ/PBE, middlepoint transverse, initial A=0 in Python.
 x/y/z and rotating A work. A is Cartesian A/c, dt atomic time, output j is atomic
-charge-current density; do not negate it again. HSE is the separate fast-PR engine
+charge-current density; do not negate it again. HSE is the separate HSE engine
 and is not registered here. Imports do not initialize MPI, build or download.
 Keep model bundles/work files unchanged; one work copy per model is made in the
 shared writable work root, not per state. Registering initializes a first state
@@ -120,7 +120,7 @@ checkpoints; restarting with changed partitions is unsupported.
 user-written calculation implementations retain prepare/open_group/create_state. They may register shared
 closeable owners in SolverContext.group_resources, released in insertion order
 after states and material factories. All subgroup ranks must register resources
-and enter callbacks in matching order. Different-input built-in fast-PR HSE
+and enter callbacks in matching order. Different-input built-in HSE
 models still require separate groups.
 
 ## calling program working directory

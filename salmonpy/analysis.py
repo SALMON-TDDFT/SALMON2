@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 import re
+from bisect import bisect_left
 import numpy as np
 from .ld import _array
 from .fields import _readonly, _times
@@ -60,7 +61,8 @@ def _read_table_segments(paths):
     if 'Time' not in first.columns:
         raise InputError('table segments require a labeled Time column')
     axis = first.columns.index('Time')
-    data = first.values
+    chunks = [first.values]
+    ends = [first.values[-1, axis]]
     for table in tables:
         if table.columns != first.columns or table.units != first.units:
             raise InputError('table segment columns and units must match')
@@ -68,14 +70,26 @@ def _read_table_segments(paths):
             raise InputError('each table segment must have strictly increasing Time')
     for table in tables[1:]:
         incoming = table.values
-        overlap = incoming[:, axis] <= data[-1, axis]
-        rows = incoming[overlap]
-        indices = np.searchsorted(data[:, axis], rows[:, axis])
-        if (np.any(indices >= len(data)) or
-                not np.array_equal(data[indices, axis], rows[:, axis]) or
-                not np.array_equal(data[indices], rows)):
+        split = np.searchsorted(incoming[:, axis], ends[-1], side='right')
+        rows = incoming[:split]
+        matched = 0
+        if len(rows):
+            start = bisect_left(ends, rows[0, axis])
+            for chunk in chunks[start:]:
+                stop = np.searchsorted(rows[:, axis], chunk[-1, axis], side='right')
+                part = rows[matched:stop]
+                indices = np.searchsorted(chunk[:, axis], part[:, axis])
+                if not np.array_equal(chunk[indices], part):
+                    raise InputError('overlapping table segments disagree; select the intended files explicitly')
+                matched = stop
+                if matched == len(rows):
+                    break
+        if matched != len(rows):
             raise InputError('overlapping table segments disagree; select the intended files explicitly')
-        data = np.concatenate((data, incoming[~overlap]), axis=0)
+        if split < len(incoming):
+            chunks.append(incoming[split:])
+            ends.append(incoming[-1, axis])
+    data = np.concatenate(chunks, axis=0)
     sources = tuple(table.source for table in tables)
     headers = tuple(header for table in tables for header in table.headers)
     headers += tuple('# segment source: ' + source for source in sources)

@@ -3,6 +3,25 @@ import importlib
 from salmonpy.manual import load, search
 
 class ManualTest(unittest.TestCase):
+    def test_user_facing_hse_names_and_entry_guidance(self):
+        from importlib.resources import files
+        import json
+        d=load()
+        for task in d['tasks']:
+            fields={k:task.get(k) for k in ('intent','intent_i18n','inputs','outputs','keywords','constraints')}
+            text=json.dumps(fields,ensure_ascii=False).casefold()
+            for internal_label in ('高速pr','fast-pr','fast pr'):
+                self.assertNotIn(internal_label,text,task['id'])
+        for name in ('README.md','README.en.md','AI_USAGE.md','FAST_HSE_SYMMETRY.md','FAST_HSE_SYMMETRY.en.md'):
+            text=files('salmonpy').joinpath(name).read_text(encoding='utf-8').casefold()
+            for internal_label in ('高速pr','fast-pr','fast pr'):
+                self.assertNotIn(internal_label,text,name)
+        guide=files('salmonpy').joinpath('FAST_HSE_SYMMETRY.md').read_text(encoding='utf-8')
+        self.assertIn('allow_symmetry=True',guide)
+        self.assertIn('同じMPI分割',guide)
+        self.assertIn('円偏光',guide)
+        self.assertIn('docs/development/',guide)
+
     def test_material_guides_are_packaged(self):
         from importlib.resources import files
         for name in ('FDTD_MATERIALS.md', 'FDTD_MATERIALS.en.md', 'DISTRIBUTED.md', 'DISTRIBUTED.en.md',
@@ -91,5 +110,24 @@ class ManualTest(unittest.TestCase):
         from importlib.resources import files
         tasks=search('checkpoint compatibility')['tasks']
         self.assertEqual(tasks[0]['id'],'checkpoint_compatibility')
+        import json
+        task=tasks[0]
+        text=json.dumps(task,ensure_ascii=False)
+        for obsolete in ('salmonpy.native-direct/3','solver-direct/1','solver-direct/2',
+                         '--unprotected-direct-restore','`protected=False`'):
+            self.assertNotIn(obsolete,text)
+        self.assertIn('stop_after_seconds',task['inputs'])
+        self.assertIn('True',task['outputs'])
+        self.assertTrue(any('after_step' in example for example in task['examples']))
+        for example in task['examples']:
+            if 'CheckpointSchedule' in example:
+                exec(compile(example,'timed-checkpoint-manual','exec'),{})
+        self.assertIn('examples/mpi_mixed_native.py',task['sample_files'])
+        for name in ('CHECKPOINTING.md','CHECKPOINTING.en.md'):
+            guide=files('salmonpy').joinpath(name).read_text(encoding='utf-8')
+            self.assertIn('salmonpy.native-direct/4',guide)
+            self.assertIn('--stop-after-seconds',guide)
+            self.assertIn('--direct-resume',guide)
+
         for name in ('CHECKPOINTING.md','CHECKPOINTING.en.md','examples/custom_checkpoint.py'):
             self.assertTrue(files('salmonpy').joinpath(name).is_file(),name)

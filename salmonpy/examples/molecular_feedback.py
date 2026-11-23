@@ -28,6 +28,9 @@ def main():
     parser.add_argument('--checkpoint',type=Path,help='new direct bundle directory')
     parser.add_argument('--resume',type=Path,help='direct bundle to load before updating')
     parser.add_argument('--stop-after',type=int,help='accepted FDTD step at which to save and exit')
+    parser.add_argument('--checkpoint-interval-steps',type=int,help='direct checkpoint every N accepted steps; continue')
+    parser.add_argument('--checkpoint-interval-seconds',type=float,help='periodic direct checkpoint in elapsed seconds; continue')
+    parser.add_argument('--stop-after-seconds',type=float,help='save a direct checkpoint and exit after this elapsed wall time')
     args=parser.parse_args()
     from mpi4py import MPI
     from salmonpy.distributed import SolverGroup,ParallelPlan,ParallelContext
@@ -39,6 +42,9 @@ def main():
     from salmonpy.isolated_tddft import load_isolated_runtime,IsolatedTDDFTInitialState
     from salmonpy.dipole_source import DipoleMap,MolecularFeedback
     world=MPI.COMM_WORLD
+    from salmonpy.checkpointing import CheckpointSchedule
+    schedule=CheckpointSchedule(interval_steps=args.checkpoint_interval_steps,
+        interval_seconds=args.checkpoint_interval_seconds,stop_after_seconds=args.stop_after_seconds,comm=world)
     nfield=prod(args.field_grid);group_size=nfield+1
     if any(n<1 for n in args.field_grid) or world.size!=2*group_size:
         raise ValueError('launch 2*(NX*NY*NZ+1) ranks with positive field-grid dimensions')
@@ -94,9 +100,12 @@ def main():
                 stop=args.steps if args.stop_after is None else args.stop_after
                 if not coupling.step_index<=stop<=args.steps:raise ValueError('stop-after must be between current FDTD step and capacity')
                 restore_statistics=state.worker_statistics() if world.rank==0 and args.resume else None
+                def timed_save(step):
+                    coupling.save_checkpoint(args.output/f'checkpoint-{step:08d}',history=records)
                 for _ in range(stop-coupling.step_index):
                     frame=coupling.step()
                     if world.rank==0:records.append(frame.record())
+                    if schedule.after_step(coupling.step_index,timed_save):break
                 if args.checkpoint:coupling.save_checkpoint(args.checkpoint,history=records)
                 statistics=state.worker_statistics() if world.rank==0 else None
             finally:
@@ -104,7 +113,7 @@ def main():
         # Finish collective cleanup before root-only file I/O.
         if world.rank==0:
             with (args.output/'molecular-feedback.json').open('x') as out:
-                json.dump(dict(policy='environment_scattered_only',field_grid=args.field_grid,
+                json.dump(dict(stopped_for_checkpoint=schedule.stopped,policy='environment_scattered_only',field_grid=args.field_grid,
                     units='atomic',execution_mode=args.execution_mode,
                     molecular_execution_mode=state.execution_mode,initial_hold=args.dt,frames=records,worker_statistics=statistics,restore_statistics=restore_statistics,restored_steps=restored_steps),out,indent=2)
             print(args.output/'molecular-feedback.json')

@@ -2,7 +2,7 @@
 
 ## 現行の混在計算の保存形式
 
-直接保存は`salmonpy.native-direct/4`、履歴再実行型は`salmonpy.native-replay/2`に統一しました。旧スキーマの受入れ・変換とIDなし旧保存を救済するオプションは削除しました。自作呼び出し元の識別情報なし状態は現行形式で扱えますが、保存側と復元側で識別情報の有無を一致させる必要があります。
+直接保存は`salmonpy.native-direct/4`、履歴再実行型は`salmonpy.native-replay/2`です。自作呼び出し元の識別情報なし状態は現行形式で扱えますが、保存側と復元側で識別情報の有無を一致させる必要があります。
 
 [English](CHECKPOINTING.en.md)
 
@@ -27,7 +27,7 @@ assert CheckpointCapability.from_dict(record) == capability
 宣言は不変です。`format`は版付きの保存形式、`modes`はsave／restoreの一方または両方を含むtupleです。
 `decomposition`は正の整数tupleで、積を実際の群サイズに合わせます。軸の順序も仕様の一部で、
 `(2,1)`と`(1,2)`は異なります。実装・固定モデル入力・計算プログラムの識別には`identity`へ検証した識別子や
-ハッシュを渡します。空のidentityは既存計算処理-direct/2との互換性のため記録から省略します。
+ハッシュを渡します。空のidentityは記録から省略します。保存側と復元側で宣言を揃えてください。
 検査対象は明示された宣言です。モデルの識別と保存ファイルの完全性は呼び出し元プログラム側で管理します。
 
 ## 計算処理独自の保存／復元を実行する
@@ -175,14 +175,14 @@ assert original == {"step": 5}
 計算処理の独立性仕様の下で、元のオブジェクトを破棄コールバックへ渡すことはありません。
 
 `execute_checkpoint(..., operation='restore', atomic=True, live=live)`も同じ保護経路です。
-従来のexecute_checkpointは互換性のため非原子的な実行を既定とします。通常のLOADだけを持つ対象は、保護経路では
-LOADを呼ぶ前に拒否し、自動で従来方式へ切り替えません。
+`execute_checkpoint`の既定は`atomic=False`で、元の状態を保つ保証はありません。保護付き復元には
+`restore_checkpoint`を使います。即時LOADだけを持つ対象は、保護経路ではLOADを呼ぶ前に拒否します。
 LD/SBEはnew_stateとsnapshot復元で候補を作れます。自作JSONファクトリーは実行可能なサンプルを参照してください。
 
 ### 計算処理数値候補（実験的）
 
-明示的に再ビルドしたPythonから直接呼ぶFDTD・標準TDDFT・高速PR版HSEには、checkpoint_protocol=1の候補ABIがあります。
-checkpointのmodeは0=保存、1=従来の即時復元、2=独立した数値候補の読込、3=準備済み候補の反映、4=破棄です。
+明示的に再ビルドしたPythonから直接呼ぶFDTD・標準TDDFT・HSEには、checkpoint_protocol=1の候補ABIがあります。
+checkpointのmodeは0=保存、1=即時復元、2=独立した数値候補の読込、3=準備済み候補の反映、4=破棄です。
 候補は1 計算処理 lifetimeにつき1個です。元の計算を止め、全群で2を完了・合意してから3を呼びます。
 失敗時は全群で4を呼び、元の状態から継続できます。HSE履歴も候補に保持し、3ではファイルを再読込しません。
 古いライブラリには対応を推測せず、版確認で拒否します。
@@ -204,19 +204,19 @@ stage_restore／discard_restoreには候補のstage／discardを結び、共通A
 ## 既存の混在計算
 
 混在サンプルも共通の検査・実行APIを使い、ソルバー固有の未進行状態・C/Fortranの呼び出し規約の確認を維持します。
-既存計算処理-direct/2の互換情報、固定した計算処理ペイロード、数値の更新順は変えません。
+保存データは形式、入力の識別情報、MPI分割、ファイルのハッシュを照合してから読み込みます。
 自作のdirect-state/1サンプルアダプターは、`checkpoint_capability`へオブジェクト／mappingを公開できます。
-従来のcheckpoint_format／checkpoint_modes／checkpoint_decompositionも使えます。
+各部品が宣言するcheckpoint_format／checkpoint_modes／checkpoint_decompositionも参照します。
 コールバック、時計、A・電流の仕様は[COUPLED.md](COUPLED.md)を参照してください。
 
 現在は同じ分割と宣言された形式・識別子を照合します。保存内容の変換、MPI分割変更時の再配置、
 汎用アーカイブのI/O、失敗時の原子的な巻き戻しは計算処理／呼び出し元プログラム側の担当です。
-共通入口は渡された関数を実行しますが、保存実装の正しさや原子的復元を認証するものではありません。互換情報のない旧計算処理-direct/1は、元の対応版で扱います。
+共通入口は渡された関数を実行します。保存内容の正しさは保存側の責任で、即時LOADだけでは失敗時の元状態保持を保証しません。
 
 ## 通常の混在サンプルの失敗時に元の状態を保つ復元
 
 `mpi_mixed_native --direct-resume PATH`は失敗時に元の状態を保つ復元を既定にします。初期化済みの場・標準TDDFT・
-高速PR HSEは候補対応計算プログラムが必要です。場の候補にはPMLと全LD材料のP/J・更新履歴も含まれます。
+HSEは候補対応計算プログラムが必要です。場の候補にはPMLと全LD材料のP/J・更新履歴も含まれます。
 SBEは新しい独立ハンドルへsnapshotを復元します。Python側の時計・電流・A・応答アダプター・所有リストと
 表示用のframes.jsonも反映前に準備し、全MPIランクの成功確認後に反映します。追加のSCFや時間発展は行いません。
 
@@ -230,11 +230,11 @@ SBEは新しい独立ハンドルへsnapshotを復元します。Python側の時
 初期化済み計算処理資源は引き続き単一lifetimeで、反映時のメモリ枯渇・プロセス異常・通信断は保証外です。
 
 古いABI、プロセス分離版HSE、自作の即時LOADのみの対象は、保護経路で読込前に拒否します。
-通常サンプルは保護付き復元だけを使います。共通APIの`protected=False`は、自作バックエンドを明示的に非原子操作で扱う場合の指定です。
+通常サンプルは保護付き復元だけを使います。自作バックエンドで即時LOADを明示的に実行する場合は、共通APIの`execute_checkpoint(..., operation="restore", atomic=False)`を使います。
 この指定には途中失敗時の元状態保持の保証がありません。自動で切り替えません。
 
 検査用の`tools/test_mixed_protected_restore_mpi.py`は通常サンプルの引数を受け取り、後の電子状態の候補読込後に
-1ランクを意図的に失敗させます。場内2種類LD・SBE・内部MPI TDDFT／高速PR HSEの元状態保持、
+1ランクを意図的に失敗させます。場内2種類LD・SBE・内部MPI TDDFT／HSEの元状態保持、
 元からの継続、再試行後の連続実行との一致を確認します。リポジトリ内で使うときだけ`--kernel LIB`で
 明示的にビルド済みLD/SBEライブラリを選べます。wheel利用時は不要です。
 
@@ -247,15 +247,15 @@ step戻り値で時系列を管理してください。ファイル出力を分�
 
 `python -m salmonpy.examples.mpi_mixed_native` は `--run-id`、論理点ID、物質ID、物質定義・初期状態のSHA256、MPI所有ランク、LDの材料番号対応を保存します。`mixed-example` は試験用の既定ラベルです。実験ごとに明示した `--run-id` を使用してください。定義の識別には出力先や一時ディレクトリを含めません。
 
-`identity.json`、通常実行の `result.json` と `point-response` アーカイブに同じ識別情報を引き継ぎます。直接保存の外側の形式は `salmonpy.native-direct/3`、再計算方式は `salmonpy.native-replay/2` です。数値状態の内部形式と更新順は変更しません。直接復元はIDとMPI分割を数値状態の読み込み前に照合し、保存時は全ランクでのID一致を検査します。
+`identity.json`、通常実行の `result.json` と `point-response` アーカイブに同じ識別情報を引き継ぎます。直接保存の外側の形式は `salmonpy.native-direct/4`、再計算方式は `salmonpy.native-replay/2` です。数値状態の内部形式と更新順は変更しません。直接復元はIDとMPI分割を数値状態の読み込み前に照合し、保存時は全ランクでのID一致を検査します。
 
-旧版向けの引数・再開形式・欠落項目の補完は提供しません。現在のAPIと保存形式を使用してください。混在計算サンプルは常に物質・初期状態の識別情報を保存します。
+現在のAPIと保存形式を使用してください。混在計算サンプルは常に物質・初期状態の識別情報を保存します。
 
 ## 点ID付きのメモリsnapshot
 
 `PointState.snapshot()` は内部計算処理のsnapshotを `salmonpy.point-snapshot/1` の不変な点情報で包みます。`state.restore(saved)` は実験・点・物質定義・初期状態のIDとパッケージ版を照合してから計算処理を呼びます。別の点や実験、裸の計算処理tokenは拒否されます。明示した同一run/point IDであっても、計算処理のモデル・時間刻み等の整合性検査は引き続き必要です。
 
-これはプロセス内の巻き戻し用であり、分岐・複製やディスク保存、MPI全体のトランザクションではありません。snapshot未対応の自作の計算コードでは `SnapshotError` となります。計算処理の復元失敗時の保証はその実装に従います。点ID不一致の拒否では内部のrestoreを呼びません。裸の状態に対する従来のsnapshot APIは変わりません。
+これはプロセス内の巻き戻し用であり、分岐・複製やディスク保存、MPI全体のトランザクションではありません。snapshot未対応の自作の計算コードでは `SnapshotError` となります。計算処理の復元失敗時の保証はその実装に従います。点ID不一致の拒否では内部のrestoreを呼びません。個別状態のsnapshot／restoreは、その状態だけを扱います。
 
 `python -m salmonpy.examples.point_ld /new/output/directory` は別の点への復元拒否と、同一点での復元後の電流一致も確認します。
 
@@ -263,7 +263,7 @@ step戻り値で時系列を管理してください。ファイル出力を分�
 
 新しく準備・ビルドした標準embedded TDDFTには `sp_tddft_error_protocol() == 1` があり、以下を結合先の物質MPI群だけで照合します。10: 不正・非有限入力／古いA／入力ファイル不在、11: ランク間不一致、12: 状態未作成・使用済み初期化、13: ステップ上限、14: 未確定の復元用の別状態あり。これらは数値更新前に全ランク同じコードで返り、既存の最後に成功した計算状態を変更しません。初期化前の10/11は初期化から終了までの期間を消費せず、Pythonからも入力を修正して初期化を再試行できます。失敗時の作業ディレクトリは診断用に残ります。
 
-Pythonは版付きの仕様と全ランク一致を確認できた拒否だけを `InputError` とします。旧ライブラリ・未知のコード・非有限な戻り値は `RuntimeFailure` のままで、状態保持を推定しません。MPI群の全員が同じ入口へ参加する必要があります。無効なポインタ、MPI・プロセス異常、確保失敗は対象外です。本項の更新前検査ではソルバー深部を扱いません（次節の限定した深部復帰を参照）。初期化に入った後は引き続き1プロセス1初期化から終了までの期間です。高速HSEとPythonから直接呼ぶFDTDのエラー仕様はこの変更では拡張していません。
+Pythonは版付きの仕様と全ランク一致を確認できた拒否だけを `InputError` とします。旧ライブラリ・未知のコード・非有限な戻り値は `RuntimeFailure` のままで、状態保持を推定しません。MPI群の全員が同じ入口へ参加する必要があります。無効なポインタ、MPI・プロセス異常、確保失敗は対象外です。本項の更新前検査ではソルバー深部を扱いません（次節の限定した深部復帰を参照）。初期化に入った後は引き続き1プロセス1初期化から終了までの期間です。HSEとPythonから直接呼ぶFDTDのエラー仕様はこの変更では拡張していません。
 
 この保証は個別TDDFT状態の更新前拒否です。結合ドライバで他の部品が既に進んだ場合、全体の巻き戻しを保証せず、従来どおりセッションを失敗扱いにします。通常計算中の一般的な原子性が完成したとは判断しないでください。
 
@@ -277,9 +277,9 @@ Pythonの `NativeTDDFTBackend` が返す状態の `advance(A_old,A_new)` は、�
 
 これはTDDFT群の状態保証です。FDTD・他の物質がすでに進んだ混在ステップ全体を自動巻き戻しする仕様ではありません。MPI／プロセス停止、確保失敗、未制御の外部ライブラリSTOP、初期化深部のSTOPや出力装置障害は未対応です。試験専用の一部ランク障害注入は `SALMONPY_RECOVERY_TESTING` を明示して別ビルドした場合のみで、本番ビルドには注入用C入口がありません。
 
-## 高速PR版HSEの深部数値異常からの復帰
+## HSEの深部数値異常からの復帰
 
-新しい `NativeFastHSEBackend` 用ライブラリは `sp_fast_hse_recovery_protocol() == 1` を宣言します。対応範囲は周期・非スピン分極・固定イオンの高速PR版HSE06、Taylor4／学習PT-CN、物質群内k点分割のMPI1／2です。通常版HSEへの切替はしません。
+新しい `NativeFastHSEBackend` 用ライブラリは `sp_fast_hse_recovery_protocol() == 1` を宣言します。対応範囲は周期・非スピン分極・固定イオンのHSE06、Taylor4／学習PT-CN、物質群内k点分割のMPI1／2です。通常版HSEへの切替はしません。
 
 各ステップ前に電子状態とACE・因子／PT-CN履歴・交換キャッシュ・カウンタを退避します。FFTプランやMPIコミュニケータなどの所有資源はコピーしません。波動関数・密度・Hartree・XC・端点の有限性検査に加え、対応したACE演算エラー、PT-CNの収束／Gram／射影検査、履歴更新エラーを物質群全体で合意して返します。最後に成功した計算状態を直接戻し、過去ステップや交換履歴を再計算しません。失敗試行の通常RT出力を追加せず、A・時計・電流・エネルギーを維持します。診断ログは残ることがあります。
 
@@ -322,7 +322,7 @@ with saved_run["states"]["film"] as payload:
 
 通信するのは互換性メタデータだけです。`NativeSCFSnapshot` は各ランクのFortran
 メモリに残り、明示的に終了します。JSONだけでは復元できず、ディスク保存／プロセス
-再開でもありません。通常PZ／Libxc-PZ/PBEと全k点CPU高速PR版HSE06の対応範囲・
+再開でもありません。通常PZ／Libxc-PZ/PBEと全k点CPUHSE06の対応範囲・
 数値実装は従来どおりです。
 
 `execute_checkpoint(operation="restore")` は引き続き**直接復元**です。
@@ -333,7 +333,7 @@ SCF candidate protocol1を持たない旧計算プログラムでは `stage_rest
 異なる所有者・終了済みトークン・互換性不一致は数値コールバック前に拒否します。
 候補作成の代わりに破壊的な復元へ落とさないでください。
 `python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT` は共通入口を使います。
-高速PR版HSE用ビルドでは `--xc hse06` を付けます。
+HSE用ビルドでは `--xc hse06` を付けます。
 
 ### SCF候補の保護付き準備とFortran/Cで保持する計算状態への反映
 
@@ -369,8 +369,8 @@ holderに入るのは準備済み候補で、独立に計算を走らせる状�
 元スナップショットは準備・反映が終わるまで保持し、その後明示的に終了します。
 
 `python -m salmonpy.examples.scf_resume BUILD_JSON NEW_OUTPUT --protected` で試せます。
-全k点の高速PR版HSEビルドなら `--xc hse06` も付けます。
-旧計算プログラムでは直接復元を維持し、未対応の失敗時に元の状態を保つ復元を直接復元へ落としません。
+全k点のHSEビルドなら `--xc hse06` も付けます。
+必要な候補作成機能を持たない計算プログラムは、保護付き復元では読み込み前に拒否します。即時復元への自動切り替えはありません。
 
 計算処理 SCFの同一ビルド・入力・MPI分割ディスク形式は、
 `state.checkpoint_target(directory=...)` でこの共通APIに接続できます。
@@ -381,3 +381,63 @@ targetを作ります。詳細と2状態の例は [NATIVE_GS.md](NATIVE_GS.md) �
 計算処理 SCFの準備済み候補はclose／with文で明示的に破棄できます。GS状態のcloseは
 その状態のPython所有候補を、snapshotのcloseはそのsnapshot由来の候補を先に破棄します。
 C ABIで直接準備した外部所有候補は自動破棄しません。すべて同じMPI呼出し順が必要です。
+
+## 定期保存と、実経過時間を指定した保存・終了
+
+チェックポイントの自動出力は既定では無効です。電流・磁化などの観測出力の間隔とは別に設定します。
+`CheckpointSchedule` は、完了した時間ステップの番号を受け取り、指定がある場合だけ保存関数を呼びます。
+
+```python
+from salmonpy.checkpointing import CheckpointSchedule
+
+# comm は結合計算全体のMPIコミュニケータ。直列なら省略できます。
+# 初期化も制限時間に含める場合、この時点で時計を開始します。
+schedule = CheckpointSchedule(
+    interval_steps=1000,        # 任意：1000ステップ進むごとに保存して続行
+    interval_seconds=600,       # 任意：実経過600秒ごとに保存して続行
+    stop_after_seconds=3300,    # 任意：実経過3300秒を超えたら保存して終了
+    initial_step=0, comm=comm)
+
+# 初期化／復元後、各ランクが同じ完了ステップで呼びます。
+for step in range(restored_step + 1, final_step + 1):
+    advance_one_step()
+    if schedule.after_step(step, save_all_states):
+        break
+```
+
+`advance_one_step` と `save_all_states(step)` は呼び出し側で用意する関数です。保存先はステップ番号ごとの新規パスにしてください。結合計算では場・LD・電子状態をまとめて保存する既存の入口を使います。単一の電子状態だけを保存して結合計算を終了してはいけません。保存形式は各計算部品が担当します。
+
+- すべての引数を省略すると、保存も追加のループ内MPI通信も行いません。
+- 複数の間隔を指定した場合は、どれか一つに達した時点で一度保存します。間隔は最後に成功した保存から数えます。
+- 時間は物理的な計算時間ではなく、作成時からの実経過秒です。MPIではランク0の時計で決め、同じ完了ステップで保存します。時間指定がある場合も、ステップの途中では中断しません。
+- `after_step` の戻り値が `True` なら、保存が成功しています。呼び出し側はループを抜け、状態を閉じて終了してください。ライブラリがプロセスやMPIを強制終了することはありません。
+- 保存失敗は全ランクへ通知され、正常終了にはなりません。同じステップで再試行できます。途中のファイルの扱いは保存部品の仕様に従い、必要なら別の保存先を使います。
+- ジョブ制限時間より、最大1ステップと保存処理・終了処理の所要時間だけ早めに設定してください。タイマー作成前の準備時間は含みません。
+
+`mpi_mixed_native`、`mixed_hse_models`、`molecular_feedback` のサンプルでは、`--checkpoint-interval-steps N`、`--checkpoint-interval-seconds SECONDS`、`--stop-after-seconds SECONDS` を指定できます。新規の `checkpoint-00001000` のようなディレクトリへ内部状態を直接保存します。既存のステップ番号指定による保存・終了も利用できます。
+
+出力連結は、別プロセスでのディスク再開が生成したNi SOCの1・2ランク出力で確認しました。電流は全8ステップ、磁化・スピン流は保存されている2時刻で連続実行と完全一致しました。これは保存／再開の接続検証であり、物理的収束の保証ではありません。
+
+### 時間指定で保存し、次のジョブで再開する
+
+準備済みの計算プログラム・GSを使う通常混在サンプルの例です。4ランクは場1・SBE1・TDDFT2の既定配置です。下記のパスは手元の準備済みデータへ置き換え、計算ノードで実行してください。
+
+```sh
+mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native \
+  BUILD_JSON RUNTIME GS_BUNDLE first-job --steps 128 \
+  --checkpoint-interval-steps 50 --stop-after-seconds 3300
+```
+
+保存先は`first-job/checkpoint-00000050`のように完了ステップ番号を含みます。時間指定終了時には実際の保存先が表示されます。そのパスを次のコマンドの`SAVED_CHECKPOINT_DIRECTORY`に指定します。時間制限で止まるステップ番号を事前に仮定しないでください。
+
+```sh
+mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native \
+  BUILD_JSON RUNTIME GS_BUNDLE second-job --steps 128 \
+  --direct-resume SAVED_CHECKPOINT_DIRECTORY --stop-after-seconds 3300
+```
+
+入力、GS、計算プログラム、総ステップ数、MPI配置を同じにし、新しい出力先を指定します。`--resume`は履歴を再実行する別方式なので、時間指定の直接保存には`--direct-resume`を使います。分子結合と`mixed_hse_models`の直接保存には`--resume`を使います。それぞれのサンプルの引数を確認してください。
+
+全ステップが指定秒より早く終わった場合、時間指定による最終保存は発生しません。定期保存は指定間隔に達した分だけです。この例は結合検査用サンプルで、最終ステップまで達した通常実行では独立計算との比較も行います。実行時間を見積もる際に含めてください。
+
+`after_step`は、保存して終了する場合だけ`True`です。保存しない場合と、定期保存して続行する場合は`False`です。保存失敗は例外で通知します。
