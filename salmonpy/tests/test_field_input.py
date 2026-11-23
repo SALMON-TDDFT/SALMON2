@@ -23,6 +23,18 @@ class FieldInputTests(unittest.TestCase):
         with self.assertRaises(InputError):self.contract().validate(self.Packet(A=self.value(unit='A/c:au')),step_index=1)
         self.contract().validate(self.Packet(E=self.value((0,0,0))),step_index=1)
 
+    def test_transport_performance_preserves_ownership_and_metadata(self):
+        a=np.array([np.nan,1.,2.])
+        with self.assertRaises(InputError):
+            self.Value._from_transport(a,time=.1,position=(0,0,0),unit='E:au',checked=True)
+        value=self.Value._from_transport(a,time=.1,position=(0,0,0),unit='E:au',checked=False)
+        a[:]=0
+        self.assertTrue(np.isnan(value.value[0]))
+        with self.assertRaises(ValueError):value.value.setflags(write=True)
+        self.contract().validate(self.Packet(E=value),step_index=1)
+        with self.assertRaises(InputError):
+            self.Value._from_transport([1.,2.],time=.1,position=(0,0,0),unit='E:au',checked=False)
+
     def test_metadata_and_numeric_rejection(self):
         for value in ([1j,0,0],[True,False,False],[np.nan,0,0],['1','0','0']):
             with self.subTest(value=value),self.assertRaises(InputError):self.value(value)

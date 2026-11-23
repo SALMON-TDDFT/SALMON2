@@ -1315,3 +1315,7 @@ A/J配列の形と所有者、時間ステップ番号、通信順序は維持�
 外側性能モードは、実際のE/H FDTD＋内蔵LD＋2点TDDFTでも検証しています。3／6ランク（FDTD 1／2分割、各TDDFT群1／2ランク）の96ステップで、通常の連続実行と通常／性能モードの明示的な保護復元・再試行後のA/E/Jが完全一致しました。既存の合成初期軌道を用いた接続試験であり、実材料の物理的収束や速度向上の証明ではありません。
 
 高速PR版HSEでも、`NativeFastHSEBackend(..., execution_mode="performance")` と `ResponseSession(..., execution_mode="performance")` を別々に指定します。E/Hの場も性能モードにする場合は `NativeEHField(..., execution_mode="performance")` を指定します。明示的な `step_protected(targets)` は場・LD・高速HSEの内部状態を退避し、処理途中に返された例外から復元して再試行できます。プロセス終了やMPI障害への復帰を意味しません。縮約k点では外場が保つ対称性の条件を引き続き満たす必要があります。
+
+### A/E/H受け渡しの性能モード
+
+`ResponseSession(..., field_contracts=contracts, execution_mode="performance")` を `PacketCoupledStepper` に渡します。A/E/Hの値の重複した有限値走査を省き、配列形状・単位・位置・時間ステップ番号の契約は維持します。Hを取得する前の異常合意は、H取得がMPI通信を行うため省略しません。`step_protected(targets)` は通常の結合と同じく明示的な退避・復元を行い、受け渡しアダプターのステップ番号と失敗状態も戻します。自作物質の内部状態と副作用を覆う `StepTarget` を指定してください。

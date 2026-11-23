@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--field-grid',nargs=3,type=int,default=(1,1,1))
     parser.add_argument('--steps',type=int,default=64)
     parser.add_argument('--dt',type=float,default=.003)
+    parser.add_argument('--execution-mode',choices=('checked','performance'),default='checked',help='field, molecule and outer feedback mode; trial/restore and explicit validation remain')
     parser.add_argument('--ld',action='store_true',help='add the verified synthetic Drude box')
     parser.add_argument('--checkpoint',type=Path,help='new direct bundle directory')
     parser.add_argument('--resume',type=Path,help='direct bundle to load before updating')
@@ -54,7 +55,7 @@ def main():
                     runtime=load_isolated_runtime(args.worker,args.validation)
                     model=states.enter_context(IsolatedTDDFTInitialState.from_salmon(
                         args.bundle,args.input,runtime=runtime,max_steps=args.steps,threads=1))
-                    state=states.enter_context(model.new_state(dt=args.dt,position=(-1.,1.,1.)))
+                    state=states.enter_context(model.new_state(dt=args.dt,position=(-1.,1.,1.),execution_mode=args.execution_mode))
                 except Exception as exc:error=str(exc)
             error=world.bcast(error,root=0)
             if error:raise RuntimeError(error)
@@ -71,14 +72,14 @@ def main():
                             source=PlaneWave(AcosPulse(.1 if pair==0 else 0.,20.,.15),0,-16.),
                             observations=((-1.,1.,1.),))
                         field=NativeEHField(context,calculation,args.field_build,args.output/('field-'+str(pair)),
-                            points={10:(19,20,20)},grid=tuple(args.field_grid))
+                            points={10:(19,20,20)},grid=tuple(args.field_grid),execution_mode=args.execution_mode)
                 except Exception as exc:error=str(exc)
                 errors=world.allgather(error)
                 if any(errors):raise RuntimeError(str(errors))
                 observer=None if field is None else field.energy_observer((13,13,13),(27,27,27))
                 coupling=MolecularFeedback(world,field,state=state,
                     mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.]),
-                    total_root=0,reference_root=group_size,policy='environment_scattered_only',observer=observer)
+                    total_root=0,reference_root=group_size,policy='environment_scattered_only',observer=observer,execution_mode=args.execution_mode)
                 restored_steps=None
                 if args.resume:
                     saved=coupling.restore_checkpoint(args.resume)

@@ -379,3 +379,9 @@ Keep Ohmic dissipation separate from `ld_work` (work on dispersive polarization,
 `initial.new_state(dt=dt, execution_mode="performance")` selects performance mode for an E-driven molecular worker. The default is `"checked"`. Performance mode skips per-step finite-value diagnostics and automatic recovery. Shape, capacity, response type, energy freshness, and explicit save/restore validation remain enabled. `step_fields` still validates its field contract. Automatic retry after failure is not guaranteed.
 
 Snapshots do not select an execution mode: the receiving state retains its mode, including the candidate worker used for direct disk restore. Compare against checked mode before use. This option does not put the surrounding FDTD coupling into performance mode.
+
+### Molecular outer-coupling performance mode
+
+`MolecularFeedback(..., execution_mode="performance")` omits additional finite scans of reported field/current arrays. Field and molecular modes are independent: select `NativeEHField(..., execution_mode="performance")` and `initial.new_state(..., execution_mode="performance")` separately. The `molecular_feedback` sample's `--execution-mode performance` selects all three; the default is checked.
+
+The trial → field restore → accepted update algorithm still requires both field backups and the molecular savepoint. Own-vacuum subtraction, predicted/accepted drive agreement, clocks, MPI ordering and explicit validation callbacks remain enabled. After a callback rejects an interval, check `StepRecoveryError.original_preserved` and cleanup errors before retrying. This does not promise general recovery from process termination, broken MPI or NaN. Direct disk restore candidates retain the receiving worker's execution mode.

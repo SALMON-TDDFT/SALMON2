@@ -4,6 +4,14 @@ from salmonpy.errors import InputError
 
 
 class DipoleSourceTests(unittest.TestCase):
+    def test_feedback_mode_rejected_collectively_before_field_use(self):
+        from types import SimpleNamespace
+        from salmonpy.dipole_source import MolecularFeedback
+        comm=SimpleNamespace(size=2,rank=0,allgather=lambda value:[value])
+        with self.assertRaisesRegex(InputError,'execution_mode'):
+            MolecularFeedback(comm,None,mapping=None,total_root=0,reference_root=1,
+                              policy='environment_scattered_only',execution_mode='fast')
+
     def model(self):
         from salmonpy.dipole_source import DipoleMap
         return DipoleMap(('mol-a','mol-b'), (10,20), [[.25,1.],[.75,0.]], [2.,5.])

@@ -681,7 +681,9 @@ class CoupledStepper:
         def capture():
             m=r._measurements
             arrays={'J':(self.J,self.J.copy()),'A':(r._A,r._A.copy())}
-            adapters={p:(a.A,a.A.copy()) for p,a in r._adapters.items()}
+            from .field_input import FieldAdapter
+            adapters={p:('fields',a._steps,a._failed) if isinstance(a,FieldAdapter) else ('A',a.A,a.A.copy())
+                      for p,a in r._adapters.items()}
             return {'step':self.step_index,'response_step':r.step_index,'failed':r.failed,
                     'arrays':arrays,'adapters':adapters,
                     'seconds':(m.seconds,dict(m.seconds)),
@@ -694,9 +696,12 @@ class CoupledStepper:
             for original,values in token['arrays'].values():
                 if not np.array_equal(original,values):original[:]=values
             self.J=token['arrays']['J'][0];r._A=token['arrays']['A'][0]
-            for p,(original,values) in token['adapters'].items():
-                if not np.array_equal(original,values):original[:]=values
-                r._adapters[p].A=original
+            for p,(kind,original,values) in token['adapters'].items():
+                if kind=='fields':
+                    r._adapters[p]._steps=original;r._adapters[p]._failed=values
+                else:
+                    if not np.array_equal(original,values):original[:]=values
+                    r._adapters[p].A=original
             for name in ('seconds','calls'):
                 original,values=token[name]
                 original.clear();original.update(values)
@@ -811,6 +816,8 @@ class PacketCoupledStepper:
         CoupledStepper._configure_current_routing(self)
         self._merge_response_admission=_select_response_admission(response,field_packets=True)
 
+    step_protected = CoupledStepper.step_protected
+
     def step(self):
         from .field_input import FieldPacket,FieldValue
         r=self.response;cxt=r.context;error=None;packets=None;samples=None
@@ -822,10 +829,10 @@ class PacketCoupledStepper:
                     raise InputError('packet field is unusable, exhausted or out of sync')
                 if self.timing['needs_H']:self.field.native._live()
         except Exception as exc:error=f'{type(exc).__name__}: {exc}'
-        r.agree(error)
+        if getattr(r,'execution_mode','checked')=='checked' or self.timing['needs_H']:
+            r.agree(error)
         try:
-            error=None
-            if self.field is not None:
+            if self.field is not None and error is None:
                 try:
                     if isinstance(self.field,NativeEHField) and getattr(self.field,'current_rows',None) is not None:
                         self.field.advance_owned(self.J)
@@ -848,8 +855,8 @@ class PacketCoupledStepper:
                         components={}
                         for q in r._field_contracts[point].units:
                             sample=samples[q]
-                            components[q]=FieldValue(sample.values[0,i],time=sample.times[0],
-                                position=sample.positions[i],unit=sample.unit)
+                            components[q]=FieldValue._from_transport(sample.values[0,i],time=sample.times[0],
+                                position=sample.positions[i],unit=sample.unit,checked=getattr(r,"execution_mode","checked")=="checked")
                         packets[point]=FieldPacket(**components)
                 except Exception as exc:error=f'{type(exc).__name__}: {exc}'
             current=_response_from_field(r,packets,error,field_packets=True,merge=self._merge_response_admission)

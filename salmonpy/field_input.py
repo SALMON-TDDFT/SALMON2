@@ -58,6 +58,22 @@ class FieldValue:
         if self.sampling not in SAMPLINGS:
             raise InputError('unsupported field sampling')
 
+    @classmethod
+    def _from_transport(cls,value,*,time,position,unit,position_unit='bohr',sampling='point',checked=True):
+        """Owned transport value; performance skips vector scans, not metadata."""
+        if checked:return cls(value,time,position,unit,position_unit,sampling)
+        from .ld import _array_unchecked
+        from .sbe import _frozen
+        result=object.__new__(cls)
+        object.__setattr__(result,'value',_frozen(_array_unchecked(value,'field',(3,)),check=False))
+        object.__setattr__(result,'time',float(_real(time,(),'time')))
+        object.__setattr__(result,'position',_real(position,(3,),'position'))
+        object.__setattr__(result,'unit',_label(unit,'unit'))
+        object.__setattr__(result,'position_unit',_label(position_unit,'position_unit'))
+        if sampling not in SAMPLINGS:raise InputError('unsupported field sampling')
+        object.__setattr__(result,'sampling',sampling)
+        return result
+
 
 @dataclass(frozen=True, slots=True)
 class FieldPacket:

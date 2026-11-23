@@ -395,6 +395,22 @@ class MolecularFrame:
         object.__setattr__(self,'current',_real(self.current,(1,3),'charge current'))
         object.__setattr__(self,'field_energy',_freeze(_copy_json(self.field_energy)))
 
+    @classmethod
+    def _from_feedback(cls,*args,checked=True):
+        if checked:return cls(*args)
+        from .ld import _array_unchecked
+        from .sbe import _frozen
+        from .config import _copy_json,_freeze
+        result=object.__new__(cls)
+        names=('field_step','field_time','molecule','total_E','own_E','selected_E','drive_E','current','field_energy')
+        for name,value in zip(names,args):
+            if name in ('total_E','own_E','selected_E','drive_E','current'):
+                shape=(1,3) if name=='current' else (3,)
+                value=_frozen(_array_unchecked(value,name,shape),check=False)
+            elif name=='field_energy':value=_freeze(_copy_json(value))
+            object.__setattr__(result,name,value)
+        return result
+
     def record(self):
         """Detached JSON-compatible accepted frame; no file I/O."""
         from .config import _thaw
@@ -416,10 +432,12 @@ class MolecularFeedback:
     A recoverable rejected interval raises StepRecoveryError(original_preserved=True).
     Electron restoration uses direct live savepoints. No automatic retry or I/O.
     """
-    def __init__(self,comm,field,*,state=None,mapping,total_root,reference_root,policy,observer=None):
+    def __init__(self,comm,field,*,state=None,mapping,total_root,reference_root,policy,observer=None,execution_mode="checked"):
         from .native_steps import _NativeBackup
         error=None;descriptor=None;backup=None;footprint=None
         try:
+            from .ld import _execution_mode_name
+            mode=_execution_mode_name(execution_mode)
             if policy!='environment_scattered_only':raise InputError('explicit environment_scattered_only policy required')
             if (type(total_root) is not int or type(reference_root) is not int
                     or total_root==reference_root or not 0<=total_root<comm.size
@@ -444,7 +462,7 @@ class MolecularFeedback:
                 backup=_NativeBackup(field,field.context.solver_comm,'sp_eh_step_transaction',
                     field.directory,('A','E','step_index','failed','closed'))
             descriptor=dict(error=None,key=(total_root,reference_root,policy,mapping.molecule_ids,
-                mapping.point_ids,mapping.weights.tobytes(),mapping.cell_volumes.tobytes()),
+                mapping.point_ids,mapping.weights.tobytes(),mapping.cell_volumes.tobytes(),mode),
                 field=field is not None,leader=field is not None and field.context.is_leader,
                 dt=None if field is None else field.dt,capacity=None if field is None else field.capacity,
                 state_dt=None if state is None else state.dt,observer=observer is not None,footprint=footprint)
@@ -461,12 +479,16 @@ class MolecularFeedback:
             raise InputError('enable energy observation on both complete field groups or neither')
         if any(r['dt']!=dt for r in records if r['field']) or records[total_root]['state_dt']!=dt:
             raise InputError('molecular and field time steps must match')
+        self._execution_mode=mode
         self.comm=comm;self.field=field;self.state=state;self.mapping=mapping
         self.total_root=total_root;self.reference_root=reference_root;self.dt=dt
         self.capacity=min(r['capacity'] for r in records if r['field'])
         self.observer=observer;self.started=False;self.failed=False;self.step_index=0
         self._bridge=None;self._needs_rollback=False
         self._backup=backup
+
+    @property
+    def execution_mode(self):return self._execution_mode
 
     def _field_step_indices(self):
         from .api import _bind_field_operations
@@ -672,7 +694,7 @@ class MolecularFeedback:
                     streams=_MolecularStreams(self.field,root/('streams-'+str(self.comm.rank)))
             if self.state is not None:
                 engine=self.state._engine
-                molecule_candidate=_EEngine(engine._model,engine.dt,engine._position)
+                molecule_candidate=_EEngine(engine._model,engine.dt,engine._position,execution_mode=engine.execution_mode)
                 molecule_candidate.restore_direct_checkpoint(root/'molecule')
                 stats=molecule_candidate.worker_statistics()
                 if stats['step']!=record['molecular_step'] or stats['updates']!=0:
@@ -796,9 +818,9 @@ class MolecularFeedback:
 
     def _frame(self,packets,drive,current):
         total=packets[self.total_root];own=packets[self.reference_root]
-        return MolecularFrame(self.step_index+1,(self.step_index+1)*self.dt,self.state.observables,
+        return MolecularFrame._from_feedback(self.step_index+1,(self.step_index+1)*self.dt,self.state.observables,
             total['E'],own['E'],_selected_molecular_field(total['E'],own['E']),drive,current,
-            [total['energy'],own['energy']])
+            [total['energy'],own['energy']],checked=self.execution_mode=='checked')
 
     def start(self):
         """Collective zero-current hold; report the immutable first frame on total_root."""

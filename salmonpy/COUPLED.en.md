@@ -1458,3 +1458,7 @@ Array shape, ownership, step indices, and communication order remain checked. Th
 Outer performance mode is also tested with actual E/H FDTD, built-in LD, and two TDDFT points: 3/6 ranks, 1/2 field partitions and 1/2 ranks per material group. All 96 steps of A/E/j match uninterrupted checked execution exactly after explicit protected rollback/retry in checked and performance modes. Existing synthetic initial orbitals test integration, not material convergence or speedup.
 
 For fast-PR HSE, select `NativeFastHSEBackend(..., execution_mode="performance")` independently of `ResponseSession(..., execution_mode="performance")`. Select `NativeEHField(..., execution_mode="performance")` separately for the field. Explicit `step_protected(targets)` retains internal backups of field, LD and HSE states for rollback/retry after a returned exception. It does not recover a terminated process or broken MPI. Reduced-k calculations still require the applied field to preserve the declared symmetry.
+
+### A/E/H transport performance mode
+
+Pass `ResponseSession(..., field_contracts=contracts, execution_mode="performance")` to `PacketCoupledStepper`. This omits duplicate finite scans of transported A/E/H values while retaining shapes, units, positions and step-index contracts. The pre-H error agreement remains because H acquisition is collective. Explicit `step_protected(targets)` also restores field-adapter indices and failure flags. Custom-material `StepTarget` callbacks must cover their internal state and side effects.

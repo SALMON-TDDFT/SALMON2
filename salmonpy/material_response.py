@@ -542,7 +542,7 @@ class ResponseSession:
             try:
                 if not isinstance(values,dict) or set(values)!=set(c.group.point_ids):
                     raise InputError('received packet IDs differ from the owning group')
-                values={p:FieldPacket(**{q:FieldValue(**v) for q,v in packet.items()})
+                values={p:FieldPacket(**{q:FieldValue._from_transport(**v,checked=self.execution_mode=="checked") for q,v in packet.items()})
                         for p,packet in values.items()}
                 for p in c.group.point_ids:
                     self._field_contracts[p].validate(values[p],step_index=self.step_index+1)
