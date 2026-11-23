@@ -1462,3 +1462,5 @@ For fast-PR HSE, select `NativeFastHSEBackend(..., execution_mode="performance")
 ### A/E/H transport performance mode
 
 Pass `ResponseSession(..., field_contracts=contracts, execution_mode="performance")` to `PacketCoupledStepper`. This omits duplicate finite scans of transported A/E/H values while retaining shapes, units, positions and step-index contracts. The pre-H error agreement remains because H acquisition is collective. Explicit `step_protected(targets)` also restores field-adapter indices and failure flags. Custom-material `StepTarget` callbacks must cover their internal state and side effects.
+
+Molecular performance mode also supports coordinated direct disk save/resume of total-field FDTD, own-vacuum reference FDTD and the molecule. Separate MPI jobs verify restored Fortran step indices and prohibit propagation during restore. See [molecular coupling](DIPOLE_RADIATION.en.md) for conditions and diagnostic output keys.

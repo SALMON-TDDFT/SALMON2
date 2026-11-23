@@ -105,7 +105,8 @@ def main():
         if world.rank==0:
             with (args.output/'molecular-feedback.json').open('x') as out:
                 json.dump(dict(policy='environment_scattered_only',field_grid=args.field_grid,
-                    units='atomic',initial_hold=args.dt,frames=records,worker_statistics=statistics,restore_statistics=restore_statistics,restored_steps=restored_steps),out,indent=2)
+                    units='atomic',execution_mode=args.execution_mode,
+                    molecular_execution_mode=state.execution_mode,initial_hold=args.dt,frames=records,worker_statistics=statistics,restore_statistics=restore_statistics,restored_steps=restored_steps),out,indent=2)
             print(args.output/'molecular-feedback.json')
     finally:local_world.Free()
 

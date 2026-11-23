@@ -363,3 +363,16 @@ Ohmic伝導の散逸量は `ohmic_work` として返します。各辺の旧／�
 `MolecularFeedback(..., execution_mode="performance")` で、報告する場・電流配列の追加の有限値走査を省きます。場と分子のモードは独立で、必要なら `NativeEHField(..., execution_mode="performance")` と `initial.new_state(..., execution_mode="performance")` も指定します。サンプル `molecular_feedback` の `--execution-mode performance` は3か所をまとめて指定します。既定は検査付きです。
 
 分子結合は、試行→場の復元→電流を含む受理更新を行うため、両FDTDと分子の退避を性能モードでも維持します。自己真空参照の差し引き、予測した電場と受理した電場の一致条件、時刻・MPI順序、明示的な検証コールバックも維持します。コールバックが更新を拒否した場合、`StepRecoveryError.original_preserved` と後処理エラーを確認してから再試行します。プロセス終了・通信障害・NaNからの一般的な自動復帰を約束するモードではありません。直接ディスク復元の候補ワーカーも復元先の実行モードを保持します。
+
+### 性能モードの公開検証記録と一括ディスク再開
+
+`load_isolated_runtime(EXECUTABLE, VALIDATION_JSON)` に、使用する実行ファイルのSHA256と一致する検証記録を渡します。今回の記録は `execution_modes=["checked", "performance"]` と性能用応答形式を含み、公開入口、独立状態、参照との比較、メモリ内復元、ワーカー終了後の直接復元を実測しています。これは短時間のC2H2/PZ接続試験の記録であり、任意の分子の物理精度を認証するものではありません。開発者向けの `tools/validate_isolated_performance_runtime.py` は既存参照を使って記録を作り、SCFやGS複製を行いません。
+
+公開サンプルは、同じ実行ファイル・入力・時間刻み・ステップ数・MPI分割で、保存ジョブと再開ジョブを分けて実行できます。例はFDTD各群2ランク＋管理用各1ランクの計6ランクです。
+
+```sh
+mpiexec -n 6 python -m salmonpy.examples.molecular_feedback FIELD_BUILD WORKER VALIDATION_JSON GS_DIR save --field-grid 2 1 1 --steps 64 --execution-mode performance --ld --checkpoint STATE_DIR --stop-after 32
+mpiexec -n 6 python -m salmonpy.examples.molecular_feedback FIELD_BUILD WORKER VALIDATION_JSON GS_DIR resume --field-grid 2 1 1 --steps 64 --execution-mode performance --ld --resume STATE_DIR
+```
+
+保存時は本計算FDTDと自己真空参照FDTDが32ステップ、分子が31ステップ終了です。再開時は両FDTDのFortran内の番号と分子の実測番号を照合し、分子ワーカーの `restore_statistics.updates` が0であることを確認します。64ステップまでの再開ジョブで新たに進める分子の更新は32回だけです。サンプル出力の `restored_steps`、`restore_statistics`、`molecular_execution_mode` で確認できます。履歴フレームは解析用で、復元のために再計算しません。異なるMPI分割・実行ファイルへの移行はこの形式の保証に含みません。
