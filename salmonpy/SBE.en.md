@@ -92,3 +92,23 @@ separately and use tools/test_source_sbe_handles.py LIBRARY for validation.
 LD handle migration, multiple TDDFT called directly from Python contexts and a public SBE ABI1 plugin
 remain separate work. Internal sp_sbe_* symbols implement the Python adapter,
 not the public material ABI1 query table.
+
+## Standalone performance mode
+
+Pass `execution_mode="performance"` to `new_state(...)` or the batch response
+entry (`material.respond(...)` for LD, `crystal.respond(...)` for SBE). The
+default is `"checked"`; the choice belongs to each state and cannot be changed
+during stepping. LD supports scalar and reciprocal tensor materials; crystal
+SBE remains driven by A/c and returns charge current density.
+
+Performance mode uses the same Fortran update arithmetic. LD omits per-step
+pole backups and finite-value scans; SBE updates its density matrix directly
+without a trial copy or per-step finite-value scans. Automatic rollback and
+retry after a failed update are not guaranteed in this mode. Initial input,
+library integrity and shape checks remain. Explicit `snapshot()` / `restore()`
+and saved output retain their checks. Restoring physical state does not change
+the execution mode. This option does not disable checks in TDDFT or external
+coupling drivers.
+
+The installed examples accept `--execution-mode performance`. Compare a checked
+run before using this mode for a new configuration.

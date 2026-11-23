@@ -44,7 +44,7 @@ class MultiscaleCouplingTests(unittest.TestCase):
     def test_old_native_library_rejects_H_without_update(self):
         from salmonpy.coupled import NativeEHField
         from salmonpy.errors import InputError
-        field=object.__new__(NativeEHField)
+        field=object.__new__(NativeEHField);field._execution_mode="checked"
         field.closed=field.failed=False;field.step_index=1
         field.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=lambda x:[x]))
         field.lib=SimpleNamespace()
@@ -55,7 +55,7 @@ class MultiscaleCouplingTests(unittest.TestCase):
     def test_H_native_liveness_checked_before_collective_read(self):
         from salmonpy.coupled import NativeEHField
         from salmonpy.errors import InputError
-        field=object.__new__(NativeEHField)
+        field=object.__new__(NativeEHField);field._execution_mode="checked"
         field.closed=field.failed=False;field.step_index=1
         field.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=lambda x:[x]))
         field.lib=SimpleNamespace(sp_eh_sample_h=lambda *args: self.fail('must not enter native read'))
@@ -66,7 +66,7 @@ class MultiscaleCouplingTests(unittest.TestCase):
 
     def test_native_sample_metadata_without_native_update(self):
         from salmonpy.coupled import NativeEHField
-        field=object.__new__(NativeEHField)
+        field=object.__new__(NativeEHField);field._execution_mode="checked"
         field.closed=field.failed=False;field.step_index=2;field.dt=.02
         field.sample_positions=np.array([[1.,2.,3.]])
         field.A=np.array([[4.,5.,6.]]);field.E=np.array([[7.,8.,9.]])
@@ -186,7 +186,7 @@ class FDTDCommonClockTests(unittest.TestCase):
             def gather(value):
                 calls.append(value)
                 return [value, remote(value,len(calls)) if remote else value]
-            f=object.__new__(NativeEHField)
+            f=object.__new__(NativeEHField);f._execution_mode="checked"
             f.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=gather))
             f.closed=f.failed=False;f.step_index=0;f.capacity=10
             f.A=np.zeros((1,3));f.E=np.zeros((1,3));f.dt=.1;f.point_ids=(7,);f.manifest={}

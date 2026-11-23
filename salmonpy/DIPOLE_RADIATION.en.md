@@ -346,10 +346,36 @@ matches every continuous history. The inner-box Maxwell/LD/six-face balance is d
 
 Fortran computes six outward face fluxes, the field energy change, LD work and external-current work. LD work includes both stored polarization energy and dissipation. This does not estimate PML heating. Sideways scattered radiation is included in the six-face flux.
 
-The verified profile is vacuum and isotropic LD with background relative permittivity and permeability equal to one and zero conductivity. Unsupported observations, including tensor and subpixel profiles, warn and return `available=False`; the calculation remains usable.
+Verified profiles include vacuum, positive nondispersive background permittivity/permeability, scalar LD and diagonal LD, with nonnegative Ohmic conductivity. LD permeability remains one as required by the existing solver. Diagonal LD uses the x/y/z background components. Non-diagonal backgrounds use the separate constitutive exchange described below. Unsupported observation configurations warn and return `available=False`, while the calculation continues.
+
+Fortran recovers the diagonal masses from the actual Yee update coefficients, not material IDs. With electric c1 and current cJ, c4=-4*pi*dt/cJ and epsilon=c4*(1+c1)/2; the implicit LD contribution cancels. Magnetic mass comes from the actual H curl coefficient. Interface ownership therefore agrees with the solver. The unit-background scalar-LD evaluation path retains the previous arithmetic.
+
+At step n, the modified stored energy weights E(n)^2 by the electric diagonal and H(n-1/2)*H(n+1/2) by permeability. Separately report the conventional energy with centered H. No solver updates, checkpoint state or communication counts change.
+
+The explicit development tool tools/test_diagonal_field_energy_mpi.py uses no GS and tests field MPI1/2, positive dielectric/magnetic backgrounds, scalar/diagonal LD and direct restart from step32. It executes calculations; it is not an input-only management-node checker. Off-diagonal background observation includes the constitutive boundary exchange from the actual interpolation. LD subpixel observation uses the actual smoothed background and dispersive response.
 
 Yee E/H samples differ by half a step. `field_modified_*` uses the cross-product energy preserved by the discrete update; `field_physical_*` uses time-centered H in the conventional energy. Both residuals are retained. Closure of the discrete balance alone does not establish continuum energy accuracy.
 
 With the molecule driven after own-vacuum-field subtraction, add the removed vacuum self-field work to the field change, outward flux, LD work and molecular internal-energy change. Do not subtract zero-field drift. The short C2H2 development test gave an accumulated discrete field residual of about 9.1e-15 Hartree and a joint residual of about 5.9e-8 Hartree, about 0.70% of molecular work. Normalization by the much larger incident field would hide this matter error. This is not a general physical-accuracy certification.
 
 Real FDTD domain tests also passed with two partitions separately along x, y and z (outer MPI6: two field ranks plus one bookkeeping rank per context). Molecular saved arrays exactly equal the one-field-rank results; six-face integrated quantities agree within reduction-order roundoff. The development tool `tools/test_molecular_feedback_mpi.py` accepts `--field-grid NX NY NZ` and requires `2*(NX*NY*NZ+1)` total ranks. Rejection/retry with the same two-partition grid exactly matches continuous execution, including every saved array and six-face record. Electronic rollback now uses a direct live savepoint. This is separate from multi-node or large-decomposition evidence.
+
+With diagonal background permittivity, off-diagonal LD pole strengths are supported: work uses the complete component currents, including cross-component response. Off-diagonal background permittivity is accounted for using the actual background interpolation and a separate constitutive boundary contribution.
+
+For non-diagonal backgrounds, `constitutive_outward_energy` is the outward-positive constitutive boundary exchange. It is separate from `outward_energy`, the six-face Poynting flux. Old/new field energies include the cross contribution; both residuals include its boundary exchange. The locally assigned cross energy need not be positive by itself.
+
+The current Fortran/C step observation has 19 components, ending with constitutive exchange and Ohmic work; the summary has 12 components. Explicitly rebuild older libraries from the current sources. Only non-diagonal background observation adds interpolation halo traffic and preparation-failure agreement within the owning field group. Ordinary time evolution, application-wide communication and checkpoint state are unchanged. Discrete balance is not a physical convergence certificate.
+
+LD subpixel smoothing uses the same 19-component budget, with diagonal weights recovered from actual update coefficients and cross energy/exchange from the spatially varying background interpolation. Complete LD currents enter `ld_work`. The observer does not substitute original bulk coefficients.
+
+This checks discrete balance of the reference-frequency smoothed model. It is not evidence of broadband material accuracy or curved-interface grid convergence. Cells that fall back to original coefficients are observed with those actual coefficients. Inspect applied/fallback sample counts and reference errors in `salmonpy-subpixel-summary.json`. SBE/TDDFT are not smoothed.
+
+`ohmic_work` is the nonnegative energy dissipated in each accepted step: dt times cell volume times the sum of sigma E_mid squared, where E_mid averages old/new edge fields. Fortran recovers sigma from the actual electric/current update coefficients after removing the implicit LD contribution. Only subtraction roundoff is treated as zero.
+
+Keep Ohmic dissipation separate from `ld_work` (work on dispersive polarization, not solely irreversible heat), external-current work, six-face Poynting flux and constitutive exchange. Both residuals and the summary include all terms. For zero-conductivity configurations the extra evaluation is skipped, existing observations are preserved and `ohmic_work=0`. There is no additional communication or change to propagation/checkpoint state. Explicitly rebuild the field runtime and lightweight kernel together.
+
+## Molecular TDDFT performance mode
+
+`initial.new_state(dt=dt, execution_mode="performance")` selects performance mode for an E-driven molecular worker. The default is `"checked"`. Performance mode skips per-step finite-value diagnostics and automatic recovery. Shape, capacity, response type, energy freshness, and explicit save/restore validation remain enabled. `step_fields` still validates its field contract. Automatic retry after failure is not guaranteed.
+
+Snapshots do not select an execution mode: the receiving state retains its mode, including the candidate worker used for direct disk restore. Compare against checked mode before use. This option does not put the surrounding FDTD coupling into performance mode.

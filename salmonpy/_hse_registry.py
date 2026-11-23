@@ -42,11 +42,11 @@ class NativeFastHSERegistry:
         self.backend=backend;self._native=native;self.lib=lib
         self.closed=False;self._models=set();self._serial=0
     def _live(self):self._native._live()
-    def open_model(self,initial,dt):
+    def open_model(self,initial,dt,*,execution_mode=None):
         from .fast_hse_mpi import _agree
         self._live()
         _agree(self._native.context.solver_comm,'HSE registry is closed' if self.closed else None)
-        model=self.backend._create(initial,None,dt,self._native.context,shared=True,registry=self)
+        model=self.backend._create(initial,None,dt,self._native.context,shared=True,registry=self,execution_mode=execution_mode)
         model._registry_id=self._serial
         self._serial+=1
         return model

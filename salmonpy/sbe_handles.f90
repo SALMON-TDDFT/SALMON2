@@ -8,6 +8,7 @@ module sbe_handles
   private
   public :: sp_sbe_model_create,sp_sbe_model_destroy,sp_sbe_state_create
   public :: sp_sbe_step,sp_sbe_density,sp_sbe_set,sp_sbe_state_destroy
+  public :: sp_sbe_state_create_performance,sp_sbe_step_performance
   type model_node
     integer(c_int64_t) :: id=0,live=0
     integer :: order=0
@@ -176,11 +177,30 @@ contains
   end subroutine
 
   integer(c_int32_t) function sp_sbe_state_create(model,dt,A,id,J) bind(C) result(status)
+    integer(c_int64_t),value::model
+    real(c_double),value::dt
+    real(c_double),intent(in)::A(3)
+    integer(c_int64_t),intent(out)::id
+    real(c_double),intent(out)::J(3)
+    status=state_create(model,dt,A,id,J,.false.)
+  end function
+
+  integer(c_int32_t) function sp_sbe_state_create_performance(model,dt,A,id,J) bind(C) result(status)
+    integer(c_int64_t),value::model
+    real(c_double),value::dt
+    real(c_double),intent(in)::A(3)
+    integer(c_int64_t),intent(out)::id
+    real(c_double),intent(out)::J(3)
+    status=state_create(model,dt,A,id,J,.true.)
+  end function
+
+  integer(c_int32_t) function state_create(model,dt,A,id,J,performance) result(status)
     integer(c_int64_t),value :: model
     real(c_double),value :: dt
     real(c_double),intent(in) :: A(3)
     integer(c_int64_t),intent(out) :: id
     real(c_double),intent(out) :: J(3)
+    logical,intent(in)::performance
     type(model_node),pointer :: m
     type(state_node),pointer :: s
     integer :: nb,nk,i,ierr
@@ -194,7 +214,8 @@ contains
     allocate(s,stat=ierr)
     if(ierr/=0)return
     nb=m%gs%nb;nk=m%gs%nk
-    allocate(s%solver%rho(nb,nb,nk),s%trial%rho(nb,nb,nk),stat=ierr)
+    allocate(s%solver%rho(nb,nb,nk),stat=ierr)
+    if(ierr==0.and..not.performance)allocate(s%trial%rho(nb,nb,nk),stat=ierr)
     if(ierr/=0)then
       deallocate(s);return
     end if
@@ -236,6 +257,21 @@ contains
     call move_alloc(s%solver%rho,old)
     call move_alloc(s%trial%rho,s%solver%rho)
     call move_alloc(old,s%trial%rho)
+    s%A=A;s%J=J;status=0
+  end function
+
+  ! Explicit in-place evolution: no trial-density copy or finite scans.
+  integer(c_int32_t) function sp_sbe_step_performance(id,A,J) bind(C) result(status)
+    integer(c_int64_t),value::id
+    real(c_double),intent(in)::A(3)
+    real(c_double),intent(out)::J(3)
+    type(state_node),pointer::s
+    real(c_double)::midpoint(3)
+    s=>find_state(id);status=2
+    if(.not.associated(s))return
+    midpoint=.5d0*(s%A+A)
+    call velocity_evolve(s%solver,s%model%gs,midpoint,s%dt)
+    call evaluate(s%solver,s%model,A,J)
     s%A=A;s%J=J;status=0
   end function
 

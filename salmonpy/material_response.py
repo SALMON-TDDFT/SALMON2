@@ -796,8 +796,13 @@ class TDDFTResponseBackend:
     execution='leader_only'
     reduction='leader'
 
-    def __init__(self,*,runtime_validation=None):
+    def __init__(self,*,runtime_validation=None,execution_mode="checked"):
+        from .ld import _execution_mode_name
+        self._execution_mode=_execution_mode_name(execution_mode)
         self._runtime_validation=runtime_validation
+
+    @property
+    def execution_mode(self):return self._execution_mode
 
     def create_state(self,initial,point_id,dt,context):
         from .tddft import TDDFTInitialState
@@ -809,12 +814,14 @@ class TDDFTResponseBackend:
         if verified.sha256!=initial.initial.executable.sha256:
             raise InputError('initial-state executable differs from verified serial runtime')
         from dataclasses import replace
-        worker=replace(initial.initial,executable=verified).new_state(dt=dt)
+        worker=replace(initial.initial,executable=verified).new_state(dt=dt,execution_mode=self.execution_mode)
         class State:
             timing=_response_timing(dt,'SALMON middlepoint TDDFT worker; charge current j')
             def __init__(self): self.A=np.zeros(3)
+            @property
+            def execution_mode(self):return worker.execution_mode
             def advance(self,old,new):
-                if not np.array_equal(old,self.A): raise InputError('old A differs from accepted TDDFT state')
+                if worker.execution_mode=="checked" and not np.array_equal(old,self.A): raise InputError('old A differs from accepted TDDFT state')
                 current=worker.step(new)  # TDDFTState returns charge current j
                 self.A=np.array(new,copy=True)
                 return current

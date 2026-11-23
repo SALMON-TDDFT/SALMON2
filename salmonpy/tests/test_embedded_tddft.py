@@ -10,6 +10,29 @@ class EmbeddedTDDFTTest(unittest.TestCase):
         self.assertEqual(NativeTDDFTBackend.execution, 'collective')
         self.assertEqual(NativeTDDFTBackend.reduction, 'leader')
 
+    def test_performance_tddft_omits_admission_and_marks_failed_updates(self):
+        from pathlib import Path
+        from types import SimpleNamespace
+        import numpy as np
+        from salmonpy.embedded_tddft import _NativeState
+        from salmonpy.errors import RuntimeFailure
+        def forbidden(*args,**kwargs):raise AssertionError('per-step agreement forbidden')
+        native=SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=forbidden)))
+        calls=[]
+        def step(old,new,j):calls.append(new.copy());j[:]=-new;return 0
+        lib=SimpleNamespace(sp_tddft_step_performance=step)
+        state=_NativeState(native,lib,Path('/unused'),4,execution_mode='performance')
+        state._call_performance=lambda fn,*args:fn(*args)
+        self.assertEqual(state.execution_mode,'performance')
+        with self.assertRaises(AttributeError):state.execution_mode='checked'
+        np.testing.assert_array_equal(state.advance([9.,9.,9.],[.1,.2,.3]),[.1,.2,.3])
+        state.advance(state.A,[np.nan,0.,0.])
+        self.assertTrue(np.isnan(calls[-1][0]))
+        self.assertEqual(state.steps,2)
+        lib.sp_tddft_step_performance=lambda *args:20
+        with self.assertRaises(RuntimeFailure):state.advance(state.A,[0.,0.,0.])
+        self.assertTrue(state.failed)
+
     def test_loader_detects_changed_assets(self):
         import tempfile
         from pathlib import Path
@@ -46,7 +69,7 @@ class EmbeddedTDDFTTest(unittest.TestCase):
             if error:raise ValueError(error)
         response=SimpleNamespace(context=context,dt=.1,step_index=0,closed=False,failed=False,agree=agree,
                                  timing_records=lambda:{1:matter_record})
-        field=object.__new__(NativeEHField)
+        field=object.__new__(NativeEHField);field._execution_mode="checked"
         field.context=context;field.dt=.1;field.point_ids=(1,);field.step_index=0;field.closed=False;field.failed=False
         return response,field
 
@@ -96,7 +119,7 @@ class EmbeddedTDDFTTest(unittest.TestCase):
         from types import SimpleNamespace
         import numpy as np
         from salmonpy.coupled import NativeEHField
-        field=object.__new__(NativeEHField)
+        field=object.__new__(NativeEHField);field._execution_mode="checked"
         field.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=lambda x:[x]))
         field.lib=SimpleNamespace(sp_eh_step=object());field.capacity=4;field.point_ids=(1,)
         field.A=np.zeros((1,3));field.E=field.A.copy();field.dt=.1

@@ -241,6 +241,43 @@ class NativeSBECouplingTests(unittest.TestCase):
             self.initial = SBEInitialState(**{k: data[k] for k in ('eigen', 'momentum', 'nonlocal_velocity',
                                            'weights', 'lattice')}, electrons=2, correction_order=1)
 
+    def test_performance_coupling_and_field_restore_match_checked(self):
+        from salmonpy.errors import InputError
+        drive=lambda t: np.column_stack((np.zeros_like(t),np.sin(t)*.001,np.cos(t)*.002))
+        models=(Transverse(drive),Longitudinal(drive),ThinFilm(thickness=2.,external=drive),
+                Multiscale1D(cells=2,spacing=C*self.dt,vacuum=(2,2),incident=drive))
+        for model in models:
+            with self.subTest(field=type(model).__name__):
+                checked=model.new_state(dt=self.dt,steps=20)
+                fast=model.new_state(dt=self.dt,steps=20,execution_mode='performance')
+                with self.assertRaises(AttributeError):fast.execution_mode='checked'
+                with self.assertRaises(InputError):model.new_state(dt=self.dt,steps=20,execution_mode='typo')
+                currents=np.sin(np.arange(60).reshape(20,1,3))*.001
+                currents=np.repeat(currents,checked.points,axis=1)
+                for n,j in enumerate(currents):
+                    np.testing.assert_array_equal(checked.step(j),fast.step(j))
+                    if n==7:saved=fast.snapshot()
+                fast.restore(saved)
+                for j in currents[8:]:fast.step(j)
+                np.testing.assert_array_equal(checked.A,fast.A)
+                a=couple(self.initial,model,dt=self.dt,steps=20)
+                b=couple(self.initial,model,dt=self.dt,steps=20,execution_mode='performance')
+                np.testing.assert_array_equal(a.A,b.A)
+                np.testing.assert_array_equal(a.current,b.current)
+                self.assertGreater(np.max(np.abs(a.current)),0.)
+                self.assertEqual(b.execution_mode,'performance')
+        # C-extension-backed factories may not expose an introspectable signature.
+        from unittest.mock import patch
+        with patch('inspect.signature',side_effect=ValueError('extension callable')):
+            result=couple(self.initial,Transverse(),dt=self.dt,steps=2,execution_mode='performance')
+        self.assertEqual(result.execution_mode,'performance')
+        state=Longitudinal().new_state(dt=self.dt,steps=3,execution_mode='performance')
+        state.step([[0.,0.,0.]])
+        self.assertTrue(np.isnan(state.step([[np.nan,0.,0.]])).any())
+        # A user backend without an opt-in is reported before it is advanced.
+        with self.assertRaisesRegex(InputError,'execution_mode'):
+            couple(FreeElectrons(.01),Transverse(),dt=self.dt,steps=2,execution_mode='performance')
+
     def test_transverse_coupling_equals_crystal_respond(self):
         from salmonpy import crystal
         steps = len(self.A)-2

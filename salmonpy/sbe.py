@@ -16,12 +16,12 @@ from pathlib import Path
 import sys
 import re
 import numpy as np
-from .ld import _array, _positive
+from .ld import _array, _positive, _array_unchecked, _execution_mode_name
 
 
-def _frozen(value, dtype=float):
+def _frozen(value, dtype=float, *, check=True):
     a = np.array(value, dtype=dtype, order='F')
-    if not np.isfinite(a).all():
+    if check and not np.isfinite(a).all():
         raise InputError('initial data must be finite')
     return np.frombuffer(a.tobytes(order='F'), dtype=a.dtype).reshape(a.shape, order='F')
 
@@ -77,8 +77,8 @@ class SBEInitialState(_WeakInitial):
         return (type(self),(self.eigen,self.momentum,self.nonlocal_velocity,self.weights,
                             self.lattice,self.electrons,self.correction_order,self.nonlocal_correction))
 
-    def new_state(self, *, dt, time0=0., initial_A=(0.,0.,0.)):
-        return SBEState(self,dt,time0,initial_A)
+    def new_state(self, *, dt, time0=0., initial_A=(0.,0.,0.), execution_mode="checked"):
+        return SBEState(self,dt,time0,initial_A,execution_mode=execution_mode)
 
     @classmethod
     def from_salmon(cls, directory, sysname, *, bands, kpoints, electrons, lattice,
@@ -169,7 +169,7 @@ def _model_handle(initial):
 
 class SBEState(_SnapshotMixin):
     """Independent density matrix; fixed dt/model; step accepts only the next A/c."""
-    __slots__=('_initial','_dt','_time0','_steps','_A','_current','_native_state','_closed')
+    __slots__=('_initial','_dt','_time0','_steps','_A','_current','_native_state','_closed','_execution_mode','_parse_A')
     _snapshot_kind = 'sbe'
     _snapshot_counter = '_steps'
 
@@ -178,13 +178,17 @@ class SBEState(_SnapshotMixin):
     def _snapshot_arrays(self):
         return {'_A':self._A,'_rho':self._native_state.density(),'_current':self._current}
 
-    def __init__(self,initial,dt,time0,initial_A):
+    def __init__(self,initial,dt,time0,initial_A,*,execution_mode="checked"):
+        self._execution_mode=_execution_mode_name(execution_mode)
+        self._parse_A=_array_unchecked if execution_mode=='performance' else _array
         self._initial=initial; self._dt=_positive(dt,'dt')
         self._time0=float(_array(time0,'time0',()))
         self._steps=0; self._A=_array(initial_A,'initial_A',(3,))
         self._closed=False
-        self._native_state=_model_handle(initial).new_state(self.dt,self._A)
+        self._native_state=_model_handle(initial).new_state(self.dt,self._A,execution_mode=execution_mode)
         self._current=self._native_state.current.copy()
+    @property
+    def execution_mode(self):return self._execution_mode
     @property
     def dt(self): return self._dt
     @property
@@ -200,15 +204,15 @@ class SBEState(_SnapshotMixin):
     @property
     def current(self):
         """Electric (charge) current density j = -J_matter at the current time."""
-        return _frozen(-self._current)
+        return _frozen(-self._current,check=self.execution_mode=="checked")
     @property
     def matter_current(self):
         """SALMON electronic matter current J (internal representation)."""
-        return _frozen(self._current)
+        return _frozen(self._current,check=self.execution_mode=="checked")
     def step(self,Anew):
         if self._closed:raise RuntimeFailure('SBE state is closed')
-        A=_array(Anew,'Anew',(3,))
-        if not np.isfinite(self._time0+(self._steps+1)*self.dt):
+        A=self._parse_A(Anew,'Anew',(3,))
+        if self.execution_mode=="checked" and not np.isfinite(self._time0+(self._steps+1)*self.dt):
             raise InputError('time overflow')
         current=self._native_state.step(A)
         self._A=A;self._current=current;self._steps+=1

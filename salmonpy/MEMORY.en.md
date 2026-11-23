@@ -75,3 +75,19 @@ Field2+SBE1+TDDFT2 uses `mpiexec -n 5 ... --field-grid 1 2 1 --tddft-ranks 2`. F
 Source-distribution tool `tools/test_mixed_scaling.py BUILD RUNTIME GS NEW_OUTPUT --rank-budget 18 --memory-budget-gib 48` uses the installed wheel and runs4/5/7/11/15 ranks sequentially twice on identical96³ inputs. A/E/j histories are compared with the first case. Different grid shapes are rejected. Supply MPI-vendor-specific flags with `--launcher-arg`; avoid other heavy work during timing.
 
 `coupled_loop_seconds_max` excludes initialization, output and serial reference replay. Communication metrics include waits, not pure link bandwidth; FDTD called directly from Python halo exchanges are not separately decomposed. Memory is the sum of per-rank peak RSS values, not simultaneous aggregate RSS or whole-system usage. Resource/timer measurement failures are distinct from calculation failures. These short repeats do not establish universal scalability or physical accuracy.
+
+## Explicit field observation cost measurements (development)
+
+Source-checkout tool `tools/test_diagonal_field_energy_mpi.py` varies field size/ranks and observation interval without GS data. This command starts an actual local calculation; it is not an input-only management-node check. The user must select compute nodes and the site's launcher. Use a new results directory outside the code and a field library matching the installed wheel.
+
+```sh
+mpiexec -n 5 python -I tools/test_diagonal_field_energy_mpi.py \
+  BUILD.json RESULTS/new-profile --profile tensor-background \
+  --grid-count 72 --field-ranks 4 --observe --observation-stride 8
+```
+
+This uses four field ranks plus one bookkeeping rank. Grid spacing/dt stay fixed; larger grid counts extend vacuum, not a grid-spacing convergence test. The stride applies to native point output, Python history and individual-step energy queries; the final step is always retained in history. Sparse energy observations do not constitute a cumulative energy balance.
+
+`report.json` separates `calculation_status` from `resource_measurement_status`. It records per-rank setup, advance, backup capture/release, observation and final-checkpoint wall times, plus peak RSS from `process_memory()`. Missing RSS stays None with its reason and does not fail the calculation. `--fail-resource-probe` explicitly tests that policy. Summed process high-water RSS is not a simultaneous job peak. File inventory includes checkpoints/static inputs, with point-stream bytes separate; the report itself and external launcher log are excluded.
+
+Timings include MPI waits; pure communication time/traffic is not isolated. Observation communication stays within the field group. Measurement records are gathered application-wide once after computation. This fixture captures old state only for observed updates; it is not an optimization that removes per-step failure recovery from protected coupled calculations. Stored observation maxima depend on sampling interval and must be distinguished from physical state when comparing checkpoint files.

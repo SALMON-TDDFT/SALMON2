@@ -8,6 +8,36 @@ from salmonpy import LorentzDrude
 from salmonpy.errors import RuntimeFailure, SnapshotError, NumericalError
 
 class LDTests(unittest.TestCase):
+    def test_performance_modes_match_batch_steps_and_explicit_restore(self):
+        from salmonpy.ld import TensorLorentzDrude
+        materials=(self.material(),TensorLorentzDrude(plasma_frequency=.7,
+            strength=[[[1.,.2,.1],[.2,.6,.05],[.1,.05,.4]]],resonance=[.3],damping=[.1]))
+        time=np.arange(65)*.02;drive=np.column_stack((np.sin(time),np.cos(time)-1,np.sin(.7*time)))*.01
+        for material in materials:
+            with self.subTest(material=type(material).__name__):
+                normal=material.respond(drive,dt=.02)
+                fast=material.respond(drive,dt=.02,execution_mode='performance')
+                np.testing.assert_array_equal(fast.current,normal.current)
+                np.testing.assert_array_equal(fast.polarization,normal.polarization)
+                a=material.new_state(dt=.02);b=material.new_state(dt=.02,execution_mode='performance')
+                other=material.new_state(dt=.02,execution_mode='performance')
+                try:
+                    self.assertEqual(b.execution_mode,'performance')
+                    with self.assertRaises(AttributeError):b.execution_mode='checked'
+                    for n,e in enumerate(drive[1:],1):
+                        p,j=a.step(e);q,k=b.step(e);other.step(-e)
+                        np.testing.assert_array_equal(q,p);np.testing.assert_array_equal(k,j)
+                        if n==24:saved=b.snapshot()
+                    b.restore(saved)
+                    for e in drive[25:]:b.step(e)
+                    np.testing.assert_array_equal(a.current,b.current)
+                    b.step([np.nan,0.,0.]);self.assertTrue(np.isnan(b.current).any())
+                    np.testing.assert_array_equal(a.current,normal.current[-1])
+                    b.restore(saved);self.assertEqual(b.execution_mode,'performance')
+                finally:a.close();b.close();other.close()
+
+
+
     def material(self):
         return LorentzDrude(plasma_frequency=1., strength=[1., .2], resonance=[0., 2.], damping=[.1, .2])
 

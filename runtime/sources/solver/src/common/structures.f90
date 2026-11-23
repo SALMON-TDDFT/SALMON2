@@ -693,6 +693,7 @@ module structures
   end type
 
   type s_rt
+    logical :: factor_endpoint_before_output=.false. ! owner-local update scheduling, not a diagnostic
     logical :: recover_errors=.false.
     integer :: step_error=0
     integer :: max_steps=0

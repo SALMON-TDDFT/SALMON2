@@ -308,3 +308,56 @@ Checkpoint history g, b and coeff now use scalar IEEE inquiries over every eleme
 `model_settings` is required. Every caller owns its settings, including the single-state and worker paths; there is no implicit process-global fallback. Process selectors still do not permit threaded reentry.
 
 `model_settings` is required. Every caller owns its settings, including the single-state and worker paths; there is no implicit process-global fallback. Process selectors still do not permit threaded reentry.
+
+## Fast-PR HSE performance mode
+
+`NativeFastHSEBackend(..., execution_mode="performance")` selects the
+caller-managed MPI route; the default is `"checked"`. The choice
+is fixed on each state. Single-state, shared-model and heterogeneous-registry
+routes are supported; serial subprocess workers are not supported by this option.
+
+The performance update omits endpoint agreement, Python finite scans, electronic
+and exchange-state backups, and numerical-recovery diagnostic votes/scans.
+Initialization, library authentication, local lifetime/capacity/shape bounds,
+explicit checkpoints and observations remain checked. Solver breakdown checks,
+FFT/Hartree/exchange reductions and learning-readiness communication remain.
+The mathematical compatibility of A with the retained symmetry little group
+also remains: status34 rejects that input before mutation and permits retry.
+Other returned failures mark the Python state failed, without an automatic
+rollback guarantee; unhandled native failures can end the job.
+
+Learning endpoint collection stays before energy/output handling in both modes.
+An owner-local scheduling flag separates this ordering from recovery diagnostics;
+it is reset after each update and is not an execution-mode selector in shared
+process globals. Taylor/PT-CN, full/reduced k and internal1/2-rank synthetic
+comparisons preserve current, energy and learning history, including explicit
+in-memory restoration. These are not physical convergence or speed benchmarks.
+
+`mpi_mixed_native --hse-execution-mode performance` requires an explicit
+`--fast-hse-mpi-build`. It selects only HSE updates;
+the field and outer coupling retain their independently selected checks.
+
+## Modes of shared and registered fast-HSE states
+
+A backend's `execution_mode` supplies its model default. Use
+`model.new_state(point_id, execution_mode="checked")` or `"performance"`
+to override per state; omit the keyword to inherit the model default.
+`registry.open_model(..., execution_mode=...)` selects a registered model's
+default. Session registry reuse preserves each material binding's chosen mode.
+Siblings can mix checked/performance updates with separate electronic, exchange,
+learning, A/current and output history. There is no process-global mode selector.
+
+The performance handle update keeps local token generation/lifetime bounds and
+the symmetry/A mathematical condition, while omitting diagnostic token votes
+and automatic recovery copies. Physical activation of each model's input and
+workspaces, solver communication and learning update order remain. Checked
+siblings retain their full validation and recovery path. Explicit memory or disk
+checkpoint operations retain checks/costs; restoring does not change the
+receiving state's selected mode. Performance update failures still have no
+automatic rollback guarantee.
+
+`shared_fast_hse --execution-mode performance` demonstrates point-a in the
+selected mode and point-b in checked mode, including a matching point-a restart.
+With `--second-initial`, the same example uses two registered input models.
+The usual `mpi_mixed_native --hse-execution-mode performance` also permits
+shared HSE points; field/outer-coupling checks have independent settings.

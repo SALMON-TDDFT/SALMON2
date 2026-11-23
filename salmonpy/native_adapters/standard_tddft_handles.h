@@ -33,7 +33,14 @@ int sp_tddft_handle_init(const char *input,double dt,int capacity,
                         int64_t *token,double j[3]);
 int sp_tddft_model_new(int64_t *token,double j[3]);
 int sp_tddft_handle_step(int64_t token,const double Aold[3],const double Anew[3],double j[3]);
+/* Unchecked update; local generation/bounds checks remain. Same charge j sign. */
+int sp_tddft_handle_step_performance(int64_t token,const double Aold[3],const double Anew[3],double j[3]);
 /* Additive read-only collective density integral; includes occupation/k weights and volume. */
+/* Explicit single-state unchecked update; no backup/finite/argument agreement.
+ * Aold is ABI-only; caller owns endpoint consistency. Failure may modify state.
+ * Initialization, physical solver communication and explicit checkpoints remain.
+ */
+int sp_tddft_step_performance(const double Aold[3],const double Anew[3],double J_matter[3]);
 int sp_tddft_electron_number(double *value);
 /* Optional protocol1: rank-local completed total/init/density/Hartree seconds.
  * Handle-local diagnostics; not checkpoint state; queries do not switch banks. */

@@ -31,11 +31,13 @@ class _Bound:
 
 
 class _HandleLibrary:
-    def __init__(self,lib,token):
+    def __init__(self,lib,token,*,execution_mode="checked"):
         self._lib=lib
         for old,new in [('step','step'),('checkpoint','checkpoint'),('info','info'),
                         ('close','close'),('history_info','history'),('step_transaction','transaction')]:
             setattr(self,'sp_fast_hse_'+old,_Bound(getattr(lib,'sp_fast_hse_handle_'+new),token))
+        if execution_mode=='performance':
+            self.sp_fast_hse_step_performance=_Bound(lib.sp_fast_hse_handle_step_performance,token)
     def __getattr__(self,name):return getattr(self._lib,name)
 
 
@@ -59,7 +61,9 @@ class NativeFastHSEModel:
     existing states keep their connection until individually closed. All calls
     are collective/main-thread. No state or file is finalized by Python GC.
     """
-    def __init__(self,native,lib,work,dt,capacity,propagator,backend_identity,manifest,*,symmetry=False):
+    def __init__(self,native,lib,work,dt,capacity,propagator,backend_identity,manifest,*,symmetry=False,execution_mode="checked"):
+        from .ld import _execution_mode_name
+        self._default_execution_mode=_execution_mode_name(execution_mode)
         self._native=native;self.lib=lib;self.work=work
         self.dt=dt;self.capacity=capacity;self.propagator=propagator
         self.symmetry_enabled=symmetry
@@ -73,12 +77,20 @@ class NativeFastHSEModel:
         self._native._live()
         return _directory_call(self.lib,self._native.context.solver_comm,self.work,fn,*args)
 
-    def new_state(self,point_id=None,*,dt=None,capacity=None):
+    def new_state(self,point_id=None,*,dt=None,capacity=None,execution_mode=None):
         """Fresh original-GS state, never a copy of another state's excitation."""
         from .fast_hse_mpi import _State, _agree
         comm=self._native.context.solver_comm
         error=None
         try:
+            from .ld import _execution_mode_name
+            execution_mode=_execution_mode_name(self._default_execution_mode if execution_mode is None else execution_mode)
+            if execution_mode=='performance':
+                vector=np.ctypeslib.ndpointer(dtype=np.float64,shape=(3,),flags='C_CONTIGUOUS')
+                fn=self.lib.sp_fast_hse_handle_step_performance
+                fn.argtypes=[c.c_int64,vector,vector,vector,c.POINTER(c.c_double)];fn.restype=c.c_int
+                from ._native_group import _bind_performance_directory
+                performance_scope=_bind_performance_directory(self.lib)
             self._native._live()
             if self.closed or self.failed:raise InputError('shared HSE model is closed or failed')
             timestep=self.dt if dt is None else _positive(dt,'dt')
@@ -87,7 +99,7 @@ class NativeFastHSEModel:
             if isinstance(point,(bool,np.bool_)) or not isinstance(point,(str,int,np.integer)):
                 raise InputTypeError('point_id must be a string or integer')
             point=int(point) if isinstance(point,np.integer) else point
-            descriptor=(point,timestep,count,self._serial,self._initialized)
+            descriptor=(point,timestep,count,self._serial,self._initialized,execution_mode)
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         descriptors=comm.allgather(descriptor)
@@ -104,9 +116,10 @@ class NativeFastHSEModel:
             if first:self.failed=True
             raise RuntimeFailure('shared native HSE state initialization failed: '+str(statuses))
         self._initialized=True
-        bound=_HandleLibrary(self.lib,token.value)
+        bound=_HandleLibrary(self.lib,token.value,execution_mode=execution_mode)
         lease=_Lease(self)
-        state=_State(lease,bound,self.work,timestep,count,self.propagator)
+        state=_State(lease,bound,self.work,timestep,count,self.propagator,execution_mode=execution_mode)
+        if execution_mode=="performance":state._performance_enter,state._performance_leave=performance_scope
         lease.state=state
         state.handle=token.value;state.point_id=point;state.model_identity=self.identity
         state.initialized=True;state.symmetry_enabled=self.symmetry_enabled

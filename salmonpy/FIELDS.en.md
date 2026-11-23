@@ -26,7 +26,7 @@ j_0 = matter(A_0)  →  A_1 = field(j_0)  →  j_1 = matter(A_1)  →  A_2 = fie
   determined by the external field alone.
 - Settings are immutable. dt and the step capacity are fixed by
   `new_state(dt=..., steps=...)`; inspect `state.config` for resolved values.
-- Invalid input or a nonfinite result leaves the state unchanged.
+- In checked mode, invalid input or a nonfinite result leaves the state unchanged.
 
 ## Components
 
@@ -147,3 +147,27 @@ An incident wave requires an `abc` left boundary. Other left boundaries require 
 See [public API and errors](API.en.md) and [in-memory snapshots](SNAPSHOTS.en.md).
 LD, SBE and the four Python fields support fixed-dt snapshot/restore since 0.1.0a5.
 This does not add solver FDTD/TDDFT/MPI restart or change current/time conventions.
+
+## Performance mode for serial coupling
+
+`Transverse`, `Longitudinal`, `ThinFilm` and `Multiscale1D` accept
+`new_state(dt=..., steps=..., execution_mode="performance")`. The same option
+on `maxwell.couple(...)` selects performance mode for both the field and every
+matter state. Built-in SBE supports this; TDDFT and fast HSE do not yet support
+this entry. The default remains `"checked"`.
+
+Setup still validates inputs, capacity, CFL and timing contracts. During stepping
+the field omits current/result finite scans, and the serial driver omits current
+finite scans and repeated clock comparisons. Shape/capacity checks remain;
+update formulas, ordering, sign conversion and physical communication are unchanged.
+Explicit snapshots, restoration and saved output retain their checks. Physical
+snapshots exclude the mode; restore preserves the receiving state's mode.
+Automatic failure rollback is not guaranteed in performance mode. This option
+does not select performance mode for MPI sessions or TDDFT/HSE internals.
+
+Custom field/matter models must accept the `execution_mode` keyword in
+`new_state` and expose the selected mode on the returned state. A requested
+performance mode is rejected if the model cannot honor it; there is no silent
+fallback. Ordinary checked custom models need no changes.
+
+Try `python -m salmonpy.examples.field_coupling NEW_DIRECTORY --execution-mode performance`.

@@ -62,13 +62,13 @@ class _RegisteredLibrary:
 
 
 class _RegisteredModel(NativeTDDFTModel):
-    def new_state(self,point_id=None):
+    def new_state(self,point_id=None,*,execution_mode=None):
         if self.registry._native.closed:raise InputError('TDDFT registry is closed')
         self._native._live();comm=self._native.context.solver_comm
         _agree(comm,'TDDFT registry is closed' if self.registry.closed else None)
         tokens=comm.allgather(self.model_token)
         _agree(comm,'model selections differ within subgroup' if any(t!=self.model_token for t in tokens) else None)
-        return super().new_state(point_id)
+        return super().new_state(point_id,execution_mode=execution_mode)
     def _detach_if_unused(self):
         if self.closed and not self._states:
             self.registry._models.discard(self)
@@ -104,10 +104,12 @@ class NativeTDDFTRegistry:
         self._native._live()
         return _directory_call(self.lib,self._native.context.solver_comm,work,fn,*args)
 
-    def open_model(self,initial,dt,*,decomposition=None):
+    def open_model(self,initial,dt,*,decomposition=None,execution_mode=None):
         from .embedded_tddft import NativeTDDFTInitialState,_manifest,_copy_bundle,_digest
         comm=self._native.context.solver_comm;error=None
         try:
+            from .ld import _execution_mode_name
+            execution_mode=_execution_mode_name(self.backend.execution_mode if execution_mode is None else execution_mode)
             self._native._live()
             if self.closed:raise InputError('TDDFT registry is closed')
             if not isinstance(initial,NativeTDDFTInitialState):raise InputError('NativeTDDFTInitialState required')
@@ -123,7 +125,7 @@ class NativeTDDFTRegistry:
             if _manifest(initial.directory)!=initial.manifest:raise InputError('initial bundle changed')
             if _digest(self.backend.library)!=self.backend.sha256:raise InputError('native library changed')
             base=_profile(initial)
-            descriptor=(initial.manifest,initial.input_file,dt,count,dec)
+            descriptor=(initial.manifest,initial.input_file,dt,count,dec,execution_mode)
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         values=comm.allgather(descriptor)
@@ -155,7 +157,7 @@ class NativeTDDFTRegistry:
             raise RuntimeFailure('TDDFT model registration failed: '+str(outcomes))
         proxy=_RegisteredLibrary(self,model_token.value,state_token.value,current)
         identity='registry-v1/'+hashlib.sha256(json.dumps([self.backend.sha256,initial.input_file,dec]).encode()).hexdigest()
-        model=_RegisteredModel(_RegistryLease(self),proxy,work,initial,dt,dec,identity,base)
+        model=_RegisteredModel(_RegistryLease(self),proxy,work,initial,dt,dec,identity,base,execution_mode=execution_mode)
         model.registry=self;model.model_token=model_token.value
         model._initialized=True;model._attempted=True
         self._models.add(model)

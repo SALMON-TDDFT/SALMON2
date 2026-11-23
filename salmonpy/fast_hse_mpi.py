@@ -210,7 +210,9 @@ class NativeFastHSEBackend:
     execution = 'collective'
     reduction = 'leader'
 
-    def __init__(self, build_record, work_root, *, allow_symmetry=False, shared_model=False, registry_model=False):
+    def __init__(self, build_record, work_root, *, allow_symmetry=False, shared_model=False, registry_model=False, execution_mode="checked"):
+        from .ld import _execution_mode_name
+        self._execution_mode=_execution_mode_name(execution_mode)
         if type(allow_symmetry) is not bool:
             raise InputTypeError('allow_symmetry must be boolean')
         if type(shared_model) is not bool:
@@ -235,7 +237,7 @@ class NativeFastHSEBackend:
         self.work_root = Path(work_root).expanduser().resolve()
         if not self.work_root.is_dir():
             raise InputError('existing shared work root required')
-        identity = [self.sha256,self.origin_sha256]
+        identity = [self.sha256,self.origin_sha256,self.execution_mode]
         if allow_symmetry:
             identity.append('symmetry-v1')
         if shared_model:
@@ -256,7 +258,7 @@ class NativeFastHSEBackend:
             elif (registry.backend.sha256,registry.backend.work_root,registry.backend.allow_symmetry)!=(self.sha256,self.work_root,self.allow_symmetry):
                 raise InputError('one HSE registry group requires matching library, work root and symmetry permission')
             from ._shared_hse import _SessionGroup
-            return _SessionGroup(registry.open_model(initial,dt))
+            return _SessionGroup(registry.open_model(initial,dt,execution_mode=self.execution_mode))
         if not self.shared_model:
             return None
         from ._shared_hse import _SessionGroup
@@ -267,6 +269,9 @@ class NativeFastHSEBackend:
         from ._hse_registry import open_registry
         return open_registry(self,context)
 
+    @property
+    def execution_mode(self):return self._execution_mode
+
     def open_model(self, initial, dt, context):
         """Collectively share one immutable full-k GS and MPI lease among states."""
         return self._create(initial, None, dt, context, shared=True)
@@ -276,11 +281,13 @@ class NativeFastHSEBackend:
             raise InputError('shared/registry model uses ResponseSession/open_group or explicit model API')
         return self._create(initial, point_id, dt, context, shared=False)
 
-    def _create(self, initial, point_id, dt, context, *, shared, registry=None):
+    def _create(self, initial, point_id, dt, context, *, shared, registry=None, execution_mode=None):
         global _used
         comm = context.solver_comm
         error = None
         try:
+            from .ld import _execution_mode_name
+            execution_mode=_execution_mode_name(self.execution_mode if execution_mode is None else execution_mode)
             if registry is None and (_used or embedded._used):
                 raise InputError('one native lifetime per process; use a fresh MPI job')
             if threading.current_thread() is not threading.main_thread():
@@ -317,7 +324,7 @@ class NativeFastHSEBackend:
             groups['tgrid'] = groups.get('tgrid','') + '\n dt='+format(dt,'.17g')+', nt='+str(initial.max_steps)+'\n'
             groups['parallel'] = groups.get('parallel','') + '\n nproc_k='+str(comm.size)+', nproc_ob=1, nproc_rgrid=1,1,1\n'
             text = '\n'.join('&'+k+v+'/' for k,v in groups.items())+'\n'
-            descriptor = (self.sha256,initial.manifest,point_id,dt,initial.max_steps,text,self.allow_symmetry,shared)
+            descriptor = (self.sha256,initial.manifest,point_id,dt,initial.max_steps,text,self.allow_symmetry,shared,execution_mode)
         except Exception as exc:
             error = str(exc)
         _agree(comm,error)
@@ -351,6 +358,11 @@ class NativeFastHSEBackend:
                 _configure_handles(lib,symmetry=symmetry)
             else:
                 initializer = _initializer(lib,self.allow_symmetry,comm.size)
+                if execution_mode=='performance':
+                    fn=lib.sp_fast_hse_step_performance
+                    fn.argtypes=lib.sp_fast_hse_step.argtypes;fn.restype=c.c_int
+                    from ._native_group import _bind_performance_directory
+                    _bind_performance_directory(lib)
         except Exception as exc:
             error = str(exc)
         _agree(comm,error)
@@ -360,15 +372,18 @@ class NativeFastHSEBackend:
             from ._hse_registry import _ModelLease,_ModelLibrary,_RegisteredModel
             native=_ModelLease(registry)
             model=_RegisteredModel(native,_ModelLibrary(registry),work,dt,initial.max_steps,
-                                  propagator,self.identity,initial.manifest,symmetry=symmetry)
+                                  propagator,self.identity,initial.manifest,symmetry=symmetry,execution_mode=execution_mode)
             native.model=model
             registry._models.add(model)
             return model
         native = NativeParallelContext(owner,self.library,self.sha256)
         _used = embedded._used = True
         if shared:
-            return NativeFastHSEModel(native,lib,work,dt,initial.max_steps,propagator,self.identity,initial.manifest,symmetry=symmetry)
-        state = _State(native,lib,work,dt,initial.max_steps,propagator)
+            return NativeFastHSEModel(native,lib,work,dt,initial.max_steps,propagator,self.identity,initial.manifest,symmetry=symmetry,execution_mode=execution_mode)
+        state = _State(native,lib,work,dt,initial.max_steps,propagator,execution_mode=execution_mode)
+        if execution_mode=="performance":
+            from ._native_group import _bind_performance_directory
+            state._performance_enter,state._performance_leave=_bind_performance_directory(lib)
         state.symmetry_enabled = symmetry
         try:
             current = np.empty(3)
@@ -391,7 +406,9 @@ class _State:
     checkpoint_format = 'salmonpy.fast-hse-kmpi-native/2'
     checkpoint_modes = ('save','restore')
 
-    def __init__(self,native,lib,work,dt,capacity,propagator):
+    def __init__(self,native,lib,work,dt,capacity,propagator,*,execution_mode="checked"):
+        from .ld import _execution_mode_name
+        self._execution_mode=_execution_mode_name(execution_mode)
         self.checkpoint_decomposition=(native.context.solver_comm.size,1,1,1,1)
         self._native = native  # Avoid the legacy sp_tddft checkpoint dispatch.
         self.lib = lib
@@ -449,7 +466,35 @@ class _State:
         _agree(self._native.context.solver_comm,error)
         return result
 
+    @property
+    def execution_mode(self):return self._execution_mode
+
+    def _call_performance(self,fn,*args):
+        self._native._live()
+        code=self._performance_enter(os.fsencode(self.work))
+        if code:raise RuntimeFailure('performance HSE I/O scope rejected: '+str(code))
+        try:return fn(*args)
+        finally:self._performance_leave()
+
+    def _advance_performance(self,old,new):
+        from .ld import _array_unchecked
+        if self.closed or self.failed or self.steps>=self.capacity:
+            raise InputError('closed, failed or exhausted HSE state')
+        a=_array_unchecked(old,'old A',(3,));b=_array_unchecked(new,'new A',(3,))
+        current=np.empty(3);energy=c.c_double()
+        try:
+            code=self._call_performance(self.lib.sp_fast_hse_step_performance,a,b,current,c.byref(energy))
+            if code==34:raise InputError('A breaks the retained symmetry little group; state unchanged')
+            if code:raise RuntimeFailure('performance HSE failed; state is not guaranteed preserved: '+str(code))
+        except InputError:
+            raise
+        except BaseException:
+            self.failed=True;raise
+        self.steps+=1;self.A=b;self.current=current;self.energy=energy.value
+        return self.current.copy()
+
     def advance(self,old,new):
+        if self.execution_mode=="performance":return self._advance_performance(old,new)
         def validate():
             a = _vector(old, 'old A')
             b = _vector(new, 'new A')

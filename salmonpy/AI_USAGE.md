@@ -1575,3 +1575,198 @@ GSは初期化で読み込むがSCFしない。保存は新規ディレクトリ
 任意のhistoryはtotal_rootだけが渡す。サンプルは--stop-after／--checkpoint／--resumeを使う。
 準備失敗の原子的拒否と、OS/MPI破損・切替時の致命的確保失敗は区別する。
 通常ステップに通信を増やさず、検証は明示的な保存・再開時に行う。
+
+六面エネルギー収支は、正の非分散背景ε・μ、等方／対角／非対角LDとLD界面平滑化、非負のOhmic伝導率を確認済み。
+実際のYee更新係数からFortranでエネルギーの重みを取得する。場の更新順や値は変えない。
+非対角背景とLD界面平滑化では、背景補間の境界交換量をPoynting流束と別に記録する。Ohmic伝導の散逸量はohmic_workとして分離し、LD分極への仕事・流束等と共に残差へ含める。
+field_modified_*（離散保存量）とfield_physical_*（Hを中心化した通常のエネルギー）を区別する。
+tools/test_diagonal_field_energy_mpi.pyは実計算を行う開発用検査であり、入力検査ではない。
+
+For non-diagonal background field energy observation, use the current rebuilt 19-component observer. Report constitutive_outward_energy separately from Poynting outward_energy; both enter the corrected residual. LD subpixel observation uses the actual smoothed coefficients; check the subpixel summary and reference-frequency approximation separately. Ohmic dissipation is returned separately as ohmic_work and included in residuals; LD polarization work is not solely heat. Rebuild the field and lightweight libraries together for the current contract. The optional query adds owning-field-group halo work; it does not change the physical step or checkpoint.
+
+Field observation profiling: see MEMORY.md / MEMORY.en.md and tools/test_diagonal_field_energy_mpi.py in the source checkout. It executes a calculation; never launch it automatically as management-node input validation. Distinguish completed calculation with partial resource measurements, individual process high-water RSS from simultaneous job peak, sampled-step energy from cumulative balance, and observation maxima from physical checkpoint payload. Grid-count changes here extend vacuum at fixed spacing; this is not the deferred material-grid convergence campaign.
+
+Performance field execution: NativeEHField(..., execution_mode="performance") skips per-step full-state snapshots, finite scans and validation-only group communication for FDTD/embedded LD. Default is checked. Select once and identically within the field group; setup validation, build audits/SHA, local ABI bounds, physical communication and solver convergence/breakdown remain. No automatic preservation/retry guarantee; invalid values may propagate or terminate the job. Explicit protection/diagnostics/checkpoints retain their own costs. This does NOT disable SBE/TDDFT/HSE matter or outer coupling checks. Rebuild the field runtime for sp_eh_step_performance; see COUPLED.md / COUPLED.en.md.
+
+## Standalone performance mode
+
+Pass `execution_mode="performance"` to `new_state(...)` or the batch response
+entry (`material.respond(...)` for LD, `crystal.respond(...)` for SBE). The
+default is `"checked"`; the choice belongs to each state and cannot be changed
+during stepping. LD supports scalar and reciprocal tensor materials; crystal
+SBE remains driven by A/c and returns charge current density.
+
+Performance mode uses the same Fortran update arithmetic. LD omits per-step
+pole backups and finite-value scans; SBE updates its density matrix directly
+without a trial copy or per-step finite-value scans. Automatic rollback and
+retry after a failed update are not guaranteed in this mode. Initial input,
+library integrity and shape checks remain. Explicit `snapshot()` / `restore()`
+and saved output retain their checks. Restoring physical state does not change
+the execution mode. This option does not disable checks in TDDFT or external
+coupling drivers.
+
+The installed examples accept `--execution-mode performance`. Compare a checked
+run before using this mode for a new configuration.
+
+## Performance mode for serial coupling
+
+`Transverse`, `Longitudinal`, `ThinFilm` and `Multiscale1D` accept
+`new_state(dt=..., steps=..., execution_mode="performance")`. The same option
+on `maxwell.couple(...)` selects performance mode for both the field and every
+matter state. Built-in SBE supports this; TDDFT and fast HSE do not yet support
+this entry. The default remains `"checked"`.
+
+Setup still validates inputs, capacity, CFL and timing contracts. During stepping
+the field omits current/result finite scans, and the serial driver omits current
+finite scans and repeated clock comparisons. Shape/capacity checks remain;
+update formulas, ordering, sign conversion and physical communication are unchanged.
+Explicit snapshots, restoration and saved output retain their checks. Physical
+snapshots exclude the mode; restore preserves the receiving state's mode.
+Automatic failure rollback is not guaranteed in performance mode. This option
+does not select performance mode for MPI sessions or TDDFT/HSE internals.
+
+Custom field/matter models must accept the `execution_mode` keyword in
+`new_state` and expose the selected mode on the returned state. A requested
+performance mode is rejected if the model cannot honor it; there is no silent
+fallback. Ordinary checked custom models need no changes.
+
+Try `python -m salmonpy.examples.field_coupling NEW_DIRECTORY --execution-mode performance`.
+
+## TDDFT performance mode
+
+`NativeTDDFTBackend(..., execution_mode="performance")` selects unchecked
+updates for the caller-managed MPI route. The default is
+`"checked"`; the backend and returned state's mode are read-only. Supported
+verification profiles are periodic fixed-ion scalar PZ, TB-mBJ, Libxc-PZ/PBE
+with transverse supplied A/c and middlepoint propagation. Single-state, shared-model and heterogeneous-registry routes are supported.
+Process-isolated workers, fast HSE and molecules are not covered by this option.
+
+Initialization, library SHA256 authentication and explicit checkpoints remain
+checked. Normal updates omit Python endpoint/finite/clock agreement, directory
+admission votes, Fortran argument agreement, full-state backups and recoverable
+numerical scans. Physical solver communication and update order remain. Shape,
+capacity and lifetime bounds remain local checks. Caller ranks must issue valid
+matching operations; nonfinite values can propagate and native failures can end
+the MPI job. A returned update error marks the Python state failed; it cannot be
+retried under the checked-mode state-preservation promise.
+
+Explicit norm queries, observation, protected operations and output retain their
+checks and costs. The outer coupling driver and FDTD have independent settings.
+The sample `mpi_coupled_tddft` accepts `--matter-execution-mode performance` to
+select this TDDFT route only; its field/outer checks are retained. The C entry
+`sp_tddft_step_performance(Aold,Anew,J_matter)` returns SALMON matter current;
+Python changes the sign once to charge current. Aold is ABI-only in this route.
+
+Small synthetic GS tests compare checked/performance/previous library for all
+four XC profiles on 1/2 internal ranks. Current and measured electron-number
+arrays agree exactly, including explicit in-memory restoration. They establish
+neither real-material convergence nor general performance gains.
+
+## Per-state modes in shared and registered TDDFT
+
+`NativeTDDFTBackend(..., shared_model=True, execution_mode="performance")`
+and `registry_model=True` set the default for states created by normal sessions.
+For direct model use, `model.new_state(point_id, execution_mode="checked")` or
+`"performance"` overrides that default per state. Omitting the keyword inherits
+the model default. `registry.open_model(..., execution_mode=...)` can set each
+registered model's default. Each created state's choice is read-only; sibling
+states may use different modes. Shared registry reuse preserves each binding's
+selected default instead of inheriting a previous binding's mode.
+
+Performance state-token updates still check local handle generation/lifetime,
+capacity and ABI bounds. They omit token/endpoint/model-selection diagnostic
+votes, numerical scans and automatic backups. Required model/input/workspace
+activation and physical solver communication remain. Checked-state operations
+keep the previous collective validation. Explicit snapshots/restoration remain
+checked and do not change the receiving state's mode. No automatic rollback or
+retry guarantee is implied for performance failures.
+
+Synthetic regression covers interleaved checked/performance states, independent
+controls, PZ/TB-mBJ/Libxc-PZ/PBE, heterogeneous PZ↔TB-mBJ and Libxc-PZ↔PBE, and
+1/2 internal ranks. This is not a real-material convergence or speed benchmark.
+
+## Fast-PR HSE performance mode
+
+`NativeFastHSEBackend(..., execution_mode="performance")` selects the
+caller-managed MPI route; the default is `"checked"`. The choice
+is fixed on each state. Single-state, shared-model and heterogeneous-registry
+routes are supported; serial subprocess workers are not supported by this option.
+
+The performance update omits endpoint agreement, Python finite scans, electronic
+and exchange-state backups, and numerical-recovery diagnostic votes/scans.
+Initialization, library authentication, local lifetime/capacity/shape bounds,
+explicit checkpoints and observations remain checked. Solver breakdown checks,
+FFT/Hartree/exchange reductions and learning-readiness communication remain.
+The mathematical compatibility of A with the retained symmetry little group
+also remains: status34 rejects that input before mutation and permits retry.
+Other returned failures mark the Python state failed, without an automatic
+rollback guarantee; unhandled native failures can end the job.
+
+Learning endpoint collection stays before energy/output handling in both modes.
+An owner-local scheduling flag separates this ordering from recovery diagnostics;
+it is reset after each update and is not an execution-mode selector in shared
+process globals. Taylor/PT-CN, full/reduced k and internal1/2-rank synthetic
+comparisons preserve current, energy and learning history, including explicit
+in-memory restoration. These are not physical convergence or speed benchmarks.
+
+`mpi_mixed_native --hse-execution-mode performance` requires an explicit
+`--fast-hse-mpi-build`. It selects only HSE updates;
+the field and outer coupling retain their independently selected checks.
+
+## Modes of shared and registered fast-HSE states
+
+A backend's `execution_mode` supplies its model default. Use
+`model.new_state(point_id, execution_mode="checked")` or `"performance"`
+to override per state; omit the keyword to inherit the model default.
+`registry.open_model(..., execution_mode=...)` selects a registered model's
+default. Session registry reuse preserves each material binding's chosen mode.
+Siblings can mix checked/performance updates with separate electronic, exchange,
+learning, A/current and output history. There is no process-global mode selector.
+
+The performance handle update keeps local token generation/lifetime bounds and
+the symmetry/A mathematical condition, while omitting diagnostic token votes
+and automatic recovery copies. Physical activation of each model's input and
+workspaces, solver communication and learning update order remain. Checked
+siblings retain their full validation and recovery path. Explicit memory or disk
+checkpoint operations retain checks/costs; restoring does not change the
+receiving state's selected mode. Performance update failures still have no
+automatic rollback guarantee.
+
+`shared_fast_hse --execution-mode performance` demonstrates point-a in the
+selected mode and point-b in checked mode, including a matching point-a restart.
+With `--second-initial`, the same example uses two registered input models.
+The usual `mpi_mixed_native --hse-execution-mode performance` also permits
+shared HSE points; field/outer-coupling checks have independent settings.
+
+## Periodic TDDFT in a separate process: performance mode
+
+`TDDFTInitialState.new_state(..., execution_mode="performance")` and
+`crystal.respond(initial, drive, execution_mode="performance")` select the
+periodic A-driven worker mode. `TDDFTResponseBackend(execution_mode=...)` passes
+the choice to each worker used by a response session; outer session/field checks
+retain their own settings. Default is `"checked"`, fixed per state. Molecules
+and fast-HSE subprocess workers are not covered by this option.
+
+The child must accept `INIT_PERFORMANCE` and reply with
+`SALMONPY_TDDFT_PERFORMANCE_V1`; an old binary is rejected, without fallback.
+Mode is passed only in that child's environment, never installed in the Python
+host environment, and does not select embedded-host behavior. Setup, executable
+SHA256, protocol shape/sequence, capacity and explicit output checks remain.
+The step omits Python/worker endpoint-current finite checks and automatic
+reconstruction/replay after a worker failure. A failed performance worker is
+closed; do not continue it under the checked-mode state-preservation promise.
+Physical propagation, update order, requested electron-number output and solver
+breakdown handling remain. No global collective is added.
+
+Accepted history is retained for explicit `snapshot()` / `restore()` and output.
+This worker's explicit restore still starts a candidate and **recalculates saved
+history**; it is not direct wavefunction restoration. Snapshot validation and
+replay-current comparison remain, and the receiving state's mode is preserved
+even when restoring a snapshot made in the other mode. Finite/nonfinite output
+validation still applies when explicitly snapshotting or saving results. Normal
+GS copying/integrity rules are unchanged; this mode does not reduce startup I/O.
+
+Examples `tddft_response` and `mpi_tddft` accept `--execution-mode performance`.
+Use a matching explicitly built or distributed worker; import does not build it.
+
+Molecular E-driven TDDFT also accepts `new_state(..., execution_mode="performance")`. Default to checked mode; use performance only when explicitly requested. Explicit saves/restores remain validated and retain the receiving mode. Do not promise automatic failure recovery or unchecked outer FDTD coupling.

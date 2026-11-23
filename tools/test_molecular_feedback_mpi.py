@@ -192,13 +192,13 @@ def isolated_loop(world, field, args):
                 else:
                     accepted=np.array([[row[0][key] for key in _BoxEnergyObserver._names]
                         for row in budgets[:last+1]],dtype=np.float64,order='C')
-                    result=np.zeros(10)
+                    result=np.zeros(12)
                     code=fn(last+1,accepted.ctypes.data,float(work[last,2]),
                         float(own_work[last,1]),float(total_work[last,1]),result.ctypes.data)
                     if code:raise ValueError('box energy summary failed: '+str(code))
                     names=('field_modified_change','ld_work','external_current_work','outward_energy',
                         'field_modified_residual','field_max_step_residual','joint_modified_residual',
-                        'point_grid_work_difference','field_physical_change','joint_physical_residual')
+                        'point_grid_work_difference','field_physical_change','joint_physical_residual','constitutive_outward_energy','ohmic_work')
                     report['box_energy']=dict(available=True,units='hartree',
                         through_field_step=last+1,quantum_energy_drift_not_subtracted=True,
                         **dict(zip(names,map(float,result))))

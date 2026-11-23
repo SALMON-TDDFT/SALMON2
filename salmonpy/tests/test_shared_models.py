@@ -9,6 +9,35 @@ from salmonpy.native_steps import _AppendJournal
 
 
 class SharedTDDFTTests(unittest.TestCase):
+    def test_performance_shared_state_skips_diagnostic_votes(self):
+        import inspect
+        import numpy as np
+        from salmonpy._shared_tddft import NativeTDDFTModel,_SharedState,_Library
+        from salmonpy._tddft_registry import _RegisteredModel
+        self.assertIn('execution_mode',inspect.signature(NativeTDDFTModel.new_state).parameters)
+        self.assertIn('execution_mode',inspect.signature(_RegisteredModel.new_state).parameters)
+        def forbidden(*args):raise AssertionError('update diagnostic agreement')
+        def step(token,old,new,j):self.assertEqual(token,17);j[:]=new;return 0
+        lib=SimpleNamespace(sp_tddft_handle_step_performance=step,
+            sp_tddft_handle_step=lambda *a:0,sp_tddft_handle_close=lambda *a:0,
+            sp_tddft_handle_checkpoint=lambda *a:0,sp_tddft_handle_transaction=lambda *a:0)
+        native=SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=forbidden)))
+        state=_SharedState(native,_Library(lib,17,execution_mode='performance'),Path('/unused'),3,execution_mode='performance')
+        state._current_sign=1;state._call_performance=lambda fn,*args:fn(*args)
+        with patch('salmonpy._shared_tddft._agree',side_effect=forbidden):
+            np.testing.assert_array_equal(state.advance([9.,9.,9.],[.1,.2,.3]),[.1,.2,.3])
+        self.assertEqual(state.execution_mode,'performance')
+        # Shared registry ownership must not override each binding's selected default.
+        from unittest.mock import Mock
+        from salmonpy.embedded_tddft import NativeTDDFTBackend
+        backend=object.__new__(NativeTDDFTBackend)
+        backend.registry_model=True;backend._execution_mode='performance'
+        backend.sha256='same';backend.work_root=Path('/work');backend.decomposition=(1,1,1,1,1)
+        registry=SimpleNamespace(backend=SimpleNamespace(sha256='same',work_root=Path('/work')),open_model=Mock(return_value='model'))
+        context=SimpleNamespace(group_resources={'salmonpy.standard-tddft.registry/1':registry})
+        backend.open_group('initial',.001,context)
+        registry.open_model.assert_called_once_with('initial',.001,decomposition=(1,1,1,1,1),execution_mode='performance')
+
     def test_public_entry_and_legacy_factory_opt_in(self):
         from salmonpy.embedded_tddft import NativeTDDFTBackend,NativeTDDFTModel
         self.assertTrue(callable(NativeTDDFTModel.new_state))
@@ -165,7 +194,7 @@ class SharedTDDFTTests(unittest.TestCase):
         registry=SimpleNamespace(backend=None,open_model=lambda initial,dt,**kw:SimpleNamespace(
             new_state=lambda p:events.append(('state',initial,p)),close=lambda:events.append(('model-close',initial))))
         backend=object.__new__(NativeTDDFTBackend)
-        backend.registry_model=True;backend.shared_model=False
+        backend.registry_model=True;backend.shared_model=False;backend._execution_mode="checked"
         backend.sha256='sha';backend.work_root=Path('/tmp/work');backend.decomposition=(1,1,1,1,1)
         registry.backend=backend;ctx=SimpleNamespace(group_resources={})
         with patch.object(backend,'open_registry',return_value=registry) as opener:
@@ -177,6 +206,33 @@ class SharedTDDFTTests(unittest.TestCase):
 
 
 class SharedHSETests(unittest.TestCase):
+    def test_performance_handle_update_and_state_mode_selection(self):
+        import inspect
+        import numpy as np
+        from salmonpy._shared_hse import NativeFastHSEModel,_HandleLibrary
+        from salmonpy.fast_hse_mpi import _State
+        self.assertIn('execution_mode',inspect.signature(NativeFastHSEModel.new_state).parameters)
+        def forbidden(*args):raise AssertionError('diagnostic vote during performance update')
+        def step(token,old,new,j,energy):
+            self.assertEqual(token,17);j[:]=new;energy._obj.value=3.;return 0
+        lib=SimpleNamespace(**{'sp_fast_hse_handle_'+name:lambda *a:0 for name in
+            ('step','checkpoint','info','close','history','transaction')})
+        lib.sp_fast_hse_handle_step_performance=step
+        native=SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=SimpleNamespace(size=1,allgather=forbidden)))
+        state=_State(native,_HandleLibrary(lib,17,execution_mode='performance'),Path('/unused'),.001,3,'taylor',execution_mode='performance')
+        state._call_performance=lambda fn,*args:fn(*args)
+        np.testing.assert_array_equal(state.advance([9.,9.,9.],[.1,.2,.3]),[.1,.2,.3])
+        self.assertEqual(state.energy,3.);self.assertEqual(state.execution_mode,'performance')
+        from salmonpy.fast_hse_mpi import NativeFastHSEBackend
+        from unittest.mock import Mock
+        backend=object.__new__(NativeFastHSEBackend)
+        backend.registry_model=True;backend._execution_mode='performance'
+        backend.sha256='sha';backend.work_root=Path('/work');backend.allow_symmetry=False
+        registry=SimpleNamespace(backend=SimpleNamespace(sha256='sha',work_root=Path('/work'),allow_symmetry=False),open_model=Mock(return_value='model'))
+        backend.open_group('initial',.001,SimpleNamespace(group_resources={'salmonpy.fast-hse.registry/1':registry}))
+        registry.open_model.assert_called_once_with('initial',.001,execution_mode='performance')
+
+
 
     def test_journal_does_not_truncate_other_state(self):
         with tempfile.TemporaryDirectory() as folder:

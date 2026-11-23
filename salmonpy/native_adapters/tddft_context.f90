@@ -338,7 +338,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  ctx%accepted=ctx%Mit
  status=0
  end subroutine
- subroutine rt_step(ctx,ac,current,total_energy,status)
+ subroutine rt_step(ctx,ac,current,total_energy,status,checked)
 #ifdef USE_MPI
  use communication,only:comm_resume_children,comm_end_children,comm_get_max
 #endif
@@ -346,34 +346,38 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  real(8),intent(in)::ac(3)
  real(8),intent(out)::current(3),total_energy
  integer,intent(out)::status
+ logical,optional,intent(in)::checked
+ logical::verify
 #ifdef USE_MPI
  logical::entered
 #endif
+ verify=.true.;if(present(checked))verify=checked
  current=0d0;total_energy=0d0;status=0
  if(.not.associated(ctx))status=1
 #ifdef USE_MPI
- call comm_get_max(status,nproc_group_global)
+ if(verify)call comm_get_max(status,nproc_group_global)
 #endif
  if(status/=0)return
 #ifdef USE_MPI
  call comm_resume_children(ctx%mpi_child_owner,status)
  entered=status==0
- call comm_get_max(status,nproc_group_global)
+ if(verify)call comm_get_max(status,nproc_group_global)
  if(status/=0)then
   if(entered)call comm_end_children(ctx%mpi_child_owner)
   return
  endif
 #endif
- call rt_step_impl(ctx,ac,current,total_energy,status)
+ call rt_step_impl(ctx,ac,current,total_energy,status,verify)
 #ifdef USE_MPI
  if(entered)call comm_end_children(ctx%mpi_child_owner)
 #endif
  end subroutine
- subroutine rt_step_impl(ctx,ac,current,total_energy,status)
+ subroutine rt_step_impl(ctx,ac,current,total_energy,status,checked)
  type(tddft_context),pointer,intent(inout)::ctx
  real(8),intent(in)::ac(3)
  real(8),intent(out)::current(3),total_energy
  integer,intent(out)::status
+ logical,intent(in)::checked
  integer::itt,i,guard_status,field_status
  type(checkpoint_payload)::accepted_payload
  type(numeric_payload)::accepted_exchange
@@ -382,13 +386,17 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  status=1;current=0d0;total_energy=0d0
  if(.not.associated(ctx))return
  guard_status=0
- if(.not.settings_match(ctx%settings).or..not.context_symmetry_matches(ctx))guard_status=2
+ if(checked)then
+  if(.not.settings_match(ctx%settings).or..not.context_symmetry_matches(ctx))guard_status=2
+ endif
  if(allocated(ctx%pending))guard_status=2
  if(ctx%checkpoint_failed)guard_status=2
  if(ctx%accepted>=ctx%rt%max_steps)guard_status=2
- do i=1,3
-  if(.not.ieee_is_finite(ac(i)))guard_status=2
- enddo
+ if(checked)then
+  do i=1,3
+   if(.not.ieee_is_finite(ac(i)))guard_status=2
+  enddo
+ endif
  if(guard_status==0)then
   call exx_validate_vector_potential(ctx%system,ac,field_status)
   if(field_status==1)guard_status=2
@@ -397,16 +405,19 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  block
  use communication,only:comm_get_max
  status=guard_status
- call comm_get_max(status,nproc_group_global)
+ if(checked)call comm_get_max(status,nproc_group_global)
  end block
  if(status/=0)return
+ if(checked)then
  call hse_checkpoint_capture(ctx%hse,accepted_exchange,status)
  call checkpoint_collective_status(status)
  if(status/=0)return
  call checkpoint_copy(ctx,accepted_payload,.false.)
  accepted_xc=ctx%system%xc_payload;accepted_cval=ctx%xc_func%cval
- ctx%rt%recover_errors=.true.;ctx%rt%step_error=0
- ctx%hse%recover_errors=.true.;ctx%hse%step_error=0
+ endif
+ ctx%rt%recover_errors=checked;ctx%rt%step_error=0
+ ctx%hse%recover_errors=checked;ctx%hse%step_error=0
+ ctx%rt%factor_endpoint_before_output=.true.
  itt=ctx%accepted+1
  ctx%rt%Ac_ext(:,itt)=ac;ctx%rt%Ac_tot(:,itt)=ac
  if(mod(itt-ctx%Mit,2)==1)then
@@ -422,11 +433,15 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  if(guard_status==0)guard_status=ctx%rt%step_error
  block
  use communication,only:comm_get_max
- call comm_get_max(guard_status,nproc_group_global)
+ if(checked)call comm_get_max(guard_status,nproc_group_global)
  end block
+ ctx%rt%factor_endpoint_before_output=.false.
  ctx%rt%recover_errors=.false.;ctx%rt%step_error=0
  ctx%hse%recover_errors=.false.;ctx%hse%step_error=0
  if(guard_status/=0)then
+   if(.not.checked)then
+     status=guard_status;return
+   endif
    call hse_checkpoint_install(ctx%hse,accepted_exchange)
    call checkpoint_copy(ctx,accepted_payload,.true.)
    ctx%system%xc_payload=accepted_xc;ctx%xc_func%cval=accepted_cval

@@ -24,7 +24,8 @@ module salmonpy_eh_context
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use iso_c_binding
   use structures, only: s_fdtd_system
-  use fdtd_eh, only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize,s_tensor_step_workspace,eh_prepare_tensor_step
+  use fdtd_eh, only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize,s_tensor_step_workspace,eh_prepare_tensor_step, &
+    eh_tensor_off,s_tensor_off_workspace
   use lorentz_drude, only: s_ld_state,ld_finalize
   use sendrecv_grid, only: dealloc_cache
   use communication, only: comm_summation,comm_bcast,comm_get_max,comm_begin_children, &
@@ -155,70 +156,94 @@ end function
 
 integer(c_int) function sp_eh_box_energy_step(box,result) bind(C) result(status)
  use phys_constants,only:cspeed_au
- use salmon_global,only:dt_em
+ use salmon_global,only:dt_em,media_type
  integer(c_int),intent(in)::box(3,2)
- real(c_double),intent(inout)::result(17)
- real(8)::local(20),total(20),stats(17)
- integer::region(3,2),m,d,code
+ real(c_double),intent(inout)::result(19)
+ real(8)::local(22),total(22),stats(19)
+ integer::region(3,2),m,d,a,b,code
+ logical::diagonal,cross_background,conducting
+ diagonal=.false.;cross_background=.false.;conducting=.false.
  local=0d0;stats=0d0;code=0
  if(.not.allocated(state).or..not.allocated(step_saved))then
-  local(20)=1d0
+  local(22)=1d0
  else if(step_restored.or.state%step/=step_saved%step+1)then
-  local(20)=1d0
+  local(22)=1d0
  else
   region=box+spread(state%fs%lg%is,2,2)
-  if(state%fe%tensor_enabled.or.state%fe%subpixel_enabled)local(18)=1d0
+  if(state%fe%tensor_enabled)then
+   ! Pole cross currents are already included in rj_old/rj. Only background
+   ! cross coupling needs an additional constitutive boundary-energy term.
+   diagonal=.true.
+   do m=lbound(state%fe%tensor_corr,4),ubound(state%fe%tensor_corr,4)
+    do b=1,3
+     do a=1,3
+      if(a/=b.and.state%fe%tensor_corr(a,b,0,m)/=0d0)cross_background=.true.
+     enddo
+    enddo
+   enddo
+  endif
+  if(state%fe%subpixel_enabled)cross_background=state%fe%subpixel_cross(0)
   do m=lbound(state%fe%rep,1),ubound(state%fe%rep,1)
-   if(state%fe%rep(m)/=1d0.or.state%fe%rmu(m)/=1d0.or.state%fe%sig(m)/=0d0)local(18)=1d0
+   if(state%fe%rep(m)/=1d0.or.state%fe%rmu(m)/=1d0.or.media_type(m)=='ld-diagonal')diagonal=.true.
+   if(state%fe%sig(m)/=0d0)conducting=.true.
   enddo
   do d=1,3
-   if(region(d,1)<state%fs%lg%is(d)+1.or.region(d,2)>state%fs%lg%ie(d)-1)local(18)=1d0
-   if(region(d,1)>region(d,2))local(18)=1d0
-   if(state%fs%a_bc(d,1)=='abc'.and.region(d,1)<=state%fs%lg%is(d)+state%fe%ipml_l)local(18)=1d0
-   if(state%fs%a_bc(d,2)=='abc'.and.region(d,2)>=state%fs%lg%ie(d)-state%fe%ipml_l)local(18)=1d0
+   if(region(d,1)<state%fs%lg%is(d)+1.or.region(d,2)>state%fs%lg%ie(d)-1)local(20)=1d0
+   if(region(d,1)>region(d,2))local(20)=1d0
+   if(state%fs%a_bc(d,1)=='abc'.and.region(d,1)<=state%fs%lg%is(d)+state%fe%ipml_l)local(20)=1d0
+   if(state%fs%a_bc(d,2)=='abc'.and.region(d,2)>=state%fs%lg%ie(d)-state%fe%ipml_l)local(20)=1d0
    if(state%fe%inc_num>0)then
     if(state%fe%inc_dist1/='none'.and.index(state%fe%inc_dist1,achar(iachar('x')+d-1))==0)then
-     if(state%fe%inc_po_id(1,d)>=region(d,1).and.state%fe%inc_po_id(1,d)<=region(d,2))local(18)=1d0
+     if(state%fe%inc_po_id(1,d)>=region(d,1).and.state%fe%inc_po_id(1,d)<=region(d,2))local(20)=1d0
     endif
     if(state%fe%inc_num>1.and.state%fe%inc_dist2/='none'.and.index(state%fe%inc_dist2,achar(iachar('x')+d-1))==0)then
-     if(state%fe%inc_po_id(2,d)>=region(d,1).and.state%fe%inc_po_id(2,d)<=region(d,2))local(18)=1d0
+     if(state%fe%inc_po_id(2,d)>=region(d,1).and.state%fe%inc_po_id(2,d)<=region(d,2))local(20)=1d0
     endif
    endif
   enddo
-  if(local(18)==0d0)then
+  if(conducting)diagonal=.true.
+  ! Cross interpolation requires matching halo calls. Agree on admission first.
+  if(cross_background)then
+   code=int(local(20));call comm_get_max(code,nproc_group_global)
+   local(20)=real(code,8)
+  endif
+  if(local(20)==0d0)then
    code=observe(step_saved%fe,state%fe,state%ld,state%current,region,stats)
    if(code==1)then
-    local(18)=1d0
+    local(20)=1d0
    else if(code/=0)then
-    local(19)=1d0
+    local(21)=1d0
    else
-    local(1:17)=stats
+    local(1:19)=stats
    endif
   endif
  endif
  ! One owning-field-group reduction; bad values never enter MPI buffers.
- call comm_summation(local,total,20,nproc_group_global)
+ call comm_summation(local,total,22,nproc_group_global)
  status=14
- if(total(20)>0d0)return
+ if(total(22)>0d0)return
  status=1
- if(total(18)>0d0)return
+ if(total(20)>0d0)return
  status=4
- if(total(19)>0d0)return
- do d=1,17
+ if(total(21)>0d0)return
+ do d=1,19
   if(.not.ieee_is_finite(total(d)))return
  enddo
- result=total(1:17);status=0
+ result=total(1:19);status=0
 contains
  integer function observe(before,after,ld,current,region,stats) result(code)
-  use salmonpy_fdtd_energy,only:sp_fdtd_box_energy
+  use salmonpy_fdtd_energy,only:sp_fdtd_box_energy,sp_fdtd_box_energy_diagonal, &
+   sp_fdtd_box_energy_conductive
   type(ls_fdtd_eh),target,intent(in)::before,after
   type(s_ld_state),target,intent(in)::ld
   integer,intent(in)::region(3,2)
   real(8),target,intent(in)::current(3,state%fs%mg%is_array(1):state%fs%mg%ie_array(1), &
    state%fs%mg%is_array(2):state%fs%mg%ie_array(2),state%fs%mg%is_array(3):state%fs%mg%ie_array(3))
-  real(8),intent(out)::stats(17)
-  type(c_ptr)::oldptr(12),newptr(12),jptr(6)
+  real(8),intent(out)::stats(19)
+  type(c_ptr)::oldptr(12),newptr(12),jptr(6),coeffptr(12)
   integer(c_int)::lo(3),hi(3),poles
+  real(8)::conductive_stats(18)
+  integer::cross_code
   lo=lbound(before%ex_y);hi=ubound(before%ex_y)
     oldptr(1)=c_loc(before%ex_y);newptr(1)=c_loc(after%ex_y)
     oldptr(2)=c_loc(before%ex_z);newptr(2)=c_loc(after%ex_z)
@@ -239,8 +264,71 @@ contains
          c_loc(ld%rjx_ld),c_loc(ld%rjy_ld),c_loc(ld%rjz_ld)]
   endif
   stats=0d0
+  if(diagonal)then
+   coeffptr=c_null_ptr
+   coeffptr(1:9)=[c_loc(after%c1_ex_y),c_loc(after%c1_ey_z),c_loc(after%c1_ez_x), &
+     c_loc(after%c2_jx),c_loc(after%c2_jy),c_loc(after%c2_jz), &
+     c_loc(after%c2_hx_y),c_loc(after%c2_hy_z),c_loc(after%c2_hz_x)]
+   if(conducting)then
+    if(ld%enabled)coeffptr(10:12)=[c_loc(ld%c2_jx_ld),c_loc(ld%c2_jy_ld),c_loc(ld%c2_jz_ld)]
+    conductive_stats=0d0
+    code=sp_fdtd_box_energy_conductive(lo,hi,state%fs%mg%is,state%fs%mg%ie,region,state%fs%hgs, &
+     dt_em,cspeed_au,poles,oldptr,newptr,jptr,c_loc(current),coeffptr,conductive_stats)
+    if(code==0)then
+     stats(1:17)=conductive_stats(1:17);stats(19)=conductive_stats(18)
+    endif
+   else
+    code=sp_fdtd_box_energy_diagonal(lo,hi,state%fs%mg%is,state%fs%mg%ie,region,state%fs%hgs, &
+     dt_em,cspeed_au,poles,oldptr,newptr,jptr,c_loc(current),coeffptr(1:9),stats(1:17))
+   endif
+  else
   code=sp_fdtd_box_energy(lo,hi,state%fs%mg%is,state%fs%mg%ie,region,state%fs%hgs, &
-   dt_em,cspeed_au,poles,oldptr,newptr,jptr,c_loc(current),stats)
+   dt_em,cspeed_au,poles,oldptr,newptr,jptr,c_loc(current),stats(1:17))
+  endif
+  if(cross_background)then
+   cross_code=add_cross(before,after,region,stats)
+   if(cross_code/=0)code=cross_code
+  endif
+ end function
+ integer function add_cross(before,after,region,stats) result(code)
+  use salmonpy_fdtd_energy,only:sp_fdtd_cross_energy
+  type(ls_fdtd_eh),intent(in)::before,after
+  integer,intent(in)::region(3,2)
+  real(8),intent(inout)::stats(19)
+  real(8),allocatable::eo(:,:,:,:),en(:,:,:,:),ko(:,:,:,:),kn(:,:,:,:)
+  type(s_tensor_off_workspace)::scratch
+  real(8)::extra(3)
+  integer::lo(3),hi(3),ios,d
+  lo=state%fs%mg%is_array;hi=state%fs%mg%ie_array
+  allocate(eo(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+   en(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+   ko(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+   kn(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+   scratch%edge(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
+   scratch%node(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=ios)
+  call comm_get_max(ios,nproc_group_global)
+  code=4
+  if(ios/=0)return
+  eo(1,:,:,:)=before%ex_y+before%ex_z;en(1,:,:,:)=after%ex_y+after%ex_z
+  eo(2,:,:,:)=before%ey_z+before%ey_x;en(2,:,:,:)=after%ey_z+after%ey_x
+  eo(3,:,:,:)=before%ez_x+before%ez_y;en(3,:,:,:)=after%ez_x+after%ez_y
+  call eh_tensor_off(state%fs,after,0,eo,ko,scratch)
+  call eh_tensor_off(state%fs,after,0,en,kn,scratch)
+  extra=0d0
+  code=sp_fdtd_cross_energy(lo,hi,state%fs%mg%is,state%fs%mg%ie,region,state%fs%hgs,eo,en,ko,kn,extra)
+  if(code/=0)return
+  stats(1)=stats(1)+extra(1);stats(2)=stats(2)+extra(2)
+  stats(3)=stats(3)+extra(2)-extra(1)
+  stats(4)=stats(4)+extra(1);stats(5)=stats(5)+extra(2)
+  stats(6)=stats(6)+extra(2)-extra(1)
+  stats(18)=extra(3)
+  stats(16)=stats(16)+extra(2)-extra(1)+extra(3)
+  stats(17)=stats(17)+extra(2)-extra(1)+extra(3)
+  do d=1,19
+   if(.not.ieee_is_finite(stats(d)))then
+    code=4;return
+   endif
+  enddo
  end function
 end function sp_eh_box_energy_step
 
@@ -469,6 +557,71 @@ end function
     real(c_double),intent(out) :: E(3,npoints)
     sp_eh_step_checked=step_checked(npoints,J,E,A)
   end function
+
+  ! Explicit unchecked update: caller owns collective order and valid inputs.
+  ! No full-state backup, finite scans, consistency votes or retry contract.
+  integer(c_int) function sp_eh_step_performance(npoints,nlocal,owned,J,A_old,A_next,E) bind(C) result(status)
+    use salmon_global,only:dt_em
+    integer(c_int),value::npoints,nlocal,owned
+    real(c_double),intent(in)::J(3,nlocal),A_old(3,npoints)
+    real(c_double),intent(out)::A_next(3,npoints),E(3,npoints)
+    real(8)::local_E(3,npoints)
+    real(8),volatile::delta(3,npoints)
+    integer::p,d,side,index(3),i,jj,k,row
+    logical::entered
+    status=12
+    if(.not.allocated(state))return
+    status=10
+    if(npoints/=size(state%points,2).or.nlocal<0.or.(owned/=0.and.owned/=1))return
+    if(owned==0.and.nlocal/=npoints)return
+    status=13
+    if(state%step>=state%capacity)return
+    status=14
+    if(allocated(pending))return
+    call comm_resume_children(state%mpi_child_owner,status)
+    entered=status==0
+    if(.not.entered)return
+    state%current=0d0;row=0
+    do p=1,npoints
+      if(owned==1)then
+        if(.not.owns_current_point(p))cycle
+      endif
+      row=row+1
+      ! Count checks are local ABI bounds protection, never a collective vote.
+      if(row>nlocal)then
+        status=10;call comm_end_children(state%mpi_child_owner);return
+      endif
+      do d=1,3
+        do side=0,1
+          index=state%points(:,p);index(d)=index(d)-side
+          if(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie)) &
+            state%current(d,index(1),index(2),index(3))= &
+            state%current(d,index(1),index(2),index(3))+.5d0*J(d,row)
+        enddo
+      enddo
+    enddo
+    state%step=state%step+1
+    state%fe%iter_sta=state%step;state%fe%iter_end=state%step
+    call eh_calc(state%fs,state%fe,state%ld,state%current)
+    local_E=0d0
+    do p=1,npoints
+      index=state%points(:,p)
+      if(.not.(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie)))cycle
+      i=index(1);jj=index(2);k=index(3)
+      local_E(1,p)=.5d0*(state%fe%ex_y(i,jj,k)+state%fe%ex_z(i,jj,k) &
+        +state%fe%ex_y(i-1,jj,k)+state%fe%ex_z(i-1,jj,k))
+      local_E(2,p)=.5d0*(state%fe%ey_z(i,jj,k)+state%fe%ey_x(i,jj,k) &
+        +state%fe%ey_z(i,jj-1,k)+state%fe%ey_x(i,jj-1,k))
+      local_E(3,p)=.5d0*(state%fe%ez_x(i,jj,k)+state%fe%ez_y(i,jj,k) &
+        +state%fe%ez_x(i,jj,k-1)+state%fe%ez_y(i,jj,k-1))
+    enddo
+    ! Physical sampling reduction remains. Volatile intermediate preserves the
+    ! existing separate binary64 multiply/subtract for the A integration.
+    call comm_summation(local_E,E,3*npoints,nproc_group_global)
+    delta=dt_em*E;A_next=A_old-delta
+    call comm_end_children(state%mpi_child_owner)
+    status=0
+  end function sp_eh_step_performance
 
   integer function step_checked(npoints,J,E,A,owned) result(status)
     integer,intent(in)::npoints

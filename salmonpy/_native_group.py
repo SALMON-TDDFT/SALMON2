@@ -43,3 +43,15 @@ def _directory_call(lib,comm,work,fn,*args):
         return fn(*args)
     finally:
         if entered:leave()
+
+
+def _bind_performance_directory(lib):
+    """Bind once during checked setup; subsequent scopes have no MPI admission."""
+    import ctypes as c
+    from .errors import InputError
+    query=lib.sp_io_directory_protocol;query.argtypes=[];query.restype=c.c_int
+    if query()!=3:raise InputError('performance mode requires directory protocol3')
+    enter=lib.sp_io_directory_enter;leave=lib.sp_io_directory_leave
+    enter.argtypes=[c.c_char_p];enter.restype=c.c_int
+    leave.argtypes=[];leave.restype=None
+    return enter,leave

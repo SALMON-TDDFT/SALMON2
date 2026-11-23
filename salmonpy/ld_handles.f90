@@ -8,6 +8,7 @@ module ld_handles
   implicit none
   private
   public :: sp_ld_create_tensor,sp_ld_create,sp_ld_advance,sp_ld_export,sp_ld_set,sp_ld_destroy
+  public :: sp_ld_advance_performance
   type entry
     integer(c_int64_t) :: id=0
     logical :: tensor=.false.
@@ -306,10 +307,27 @@ contains
   end function
 
   integer(c_int) function sp_ld_advance(id,nt,e,p,j) bind(C) result(status)
+    integer(c_int64_t),value::id
+    integer(c_int),value::nt
+    real(c_double),intent(in)::e(3,nt)
+    real(c_double),intent(out)::p(3,nt+1),j(3,nt+1)
+    status=advance_impl(id,nt,e,p,j,.true.)
+  end function
+
+  integer(c_int) function sp_ld_advance_performance(id,nt,e,p,j) bind(C) result(status)
+    integer(c_int64_t),value::id
+    integer(c_int),value::nt
+    real(c_double),intent(in)::e(3,nt)
+    real(c_double),intent(out)::p(3,nt+1),j(3,nt+1)
+    status=advance_impl(id,nt,e,p,j,.false.)
+  end function
+
+  integer(c_int) function advance_impl(id,nt,e,p,j,checked) result(status)
     integer(c_int64_t),value :: id
     integer(c_int),value :: nt
     real(c_double),intent(in) :: e(3,nt)
     real(c_double),intent(out) :: p(3,nt+1),j(3,nt+1)
+    logical,intent(in)::checked
     type(entry),pointer :: s
     real(c_double) :: old(3),x(1,1,1),y(1,1,1),z(1,1,1),zero(1,1,1)
     integer :: k,b
@@ -317,12 +335,14 @@ contains
     if(.not.associated(s))return
     status=1
     if(nt<0 .or. nt==huge(nt))return
+    if(checked)then
     do k=1,nt
       do b=1,3
         if(.not.ieee_is_finite(e(b,k)))return
       end do
     end do
     call transfer_poles(s%ld,s%n,s%saved(:,:,1),s%saved(:,:,2),.false.)
+    endif
     call totals(s,p(:,1),j(:,1));old=s%field;zero=0
     status=4
     do k=1,nt
@@ -337,6 +357,7 @@ contains
       call totals(s,p(:,k+1),j(:,k+1))
       old=e(:,k)
     end do
+    if(checked)then
     ! Match the stateless contract: validate final poles and every returned sample.
     ! Intermediate pole histories are neither returned nor committed.
     if(.not.finite_state(s))then
@@ -351,6 +372,7 @@ contains
         end if
       end do
     end do
+    endif
     s%field=old;status=0
   end function
 

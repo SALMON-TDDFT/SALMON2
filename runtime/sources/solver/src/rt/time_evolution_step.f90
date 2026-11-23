@@ -443,6 +443,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call nvtxEndRange
       return
     endif
+  else if(rt%factor_endpoint_before_output)then
+#ifdef USE_HSE
+    ! Explicit unchecked embedded HSE retains the checked collector position.
+    call exx_factor_endpoint(system,info,itt)
+#endif
   endif
   call timer_begin(LOG_WRITE_ENERGIES)
   call subdip(info%icomm_r,itt,rt,lg,mg,system,rho_s,rNe,poisson,energy%E_tot,pp)
@@ -544,7 +549,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
 #ifdef USE_HSE
   ! One capture per completed step; predictor stages never call the collector.
-  if(.not.rt%recover_errors)call exx_factor_endpoint(system,info,itt)
+  if(.not.rt%recover_errors.and..not.rt%factor_endpoint_before_output)call exx_factor_endpoint(system,info,itt)
 #endif
   call nvtxEndRange
   return

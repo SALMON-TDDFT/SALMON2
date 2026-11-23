@@ -278,6 +278,22 @@ end function
  accepted_A=Anew
  sp_fast_hse_step=0
  end function
+ ! Explicit unchecked single-state update. Symmetry admissibility remains mathematical.
+ integer(c_int) function sp_fast_hse_step_performance(Aold,Anew,J,energy) bind(C) result(status)
+ real(c_double),intent(in)::Aold(3),Anew(3)
+ real(c_double),intent(out)::J(3),energy
+ status=1;J=0d0;energy=0d0
+ if(.not.attached_main_thread())return
+ if(.not.ready.or.failed.or..not.associated(state))return
+ if(.not.handle_mode)call legacy_timer_enter()
+ call rt_step(state,Anew,J,energy,status,checked=.false.)
+ if(.not.handle_mode)call legacy_timer_leave()
+ if(status/=0)then
+   if(status/=34)failed=.true.
+   return
+ endif
+ accepted_A=Anew
+ end function
  integer(c_int) function sp_fast_hse_checkpoint(path,restore) bind(C)
  character(c_char),intent(in)::path(*)
  integer(c_int),value::restore
@@ -374,22 +390,27 @@ end function
 integer(c_int) function sp_fast_hse_handle_protocol() bind(C)
  sp_fast_hse_handle_protocol=1
 end function
-subroutine handle_lookup(token,index,status)
+subroutine handle_lookup(token,index,status,checked)
  integer(c_int64_t),intent(in)::token
  integer,intent(out)::index,status
+ logical,optional,intent(in)::checked
+ logical::verify
  integer::group,rank,count,parts(2),reference(2)
+ verify=.true.;if(present(checked))verify=checked
  index=0;status=12
  if(.not.attached_main_thread())return
  call comm_get_globalinfo(group,rank,count)
  status=0
  if(.not.handle_mode.or.group/=handle_group.or.token<=0_c_int64_t)status=12
  if(token/handle_stride>int(huge(0),c_int64_t))status=12
- call agree(status)
+ if(verify)call agree(status)
  if(status/=0)return
  parts=[int(mod(token,handle_stride)),int(token/handle_stride)]
- reference=parts;call comm_bcast(reference,group)
- if(any(reference/=parts))status=11
- call agree(status)
+ if(verify)then
+  reference=parts;call comm_bcast(reference,group)
+  if(any(reference/=parts))status=11
+ endif
+ if(verify)call agree(status)
  if(status/=0)return
  index=parts(1)
  if(.not.allocated(handles))then
@@ -401,7 +422,7 @@ subroutine handle_lookup(token,index,status)
  else if(.not.associated(handles(index)%context))then
   status=12
  endif
- call agree(status)
+ if(verify)call agree(status)
 end subroutine
 subroutine handle_reserve(index,token,status)
  integer,intent(out)::index,status
@@ -443,10 +464,11 @@ subroutine handle_reserve(index,token,status)
  handles(index)%timers=empty_timers
  handles(index)%field=0d0;handles(index)%broken=.false.
 end subroutine
-subroutine handle_select(token,index,status)
+subroutine handle_select(token,index,status,checked)
  integer(c_int64_t),intent(in)::token
  integer,intent(out)::index,status
- call handle_lookup(token,index,status)
+ logical,optional,intent(in)::checked
+ call handle_lookup(token,index,status,checked)
  if(status/=0)return
  if(handles(index)%model_index>0)call select_model(handles(index)%model_index)
  state=>handles(index)%context
@@ -656,6 +678,18 @@ integer(c_int) function sp_fast_hse_handle_step(token,Aold,Anew,J,energy) bind(C
  sp_fast_hse_handle_step=status
  if(status/=0)return
  sp_fast_hse_handle_step=sp_fast_hse_step(Aold,Anew,J,energy)
+ call handle_unselect(index)
+end function
+! Unchecked token route; generation/lifetime bounds and symmetry remain local.
+integer(c_int) function sp_fast_hse_handle_step_performance(token,Aold,Anew,J,energy) bind(C) result(status)
+ integer(c_int64_t),value::token
+ real(c_double),intent(in)::Aold(3),Anew(3)
+ real(c_double),intent(out)::J(3),energy
+ integer::index
+ J=0d0;energy=0d0
+ call handle_select(token,index,status,.false.)
+ if(status/=0)return
+ status=sp_fast_hse_step_performance(Aold,Anew,J,energy)
  call handle_unselect(index)
 end function
 integer(c_int) function sp_fast_hse_handle_info(token,step,A,J) bind(C)

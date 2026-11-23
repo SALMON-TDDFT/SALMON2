@@ -5,6 +5,7 @@ from salmonpy import LorentzDrude
 
 parser=argparse.ArgumentParser(description="Synthetic LD response; optional reciprocal anisotropic tensor")
 parser.add_argument("--anisotropic",action="store_true")
+parser.add_argument("--execution-mode", choices=("checked", "performance"), default="checked")
 args=parser.parse_args()
 
 material = LorentzDrude(
@@ -25,7 +26,7 @@ dt = 0.1  # atomic time units
 field = np.zeros((1001, 3))
 time = np.arange(len(field))*dt
 field[:, 0] = 1e-3*np.exp(-((time-50)/10)**2)*np.cos(0.2*(time-50))
-response = material.respond(field, dt=dt)
+response = material.respond(field, dt=dt, execution_mode=args.execution_mode)
 print('Final time (a.u.):', response.time[-1])
 print('Final current (a.u.):', response.current[-1])
 print('epsilon tensor at omega=0.2 a.u.:', material.permittivity_tensor(0.2))

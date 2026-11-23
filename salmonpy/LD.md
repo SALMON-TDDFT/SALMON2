@@ -182,3 +182,21 @@ model, report = fit_lorentz_drude_tensor(epsilon, initial=initial,
     units="atomic_gaussian", rtol=.05)
 # Inspect report before use; this does not start an FDTD calculation.
 ```
+
+## 単独利用時のパフォーマンスモード
+
+`new_state(...)` またはバッチ応答の入口（LDは `material.respond(...)`、
+SBEは `crystal.respond(...)`）に `execution_mode="performance"` を指定します。
+既定は `"checked"` です。設定は状態ごとに固定され、更新途中では変更できません。
+LDは等方材料と相反なテンソル材料に対応します。結晶SBEは引き続きA/cで駆動し、
+電荷電流密度を返します。
+
+Fortranの更新計算は通常モードと共通です。LDは毎ステップの極状態の退避と
+有限値検査を省略し、SBEは試行用コピーを作らず密度行列を直接更新します。
+異常更新後の自動復元・再試行は保証しません。初期入力・ライブラリの整合性・
+配列形状の検査は残ります。明示的な `snapshot()` / `restore()` と出力保存の
+検査も残ります。物理状態を復元してもモードは変わりません。TDDFTや外側の
+結合ドライバーの検査を無効化する設定ではありません。
+
+同梱例は `--execution-mode performance` に対応しています。新しい条件では
+先に通常モードの結果と比較してください。

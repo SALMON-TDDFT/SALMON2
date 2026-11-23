@@ -30,7 +30,9 @@ class API:
             'sp_sbe_model_create':[c.c_int32]*5+[c.c_double]+[c.c_void_p]*4+[c.POINTER(H)],
             'sp_sbe_model_destroy':[H],
             'sp_sbe_state_create':[H,c.c_double,c.c_void_p,c.POINTER(H),c.c_void_p],
+            'sp_sbe_state_create_performance':[H,c.c_double,c.c_void_p,c.POINTER(H),c.c_void_p],
             'sp_sbe_step':[H,c.c_void_p,c.c_void_p],
+            'sp_sbe_step_performance':[H,c.c_void_p,c.c_void_p],
             'sp_sbe_density':[H,c.c_void_p],
             'sp_sbe_set':[H,c.c_void_p,c.c_void_p,c.c_void_p],
             'sp_sbe_state_destroy':[H]}
@@ -100,13 +102,15 @@ class NativeModel:
         except BaseException as exc:
             _cleanup_failure(api,'sp_sbe_model_destroy',int(self.handle.value),exc);raise
 
-    def new_state(self,dt,A):return NativeState(self,dt,A)
+    def new_state(self,dt,A,*,execution_mode="checked"):return NativeState(self,dt,A,execution_mode=execution_mode)
 
 
 class NativeState:
-    def __init__(self,model,dt,A):
+    def __init__(self,model,dt,A,*,execution_mode="checked"):
         self.model=model;self.handle=H(0);self.current=np.empty(3)
-        model.api.call('sp_sbe_state_create',model.handle,dt,A.ctypes.data,c.byref(self.handle),self.current.ctypes.data)
+        self._step_name='sp_sbe_step_performance' if execution_mode=='performance' else 'sp_sbe_step'
+        create='sp_sbe_state_create_performance' if execution_mode=='performance' else 'sp_sbe_state_create'
+        model.api.call(create,model.handle,dt,A.ctypes.data,c.byref(self.handle),self.current.ctypes.data)
         try:self.finalizer=weakref.finalize(self,_release_state,model.api,int(self.handle.value),model)
         except BaseException as exc:
             _cleanup_failure(model.api,'sp_sbe_state_destroy',int(self.handle.value),exc);raise
@@ -117,7 +121,7 @@ class NativeState:
     def step(self,A):
         if not self.alive:raise RuntimeFailure('SBE state is closed')
         current=np.empty(3)
-        self.model.api.call('sp_sbe_step',self.handle,A.ctypes.data,current.ctypes.data)
+        self.model.api.call(self._step_name,self.handle,A.ctypes.data,current.ctypes.data)
         self.current=current
         return current
 

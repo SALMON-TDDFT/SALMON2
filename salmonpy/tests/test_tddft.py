@@ -64,7 +64,7 @@ class TDDFTLoaderTests(unittest.TestCase):
         from salmonpy.tddft import TDDFTState
         from salmonpy.errors import RuntimeFailure
         state=object.__new__(TDDFTState)
-        state._closed=False;state._timeout=1;state._events=queue.Queue()
+        state._closed=False;state._execution_mode="checked";state._timeout=1;state._events=queue.Queue()
         state._reply_size=3
         state._events.put('SALMONPY_TDDFT_V1 0 0 0 0 7.99999')
         self.assertEqual(state._receive(0).shape,(3,))

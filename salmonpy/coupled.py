@@ -70,9 +70,10 @@ class NativeEHField:
     scheme='salmonpy.eh-centered-current/1'
     electronic_clock_offset = ELECTRONIC_CLOCK_OFFSET
 
-    def __init__(self,context,calculation,build_record,directory,*,points,grid):
+    def __init__(self,context,calculation,build_record,directory,*,points,grid,execution_mode="checked"):
         comm=context.solver_comm;error=None
         try:
+            if execution_mode not in ('checked','performance'):raise InputError('execution_mode must be checked or performance')
             if context.group.role!='field':raise InputError('field group required')
             if embedded._used:raise InputError('one native lifetime per process')
             if threading.current_thread() is not threading.main_thread():raise InputError('main thread required')
@@ -111,8 +112,13 @@ class NativeEHField:
             lib=c.CDLL(str(library))
             from .api import _bind_field_operations
             _bind_field_operations(lib)
+            if execution_mode=='performance':
+                _bind_field_operations(lib,('sp_eh_step_performance',))
+                self._performance_fn=lib.sp_eh_step_performance
+                from ._native_group import _bind_performance_directory
+                self._performance_enter,self._performance_leave=_bind_performance_directory(lib)
             self.directory=Path(directory).expanduser().resolve()
-            descriptor=(text,indices.tolist(),sha,str(self.directory))
+            descriptor=(text,indices.tolist(),sha,str(self.directory),execution_mode)
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         descriptors=comm.allgather(descriptor)
@@ -137,12 +143,14 @@ class NativeEHField:
         self.context=context;self.lib=lib;self.dt=calculation.dt;self.capacity=calculation.steps
         self.step_index=0;self.A=np.zeros((len(self.point_ids),3));self.E=np.zeros_like(self.A)
         self.closed=False;self.initialized=False;self.failed=False
+        self._execution_mode=execution_mode
         self.current_rows=None;self.current_rows_by_rank=None
         from .field_input import _real
         xyz=np.column_stack([calculation.geometry.grid.coordinates[d][indices[:,d]] for d in range(3)])
         self.sample_positions=_real(xyz,(len(self.point_ids),3),'macro sample positions')
         self.manifest={'schema':self.scheme,'status':'started','point_ids':self.point_ids,
             'grid_indices':indices.tolist(),'sample_positions_bohr':self.sample_positions.tolist(),'cell_volume':float(np.prod(calculation.geometry.grid.spacing)),
+            'execution_mode':execution_mode,'automatic_step_rollback':execution_mode=='checked',
             'dt':self.dt,'steps':self.capacity,'field_ranks':comm.size,'field_grid':list(grid),
             'library_sha256':sha,'sample_map':'half of same-index and previous-axis E edges',
             'deposit_map':'transpose of sample_map, equal cell volumes',
@@ -237,8 +245,9 @@ class NativeEHField:
         """Create an opt-in closed inner-box observer; this never advances a field.
 
         Collective setup on the field group. sample_step() reads only a live
-        accepted-attempt backup before its release. Scalar vacuum/isotropic LD,
-        epsilon_inf=mu=1,sigma=0; unsupported profiles warn and report unavailable.
+        accepted-attempt backup before its release. Actual constitutive coefficients, including validated tensor/subpixel/Ohmic
+        profiles; unsupported observations warn and report unavailable. Explicit
+        observation also works in performance mode when the caller supplies a backup.
         """
         return _BoxEnergyObserver(self,lower,upper)
 
@@ -382,7 +391,36 @@ class NativeEHField:
         if self.current_rows is None:return self.advance(J_previous)
         return self._advance(J_previous,owned=True)
 
+    @property
+    def execution_mode(self):
+        return self._execution_mode
+
+    def _call_performance(self,fn,*args):
+        import os
+        self.native._live()
+        code=self._performance_enter(os.fsencode(self.directory))
+        if code:raise RuntimeFailure('performance I/O scope rejected; no collective recovery: '+str(code))
+        try:return fn(*args)
+        finally:self._performance_leave()
+
+    def _advance_performance(self,J_previous,*,owned):
+        if self.closed or self.failed or self.step_index>=self.capacity:
+            raise InputError('closed, failed or exhausted field')
+        J=np.ascontiguousarray(J_previous,dtype=np.float64)
+        if J.shape!=self.A.shape:raise InputError('point-current shape must match field points')
+        if owned:J=np.ascontiguousarray(J[self.current_rows])
+        E=np.empty_like(self.A);next_A=np.empty_like(self.A)
+        try:
+            code=self._call_performance(self._performance_fn,len(self.point_ids),len(J),int(owned),J,self.A,next_A,E)
+            if code:raise RuntimeFailure('performance field failed; state is not guaranteed preserved: '+str(code))
+        except BaseException:
+            self.failed=True
+            raise
+        self.A=next_A;self.E=E;self.step_index+=1
+        return self.A.copy()
+
     def _advance(self,J_previous,*,owned):
+        if self.execution_mode=='performance':return self._advance_performance(J_previous,owned=owned)
         comm=self.context.solver_comm;error=None
         try:
             if self.closed or self.failed or self.step_index>=self.capacity:raise InputError('closed, failed or exhausted field')
@@ -829,7 +867,7 @@ class _BoxEnergyObserver:
         'field_physical_old','field_physical_new','field_physical_change',
         'ld_work','external_current_work','out_x_lower','out_x_upper',
         'out_y_lower','out_y_upper','out_z_lower','out_z_upper',
-        'outward_energy','modified_residual','physical_residual')
+        'outward_energy','modified_residual','physical_residual','constitutive_outward_energy','ohmic_work')
 
     def __init__(self,field,lower,upper):
         error=None;box=None
@@ -861,12 +899,12 @@ class _BoxEnergyObserver:
         guard=getattr(field,'_step_guard',None)
         if guard is None or not guard.active:
             raise InputError('energy observation requires an unconsumed accepted-step backup')
-        values=np.zeros(17)
+        values=np.zeros(19)
         code=field.lib.sp_eh_box_energy_step(self.box,values.ctypes.data)
         if code==14:raise InputError('energy observation requires a fresh accepted-attempt backup')
         if not field.context.is_leader:return None
         if code:
-            reason={1:'box/profile unsupported: exclude source, PML and outer boundary; scalar epsilon_inf=mu=1, sigma=0 required',
+            reason={1:'box/profile unsupported: exclude source, PML and outer boundary; positive background permittivity and permeability with nonnegative conductivity required',
                     4:'nonfinite energy observation; no physical state was modified'}.get(code,'energy observation status '+str(code))
             if not self._warned:
                 import warnings

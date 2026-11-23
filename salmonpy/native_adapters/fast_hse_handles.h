@@ -68,6 +68,10 @@ int sp_fast_hse_gs_boundary(int mode);
 
 int sp_fast_hse_handle_new(int64_t model, double dt, int capacity,
                          int64_t *handle, double j[3]);
+/* Single-state unchecked update; symmetry admissibility remains. No rollback promise. */
+int sp_fast_hse_step_performance(const double Aold[3],const double Anew[3],double j[3],double *energy);
+/* Unchecked handle update; local generation bounds and symmetry are retained. */
+int sp_fast_hse_handle_step_performance(int64_t token,const double Aold[3],const double Anew[3],double j[3],double *energy);
 int sp_fast_hse_handle_step(int64_t handle, const double a_old[3],
                           const double a_new[3], double j[3], double *energy);
 int sp_fast_hse_handle_info(int64_t handle, int *step, double a[3], double j[3]);

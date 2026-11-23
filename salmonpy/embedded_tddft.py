@@ -79,13 +79,16 @@ class NativeTDDFTBackend:
     """Collective native A/c-to-charge-current adapter with explicit sharing modes.
 
     decomposition is (k, orbital, x, y, z); its product must equal group size.
-    Declared deep numerical errors restore accepted state before returning.
+    In checked mode declared deep numerical errors restore accepted state before returning.
+    Performance mode omits diagnostic scans/backups and does not promise retry.
     Unknown native errors may terminate the process; retain an MPI timeout policy.
     """
     execution='collective'
     reduction='leader'
 
-    def __init__(self, build_record, work_root, *, decomposition, shared_model=False, registry_model=False):
+    def __init__(self, build_record, work_root, *, decomposition, shared_model=False, registry_model=False, execution_mode="checked"):
+        from .ld import _execution_mode_name
+        self._execution_mode=_execution_mode_name(execution_mode)
         if type(shared_model) is not bool:raise InputTypeError("shared_model must be boolean")
         if type(registry_model) is not bool:raise InputTypeError("registry_model must be boolean")
         if shared_model and registry_model:raise InputError('choose shared_model or registry_model')
@@ -99,7 +102,7 @@ class NativeTDDFTBackend:
         if not self.work_root.is_dir(): raise InputError('existing shared work root required')
         self.decomposition=tuple(_integer(v,'decomposition',1,2**31-1) for v in decomposition)
         if len(self.decomposition)!=5: raise InputError('decomposition requires k, orbital, x, y, z')
-        identity=[self.sha256,self.decomposition,str(self.work_root)]
+        identity=[self.sha256,self.decomposition,str(self.work_root),self.execution_mode]
         if shared_model:identity.append('shared-model-v1')
         if registry_model:identity.append('registry-model-v1')
         self.identity='salmonpy.embedded-tddft/1/'+hashlib.sha256(json.dumps(identity).encode()).hexdigest()
@@ -116,9 +119,12 @@ class NativeTDDFTBackend:
                 resources[key]=registry
             elif (registry.backend.sha256,registry.backend.work_root)!=(self.sha256,self.work_root):
                 raise InputError('one response group requires the same registry library and work root')
-            return _SessionGroup(registry.open_model(initial,dt,decomposition=self.decomposition))
+            return _SessionGroup(registry.open_model(initial,dt,decomposition=self.decomposition,execution_mode=self.execution_mode))
         if not self.shared_model:return None
         return _SessionGroup(self.open_model(initial,dt,context))
+
+    @property
+    def execution_mode(self):return self._execution_mode
 
     def open_registry(self,context):
         from ._tddft_registry import open_registry
@@ -162,10 +168,15 @@ class NativeTDDFTBackend:
             if shared:_configure(lib)
             from .api import _bind_state_operations
             _bind_state_operations(lib,'tddft',route='single')
+            if self.execution_mode=='performance':
+                fn=lib.sp_tddft_step_performance
+                fn.argtypes=lib.sp_tddft_step.argtypes;fn.restype=c.c_int
+                from ._native_group import _bind_performance_directory
+                _bind_performance_directory(lib)
         except Exception as exc: error=str(exc)
         errors=comm.allgather(error)
         if any(errors): raise InputError(str(errors))
-        descriptor=(self.identity,initial.input_file,initial.manifest,dt,initial.max_steps,self.decomposition,shared)
+        descriptor=(self.identity,initial.input_file,initial.manifest,dt,initial.max_steps,self.decomposition,shared,self.execution_mode)
         descriptors=comm.allgather(descriptor)
         if any(x!=descriptor for x in descriptors):raise InputError('TDDFT configuration differs within subgroup')
         work=None;error=None
@@ -194,8 +205,11 @@ class NativeTDDFTBackend:
         _used=True
         if shared:
             from ._shared_tddft import NativeTDDFTModel
-            return NativeTDDFTModel(native,lib,work,initial,dt,self.decomposition,self.identity,base)
-        state=_NativeState(native,lib,work,initial.max_steps)
+            return NativeTDDFTModel(native,lib,work,initial,dt,self.decomposition,self.identity,base,execution_mode=self.execution_mode)
+        state=_NativeState(native,lib,work,initial.max_steps,execution_mode=self.execution_mode)
+        if self.execution_mode=="performance":
+            from ._native_group import _bind_performance_directory
+            state._performance_enter,state._performance_leave=_bind_performance_directory(lib)
         state.checkpoint_decomposition=self.decomposition
         retryable_initialization=False
         try:
@@ -221,7 +235,9 @@ class NativeTDDFTBackend:
 
 
 class _NativeState:
-    def __init__(self,native,lib,work,capacity):
+    def __init__(self,native,lib,work,capacity,*,execution_mode="checked"):
+        from .ld import _execution_mode_name
+        self._execution_mode=_execution_mode_name(execution_mode)
         self._current_sign=-1
         self.timing=None  # declared once dt is known (create_state)
         self.lib=lib
@@ -267,7 +283,32 @@ class _NativeState:
         if any(codes):raise RuntimeFailure('electron-number query failed: '+str(codes))
         return value.value
 
+    @property
+    def execution_mode(self):return self._execution_mode
+
+    def _call_performance(self,fn,*args):
+        self.native._live()
+        code=self._performance_enter(os.fsencode(self.work))
+        if code:raise RuntimeFailure('performance I/O scope rejected: '+str(code))
+        try:return fn(*args)
+        finally:self._performance_leave()
+
+    def _advance_performance(self,old,new):
+        from .ld import _array_unchecked
+        if self.closed or self.failed or self.steps>=self.capacity:
+            raise InputError('closed, failed or exhausted native state')
+        old=_array_unchecked(old,'old A',(3,));new=_array_unchecked(new,'new A',(3,))
+        J=np.empty(3)
+        try:
+            code=self._call_performance(self.lib.sp_tddft_step_performance,old,new,J)
+            if code:raise RuntimeFailure('performance TDDFT failed; state is not guaranteed preserved: '+str(code))
+        except BaseException:
+            self.failed=True;raise
+        self.A=new;self.steps+=1
+        return self._current_sign*J
+
     def advance(self,old,new):
+        if self.execution_mode=="performance":return self._advance_performance(old,new)
         error=None
         try:
             old=np.array(old,dtype=np.float64,order='C');new=np.array(new,dtype=np.float64,order='C')

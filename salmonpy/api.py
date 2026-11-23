@@ -295,6 +295,7 @@ def _field_operations():
         'close': [],
         'current_mask': [('points','int','in'),('mask','mask','out')],
         'step_owned': [('points','int','in'),('local_points','int','in'),('J','array','in'),('A','array','in'),('E','array','out')],
+        'step_performance': [('points','int','in'),('local_points','int','in'),('owned','int','in'),('J','array','in'),('old_A','array','in'),('A','array','out'),('E','array','out')],
         'step_checked': [('points','int','in'),('J','array','in'),('A','array','in'),('E','array','out')],
         'sample_h': [('points','int','in'),('H','matrix','out')],
         'box_energy_step': [('box','indices','in'),('values','buffer','out')],
@@ -322,11 +323,14 @@ def _field_operations():
             entry['current']='physical charge-current density j in atomic units (C parameter named J); previous half-step; no volume multiplier or sign conversion'
             entry['atomicity']='use declared protected-step transaction/coordinator; raw call is not universal rollback'
         if name=='step_owned':entry['routing']='J rows follow ascending current-mask rows; local count differs by field rank; A/E retain all mapped rows'
+        if name=='step_performance':
+            entry['requires']='performance mode; caller guarantees matching collective order, current ownership and valid data; no rollback/retry guarantee'
+            entry['layout']='float64 C(points,3); compact owned J rows when owned=1; old_A input, next A/E outputs; no finite scans or validation collectives'
         if name=='step_indices':entry['layout']='int32[2]: accepted step and staged candidate step; -1 means absent; read-only'
         if name=='current_mask':entry['layout']='int32[points]; rank-local constitutive ownership, overlaps permitted'
         if name=='box_energy_step':
             entry['requires']='accepted step with live unconsumed protected-step backup; identical zero-based inclusive box on the field group; read-only, no I/O'
-            entry['layout']='box int32 C(2,3); output float64[17]; modified/physical energy, LD/source work and six-face flux'
+            entry['layout']='box int32 C(2,3); output float64[19]; modified/physical energy, LD/source work, six-face Poynting flux, separate constitutive exchange and Ohmic work'
         if name=='sample_h':entry['clock']='raw macro-centered H at (n+1/2)dt; accepted step >=1; no time advance'
         if name=='plane_read':
             entry['layout']='info int32[21]; values float64[values_count]; first call count0 queries metadata; axis1..3, local-grid offset'

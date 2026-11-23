@@ -19,6 +19,20 @@ def _array(value, name, shape=None):
     return a
 
 
+def _execution_mode_name(value):
+    if not isinstance(value,str) or value not in ('checked','performance'):
+        raise InputError('execution_mode must be checked or performance')
+    return value
+
+
+def _array_unchecked(value,name,shape=None):
+    """Owned real ABI buffer; intentionally no value/finite scan."""
+    if np.iscomplexobj(value):raise InputError(f'{name} must be real-valued')
+    a=np.array(value,dtype=np.float64,order='C',copy=True)
+    if shape is not None and a.shape!=shape:raise InputError(f'{name}: expected shape {shape}')
+    return a
+
+
 def _positive(value, name, zero=False):
     a = np.asarray(value)
     if a.ndim != 0 or a.dtype.kind not in 'iuf':
@@ -261,16 +275,18 @@ class LorentzDrude:
         return dict(known=True,valid_frequency_range=list(band),outside_fraction=float(stats[0]),rtol=tol,
                     within_band=within,scope='raw FFT-bin squared amplitudes, not absorbed energy; finite band only')
 
-    def new_state(self, *, dt, initial_field=(0., 0., 0.)):
+    def new_state(self, *, dt, initial_field=(0., 0., 0.), execution_mode="checked"):
         """Independent initially unpolarized state at t=0, with E(0) specified."""
-        return LDState(self, dt, initial_field)
+        return LDState(self, dt, initial_field,execution_mode=execution_mode)
 
-    def respond(self, field, *, dt):
+    def respond(self, field, *, dt, execution_mode="checked"):
         """E samples of shape (N,3) at t=0,dt,...; output includes initial zeros."""
-        field = _array(field, 'field')
+        execution_mode=_execution_mode_name(execution_mode)
+        parser=_array_unchecked if execution_mode=='performance' else _array
+        field = parser(field, 'field')
         if field.ndim != 2 or field.shape[1] != 3 or len(field) == 0:
             raise InputError('field must have shape (N,3), N >= 1')
-        state = self.new_state(dt=dt, initial_field=field[0])
+        state = self.new_state(dt=dt, initial_field=field[0],execution_mode=execution_mode)
         try:
             p, j = state._advance(field)
             return Response(np.arange(len(field))*state.dt, p, j)
@@ -281,7 +297,7 @@ class LorentzDrude:
 class LDState(_SnapshotMixin):
     """Independent native per-pole history. A state is not thread-shareable."""
     __slots__ = ('_config', '_material', '_field', '_polarization', '_current',
-                 '_steps', '_native_state', '_closed')
+                 '_steps', '_native_state', '_closed', '_execution_mode', '_parse_field')
     _snapshot_kind = 'ld'
     _snapshot_counter = '_steps'
 
@@ -291,7 +307,9 @@ class LDState(_SnapshotMixin):
         p,j=self._native_state.export()
         return {'_field':self._field,'_p':p,'_j':j}
 
-    def __init__(self, material, dt, initial_field):
+    def __init__(self, material, dt, initial_field, *, execution_mode="checked"):
+        self._execution_mode=_execution_mode_name(execution_mode)
+        self._parse_field=_array_unchecked if execution_mode=='performance' else _array
         dt = _positive(dt, 'dt')
         self._material = material
         self._field = _array(initial_field, 'initial_field', (3,))
@@ -299,8 +317,10 @@ class LDState(_SnapshotMixin):
         self._polarization=np.zeros(3);self._current=np.zeros(3)
         self._steps = 0;self._closed=False
         from ._ld_handles import NativeState
-        self._native_state=NativeState(_handles_api(),material,dt,self._field)
+        self._native_state=NativeState(_handles_api(),material,dt,self._field,execution_mode=execution_mode)
 
+    @property
+    def execution_mode(self):return self._execution_mode
     @property
     def dt(self): return self._config.dt
     @property
@@ -318,7 +338,7 @@ class LDState(_SnapshotMixin):
     def step(self, field):
         """Advance dt using E at the new time; return (P, J), not FDTD Q."""
         self._require_open()
-        field = _array(field, 'field', (3,))
+        field = self._parse_field(field, 'field', (3,))
         p=np.empty((2,3));j=np.empty_like(p)
         # Allocate accepted metadata and return values before committing native history.
         accepted_p=np.empty(3);accepted_j=np.empty(3);steps=self._steps+1
@@ -335,7 +355,7 @@ class LDState(_SnapshotMixin):
         field=np.ascontiguousarray(field,dtype=np.float64)
         if field.ndim!=2 or field.shape[1]!=3 or not len(field):
             raise InputError('field must have shape (N,3), N >= 1')
-        if not np.array_equal(field[0],self._field):
+        if self.execution_mode=='checked' and not np.array_equal(field[0],self._field):
             raise InputError('batch must begin at the accepted field')
         if len(field)>2**31-1:raise InputError('too many LD samples')
         p=np.empty_like(field);j=np.empty_like(field)

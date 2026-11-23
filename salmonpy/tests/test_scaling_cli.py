@@ -24,3 +24,16 @@ class ScalingCLI(unittest.TestCase):
     def test_incompatible_or_odd_field_shape_before_mpi(self):
         for shape in (('80','80','80'),('95','96','96')):
             with self.subTest(shape=shape):self.reject(['--field-shape',*shape])
+
+    def test_field_observation_campaign_rejects_bad_options_before_mpi(self):
+        script=Path(__file__).resolve().parents[2]/'tools/test_diagonal_field_energy_mpi.py'
+        for option,value,message in (('--observation-stride','0','observation-stride must be positive'),
+                                     ('--grid-count','41','grid-count must be even and at least40'),
+                                     ('--stop-after','0','stop-after must be in1..64')):
+            with self.subTest(option=option),tempfile.TemporaryDirectory() as tmp:
+                output=Path(tmp)/'output'
+                result=subprocess.run([sys.executable,str(script),'build',str(output),option,value],
+                                      capture_output=True,text=True)
+                self.assertEqual(result.returncode,2,result.stderr)
+                self.assertIn(message,result.stderr)
+                self.assertFalse(output.exists())

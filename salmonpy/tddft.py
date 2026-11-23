@@ -19,7 +19,7 @@ import tempfile
 import threading
 import numpy as np
 from .fdtd import SalmonExecutable
-from .ld import _array, _positive
+from .ld import _array, _positive, _array_unchecked, _execution_mode_name
 from .sbe import _integer, _frozen
 
 
@@ -158,12 +158,12 @@ class TDDFTInitialState:
         except BaseException:
             owner.cleanup();raise
 
-    def new_state(self,*,dt,time0=0.,initial_A=(0.,0.,0.)):
+    def new_state(self,*,dt,time0=0.,initial_A=(0.,0.,0.),execution_mode="checked"):
         dt=_positive(dt,'dt');time0=float(_array(time0,'time0',()))
         A=_array(initial_A,'initial_A',(3,))
         if time0!=0.: raise InputError('fresh TDDFT GS states start at time0=0')
         if self._owner.closed or not self._snapshot.exists(): raise RuntimeFailure('initial snapshot is closed')
-        return TDDFTState(self,dt,A)
+        return TDDFTState(self,dt,A,execution_mode=execution_mode)
 
     def close(self): self._owner.cleanup()
     def __enter__(self): return self
@@ -183,17 +183,23 @@ def _read_output(stream,events,log,prefix='SALMONPY_TDDFT_V1 '):
 class TDDFTState(_SnapshotMixin):
     """One live SALMON process. Use a context manager or close explicitly.
 
-    Only step(Anew) mutates the calculation. On a worker failure the accepted
+    Only step(Anew) mutates the calculation. In checked mode, on worker failure the accepted
     A history is replayed into a new process before the error is returned. If
     replay itself fails the state is closed and cannot silently continue.
     """
     _worker_mode = '1'
     _reply_prefix = 'SALMONPY_TDDFT_V1 '
     _init_command = 'INIT'
+    _performance_init_command = 'INIT_PERFORMANCE'
+    _performance_reply_prefix = 'SALMONPY_TDDFT_PERFORMANCE_V1 '
     _step_command = 'STEP'
     _reply_size = 3
 
-    def __init__(self,initial,dt,A):
+    def __init__(self,initial,dt,A,*,execution_mode="checked"):
+        self._execution_mode=_execution_mode_name(execution_mode)
+        if execution_mode=='performance':
+            self._init_command=self._performance_init_command
+            self._reply_prefix=self._performance_reply_prefix
         self._model=initial
         self._dt=dt;self._steps=0;self._history=[];self._A0=A.copy()
         self._executable=initial.executable;self._capacity=initial.max_steps
@@ -210,6 +216,8 @@ class TDDFTState(_SnapshotMixin):
             self.close();raise
 
     @property
+    def execution_mode(self):return self._execution_mode
+    @property
     def dt(self): return self._dt
     @property
     def timing(self):
@@ -222,7 +230,7 @@ class TDDFTState(_SnapshotMixin):
     @property
     def current(self):
         """Electric (charge) current density j = -J_matter at the current time."""
-        return _frozen(-self._current)
+        return _frozen(-self._current,check=self.execution_mode=="checked")
     @property
     def electron_number(self):
         """Actual Fortran-integrated occupied electron density at this endpoint."""
@@ -234,7 +242,7 @@ class TDDFTState(_SnapshotMixin):
     @property
     def matter_current(self):
         """SALMON electronic matter current J (internal representation)."""
-        return _frozen(self._current)
+        return _frozen(self._current,check=self.execution_mode=="checked")
     @property
     def max_steps(self): return self._capacity
 
@@ -258,7 +266,7 @@ class TDDFTState(_SnapshotMixin):
         self._events=queue.Queue()
         self._proc=subprocess.Popen([str(self._executable.path)],cwd=work,
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1,
-            env={**environment,'SALMONPY_TDDFT_WORKER':self._worker_mode,'SALMONPY_TDDFT_NORM':'1','OMP_NUM_THREADS':str(self._threads)})
+            env={**environment,'SALMONPY_TDDFT_WORKER':self._worker_mode,'SALMONPY_TDDFT_NORM':'1','SALMONPY_TDDFT_EXECUTION_MODE':self.execution_mode,'OMP_NUM_THREADS':str(self._threads)})
         self._reader=threading.Thread(target=_read_output,args=(self._proc.stdout,self._events,work/'worker.log',self._reply_prefix),daemon=True)
         self._reader.start()
         self._send(self._input.rstrip()+'\n!SALMONPY_END_INPUT\n'+
@@ -307,7 +315,8 @@ class TDDFTState(_SnapshotMixin):
             if len(fields)!=6:raise RuntimeFailure('TDDFT worker protocol requires measured electron number')
             self._electron_number=float(fields[-1]);fields=fields[:-1]
         if len(fields)!=2+self._reply_size or int(fields[1])!=index: raise RuntimeFailure('TDDFT worker protocol sequence mismatch')
-        return _array([float(x) for x in fields[2:]],'worker observables',(self._reply_size,))
+        parser=_array if self.execution_mode=='checked' else _array_unchecked
+        return parser([float(x) for x in fields[2:]],'worker observables',(self._reply_size,))
 
     def _stop(self,*,cleanup=True):
         returncode=None
@@ -327,7 +336,21 @@ class TDDFTState(_SnapshotMixin):
         if cleanup and self._work is not None and not self._retain_outputs: self._work.cleanup();self._work=None
         return returncode
 
+    def _step_performance(self,Anew):
+        if self._closed:raise RuntimeFailure('TDDFT state is closed')
+        A=_array_unchecked(Anew,'Anew',(3,))
+        if self._steps>=self._capacity:raise InputError('TDDFT max_steps reached')
+        try:
+            self._send(self._step_command+' '+' '.join(f'{v:.17e}' for v in A))
+            current=self._receive(self._steps+1)
+        except Exception as exc:
+            self.close()
+            raise RuntimeFailure('performance TDDFT worker failed; state closed without automatic replay') from exc
+        self._current=current;self._history.append(A);self._curr_history.append(current.copy());self._steps+=1
+        return self.current
+
     def step(self,Anew):
+        if self.execution_mode=="performance":return self._step_performance(Anew)
         if self._closed: raise RuntimeFailure('TDDFT state is closed')
         A=_array(Anew,'Anew',(3,))
         if self._steps>=self._capacity: raise InputError('TDDFT max_steps reached; create a new state with larger capacity')
@@ -506,7 +529,7 @@ class TDDFTState(_SnapshotMixin):
         from .outputs import _write_archive
         try:
             if self._stop(cleanup=False)!=0: raise RuntimeFailure('worker did not exit cleanly; output not finalized')
-            metadata={'backend':'SALMON-TDDFT-middlepoint','dt':self.dt,'steps':self._steps,
+            metadata={'backend':'SALMON-TDDFT-middlepoint','execution_mode':self.execution_mode,'dt':self.dt,'steps':self._steps,
                 'units':{'time':'a.u.','A':'Ac=A/c, a.u.','current':'electric (charge) current density, a.u.'},
                 'time_location':'A and current are accepted endpoint samples; first sample is the initial state',
                 'matter_current':'-current','executable_sha256':self._executable.sha256,'threads':self._threads,

@@ -90,3 +90,25 @@ class NativeStepTests(unittest.TestCase):
         root=package/'_runtime_source' if (package/'_runtime_source').is_dir() else package.parent
         self.assertFalse((package/'native_adapters/step_output.f90').exists())
         self.assertTrue((root/'runtime/sources/solver/src/io/step_output.f90').is_file())
+
+    def test_field_performance_dispatch_skips_finite_and_collective_checks(self):
+        from types import SimpleNamespace
+        import numpy as np
+        from salmonpy.coupled import NativeEHField
+        owner=object.__new__(NativeEHField)
+        owner._execution_mode='performance';owner.closed=False;owner.failed=False
+        owner.step_index=0;owner.capacity=4;owner.dt=.1;owner.point_ids=(10,)
+        owner.A=np.zeros((1,3));owner.E=np.zeros((1,3));owner.current_rows=None
+        def forbidden(*args,**kwargs):raise AssertionError('validation collective called')
+        owner.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=forbidden))
+        owner.native=SimpleNamespace(_live=lambda:None)
+        calls=[]
+        def run(npoints,nlocal,owned,J,old_A,next_A,E):
+            calls.append((npoints,nlocal,owned));E[:]=J;next_A[:]=old_A-.1*E;return 0
+        owner._performance_fn=run;owner._call_performance=lambda fn,*args:fn(*args)
+        old=owner.A;J=np.array([[np.nan,.2,.3]])
+        output=owner.advance(J)
+        self.assertTrue(np.isnan(output[0,0]));self.assertFalse(owner.failed)
+        self.assertEqual(owner.step_index,1);self.assertEqual(calls,[(1,1,0)])
+        np.testing.assert_array_equal(old,0.)
+        with self.assertRaisesRegex(InputError,'shape'):owner.advance(np.zeros((2,3)))

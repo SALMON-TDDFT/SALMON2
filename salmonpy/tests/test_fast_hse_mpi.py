@@ -21,6 +21,29 @@ class FakeComm:
 
 
 class NativeFastHSETests(unittest.TestCase):
+    def test_performance_update_skips_votes_and_retains_symmetry_rejection(self):
+        from pathlib import Path
+        from types import SimpleNamespace
+        from salmonpy.fast_hse_mpi import _State
+        from salmonpy.errors import InputError,RuntimeFailure
+        import numpy as np
+        def forbidden(*args):raise AssertionError('per-step diagnostic collective')
+        native=SimpleNamespace(_live=lambda:None,context=SimpleNamespace(solver_comm=SimpleNamespace(size=1,allgather=forbidden)))
+        def step(old,new,j,energy):j[:]=new;energy._obj.value=2.;return 0
+        lib=SimpleNamespace(sp_fast_hse_step_performance=step)
+        state=_State(native,lib,Path('/unused'),.001,5,'taylor',execution_mode='performance')
+        state._call_performance=lambda fn,*args:fn(*args)
+        with self.assertRaises(AttributeError):state.execution_mode='checked'
+        np.testing.assert_array_equal(state.advance([9.,9.,9.],[.1,.2,.3]),[.1,.2,.3])
+        self.assertEqual(state.energy,2.)
+        lib.sp_fast_hse_step_performance=lambda *args:34
+        with self.assertRaises(InputError):state.advance(state.A,[0.,0.,0.])
+        self.assertFalse(state.failed);self.assertEqual(state.steps,1)
+        lib.sp_fast_hse_step_performance=lambda *args:30
+        with self.assertRaises(RuntimeFailure):state.advance(state.A,[0.,0.,0.])
+        self.assertTrue(state.failed)
+
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)

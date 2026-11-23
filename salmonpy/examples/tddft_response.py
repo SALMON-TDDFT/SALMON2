@@ -13,6 +13,7 @@ def main():
     p.add_argument('executable'); p.add_argument('sha256'); p.add_argument('gs')
     p.add_argument('directory', help='新規親ディレクトリ')
     p.add_argument('--threads', type=int, default=1)
+    p.add_argument("--execution-mode",choices=("checked","performance"),default="checked")
     args = p.parse_args()
     output = Path(args.directory)
     output.mkdir(parents=True, exist_ok=False)
@@ -21,7 +22,7 @@ def main():
     with gs.tddft_initial_state(executable=engine, max_steps=20, threads=args.threads) as initial:
         for i, amplitude in enumerate((.001, .002)):
             drive = AcosPulse(amplitude, .2, .4).sample(np.arange(21)*.02)
-            result = respond(initial, drive, output_directory=output/f'run-{i}')
+            result = respond(initial, drive, output_directory=output/f'run-{i}',execution_mode=args.execution_mode)
             print('電荷電流密度 j [a.u.]:', result.current[-1])
     # 短い接続試験用波形。物理評価にはパルス・dt・伝播時間の収束確認が必要。
 

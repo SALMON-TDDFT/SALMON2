@@ -2,7 +2,7 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## 現在の状態（2026-11-22 commit/push照合）
+## 現在の状態（2026-11-23 作業・検証照合）
 
 この節と末尾の最新検証記録を現在の状態として扱います。過去の日付の
 未完了チェックや「未コミット」は、その時点の記録であり、独立した残件として
@@ -14,11 +14,11 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 | 完了 | 現行CPUのNLCC認証・単位照合 | PZ/Libxc-PZ/PBE局所試験、MPI2/4、固定Si/PBE比較。今回のソース・バイナリ向け記録も更新。換算定数は変更なし |
 | 完了 | 初期推定の入力準備・保持GSからの受け渡し | 準備と実行を分離し、保持GSの波動関数・占有数を独立コピー。前回実装は8f3a7663までpush済み |
 | 完了 | アーカイブ・自作readerからの初期推定 | 共通配列をFortranへ直接渡す。PZ/高速HSEのMPI、独立性、拒否後の再試行、既存経路との一致を確認。本項の実装・文書を今回のcommitへ収録 |
-| 完了 | 最新パッケージ・分子接続検証 | 六面収支・x/y/z各2分割まで5d6892c7へpush済み。単一分子の公開結合API・公開保存点・直接取消は3af42587へpush済み。分子単体の直接ディスク再開は54c43c2bへpush済み。二つのFDTDを含む一括再開も実装済み。ソース・wheelとも692件実行、各1件任意スキップ。末尾の最新記録を参照 |
+| 完了 | 最新パッケージ・分子接続検証 | 六面収支・x/y/z各2分割まで5d6892c7へpush済み。単一分子の公開結合API・公開保存点・直接取消は3af42587へpush済み。分子単体の直接ディスク再開は54c43c2bへpush済み。二つのFDTDを含む一括再開はf4cc1b03へcommit済み（未push）。対角背景の六面収支も実装・検証済み。ソース・wheelとも693件実行、各1件任意スキップ。末尾の最新記録を参照 |
 
 ### 残る作業と対象拡大
 
-**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消はワーカー内保存点から直接復元します。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。光源・吸収層を除いた内側の箱について、六面流束を含む場・等方LD・分子の離散エネルギー収支と実MPI2分割を確認済みです。単一分子用の一般利用向け入口はMolecularFeedbackとして実装済みです。テンソル・界面平滑化・任意の背景誘電率への観測拡張、広い物理条件での収束確認は残件です。以下はそれと区別する運用・対象拡大の残件です。
+**分子の双方向FDTD結合は、C2H2・PZの開発試験まで接続済みです。** 真空・LD環境で独立E応答との一致と取消・再試行を確認しました。電子状態の取消はワーカー内保存点から直接復元します。短時間の電子数保存は確認済みです。量子系の仕事量は観測・比較と選択電場の中点時間配置まで確認済みです。光源・吸収層を除いた内側の箱について、六面流束を含む場・等方LD・分子の離散エネルギー収支と実MPI2分割を確認済みです。単一分子用の一般利用向け入口はMolecularFeedbackとして実装済みです。正の背景誘電率・透磁率と対角LDの収支観測まで完了しました。背景誘電率が対角の場合は非対角LD極の収支観測も実装・ソース検証済みです。非対角の背景誘電率の収支観測も接続・検証済みです。LD界面平滑化の収支観測も実装・検証済みです。Ohmic伝導の散逸観測も実装・検証済みです。広い物理条件での収束確認は残件です。以下はそれと区別する運用・対象拡大の残件です。
 
 1. **施設MPI・多ノードでの実証**：サイトのランチャー、実際のジョブ単位検証記録、ランク配置・多ノードの検証。Mac上の少数ランク試験を代用しない。
 2. **大規模化の計測**：マクロ点・ランク・観測間隔に対するメモリ、通信、ファイル数・I/O負荷の測定。集約・バッファ化は測定上の必要に応じて実装する。
@@ -35,7 +35,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 This section takes precedence over historical dated checkboxes below. Historical
 unchecked scope statements are not independent tasks; retain them as evidence.
-Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum-work observation/comparison and selected-field midpoint timing are verified. Six-face inner-box energy balance is verified for scalar LD, including real two-partition FDTD tests along x/y/z. Tensor/subpixel/arbitrary-background energy observation and physical convergence remain open. MolecularFeedback, live direct cancellation and process-exit molecular direct disk restart are implemented and verified in the latest entries below. Coordinated direct disk persistence of both fields, the molecule and explicit accepted step indices is now verified for MPI6/same-layout C2H2 PZ; see the latest entry. Memory budgets warn; SCF nonconvergence retains
+Molecular work resumed2026-11-22: actual C2H2 PZ E-worker/FDTD wiring and retry are tested in vacuum/LD. Short-run measured electron-number conservation is verified. Quantum-work observation/comparison and selected-field midpoint timing are verified. Six-face inner-box energy balance is verified for scalar LD, including real two-partition FDTD tests along x/y/z. Ohmic-conductivity energy observation is now verified below. Physical convergence remains open. LD subpixel energy observation is now verified below. Non-diagonal background observation is now integrated and verified below. Off-diagonal LD pole strengths with diagonal background are source-verified; wheel validation of that increment is also verified below. Positive diagonal electric/magnetic backgrounds and diagonal LD energy observations are now verified below. MolecularFeedback, live direct cancellation and process-exit molecular direct disk restart are implemented and verified in the latest entries below. Coordinated direct disk persistence of both fields, the molecule and explicit accepted step indices is now verified for MPI6/same-layout C2H2 PZ; see the latest entry. Memory budgets warn; SCF nonconvergence retains
 results/residual diagnostics and pauses the downstream workflow for user review
 (the explicit continuation policy is documented below). GS saving/reuse is the normal workflow. Collected GS validation datasets require the applicable campaign-specific user authorization; existing grants do not authorize arbitrary new campaigns. Store authorized results in calc2026. Do not manually dispatch optional heavy CI. Critical source/inventory/packaging commits must not skip required integrity CI.
 
@@ -4289,3 +4289,166 @@ midpoint-work-summary.json. Follow-up still uncommitted; no manual heavy CI.
 molecular-bundle-summary.jsonとmolecular-bundle-artifacts。追加SCF・物理CIの手動起動なし。
 同一入力／実行ファイル／ライブラリ／容量／MPI分割の範囲であり、任意のOS・MPI障害や
 切替時の致命的確保失敗への原子性、レイアウト変更、他の分子XCまでの証明ではない。
+
+## 2026-11-22 正の背景ε・μと対角LDの六面収支
+
+f4cc1b03（一括直接保存／再開）はcommit済み、利用者の今回の指示にpushは含まれないため未push。
+以下の観測拡張は未コミット。
+
+- [x] Fortranの読み取り専用観測で、実際の電場・電流・磁場の更新係数から正の対角エネルギー重みを取得。物質IDで係数を推定しない。LDの半陰的寄与を相殺して背景εを取得し、µでHの保存量を重み付けする。ソルバー、LD更新順、保存状態と通信回数は変更しない。
+- [x] 人工解：非等間隔格子、方向別ε・µ、LD／外部電流の仕事、全方向の静的エネルギー、領域分割加法性、0／NaN／Inf係数の拒否を確認。失敗時の出力は保持。
+- [x] 実FDTD：誘電体ε=2.5・µ=1.4、等方LD背景ε=4、対角LD背景ε=(2,3,4)、x成分だけ1の対角LD、従来の単位背景。全64ステップの観測が利用可能。最大離散残差は約2.89e-14～4.13e-14 Hartree。
+- [x] 観測有無のE/A履歴と全ランク最終E/H・LD・PML・電流保存バイナリが完全一致。従来ライブラリとの対角LD状態と標準背景の観測も完全一致。既存C2H2・MPI6の全64フレーム／収支も不変。
+- [x] 場MPI1/2はE/A完全一致・収支は丸め誤差内。ステップ32保存から別ジョブで直接再開した全履歴・収支・最終状態は連続実行と完全一致。ソース・最終wheelでも同じ結果。
+- [x] Git追跡ファイルのみの準備・ビルド、共有カーネルのバイト一致、禁止ソルバー監査。NLCC局所MPI1/2も確認。ソース・wheel各693件、任意スキップ各1件。日英ガイド・AI JSON・収録バイトを同期。
+- [ ] 次：非対角テンソルと界面平滑化の空間補間を含むエネルギー／流束の導出と実装。Ohmic伝導の散逸項も別途必要。これらが未対応でも観測だけ警告し、計算は継続する。
+
+記録：docs/diagonal-field-energy-validation-2026-11-22.md。
+calc2026/salmonpy-diagonal-field-energy-20261122/summary.jsonとartifacts-verified。
+場だけの新規検査ではGS／SCFなし。分子の回帰は許可済みC2H2 GSを再利用。
+時刻中心化した通常のエネルギー残差は離散保存量の残差と別であり、物理精度の保証と混同しない。
+
+- Non-diagonal LD pole energy observation with diagonal background: implemented and verified with field MPI1/2, observation invariance and exact direct restart (see tensor-pole-field-energy-validation-2026-11-22.md). Non-diagonal background and subpixel energy remain pending.
+
+## 2026-11-22 最新リスト照合（非対角LD極の観測後）
+
+この節を現在の残件として扱い、過去の未完了チェックを重複計上しない。
+
+- [x] 背景が対角の非対角LD極：全電流を使った仕事量観測、場MPI1/2、観測有無・変更前ライブラリとの状態一致、ステップ32からの直接再開一致。ソース693件（1件スキップ）。
+- [x] 今回の非対角LD極の変更を含むwheelをsdistから構築し、別環境へ導入。ソース版と全64ステップの履歴・収支・全ランク最終状態バイトが一致。ソース保存点から別MPIジョブで直接再開した結果も一致。wheel693件（1件スキップ）。
+- [ ] 非対角の背景誘電率：領域境界をまたぐ構成則のエネルギー交換を導出・実装・検証する。
+- [ ] LD界面平滑化の六面収支観測：分散と空間補間を含む保存量を評価する。
+- [ ] Ohmic伝導の散逸量を収支へ加える。
+- [ ] 分子双方向結合の広い物理条件での収束確認。現在のC2H2/PZ短時間試験を一般の精度保証にしない。
+- [ ] 運用・対象拡大：施設MPI／多ノード、大規模時のメモリ・通信・I/O計測、Linux／Intel Mac等の重いライブラリ配布・実行、Agフィット改善。
+
+高速HSE電子数診断と実材料格子収束キャンペーンは利用者指定で後回し。
+GPU・追加保存形式は必要性に応じた別枠。後方互換・TTMは追加しない。
+f4cc1b03はローカルcommit済み・未push。その後の対角背景／非対角LD極観測と文書更新は未コミット。
+
+### 非対角背景の独立会計カーネル（2026-11-22）
+
+- [x] Fortranで旧／新の非対角電場エネルギーと、Poynting流束と区別した境界交換量を評価。対称な非局所演算子の人工解で、中点仕事量との恒等式、領域分割の加法性、全領域での交換相殺、NaN／Inf拒否時の出力保持を確認。694件（1件スキップ）。
+- [ ] 実FDTDの背景補間と観測出力への接続、およびMPI／直接再開での比較。独立カーネルの検証だけで非対角背景の対応完了とはしない。
+
+導出：docs/plans/2026-11-22-cross-background-energy.md。検証ログ：calc2026/salmonpy-cross-background-energy-20261122。新規GS・SCF・物理CIなし。
+
+## 2026-11-22 最新リスト照合（非対角背景の実FDTD接続後）
+
+- [x] 実際の背景補間演算子をFortran観測へ接続し、非対角エネルギーと `constitutive_outward_energy` を評価。Poynting六面流束とは別に保持し、残差・集計には両方を含める。現行観測18成分／集計11成分に統一し、旧契約への分岐なし。
+- [x] 材料内部を切る領域の64ステップ：最大離散残差6.09e-13 Hartree、構成則境界交換は最大4.31e-7 Hartree。場MPI1/2、x/y/z分割が丸め誤差内で一致。
+- [x] 観測有無・変更前ライブラリとの最終保存状態が完全一致。ステップ32の保存から別ジョブで直接再開し、全履歴・全ランク最終状態が連続実行と完全一致。従来の等方／対角の既存観測値・状態は不変、新項目は0。
+- [x] 現行目録からのソース準備、ソース／全アプリケーションオブジェクトの禁止ソルバー監査、sdistからのwheel構築・別環境導入、最終wheelでの実行／再開。ソース・wheel各694件、任意スキップ各1件。日英ガイド・AI JSON・収録ソースのバイト一致。
+- [ ] 次：LD界面平滑化の収支観測、Ohmic散逸の観測、分子結合の広い条件での物理収束。施設MPI／多ノード・規模計測・他環境配布・Agフィット改善は別枠の残件。
+
+非対角背景の観測時のみ、担当MPI群内で準備合意と補間の境界通信が増える。通常更新・全体通信・保存状態は変更しない。新規GS／SCF・物理CIの手動起動なし。
+記録：docs/cross-background-energy-validation-2026-11-22.md、calc2026/salmonpy-cross-background-energy-20261122/fdtd-summary.json。今回の変更は未コミット。
+
+## 2026-11-22 最新リスト照合（LD界面平滑化の観測後）
+
+- [x] LD界面平滑化の実係数を六面収支観測へ接続。背景の非対角境界交換をPoynting流束と分離し、平滑化された全LD電流の仕事量を評価。既存の初期化済み判定を再利用し、追加の全体通信・保存形式変更なし。
+- [x] 格子からずらした曲面LD、544平滑化サンプル、参照／形状フォールバック0。最大離散残差7.41e-13 Hartree。格子整列界面も確認。物理的な広帯域精度・格子収束とは区別する。
+- [x] 場MPI1/2とx/y/z分割が一致。観測有無・変更前ランタイムの最終保存状態が完全一致。ステップ32から別MPIジョブで直接再開した履歴・収支・最終状態も完全一致。既存テンソル／等方の対照は不変。
+- [x] ソース／オブジェクトの禁止ソルバー監査、sdistからのwheel構築・別環境導入、最終wheelからの直接再開、ソース・wheel各694件（任意スキップ各1件）。日英マニュアル・AI JSONとwheel収録バイトを照合。
+- [ ] 次：Ohmic伝導の散逸量を収支へ追加。分子結合の広い条件での物理収束、施設MPI／多ノード、規模計測、他環境配布、Agフィット改善は既存の別枠。高速HSE電子数と実材料格子収束キャンペーンは利用者指定で後回し。
+
+記録：docs/subpixel-field-energy-validation-2026-11-22.md、calc2026/salmonpy-subpixel-field-energy-20261122/summary.json。新規GS・SCF・物理CIなし。今回の変更は未コミット。
+
+## 2026-11-22 最新リスト照合（Ohmic散逸の観測後）
+
+- [x] Fortranで実更新係数から導電率を取得し、LD半陰的寄与を差し引いて `ohmic_work` を評価。LD分極への仕事・Poynting流束・構成則の境界交換と分け、残差／集計に含める。現行観測19成分／集計12成分。後方互換分岐なし。
+- [x] 人工解で正の散逸、ゼロ導電率、LD二重計上の防止、領域分割加法性、NaN／Inf・負係数の拒否時の出力保持を確認。
+- [x] 実FDTDの導体・導体＋LD・単位背景導体で64ステップを確認。最大離散残差1.87e-14〜4.47e-14 Hartree。混在計算の場MPI1/2、x/y/z分割、32ステップからの別ジョブ直接再開が一致。観測有無・変更前ランタイムの状態は完全一致。
+- [x] ゼロ導電率の等方・非対角背景・界面平滑化の既存観測値／状態は不変。新項目は0。通常更新・保存形式・通信回数は変更なし。
+- [x] 禁止ソルバーのソース／オブジェクト監査、sdist→wheelの別環境導入、ソース・wheel各695件（任意スキップ各1件）、日英ガイド・AI JSON・wheel収録ソースの一致を確認。
+- [ ] 残る主要作業：分子結合など広い物理条件の収束確認、施設MPI／多ノード、規模別メモリ・通信・I/O計測、他環境の重いライブラリ配布・実行、Agフィット改善。高速HSE電子数・実材料格子収束キャンペーンは利用者指定で後回し。追加保存形式・GPUは必要性に応じた別枠。
+
+記録：docs/ohmic-field-energy-validation-2026-11-22.md、calc2026/salmonpy-ohmic-field-energy-20261122/summary.json。新規GS／SCF・物理CIの手動起動なし。今回の変更は未コミット。
+
+## 2026-11-23 最新リスト照合（観測の資源負荷測定）
+
+- [x] 開発用検査に格子数・観測間隔・段階別計時・安全なRSS／出力ファイル計測を追加。入力不正はMPI初期化前に拒否。計測値の全体集約は終了後1回で、計算核・通常更新は変更なし。
+- [x] 単一Macの40³／72³、場1／4ランク、観測off／毎ステップ／8ステップ間隔を各2回、計24件。最大5 MPIランク、1スレッド。72³・場1ランクの観測時間中央値2.733→0.361秒、点出力10,520→1,448 bytes。一方、個別ピークRSS合計は約1007MiBでほぼ不変。実行時間のばらつきが大きく、速度向上率や最適ランク数は断定しない。
+- [x] 同じ格子／MPI配置の物理状態は一致。保存した観測最大値2個の差を区別し、それ以外の保存バイトは一致。資源計測失敗を注入しても計算完了・状態一致。間引いた値は該当する毎ステップ観測と完全一致。
+- [x] 日英MEMORYガイド・AI用JSONを更新。ソース・wheel各696件（任意スキップ各1件）、最終wheelの実行・sdist内の測定コードと文書の一致を確認。
+- [ ] 残件：実際の保護付き混在計算での多数点・長時間の資源測定、施設MPI／多ノード・共有ファイルシステム、他環境の重いライブラリ配布・実行、広い物理条件の収束確認、Agフィット改善。高速HSE電子数・実材料格子収束キャンペーンは利用者指定で後回し。GPU・追加保存形式は別枠。
+
+記録：docs/field-observation-profile-2026-11-23.md、calc2026/salmonpy-field-observation-profile-20261123/summary.json。今回の変更は未コミット。新規GS／SCF・遠隔ジョブ・CI手動起動なし。
+
+## 2026-11-23 パフォーマンスモード（FDTD＋内蔵LD）
+
+- [x] NativeEHField(execution_mode="performance") を追加。既定はchecked。毎ステップの全配列走査・A/J一致検査・検査用MPI合意・自動復元用コピーを省く。値の正しさ・呼出順は呼出元の責任とし、自動復元／再試行を保証しない。初期化・SHA・禁止ソルバー監査、最小限のローカルABI検査、物理通信、ソルバー処理、指定出力は維持。
+- [x] 非ゼロ電流、通常／空間所有点配送、MPI1/2/4、導体＋LD、界面平滑化、直接保存／別ジョブ再開、明示的観測の一致を確認。通常／性能の履歴・最終保存状態は完全一致。
+- [x] 72³・4場ランク・64更新を各2回。更新時間中央値6.710→5.379秒、個別ピークRSS合計1567.8→1050.8MiB。局所的な短い試験であり一般化しない。
+- [x] 全730目録資産の追跡・一致、Git-only準備／ビルド、ソース／オブジェクト監査、wheel導入・697件（任意スキップ1件）、C/Fortran問い合わせ・NLCC局所MPI1/2、日英COUPLED・AI JSONの同期を確認。
+- [ ] 次：独立LD／SBE、その後TDDFT／高速HSE・混在結合外側へ、同じ明示的な実行モードを展開。現時点で場以外の検査が外れるとは扱わない。
+
+記録：docs/performance-field-mode-2026-11-23.md、calc2026/salmonpy-performance-field-20261123/summary.json。今回の変更は未コミット。
+
+### 2026-11-23: standalone LD/SBE performance mode
+
+- Implemented per-state and batch `execution_mode="performance"`; checked remains default.
+- LD scalar/tensor arithmetic preserved; per-step backup/scans omitted.
+- SBE directly evolves owned density without trial allocation; A drive unchanged.
+- Independent states and explicit snapshot/restore tested against checked mode.
+- Initial/library/output validation retained; automatic failed-step rollback is not promised.
+- Validation: source and installed wheel each 699 tests, 698 passed / 1 optional skip; synthetic comparisons exact. Installed scalar/tensor LD and SBE examples matched. No remote CI or GS collection. See `docs/ld-sbe-performance-validation-2026-11-23.md`.
+
+## 2026-11-23 直列の場＋SBE性能モード
+
+- [x] 4種類の場の状態と `maxwell.couple` に明示的な実行モードを接続。初期化・契約検査は維持し、更新中の有限値走査・時刻比較を省略。数式・演算順は変更なし。
+- [x] 非ゼロ・多成分の駆動による4種類の場＋SBE、2点の1D配置で通常モードとのA/J完全一致。場の明示的snapshot/restore後も一致。自作部品は性能モードへの明示的対応を要求し、通常モードは変更不要。
+- [ ] 次：TDDFT／高速HSE内部とMPI結合外側への性能モード展開。今回の直列対応でこれらの検査まで省かれるとは扱わない。施設MPI・多ノード等の既存残件も維持。
+- [x] 最終ソース／別環境wheel各700件（699成功、任意スキップ1件）。同梱例の横波・縦波・3点1Dを各4000ステップ、time/A/J全配列が完全一致。日英FIELDS・AI JSON・例のwheel収録バイト一致。記録：docs/serial-coupling-performance-validation-2026-11-23.md。未コミット。
+
+## 2026-11-23 通常TDDFT・単一状態の性能モード
+
+- [x] NativeTDDFTBackend(execution_mode="performance") を単一状態の呼出元MPI経路へ接続。Fortran時間発展は通常経路と共通。更新時の全状態退避・診断合意・異常復帰走査を省き、初期化・明示的保存／復元・物理通信を維持。
+- [x] 既存GSを読取専用のリンクで再利用。PZ／TB-mBJ／Libxc-PZ／Libxc-PBE × 内部1／2ランクで通常・性能・変更前ライブラリの電流／実測電子数が完全一致。メモリ内復元後も一致。新規GS・GSコピー・ディスク電子状態保存なし。
+- [x] ソース目録・全Git追跡資産のみからの準備／新規ビルド、禁止ソルバー監査。Python契約テストで検査通信の省略・有限値検査の省略・失敗後の再利用拒否を確認。
+- [ ] 次：共有／登録モデルの通常TDDFT、高速HSE、分子・別プロセス型、MPI結合外側へ性能モードを展開。今回の単一状態対応をこれらの対応済みとは扱わない。
+- [x] 最終ソース／wheel各701件（700成功、任意スキップ1件）。各版8条件のMPI比較と明示的メモリ内復元が一致。wheel/sourceの配列・文書バイト一致。記録：docs/tddft-performance-validation-2026-11-23.md。未コミット。
+
+## 2026-11-23 共有・登録TDDFTの性能モード
+
+- [x] ハンドル更新に性能モードを追加。ローカルの世代・容量・有効期間の検査を維持し、診断合意と自動退避を省く。通常経路の合意・異常復帰は維持。
+- [x] モデルの既定値と状態ごとの上書きを分離。通常セッション／登録管理器の再利用でも各物質設定の選択を伝達する。
+- [x] 4種類のXCの共有状態、PZ↔TB-mBJ／Libxc-PZ↔PBEの異種登録を内部1／2ランクで独立対照と比較。交互更新・兄弟状態の保持・メモリ内復元後の結果が完全一致。既存GSは読取リンクだけ、新規GS・コピー・電子状態のディスク保存なし。
+- [ ] 次：高速HSE、別プロセス型・分子、MPI結合外側への性能モード展開。施設MPI・多ノードなどの既存残件は維持。
+- [x] 最終ソース／wheel各702件（701成功、任意スキップ1件）。各版12条件のMPI試験で独立実行・明示的メモリ内復元後の電流一致、兄弟状態の保持、閉じたハンドルの拒否を確認。wheel/sourceの配列・日英文書・AI JSONバイト一致。記録：docs/shared-tddft-performance-validation-2026-11-23.md。未コミット。
+
+## 2026-11-23 高速PR版HSEの単一状態性能モード
+
+- [x] NativeFastHSEBackend(execution_mode="performance") を単一状態の呼出元MPI経路へ接続。電子／交換状態の自動退避と復帰用診断合意・走査を省き、初期化・明示的保存／復元・必要な物理通信を維持。
+- [x] 学習用データ収集の位置を通常／性能の両方でエネルギー出力前に維持。状態所有の一時フラグで診断設定と処理順を分離。縮約対称性とAの数学的な条件は維持。
+- [x] Taylor／PT-CN × 全／縮約k点 × 内部1／2ランクの8条件で、通常／性能／変更前の電流・エネルギー・学習履歴が完全一致。明示的メモリ内復元後も一致。縮約で不適合Aを拒否して正常続行。
+- [x] 既存GSはリンクから読み取り、新規GS・GSコピー・電子状態のディスク保存なし。Git-only準備／新規ビルド、ソースと全アプリケーションオブジェクトの禁止ソルバー監査。
+- [ ] 次：高速HSEの共有／登録状態、別プロセス型・分子、外側MPI結合へ性能モードを展開。既存の施設MPI・多ノード等の残件も維持。
+- [x] ソース／wheel各703件（702成功、任意スキップ1件）。各版8条件で電流・エネルギー・学習履歴とメモリ内復元後の一致、縮約対称性違反の更新前拒否を確認。wheel/sourceの配列・文書・サンプル・アダプターバイト一致。記録：docs/fast-hse-performance-validation-2026-11-23.md。未コミット。
+
+## 2026-11-23 高速HSEの共有・登録状態の性能モード
+
+- [x] 世代付きハンドルの性能更新を追加。ローカルな世代・容量・対称性条件と必要なモデル切替を維持し、診断用ハンドル合意を省く。通常更新の検査・異常復帰は維持。
+- [x] モデルの既定モードと状態ごとの選択を分離。共有セッション・登録管理器の再利用でも各物質設定の選択を伝達。日英ガイド・AI JSON・共有／混在サンプルを更新。
+- [x] 最終の共有8条件・異種登録4条件のMPI比較、wheel導入版の照合を完了。既存GSは読取リンクのみで再利用し、新規GS・コピー・電子状態のディスク保存は行わない。
+- [ ] 次：別プロセス型・分子、外側MPI結合への性能モード展開。施設MPI・多ノードなどの既存残件は維持。
+- [x] 最終ソース／wheel各704件（703成功、任意スキップ1件）。各版12条件で独立対照との電流／エネルギー／学習履歴、メモリ内復元、兄弟状態保持、スロット再利用後の旧世代拒否を確認。wheel/sourceの配列・日英文書・AI JSON・サンプル・アダプターは一致。記録：docs/shared-fast-hse-performance-validation-2026-11-23.md。未コミット。
+
+## 2026-11-23 別プロセスの周期系TDDFT性能モード
+
+- [x] TDDFTInitialState.new_state／crystal.respond／TDDFTResponseBackendに性能モードを接続。専用初期化コマンドと応答で実行ファイルの対応を確認し、黙って通常モードへ下げない。
+- [x] 更新時の有限値検査と失敗後の自動再起動・履歴再計算を省略。初期化・通信形式／ステップ番号・容量・SHA照合・明示的出力を維持。通常経路と分子の経路は維持。
+- [x] PZ／TB-mBJ／Libxc-PZ／Libxc-PBEで通常・性能・変更前の電流／電子数が完全一致。モード間snapshotを明示的な履歴再計算で復元して受取側モードを維持。ワーカー強制終了後の自動再起動なし、旧実行ファイルの拒否も確認。
+- [x] 最終ソース／wheelの照合と検証記録を完了。実GSの収集を避けるため検証時だけコピー関数をGSリンクへ置換し、更新・通信・復元は製品コードを使用。GS内容は前後で同一。製品コピー処理は変更しない。
+- [ ] 次：分子・高速HSEの別プロセス型、外側MPI結合への性能モード展開。施設MPI・多ノード等の既存残件も維持。
+- [x] ソース／wheel各705件（704成功、任意スキップ1件）。各版4種類のXCで電流・電子数一致、明示的なモード間履歴再計算の復元、ワーカー停止時の自動再起動なし、旧ワーカー拒否を確認。wheel/sourceの配列・日英文書・AI JSON・サンプルは一致。記録：docs/process-tddft-performance-validation-2026-11-23.md。未コミット。
+
+### 2026-11-23 分子E駆動ワーカーの性能モード
+
+- [x] 専用の初期化・応答プロトコルと状態ごとのモード指定。
+- [x] C2H2の20ステップで通常・性能モードの9観測項目が完全一致。
+- [x] メモリ内復元とプロセス終了後の直接ディスク復元で継続結果が完全一致。直接復元後の時間発展回数は0。
+- [x] GSは読み取りリンクで再利用し、内容不変。新しいGS計算・コピーなし。
+- [x] この変更を含むwheelでの実計算確認。705件成功・1件スキップ。記録: `docs/molecular-performance-wheel-validation-2026-11-23.md`。
+
+検証ログ: `/private/tmp/molecular-perf-native.log`。物理的収束や速度向上を示す試験ではない。

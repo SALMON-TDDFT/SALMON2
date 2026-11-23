@@ -22,6 +22,8 @@ p.add_argument('build_record');p.add_argument('bundle');p.add_argument('input');
 p.add_argument('--field-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--material-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--steps',type=int,default=64)
+p.add_argument('--matter-execution-mode',choices=('checked','performance'),default='checked',
+               help='TDDFT update mode only; field and outer coupling retain their own checks')
 p.add_argument('--sample-h',action='store_true',help='collect raw half-step H; requires H-enabled native ABI')
 a=p.parse_args()
 from mpi4py import MPI
@@ -50,7 +52,7 @@ try:
     # Each material rank enters the same native electronic state on its group.
     # Replace these provider/backend objects with a user implementation to change physics.
     provider=NativeTDDFTMaterialProvider(a.bundle,a.input,max_steps=a.steps)
-    backend=NativeTDDFTBackend(a.build_record,output,decomposition=(1,nm,1,1,1))
+    backend=NativeTDDFTBackend(a.build_record,output,decomposition=(1,nm,1,1,1),execution_mode=a.matter_execution_mode)
     binding=MaterialBinding('crystal',provider,backend)
     response=ResponseSession(context,{1:binding,2:binding},dt=dt)
     coupled=CoupledStepper(response,field);history=[];sample_history=[]
@@ -75,7 +77,7 @@ try:
                  **({'H':np.concatenate([s['H'].values for s in sample_history]),
                      'H_time':np.concatenate([s['H'].times for s in sample_history])} if a.sample_h else {}))
         (output/'response.json').write_text(json.dumps({'scheme':NativeEHField.scheme,'units':'atomic',
-            'point_ids':plan.point_ids,'timing':coupled.timing,'history':history},indent=2)+'\n')
+            'point_ids':plan.point_ids,'matter_execution_mode':a.matter_execution_mode,'timing':coupled.timing,'history':history},indent=2)+'\n')
         print(output/'response.json')
 except BaseException:
     # Native failures cannot be rolled back collectively; do not enter context

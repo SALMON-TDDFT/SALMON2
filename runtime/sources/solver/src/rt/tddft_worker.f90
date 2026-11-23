@@ -5,6 +5,7 @@ module tddft_worker
   implicit none
   private
   public :: worker_requested, worker_configure, worker_initial_A, worker_next_A, worker_reply
+  public :: worker_performance_requested
   public :: worker_E_requested, worker_reply_E,worker_norm_requested,worker_electron_number,worker_state_reply
   ! Embedded mode is set only by the explicit host-MPI ABI, once per process.
   logical,public,save :: worker_embedded=.false.
@@ -13,6 +14,13 @@ module tddft_worker
   real(8), save :: worker_initial_A(3)=0d0
   real(8),save :: worker_electron_number=0d0
 contains
+  logical function worker_performance_requested()
+    character(16)::value
+    integer::status
+    ! One explicitly owned child process; never select embedded-host behavior.
+    call get_environment_variable('SALMONPY_TDDFT_EXECUTION_MODE',value,status=status)
+    worker_performance_requested=.not.worker_embedded.and.status==0.and.trim(value)=='performance'
+  end function
   logical function worker_norm_requested()
     character(8) :: value
     integer :: status
@@ -93,7 +101,13 @@ contains
       read(*,*,iostat=ios) command,dt,nt,worker_initial_A
     end if
     if(worker_E_requested()) then
-      if(ios/=0.or.trim(command)/='INIT_E') error stop 'SALMONpy: expected INIT_E dt capacity E'
+      if(worker_performance_requested())then
+        if(ios/=0.or.trim(command)/='INIT_E_PERFORMANCE')error stop 'SALMONpy: expected INIT_E_PERFORMANCE dt capacity E'
+      else
+        if(ios/=0.or.trim(command)/='INIT_E') error stop 'SALMONpy: expected INIT_E dt capacity E'
+      endif
+    else if(worker_performance_requested())then
+      if(ios/=0.or.trim(command)/='INIT_PERFORMANCE')error stop 'SALMONpy: expected INIT_PERFORMANCE dt capacity A'
     else
       if(ios/=0.or.trim(command)/='INIT') error stop 'SALMONpy: expected INIT dt capacity A'
     end if
@@ -152,9 +166,11 @@ contains
     else
       if(ios/=0.or.trim(command)/='STEP') error stop 'SALMONpy: expected STEP A'
     end if
+    if(.not.worker_performance_requested())then
     do i=1,3
       if(.not.ieee_is_finite(A(i))) error stop 'SALMONpy: invalid A'
     end do
+    endif
     worker_next_A=.true.
   end function
 
@@ -172,6 +188,10 @@ contains
     integer,intent(in) :: step
     real(8),intent(in) :: J(3)
     integer :: i
+    character(32)::prefix
+    prefix="SALMONPY_TDDFT_V1"
+    if(worker_performance_requested())prefix="SALMONPY_TDDFT_PERFORMANCE_V1"
+    if(.not.worker_performance_requested())then
     do i=1,3
       if(.not.ieee_is_finite(J(i)))then
         write(output_unit,'(a)') 'SALMONPY_NUMERICAL_FAILURE nonfinite current'
@@ -179,10 +199,11 @@ contains
         error stop 'SALMONpy: nonfinite current'
       endif
     end do
+    endif
     if(worker_norm_requested())then
-      write(output_unit,'(a,1x,i0,4(1x,es26.17e3))') 'SALMONPY_TDDFT_V1',step,J,worker_electron_number
+      write(output_unit,'(a,1x,i0,4(1x,es26.17e3))') trim(prefix),step,J,worker_electron_number
     else
-      write(output_unit,'(a,1x,i0,3(1x,es26.17e3))') 'SALMONPY_TDDFT_V1',step,J
+      write(output_unit,'(a,1x,i0,3(1x,es26.17e3))') trim(prefix),step,J
     endif
     flush(output_unit)
   end subroutine
@@ -193,13 +214,18 @@ contains
     real(8),intent(in) :: delta_dipole(3),total_dipole(3),electron_number,internal_energy
     logical,intent(in)::energy_fresh
     integer :: i
+    character(40)::prefix
+    prefix="SALMONPY_TDDFT_E_V3"
+    if(worker_performance_requested())prefix="SALMONPY_TDDFT_E_PERFORMANCE_V3"
+    if(.not.worker_performance_requested())then
     do i=1,3
       if(.not.ieee_is_finite(delta_dipole(i)).or..not.ieee_is_finite(total_dipole(i))) &
         error stop 'SALMONpy: nonfinite dipole'
     end do
     if(.not.ieee_is_finite(electron_number))error stop 'SALMONpy: nonfinite electron number'
     if(.not.ieee_is_finite(internal_energy))error stop 'SALMONpy: nonfinite internal energy'
-    write(output_unit,'(a,1x,i0,9(1x,es26.17e3))') 'SALMONPY_TDDFT_E_V3', &
+    endif
+    write(output_unit,'(a,1x,i0,9(1x,es26.17e3))') trim(prefix), &
       step,delta_dipole,total_dipole,electron_number,internal_energy,merge(1d0,0d0,energy_fresh)
     flush(output_unit)
   end subroutine

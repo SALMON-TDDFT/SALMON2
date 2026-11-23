@@ -13,6 +13,7 @@ from salmonpy.material_response import MaterialBinding,ResponseSession,TDDFTMate
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('runtime');p.add_argument('bundle');p.add_argument('input');p.add_argument('output')
 p.add_argument('--dt',type=float,default=.02);p.add_argument('--steps',type=int,default=3)
+p.add_argument("--execution-mode",choices=("checked","performance"),default="checked")
 a=p.parse_args()
 from mpi4py import MPI
 if MPI.COMM_WORLD.size!=3: raise ValueError('launch exactly three MPI ranks')
@@ -22,7 +23,7 @@ plan=ParallelPlan((SolverGroup('field',(0,),role='field'),SolverGroup('left',(1,
 # the whole demonstration on errors rather than stranding the other ranks.
 try:
     with TDDFTMaterialProvider(a.bundle,a.input,runtime=a.runtime,max_steps=a.steps,threads=1) as provider:
-        binding=MaterialBinding('crystal',provider,TDDFTResponseBackend())
+        binding=MaterialBinding('crystal',provider,TDDFTResponseBackend(execution_mode=a.execution_mode))
         with ParallelContext.create(MPI.COMM_WORLD,plan) as context:
             session=ResponseSession(context,{point:binding for point in plan.point_ids},dt=a.dt)
             history=[]

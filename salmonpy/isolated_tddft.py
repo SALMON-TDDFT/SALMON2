@@ -9,6 +9,8 @@ from .field_input import FieldContract, FieldPacket, FieldValue, _real
 from .timing import TimeSpec, InputPort
 from .snapshots import _fingerprint
 from .tddft import TDDFTInitialState, TDDFTState, _digest
+from .ld import _array_unchecked
+from .sbe import _frozen
 
 __all__ = ['IsolatedRuntime','load_isolated_runtime','DipoleObservables',
            'IsolatedTDDFTInitialState','IsolatedTDDFTState','IsolatedSavepoint']
@@ -84,6 +86,19 @@ class DipoleObservables:
             object.__setattr__(self,'internal_energy',float(_real(self.internal_energy,(),'internal energy')))
 
 
+    @classmethod
+    def _from_worker(cls,time,values,*,checked):
+        if checked:return cls(time,values[:3],values[3:6],values[6],values[7] if values[8]==1. else None)
+        # Transport already fixed the nine-element ABI; immutable owned views.
+        values=_frozen(values,check=False)
+        result=object.__new__(cls)
+        for key,value in (('time',float(time)),('electronic_change',values[:3]),
+            ('dipole',values[3:6]),('electron_number',float(values[6])),
+            ('internal_energy',float(values[7]) if values[8]==1. else None)):
+            object.__setattr__(result,key,value)
+        return result
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class IsolatedSavepoint:
     """Opaque live-worker token; explicitly release it, never serialize it."""
@@ -103,17 +118,20 @@ class _EEngine(TDDFTState):
     _worker_mode = 'E3'
     _reply_prefix = ('SALMONPY_TDDFT_E_V3 ', 'SALMONPY_E_STATE_V1 ')
     _init_command = 'INIT_E'
+    _performance_init_command = 'INIT_E_PERFORMANCE'
+    _performance_reply_prefix = ('SALMONPY_TDDFT_E_PERFORMANCE_V3 ', 'SALMONPY_E_STATE_V1 ')
     _step_command = 'STEP_E'
     _reply_size = 9
     _snapshot_kind = 'isolated-TDDFT-E-dipole-replay'
 
-    def __init__(self,model,dt,position):
+    def __init__(self,model,dt,position,*,execution_mode="checked"):
         self._position = position
-        super().__init__(model,dt,np.zeros(3))
+        super().__init__(model,dt,np.zeros(3),execution_mode=execution_mode)
 
     @property
     def current(self):
         # Private transport hook: nine raw observables, never exposed as current.
+        if self.execution_mode=='performance':return _frozen(self._current,check=False)
         return _real(self._current,(9,),'dipole/electron/energy observables')
 
     def _receive(self,index):
@@ -238,6 +256,7 @@ class _EEngine(TDDFTState):
     def step(self, E):
         if self._direct_failed or self._restore_pending is not None:
             raise RuntimeFailure('isolated worker has an incomplete or failed direct restore')
+        if self.execution_mode=='performance':return super().step(E)
         if self._savepoint is None and not self._direct_origin:
             return super().step(E)
         # The live-savepoint route never enters TDDFTState's process/replay recovery.
@@ -341,7 +360,7 @@ class _EEngine(TDDFTState):
             raise SnapshotError('invalid isolated direct checkpoint: '+str(exc)) from exc
         candidate = None
         try:
-            candidate = _EEngine(self._model, self.dt, self._position)
+            candidate = _EEngine(self._model, self.dt, self._position,execution_mode=self.execution_mode)
             run = Path(candidate._work.name)/'run'
             shutil.copyfile(root/'isolated-state.bin', run/'isolated-state.bin')
             status, actual_step, updates = candidate._command('LOAD_E', 7)
@@ -413,11 +432,11 @@ class IsolatedTDDFTInitialState:
                                           max_steps=max_steps,threads=threads,timeout=timeout)
         return cls(model,runtime)
 
-    def new_state(self,*,dt,position=(0.,0.,0.)):
+    def new_state(self,*,dt,position=(0.,0.,0.),execution_mode="checked"):
         dt=float(_real(dt,(),'dt'))
         if dt<=0: raise InputError('positive dt required')
         position=_real(position,(3,),'position')
-        return IsolatedTDDFTState(_EEngine(self._model,dt,position),position)
+        return IsolatedTDDFTState(_EEngine(self._model,dt,position,execution_mode=execution_mode),position)
 
     def close(self): self._model.close()
     def __enter__(self): return self
@@ -433,6 +452,8 @@ class IsolatedTDDFTState:
                             units={'E':'E:au'},position=position,gauge='length')
 
     @property
+    def execution_mode(self):return self._engine.execution_mode
+    @property
     def dt(self): return self._engine.dt
     @property
     def time(self): return self._engine.time
@@ -441,7 +462,7 @@ class IsolatedTDDFTState:
     @property
     def observables(self):
         values=self._engine.current
-        return DipoleObservables(self.time,values[:3],values[3:6],values[6],values[7] if values[8]==1. else None)
+        return DipoleObservables._from_worker(self.time,values,checked=self.execution_mode=="checked")
 
     @property
     def electron_number(self): return self.observables.electron_number
@@ -450,7 +471,7 @@ class IsolatedTDDFTState:
     def internal_energy(self): return self.observables.internal_energy
 
     def step(self,E):
-        E=_real(E,(3,),'E')
+        E=(_array_unchecked(E,'E',(3,)) if self.execution_mode=='performance' else _real(E,(3,),'E'))
         self._engine.step(E)
         return self.observables
 

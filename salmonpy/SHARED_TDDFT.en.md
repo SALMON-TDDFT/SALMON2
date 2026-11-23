@@ -258,3 +258,26 @@ named temporary-file sentinels remain unchanged. Repeat at MPI1/2. No GS data is
 needed. solver old/new XC/MPI/direct/mixed comparisons verify numerical parity.
 
 With standard TDDFT timer protocol1, `state.timing_seconds` returns rank-local completed total, initialization, density and Hartree intervals in seconds. Each handle owns its timer bank; parked intervals and calling program/sibling work are excluded. The total excludes an unfinished running interval and may be zero while a state is live. Query collectively on the material communicator. Diagnostics are not checkpoint payloads and numerical restore does not erase spent work. Older runtimes retain normal calculations but this optional query needs an explicitly built matching runtime. This describes the standard handle capability; the separate standard singleton capability is documented in COUPLED.en.md. Threaded concurrency remains unsupported.
+
+## Per-state modes in shared and registered TDDFT
+
+`NativeTDDFTBackend(..., shared_model=True, execution_mode="performance")`
+and `registry_model=True` set the default for states created by normal sessions.
+For direct model use, `model.new_state(point_id, execution_mode="checked")` or
+`"performance"` overrides that default per state. Omitting the keyword inherits
+the model default. `registry.open_model(..., execution_mode=...)` can set each
+registered model's default. Each created state's choice is read-only; sibling
+states may use different modes. Shared registry reuse preserves each binding's
+selected default instead of inheriting a previous binding's mode.
+
+Performance state-token updates still check local handle generation/lifetime,
+capacity and ABI bounds. They omit token/endpoint/model-selection diagnostic
+votes, numerical scans and automatic backups. Required model/input/workspace
+activation and physical solver communication remain. Checked-state operations
+keep the previous collective validation. Explicit snapshots/restoration remain
+checked and do not change the receiving state's mode. No automatic rollback or
+retry guarantee is implied for performance failures.
+
+Synthetic regression covers interleaved checked/performance states, independent
+controls, PZ/TB-mBJ/Libxc-PZ/PBE, heterogeneous PZ↔TB-mBJ and Libxc-PZ↔PBE, and
+1/2 internal ranks. This is not a real-material convergence or speed benchmark.

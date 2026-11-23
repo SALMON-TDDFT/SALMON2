@@ -13,7 +13,7 @@ class Function:
 class FieldRecoveryTests(unittest.TestCase):
     def test_declared_failure_preserves_field_and_permits_retry(self):
         comm=SimpleNamespace(allgather=lambda x:[x])
-        f=NativeEHField.__new__(NativeEHField)
+        f=NativeEHField.__new__(NativeEHField);f._execution_mode="checked"
         f.context=SimpleNamespace(solver_comm=comm)
         f.closed=f.failed=False;f.step_index=1;f.capacity=3;f.dt=.01
         f.A=np.zeros((1,3));f.E=np.zeros((1,3));f.point_ids=(1,);f.manifest={}
@@ -41,7 +41,7 @@ class FieldRecoveryTests(unittest.TestCase):
                 _require_field_record({'schema':'salmonpy.fast-hse-mpi/1','field_abi':declaration})
         with self.assertRaises(InputError):_require_field_record({'schema':'unknown'})
         comm=SimpleNamespace(allgather=lambda x:[x])
-        f=NativeEHField.__new__(NativeEHField)
+        f=NativeEHField.__new__(NativeEHField);f._execution_mode="checked"
         f.context=SimpleNamespace(solver_comm=comm)
         f.closed=f.failed=False;f.step_index=1;f.capacity=3;f.dt=.01
         f.A=np.zeros((1,3));f.E=np.zeros((1,3));f.point_ids=(1,);f.manifest={}

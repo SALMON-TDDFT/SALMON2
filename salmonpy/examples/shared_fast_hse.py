@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--split',type=int,default=8)
     parser.add_argument('--dt',type=float,default=.001)
     parser.add_argument('--symmetry',action='store_true',help='explicit same-symmetry reduced-k model; both example drives along z')
+    parser.add_argument('--execution-mode',choices=('checked','performance'),default='checked')
     args=parser.parse_args();comm=MPI.COMM_WORLD
     if not 0<args.split<args.steps:parser.error('require 0 < split < steps')
     output=args.output.resolve();error=None
@@ -31,7 +32,7 @@ def main():
     if error:raise ValueError(error)
     context=SimpleNamespace(solver_comm=comm,point_ids=('point-a','point-b'),closed=False,_dependents=0)
     initial=FastHSEMaterialProvider(args.initial,max_steps=args.steps).prepare(context)
-    backend=NativeFastHSEBackend(args.build,output,allow_symmetry=args.symmetry)
+    backend=NativeFastHSEBackend(args.build,output,allow_symmetry=args.symmetry,execution_mode=args.execution_mode)
     registry=model=second_model=None
     states=[];continuous=[];second=[];resumed=[]
     saved=output/f'point-a-{comm.rank}.bin'
@@ -47,7 +48,7 @@ def main():
             second_model=registry.open_model(second_initial,args.dt)
         with model:
             a=model.new_state('point-a');states.append(a)
-            b=(second_model or model).new_state('point-b');states.append(b)
+            b=(second_model or model).new_state('point-b',execution_mode='checked');states.append(b)
             for index in range(1,args.steps+1):
                 continuous.append(np.r_[a.step(drive(index)),a.energy])
                 bfield=np.array([0.,0.,-7e-5*np.sin(.2*index*args.dt)]) if args.symmetry else np.array([1e-4*np.sin(.2*index*args.dt),0.,0.])
@@ -68,7 +69,7 @@ def main():
     assert context._dependents==0
     if comm.rank==0:
         (output/'result.json').write_text(json.dumps({'status':'pass','steps':args.steps,'split':args.split,
-            'replayed_steps':0,'model_identity':model.identity,
+            'replayed_steps':0,'execution_modes':{'point-a':args.execution_mode,'point-b':'checked'},'model_identity':model.identity,
             'second_model_identity':second_model.identity if second_model else model.identity,'point_ids':['point-a','point-b'],
             'A_unit':'A/c atomic units','current_unit':'charge current density atomic units',
             'energy_unit':'Hartree','caveat':'Composition/restart check, not material convergence.'},indent=2)+'\n')

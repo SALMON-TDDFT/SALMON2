@@ -65,3 +65,19 @@ FDTD2＋SBE1＋TDDFT2は `mpiexec -n 5 ... --field-grid 1 2 1 --tddft-ranks 2`�
 ソース配布の `tools/test_mixed_scaling.py BUILD RUNTIME GS NEW_OUTPUT --rank-budget 18 --memory-budget-gib 48` は導入済みwheelを用い、同じ96³の入力で4/5/7/11/15ランクを順番に2回ずつ比較します。各計算のA/E/jを最初の計算と照合します。格子サイズが違う結果は比較拒否します。MPI実装固有の引数は `--launcher-arg` で指定し、計測中は他の重い処理を避けてください。
 
 結果の `coupled_loop_seconds_max` は初期化・保存・直列参照計算を除いた時間発展区間です。通信計測には待ち時間が含まれ、純粋な通信帯域ではありません。FDTD内部のハロー通信は個別に分解していません。メモリは各ランクのピークRSSの和であり、同時刻の総常駐量や全システム使用量ではありません。時間・資源の計測失敗を計算失敗と混同しないでください。短い反復測定だけで一般的な並列効率や物理精度を保証しません。
+
+## 場の観測負荷を明示的に測る（開発用）
+
+ソース取得先の `tools/test_diagonal_field_energy_mpi.py` は、GSなしで格子数・場ランク数・観測間隔を変えて負荷を測れます。以下は実計算を開始するローカル例で、管理ノード用の入力検査ではありません。計算ノードと施設のランチャーは利用者が指定してください。`RESULTS/new-profile` はコードの外にある新しい結果ディレクトリです。
+
+```sh
+mpiexec -n 5 python -I tools/test_diagonal_field_energy_mpi.py \
+  BUILD.json RESULTS/new-profile --profile tensor-background \
+  --grid-count 72 --field-ranks 4 --observe --observation-stride 8
+```
+
+既にwheelと同じ版の場ライブラリを用意した環境で使います。4場ランク＋記録用1ランクです。格子幅・dtは固定し、`--grid-count` で真空領域を広げる検査なので、格子幅の収束試験ではありません。`--observation-stride 8` は、点ファイルとPythonの履歴を8ステップごとに採取し、収支もそのステップだけ評価します。最後のステップは履歴へ必ず残します。間引いた収支を足して全時間のエネルギー保存と見なしてはいけません。
+
+`report.json` は `calculation_status` と `resource_measurement_status` を分け、各ランクの初期化・更新・更新前状態の保持／解放・観測・最終保存の壁時計時間と、`process_memory()` のピークRSSを返します。計測不能のRSSはNoneと理由を残し、計算失敗とはしません。`--fail-resource-probe` はこの扱いを確認する開発用の注入です。RSS合計は個別ピークの合計で、同時刻のジョブ全体ピークではありません。ファイル集計には最終保存・入力等も入るため、点ストリームのbytesを別に示します。報告JSON自体と外側のログは集計に含めません。
+
+時刻計測にはMPI待ちが含まれ、純粋な通信時間や通信量は測っていません。観測用の境界通信と合意は場の担当群に限定され、測定値の全体集約は終了後に1回だけ行います。この検査は、観測する更新だけ読み取り用の保存を用意します。通常の保護付き結合で毎ステップ必要な失敗復帰用保存を間引く最適化ではありません。保存済みE/H最大値は観測間隔に依存するため、物理状態と区別して比較します。

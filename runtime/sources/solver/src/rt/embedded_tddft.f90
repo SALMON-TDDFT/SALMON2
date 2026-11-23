@@ -63,7 +63,7 @@ use iso_c_binding
 use sendrecv_grid, only: dealloc_cache
 implicit none
 private
-public :: sp_tddft_init,sp_tddft_step,sp_tddft_close,sp_tddft_checkpoint
+public :: sp_tddft_init,sp_tddft_step,sp_tddft_close,sp_tddft_checkpoint,sp_tddft_step_performance
 ! Only numerical state: communicators, output units and library handles stay in the fresh context.
 type :: checkpoint_payload
   type(s_orbital) :: spsi_in,spsi_out,tpsi
@@ -178,12 +178,15 @@ subroutine park_active_model()
 #endif
   nullify(active_model)
 end subroutine
-subroutine select_model(owner,initializing,status)
+subroutine select_model(owner,initializing,status,checked)
   use inputoutput,only:initialize_inputoutput_units
   use sym_sub,only:read_sw_symmetry
   type(rt_model),pointer,intent(in) :: owner
   logical,intent(in) :: initializing
   integer,intent(out) :: status
+  logical,optional,intent(in)::checked
+  logical::verify
+  verify=.true.;if(present(checked))verify=checked
   status=12
   if(.not.associated(owner))return
   if(.not.initializing.and..not.owner%runtime_ready)return
@@ -196,7 +199,7 @@ subroutine select_model(owner,initializing,status)
   else
     call owner%runtime_inputs%activate(status)
   endif
-  call handle_agree(status)
+  if(verify)call handle_agree(status)
   if(status/=0)return
   call initialize_inputoutput_units
   calc_mode='RT';worker_embedded=.true.;worker_initial_A=owner%initial_A
@@ -492,23 +495,28 @@ subroutine handle_reserve(index,token,status)
   handles(index)%timers=empty_timers
   handles(index)%timers_alive=.false.
 end subroutine
-subroutine handle_lookup(token,index,status)
+subroutine handle_lookup(token,index,status,checked)
   use communication,only:comm_get_globalinfo
   integer(c_int64_t),intent(in)::token
   integer,intent(out)::index,status
+  logical,optional,intent(in)::checked
+  logical::verify
   integer::group,rank,n,parts(2),reference(2)
+  verify=.true.;if(present(checked))verify=checked
   index=0;status=12
   if(.not.handle_main())return
   call comm_get_globalinfo(group,rank,n)
   status=0
   if(.not.handle_mode.or.group/=handle_group.or.token<=0_c_int64_t)status=12
   if(token/handle_stride>int(huge(0),c_int64_t))status=12
-  call handle_agree(status)
+  if(verify)call handle_agree(status)
   if(status/=0)return
   parts=[int(mod(token,handle_stride)),int(token/handle_stride)]
-  reference=parts;call comm_bcast(reference,group)
-  if(any(reference/=parts))status=11
-  call handle_agree(status)
+  if(verify)then
+    reference=parts;call comm_bcast(reference,group)
+    if(any(reference/=parts))status=11
+  endif
+  if(verify)call handle_agree(status)
   if(status/=0)return
   index=parts(1)
   if(.not.allocated(handles))then
@@ -520,13 +528,14 @@ subroutine handle_lookup(token,index,status)
   else if(.not.associated(handles(index)%context))then
     status=12
   endif
-  call handle_agree(status)
+  if(verify)call handle_agree(status)
 end subroutine
-subroutine handle_select(token,index,status)
+subroutine handle_select(token,index,status,checked)
   integer(c_int64_t),intent(in)::token
   integer,intent(out)::index,status
-  call handle_lookup(token,index,status)
-  if(status==0)call select_model(handles(index)%context%model,.false.,status)
+  logical,optional,intent(in)::checked
+  call handle_lookup(token,index,status,checked)
+  if(status==0)call select_model(handles(index)%context%model,.false.,status,checked)
   if(status==0)then
     state=>handles(index)%context
     call handle_timer_enter(index)
@@ -672,6 +681,18 @@ integer(c_int) function sp_tddft_handle_step(token,Aold,Anew,J) bind(C)
   call handle_select(token,index,status);sp_tddft_handle_step=status
   if(status/=0)return
   sp_tddft_handle_step=sp_tddft_step(Aold,Anew,J);J=-J
+  call handle_unselect(index)
+end function
+! State-token route with only local generation/bounds checks; same physical update.
+integer(c_int) function sp_tddft_handle_step_performance(token,Aold,Anew,J) bind(C) result(status)
+  integer(c_int64_t),value::token
+  real(c_double),intent(in)::Aold(3),Anew(3)
+  real(c_double),intent(out)::J(3)
+  integer::index
+  J=0d0
+  call handle_select(token,index,status,.false.)
+  if(status/=0)return
+  status=sp_tddft_step_performance(Aold,Anew,J);J=-J
   call handle_unselect(index)
 end function
 integer(c_int) function sp_tddft_timer_protocol() bind(C)
@@ -1142,20 +1163,7 @@ integer(c_int) function tddft_step_impl(Aold,Anew,J)
   saved_xc_payload=state%system%xc_payload
   state%rt%recover_errors=.true.
   state%rt%step_error=0
-  state%itt=state%itt+1
-  state%rt%Ac_ext(:,state%itt)=Anew
-  state%rt%Ac_tot(:,state%itt)=Anew
-  if(mod(state%itt,2)==1)then
-    call time_evolution_step(state%Mit,nt,state%itt,state%lg,state%mg,state%system,state%rt,state%info,state%stencil,state%xc_func &
-     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_in,state%spsi_out,state%tpsi &
-     & ,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
-     & ,state%Vpsl,state%fg,state%energy,state%ewald,state%md,state%ofl,state%poisson,state%singlescale,state%unfold)
-  else
-    call time_evolution_step(state%Mit,nt,state%itt,state%lg,state%mg,state%system,state%rt,state%info,state%stencil,state%xc_func &
-     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_out,state%spsi_in,state%tpsi &
-     & ,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
-     & ,state%Vpsl,state%fg,state%energy,state%ewald,state%md,state%ofl,state%poisson,state%singlescale,state%unfold)
-  end if
+  call evolve_endpoint(Anew)
 
   status=state%rt%step_error
   call comm_get_max(status,admission_group)
@@ -1176,6 +1184,45 @@ integer(c_int) function tddft_step_impl(Aold,Anew,J)
   state%accepted_A=Anew
   tddft_step_impl=0
 end function
+! Explicit unchecked fixed-ion semilocal update. Caller owns rank order/inputs.
+! No diagnostic agreement, full-state backup or automatic failure restoration.
+integer(c_int) function sp_tddft_step_performance(Aold,Anew,J) bind(C) result(status)
+  use communication,only:comm_resume_children,comm_end_children
+  real(c_double),intent(in)::Aold(3),Anew(3)
+  real(c_double),intent(out)::J(3)
+  status=12;J=0d0
+  if(.not.associated(state))return
+  status=13
+  if(state%itt>=nt)return
+  status=14
+  if(allocated(state%pending))return
+  call comm_resume_children(state%mpi_child_owner,status)
+  if(status/=0)return
+  if(.not.handle_timer_active)call legacy_timer_enter()
+  state%rt%recover_errors=.false.;state%rt%step_error=0
+  call evolve_endpoint(Anew)
+  J=state%rt%curr(:,state%itt);state%accepted_A=Anew;status=0
+  if(.not.handle_timer_active)call legacy_timer_leave()
+  call comm_end_children(state%mpi_child_owner)
+end function
+subroutine evolve_endpoint(Anew)
+  real(c_double),intent(in)::Anew(3)
+  state%itt=state%itt+1
+  state%rt%Ac_ext(:,state%itt)=Anew
+  state%rt%Ac_tot(:,state%itt)=Anew
+  if(mod(state%itt,2)==1)then
+    call time_evolution_step(state%Mit,nt,state%itt,state%lg,state%mg,state%system,state%rt,state%info,state%stencil,state%xc_func &
+     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_in,state%spsi_out,state%tpsi &
+     & ,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
+     & ,state%Vpsl,state%fg,state%energy,state%ewald,state%md,state%ofl,state%poisson,state%singlescale,state%unfold)
+  else
+    call time_evolution_step(state%Mit,nt,state%itt,state%lg,state%mg,state%system,state%rt,state%info,state%stencil,state%xc_func &
+     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_out,state%spsi_in,state%tpsi &
+     & ,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
+     & ,state%Vpsl,state%fg,state%energy,state%ewald,state%md,state%ofl,state%poisson,state%singlescale,state%unfold)
+  end if
+
+end subroutine
 integer(c_int) function sp_tddft_close() bind(C)
   if(.not.handle_timer_active)call legacy_timer_enter()
   sp_tddft_close=tddft_close_impl()

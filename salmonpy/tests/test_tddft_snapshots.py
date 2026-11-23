@@ -17,17 +17,18 @@ from salmonpy.tddft import TDDFTInitialState, TDDFTState
 
 WORKER = '''#!/usr/bin/env python3
 import sys
-j=[0.,0.,0.]; n=0
+j=[0.,0.,0.]; n=0; prefix="SALMONPY_TDDFT_V1"
 for line in sys.stdin:
     p=line.split()
     if not p: continue
-    if p[0]=='INIT':
+    if p[0] in ('INIT','INIT_PERFORMANCE'):
+        prefix='SALMONPY_TDDFT_PERFORMANCE_V1' if p[0]=='INIT_PERFORMANCE' else 'SALMONPY_TDDFT_V1'
         dt=float(p[1]); j=list(map(float,p[3:6]))
     elif p[0]=='STEP':
         n+=1; a=list(map(float,p[1:])); j=[.83*x+dt*y+.001*n for x,y in zip(j,a)]
     elif p[0]=='CLOSE': break
     else: continue
-    print('SALMONPY_TDDFT_V1',n,*j,8.,flush=True)
+    print(prefix,n,*j,8.,flush=True)
 '''
 
 class TDDFTSnapshots(unittest.TestCase):
@@ -51,6 +52,34 @@ class TDDFTSnapshots(unittest.TestCase):
         self.addCleanup(self.model.close)
     def state(self,**kw):
         s=self.model.new_state(dt=kw.pop('dt',.02),**kw);self.addCleanup(s.close);return s
+    def test_performance_handshake_explicit_replay_and_no_automatic_respawn(self):
+        from salmonpy.errors import RuntimeFailure
+        a=self.state(execution_mode='performance');b=self.state()
+        self.assertEqual(a.execution_mode,'performance')
+        with self.assertRaises(AttributeError):a.execution_mode='checked'
+        values=np.random.default_rng(72).normal(size=(16,3))*.01
+        expected=[]
+        for index,A in enumerate(values):
+            np.testing.assert_array_equal(a.step(A),b.step(A));expected.append(a.current.copy())
+            if index==4:saved=a.snapshot()
+        a.restore(saved);self.assertEqual(a.execution_mode,'performance')
+        for A,j in zip(values[5:],expected[5:]):np.testing.assert_array_equal(a.step(A),j)
+        a._proc.kill();a._proc.wait()
+        with patch.object(a,'_spawn',side_effect=AssertionError('automatic respawn forbidden')):
+            with self.assertRaises(RuntimeFailure):a.step([0.,0.,0.])
+        self.assertTrue(a._closed)
+        c=self.state(execution_mode='performance');c.step([np.nan,0.,0.])
+        self.assertTrue(np.isnan(c.current).any())
+        with self.assertRaises(SnapshotError):c.snapshot()
+        from salmonpy.material_response import TDDFTPreparedState,TDDFTResponseBackend
+        backend=TDDFTResponseBackend(execution_mode='performance')
+        with patch('salmonpy.runtime.load_runtime',return_value=self.model.executable):
+            state=backend.create_state(TDDFTPreparedState(self.model,Path('/unused-runtime')),1,.02,None)
+        try:
+            self.assertEqual(state.execution_mode,'performance')
+            state.advance([9.,9.,9.],[.001,0.,0.])
+        finally:state.close()
+
     def test_replay_and_independent_branches(self):
         a,b=self.state(),self.state();initial=a.snapshot()
         values=np.random.default_rng(41).normal(size=(25,3))*.01

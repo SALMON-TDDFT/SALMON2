@@ -11,7 +11,7 @@ from salmonpy.errors import InputError, SnapshotError, RuntimeFailure
 
 WORKER = '''import sys,json
 from pathlib import Path
-v=[0.]*6;n=0;updates=0;saved=None
+v=[0.]*6;n=0;updates=0;saved=None;prefix="SALMONPY_TDDFT_E_V3"
 codes={'CAPTURE_E':1,'RESTORE_E':2,'RELEASE_E':3,'RESUME_E':4,'PROBE_E':5,'SAVE_E':6,'LOAD_E':7}
 for line in sys.stdin:
  p=line.split()
@@ -32,12 +32,13 @@ for line in sys.stdin:
   elif op==7:n,v=json.loads(Path('isolated-state.bin').read_text());saved=(n,list(v))
   print('SALMONPY_E_STATE_V1',op,status,n,updates,flush=True)
   continue
- if p[0]=='INIT_E':dt=float(p[1])
+ if p[0] in ('INIT_E','INIT_E_PERFORMANCE'):
+  dt=float(p[1]);prefix='SALMONPY_TDDFT_E_PERFORMANCE_V3' if p[0]=='INIT_E_PERFORMANCE' else 'SALMONPY_TDDFT_E_V3'
  elif p[0]=='STEP_E':
   n+=1;updates+=1;e=list(map(float,p[1:]));v=[.9*x+dt*e[k%3]+.001*n for k,x in enumerate(v)]
  elif p[0]=='CLOSE':break
  else:continue
- print('SALMONPY_TDDFT_E_V3',n,*v,10.-n*1.e-8,-1.+n*.01,1. if n!=2 else 0.,flush=True)
+ print(prefix,n,*v,10.-n*1.e-8,-1.+n*.01,1. if n!=2 else 0.,flush=True)
 '''
 
 
@@ -69,8 +70,33 @@ class IsolatedTDDFTTests(unittest.TestCase):
         self.model=IsolatedTDDFTInitialState.from_salmon(self.bundle,'rt.inp',runtime=self.runtime,max_steps=25)
         self.addCleanup(self.model.close)
 
-    def state(self,dt=.02):
-        state=self.model.new_state(dt=dt);self.addCleanup(state.close);return state
+    def state(self,dt=.02,**kwargs):
+        state=self.model.new_state(dt=dt,**kwargs);self.addCleanup(state.close);return state
+
+    def test_performance_mode_live_and_disk_restore_and_failed_worker(self):
+        a=self.state();b=self.state(execution_mode='performance')
+        self.assertEqual(b.execution_mode,'performance')
+        with self.assertRaises(AttributeError):b.execution_mode='checked'
+        values=np.random.default_rng(81).normal(size=(12,3))*.01
+        traces=[]
+        for i,E in enumerate(values):
+            one=a.step(E);two=b.step(E)
+            np.testing.assert_array_equal(one.dipole,two.dipole)
+            self.assertEqual(one.electron_number,two.electron_number)
+            traces.append(two.dipole.copy())
+            if i==3:token=b.savepoint()
+        updates=b.worker_statistics()['updates'];b.restore_savepoint(token)
+        self.assertEqual(b.worker_statistics()['updates'],updates)
+        for E,dipole in zip(values[4:],traces[4:]):np.testing.assert_array_equal(b.step(E).dipole,dipole)
+        b.release_savepoint(token)
+        directory=Path(self.tmp.name)/'performance-checkpoint';b.save_direct_checkpoint(directory)
+        c=self.state(execution_mode='performance');c.restore_direct_checkpoint(directory)
+        self.assertEqual(c.execution_mode,'performance');self.assertEqual(c.worker_statistics()['updates'],0)
+        np.testing.assert_array_equal(c.step([0.,0.,0.]).dipole,b.step([0.,0.,0.]).dipole)
+        c._engine._proc.kill();c._engine._proc.wait()
+        with patch.object(c._engine,'_spawn',side_effect=AssertionError('automatic replay forbidden')):
+            with self.assertRaises(RuntimeFailure):c.step([0.,0.,0.])
+        self.assertFalse(c.usable)
 
     def test_independent_restore_and_loader_lifetime(self):
         a,b=self.state(),self.state()

@@ -8,6 +8,40 @@ from salmonpy.sbe import SBEInitialState
 from salmonpy.errors import RuntimeFailure, SnapshotError
 
 class SBE(unittest.TestCase):
+    def test_performance_modes_match_reference_independent_states_and_restore(self):
+        from pathlib import Path
+        from salmonpy.fields import FieldSamples
+        from salmonpy.crystal import respond
+        with np.load(Path(__file__).with_name('sbe_reference.npz')) as d:
+            dt=float(d['dt']);drive=d['A'];mid=max(1,(len(drive)-1)//2)
+            for order in range(4):
+                for vnl in (False,True):
+                    with self.subTest(order=order,vnl=vnl):
+                        initial=SBEInitialState(**{k:d[k] for k in ('eigen','momentum','nonlocal_velocity','weights','lattice')},electrons=2,correction_order=order,nonlocal_correction=vnl)
+                        initial_bytes=initial.momentum.tobytes()
+                        a=initial.new_state(dt=dt,initial_A=drive[0])
+                        b=initial.new_state(dt=dt,initial_A=drive[0],execution_mode='performance')
+                        other=initial.new_state(dt=dt,initial_A=drive[0],execution_mode='performance')
+                        try:
+                            with self.assertRaises(AttributeError):b.execution_mode='checked'
+                            for n,A in enumerate(drive[1:],1):
+                                x=a.step(A);y=b.step(A);other.step(-A)
+                                np.testing.assert_array_equal(x,y);np.testing.assert_array_equal(a.density,b.density)
+                                if n==mid:saved=b.snapshot()
+                            b.restore(saved)
+                            for A in drive[mid+1:]:b.step(A)
+                            np.testing.assert_array_equal(a.density,b.density)
+                            np.testing.assert_array_equal(a.current,b.current)
+                            b.step([np.nan,0.,0.]);self.assertTrue(np.isnan(b.current).any())
+                            b.restore(saved);self.assertEqual(b.execution_mode,'performance')
+                            self.assertEqual(initial.momentum.tobytes(),initial_bytes)
+                        finally:a.close();b.close();other.close()
+                        samples=FieldSamples(np.arange(len(drive))*dt,drive,'A')
+                        x=respond(initial,samples);y=respond(initial,samples,execution_mode='performance')
+                        np.testing.assert_array_equal(x.current,y.current)
+
+
+
 
     def test_legacy_fortran_reference(self):
         from pathlib import Path

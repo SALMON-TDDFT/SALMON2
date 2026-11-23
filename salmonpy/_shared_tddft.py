@@ -52,10 +52,12 @@ class _Bound:
 
 
 class _Library:
-    def __init__(self,lib,token):
+    def __init__(self,lib,token,*,execution_mode="checked"):
         self._lib=lib
         for old,new in (('step','step'),('close','close'),('checkpoint','checkpoint'),('step_transaction','transaction')):
             setattr(self,'sp_tddft_'+old,_Bound(getattr(lib,'sp_tddft_handle_'+new),token))
+        if execution_mode=='performance':
+            self.sp_tddft_step_performance=_Bound(lib.sp_tddft_handle_step_performance,token)
     def __getattr__(self,name):return getattr(self._lib,name)
 
 
@@ -72,7 +74,9 @@ class _Lease:
 
 class NativeTDDFTModel:
     """One immutable full-k model, common dt/capacity/decomposition, independent states."""
-    def __init__(self,native,lib,work,initial,dt,decomposition,identity,base):
+    def __init__(self,native,lib,work,initial,dt,decomposition,identity,base,*,execution_mode="checked"):
+        from .ld import _execution_mode_name
+        self._default_execution_mode=_execution_mode_name(execution_mode)
         self._native=native;self.lib=lib;self.work=work;self._initial=initial
         self._dt=float(dt);self._capacity=initial.max_steps;self._decomposition=decomposition;self.base=base
         self.closed=False;self.failed=False;self._initialized=False;self._attempted=False;self._serial=0;self._states=set()
@@ -90,18 +94,26 @@ class NativeTDDFTModel:
         from ._native_group import _directory_call
         self._native._live()
         return _directory_call(self.lib,self._native.context.solver_comm,self.work,fn,*args)
-    def new_state(self,point_id=None):
+    def new_state(self,point_id=None,*,execution_mode=None):
         from .embedded_tddft import _NativeState
         from .material_response import _response_timing
         comm=self._native.context.solver_comm;error=None
         try:
+            from .ld import _execution_mode_name
+            execution_mode=_execution_mode_name(self._default_execution_mode if execution_mode is None else execution_mode)
             self._native._live()
+            if execution_mode=='performance':
+                fn=self.lib.sp_tddft_handle_step_performance
+                vector=np.ctypeslib.ndpointer(dtype=np.float64,shape=(3,),flags='C_CONTIGUOUS')
+                fn.argtypes=[c.c_int64,vector,vector,vector];fn.restype=c.c_int
+                from ._native_group import _bind_performance_directory
+                performance_scope=_bind_performance_directory(self.lib)
             if self.closed or self.failed:raise InputError('shared TDDFT model is closed or failed')
             point=self._serial if point_id is None else point_id
             if isinstance(point,(bool,np.bool_)) or not isinstance(point,(str,int,np.integer)):
                 raise InputTypeError('point_id must be a string or integer')
             point=int(point) if isinstance(point,np.integer) else point
-            descriptor=(point,self._serial,self._initialized)
+            descriptor=(point,self._serial,self._initialized,execution_mode)
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         descriptors=comm.allgather(descriptor)
@@ -122,7 +134,8 @@ class NativeTDDFTModel:
             raise RuntimeFailure('shared native TDDFT creation failed: '+str(outcomes))
         self._initialized=True
         lease=_Lease(self)
-        state=_SharedState(lease,_Library(self.lib,token.value),self.work,self.capacity)
+        state=_SharedState(lease,_Library(self.lib,token.value,execution_mode=execution_mode),self.work,self.capacity,execution_mode=execution_mode)
+        if execution_mode=="performance":state._performance_enter,state._performance_leave=performance_scope
         lease.state=state;state.handle=token.value;state.point_id=point;state.model_identity=self.identity
         state._current_sign=1;state.initialized=True;state.checkpoint_decomposition=self.decomposition
         state.timing=_response_timing(self.dt,'shared native standard TDDFT; charge current j')
@@ -202,7 +215,8 @@ class _SharedState(_NativeState):
     @property
     def dt(self):return self.native.model.dt
     def advance(self,old,new):
-        _agree(self.native.context.solver_comm,'real A vectors required' if np.iscomplexobj(old) or np.iscomplexobj(new) else None)
+        if self.execution_mode=='checked':
+            _agree(self.native.context.solver_comm,'real A vectors required' if np.iscomplexobj(old) or np.iscomplexobj(new) else None)
         result=super().advance(old,new);self.current=result.copy();return result
     def step(self,A):return self.advance(self.A.copy(),A)
     @property

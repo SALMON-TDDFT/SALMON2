@@ -221,9 +221,11 @@ J = −j stays internal (`state.matter_current`). No numerical integrator or
 unitarity correction is introduced.
 
 Always close direct states, preferably with `with`. `respond` does this for you.
-Invalid A leaves the state unchanged. On worker failure the adapter reconstructs
+In checked mode invalid A leaves the state unchanged. On worker failure the adapter reconstructs
 and replays accepted A samples before raising; if recovery fails it closes the
-state explicitly. Replay is expensive and is not a scientific checkpoint format.
+state explicitly. Performance mode closes a failed worker without automatic replay;
+see the periodic worker mode section in COUPLED.en.md / COUPLED.md.
+Explicit replay is expensive and is not an internal-state checkpoint.
 Snapshots and per-process copies also require disk space. N live states retain
 N+1 managed bundles (one shared baseline plus N worker copies), excluding the
 caller input and retained output archives. Closing the initial loader refuses new

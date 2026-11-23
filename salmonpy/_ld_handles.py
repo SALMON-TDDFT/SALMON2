@@ -26,6 +26,7 @@ class API:
         signatures={
             'sp_ld_create':[c.c_int,c.c_double,c.c_double]+[c.c_void_p]*4+[c.POINTER(H)],
             'sp_ld_advance':[H,c.c_int]+[c.c_void_p]*3,
+            'sp_ld_advance_performance':[H,c.c_int]+[c.c_void_p]*3,
             'sp_ld_export':[H]+[c.c_void_p]*2,
             'sp_ld_set':[H]+[c.c_void_p]*5,
             'sp_ld_destroy':[H]}
@@ -52,8 +53,9 @@ def default_api():
 
 
 class NativeState:
-    def __init__(self,api,material,dt,field):
+    def __init__(self,api,material,dt,field,*,execution_mode="checked"):
         self.api=api;self.n=len(material._f);self.handle=H(0)
+        self._advance_name="sp_ld_advance_performance" if execution_mode=="performance" else "sp_ld_advance"
         if not 1<=self.n<=(2**31-1)//3:raise InputError('unsupported LD pole count')
         from .ld import TensorLorentzDrude
         if isinstance(material,TensorLorentzDrude):
@@ -81,7 +83,7 @@ class NativeState:
     def close(self):self.finalizer()
 
     def advance(self,field,p,j):
-        self.api.call('sp_ld_advance',self.handle,len(field),field.ctypes.data,p.ctypes.data,j.ctypes.data)
+        self.api.call(self._advance_name,self.handle,len(field),field.ctypes.data,p.ctypes.data,j.ctypes.data)
 
     def export(self):
         p=np.empty((self.n,3));j=np.empty_like(p)
