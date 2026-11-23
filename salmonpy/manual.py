@@ -34,8 +34,16 @@ def search(query, *, lang='ja', limit=5):
         components=task.get('workflow_components',())
         hits=[component for component in components if matches(component,query)]
         required=task.get('workflow_required',())
+        # A bare list such as "TDDFT FDTD" is also a combined-workflow query.
+        # Additional words (e.g. "compare") must not imply coupling by default.
+        remaining=query.casefold()
+        for component in hits:
+            remaining=re.sub(r'(?<![a-z0-9_])'+re.escape(component.casefold())+
+                             r'(?![a-z0-9_])','',remaining)
+        models_only=not re.sub(r'\band\b|と|[\s,+/&]+','',remaining)
         if (len(hits)>=2 and any(component in hits for component in required)
-                and any(word.casefold() in query.casefold() for word in task.get('workflow_keywords',()))):
+                and (models_only or any(word.casefold() in query.casefold()
+                                           for word in task.get('workflow_keywords',())))):
             score += 100 * len(hits)
         if score:
             localized = {k:task[k] for k in ('id','api','inputs','outputs','constraints','environment',

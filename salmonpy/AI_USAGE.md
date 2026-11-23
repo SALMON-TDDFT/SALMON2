@@ -53,6 +53,7 @@ MatplotlibやASE等がないことは、この最初の計算の失敗ではあ�
 python -m salmonpy.manual
 python -m salmonpy.manual --lang en
 python -m salmonpy.manual TDDFT
+python -m salmonpy.manual "TDDFTとFDTDをつなぎたい"
 python -m salmonpy.manual checkpoint
 python -m salmonpy.manual --task checkpoint_compatibility
 ```

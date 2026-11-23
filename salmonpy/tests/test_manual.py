@@ -79,6 +79,8 @@ class ManualTest(unittest.TestCase):
     def test_search(self):
         for query,expected in [('バンド図を描きたい','bands'),('TDDFT','tddft'),('ドルーデ','ld'),('runtime','runtime')]:
             self.assertEqual(search(query)['tasks'][0]['id'],expected)
+        for query in ('はじめて','初めて','最初の計算','first calculation','getting started'):
+            self.assertEqual(search(query)['tasks'][0]['id'],'first_calculation')
         self.assertEqual(search('unrecognizedxyz')['tasks'],[])
         with self.assertRaises(ValueError):search('')
 
@@ -88,7 +90,8 @@ class ManualTest(unittest.TestCase):
         import sys
         from salmonpy.manual import task_details
         for query in ('LDとSBEとTDDFTを混ぜて多層膜を計算',
-                      'combine LD SBE TDDFT in a multilayer'):
+                      'combine LD SBE TDDFT in a multilayer',
+                      'TDDFTとFDTDをつなぎたい', 'connect TDDFT and FDTD', 'TDDFT FDTD'):
             result=search(query)
             self.assertEqual(result['tasks'][0]['id'],'native_coupled')
             self.assertLessEqual(len(result['tasks']),5)
