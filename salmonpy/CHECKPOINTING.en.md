@@ -1,5 +1,17 @@
 # Checkpoint capability and compatibility
 
+## Start from what you want to save
+
+| Existing calculation | Read next |
+|---|---|
+| LD, SBE or a field state; temporary in-memory rewind | [snapshot / restore](SNAPSHOTS.en.md) |
+| Retained GS; resume SCF with mixing history | [SCF save/resume](NATIVE_GS.en.md#scf-disk) |
+| FDTD with LD/electronic states; continue in another job | [protected coupled restore](#coupled-restore) |
+| Existing loop; save and exit before wall time expires | [CheckpointSchedule](#timed-save) |
+| User-written code; bind its own storage format | Capability and execution interfaces below |
+
+Postprocessing output archives do not replace restart checkpoints. No automatic checkpoint is written unless explicitly requested.
+
 ## Current mixed-session checkpoint formats
 
 Direct persistence uses `salmonpy.native-direct/4`; replay persistence uses `salmonpy.native-replay/2`. Older schemas, automatic conversion and the unidentified-old-checkpoint option are removed. Custom hosts may use unidentified states in the current format, but identity presence must match between writer and reader.
@@ -249,6 +261,7 @@ Current input checking requires the same topology and declared format/identity. 
 conversion, changed-topology redistribution, generic archive I/O and atomic rollback
 remain calculation implementation/calling program responsibilities. The execution entry calls supplied functions. The saving backend owns payload correctness; an immediate LOAD alone does not preserve original states on failure.
 
+<a id="coupled-restore"></a>
 ## Protected restore in the ordinary mixed sample
 
 `mpi_mixed_native --direct-resume PATH` now defaults to protected restore.
@@ -443,6 +456,7 @@ close discards its Python-owned candidate; snapshot close discards a candidate
 derived from that snapshot. Direct C-calling program reservations are not automatically
 discarded. Matching MPI call order is still required.
 
+<a id="timed-save"></a>
 ## Periodic checkpoints and elapsed-time save-and-stop
 
 Automatic checkpoints are disabled by default. Their cadence is separate from current, magnetization and other observation output. `CheckpointSchedule` calls an explicitly supplied save function at accepted step boundaries.

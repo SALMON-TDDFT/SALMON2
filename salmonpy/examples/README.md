@@ -2,6 +2,73 @@
 
 [English](README.en.md)
 
+[初回テスト](#first-test) · [既存計算への追加](#add-to-existing)
+
+<a id="add-to-existing"></a>
+## 今ある計算に機能を追加する
+
+導入と基本計算を済ませた方は、ここから目的を選べます。再インストールや初回テストは不要です。手元のモデル・GS・波形・保存結果を使い、追加する機能に必要な準備だけを行います。モデルや状態の対応条件は各ガイドで確認してください。
+
+| 追加したいこと | 手元で使うもの | 追加準備・最短の入口 | 得られるもの |
+|---|---|---|---|
+| 実験の光学定数からLDを使う | 材料ID・利用する周波数帯 | [光学材料](../OPTICAL_DATA.md)：`load_material(...).model()`。保存済み係数の利用は再フィット不要 | LDモデルとフィット誤差・出典 |
+| 誘電率の方向依存を入れる | 等方LDの係数、主軸・材料の向き | [テンソルLD](../LD.md)：`TensorLorentzDrude`。非対角成分とFDTDの条件を確認 | 異方性の分極・電流・誘電率 |
+| 電流から誘電率・伝導率を求める | 同じ時刻列の電荷電流jと電場E | [スペクトル解析](../OPTICAL_TRAJECTORIES.md)、[計算例](../WORKFLOWS.md)。完全テンソルには独立な駆動方向が必要 | 光学スペクトルと有効な周波数範囲 |
+| 同じ物質に別のパルスを与える | 保存GSと新しい波形 | [初期状態](../INITIAL_STATES.md)、[保持GS](../NATIVE_GS.md)。既知の未収束GSは先に残差を確認 | 独立したTDDFT応答 |
+| SCFを続ける・初期推定を再利用する | 保持中のGS、SCFチェックポイント、GSアーカイブ | [SCF操作](../NATIVE_GS.md)。同じ計算の再開と、新しい計算の初期推定を区別 | 混合履歴を含む継続、または独立した新SCF |
+| 電流・磁化・スピン流をまとめて読む | 出力ファイル、再開前後のファイル一覧 | [出力読込み](../OUTPUTS.md)：`read_table`／`read_spin_dynamics`。ソルバー不要 | 単位と時刻を保持した配列 |
+| LD・SBE・TDDFTを混ぜる | 材料定義・配置・使用可能ランク数 | [混在計算](../COUPLED.md)：`mpi_mixed_native`。対応するFDTD・電子計算ライブラリとMPI | 場と各点の物質応答 |
+| 実経過時間で保存して終了する | 既存の更新ループと一括保存関数 | [保存と再開](../CHECKPOINTING.md)：`CheckpointSchedule`。保存時間の余裕を確保 | 次ジョブで再開できる状態一式 |
+| 更新ごとの検査を省く | 動作確認済みの同じモデル・入力 | [性能モード](../NATIVE_STEPPING.md)、[LD](../LD.md)、[SBE](../SBE.md)。対応部品で`execution_mode="performance"`を明示 | 検査・退避の負担を減らした時間発展 |
+| FDTDの反射・透過・吸収を確かめる | E/H面データ、物質のE/j | [エネルギー収支](../API.md)。面の位置・時刻・符号を揃える | 散乱・回折も含めた収支診断 |
+| 格子幅・dtを選び直す | 物質・擬ポテンシャル・評価したい電流 | [収束診断](../CONVERGENCE.md)。計画作成と計算実行を分ける | 電子数保存と電流差の比較 |
+| 自作の物質応答へ差し替える | 自作のA→j／E応答と単位・時刻の定義 | [自作コードの接続](../MATERIALS.md)。まず単独応答と適合検査を行う | 既存の場との結合 |
+
+### 保存済みの光学材料をLDとして使う
+
+```python
+from salmonpy.optical_materials import load_material
+
+data = load_material('au-johnson-1972')
+model, fit = data.model()  # 保存済みの係数。ダウンロード・再フィットなし
+print(fit['relative_rms_error'], data.metadata['conditions'])
+```
+
+必要なのは導入済みwheelです。フィットの周波数帯と実験条件を確認してから使います。別の実験データへの再フィットには[LDフィッティング](../LD.md)を使い、選ぶ方法によって任意依存のSciPyが必要です。
+
+### 再開で分かれた出力を読む
+
+```python
+from salmonpy.analysis import read_table
+from salmonpy.outputs import read_spin_dynamics
+
+current = read_table(['job1/rt_rt.data', 'job2/rt_rt.data'])
+spin = read_spin_dynamics(['job1/rt_rt_spin.data', 'job2/rt_rt_spin.data'])
+```
+
+パスを手元の既存ファイルへ置き換えます。これは後処理だけで、計算を再実行しません。ファイルは計算順で指定し、絶対時刻を保持します。完全一致する重複だけを除き、不一致は通知します。欠測区間は補間しません。電流とスピンの時刻列は別々に保持します。単位・電流の符号は自動変換しません。SALMONの`Jm`から電荷電流`j`を作る場合は`j=-Jm`です。
+
+### 経過時間で保存して終了する
+
+既存のループと保存関数がある場合の差し込み位置です。
+
+```python
+from salmonpy.checkpointing import CheckpointSchedule
+
+schedule = CheckpointSchedule(stop_after_seconds=3300, comm=comm)
+for step in range(restored_step + 1, final_step + 1):
+    advance_one_step()
+    if schedule.after_step(step, save_all_states):
+        break
+```
+
+`comm`は結合計算全体のコミュニケータです。直列では省略します。`advance_one_step()`と`save_all_states(step)`は既存の処理へ結びます。場・LD・電子状態を同じ完了ステップでまとめて保存し、新しい保存先を使ってください。ジョブ制限時間から1ステップ・保存・終了処理の時間を引いて設定します。単一状態のスナップショットだけでは結合計算の再開データになりません。
+
+### AIに追加機能を頼む
+
+「既存の計算に機能を追加」と検索し、必要な機能のタスクIDを選んで詳細だけを読みます。たとえば「このGSを再利用して円偏光の電流を計算。使えるのは4コア・4GiB」のように、既存データと変更点を伝えます。既に分かっている環境・メモリ・CPU条件を再質問する必要はありません。既存データが対応するか不明な場合だけ、必要な項目を確認します。
+
+<a id="first-test"></a>
 ## 最初のテストを終える
 
 ```sh

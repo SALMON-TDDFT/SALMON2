@@ -8,6 +8,8 @@ or to prepare structures, pulses and analysis for an existing calculation.
 - [Installing the calculation programs](salmonpy/RUNTIME.en.md) · [計算プログラムの準備](salmonpy/RUNTIME.md)
 - [Task catalog for AI assistants](salmonpy/manual.json)
 
+Already using SALMONpy? Choose [a feature to add](salmonpy/examples/README.en.md#add-to-existing) / [既存計算への追加](salmonpy/examples/README.md#add-to-existing).
+
 This is a development release and is not published on PyPI. Obtain a wheel
 matching your OS, CPU and Python version; see the language guides above.
 

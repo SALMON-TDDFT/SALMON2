@@ -130,6 +130,14 @@ class ManualTest(unittest.TestCase):
             result = search(query)
             self.assertTrue(result['getting_started'])
             self.assertIn('dft', {t['id'] for t in result['task_catalog']})
+        for query in ('既存の計算に機能を追加', 'extend existing workflow'):
+            task=search(query)['tasks'][0]
+            self.assertEqual(task['id'],'extend_workflow')
+            detail=task_details(task['id'],lang='en')
+            self.assertEqual(detail['instructions'][0]['heading'],'en')
+            self.assertIn('TensorLorentzDrude',detail['instructions'][0]['text'])
+            self.assertIn('CheckpointSchedule',detail['instructions'][0]['text'])
+        self.assertIn('returning_user_action',search('TDDFT')['getting_started'])
         ids = {t['id'] for t in search('レーザーによる電子の動き')['tasks']}
         self.assertTrue({'sbe', 'tddft'}.issubset(ids))
 

@@ -2,6 +2,13 @@
 
 `salmonpy.LorentzDrude` は等方的で受動的な極の誘電率と、電場 E に対する物理的な分極 P・電流 J を返します。原子単位・Gaussian 単位系を使い、周波数は角周波数、時間は原子時間です。eV や fs は変換してから渡します。極の強度は無次元です。
 
+## 既存のLDモデルに追加する
+
+- 方向依存・非対角成分を入れる：[TensorLorentzDrude](#tensor-response)。
+- 別の実験データをフィットする：[フィッティングと来歴](#fit-response)。選択する方法によってSciPyが必要です。
+- 保存済みのフィットを使う：[光学材料一覧](OPTICAL_DATA.md)。再フィット・ダウンロードは不要です。
+- 動作確認済みの模型で更新の負担を減らす：[性能モード](#performance-mode)。
+
 ```python
 import numpy as np
 from salmonpy import LorentzDrude
@@ -56,6 +63,7 @@ FDTDには既存のepsilon_emを通して伝え、半陰的E更新の分母と�
 
 検証は合成LDです。MPI1/2で背景2.25の平板とFresnel参照、分散ゼロ極限と通常誘電体の一致、異なる背景の二物質を含むPythonから直接呼ぶFDTDの直接保存／復元を確認しています。実材料の光学精度の保証ではありません。
 
+<a id="fit-response"></a>
 ## 制約付きフィッティングと来歴
 
 ```python
@@ -105,6 +113,7 @@ LDMaterialProviderで共通に受け取ります。三次元E/Hに限定する�
 permittivity_tensor(omega)は読み取り専用の複素(...,3,3)配列です。旧scalar入口も保持します。
 FDTD.tensor_materialsと実行記録で表現を確認できます。Pythonから直接呼ぶFDTDは等方・独立対角・相反非対角テンソルに対応しています。単独／MPI物質応答の独立対角・非対角更新は下記の実装を参照してください。酸化物と仮定・帯域はOPTICAL_DATA.mdを参照してください。
 
+<a id="tensor-response"></a>
 ## 独立対角・非対角の相反テンソルLD
 
 `TensorLorentzDrude` は極ごとに対称3×3の振動子強度を受け取ります。
@@ -183,6 +192,7 @@ model, report = fit_lorentz_drude_tensor(epsilon, initial=initial,
 # Inspect report before use; this does not start an FDTD calculation.
 ```
 
+<a id="performance-mode"></a>
 ## 単独利用時のパフォーマンスモード
 
 `new_state(...)` またはバッチ応答の入口（LDは `material.respond(...)`、

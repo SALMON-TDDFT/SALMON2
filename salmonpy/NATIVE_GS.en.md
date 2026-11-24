@@ -1,15 +1,23 @@
 # Retained solver ground states
 
-> Current build layout (2026-11-19): ordinary XC and HSE both build
-> from runtime/sources/solver. Below, standard/ordinary identifies the API
-> capability configuration, not a second maintained source tree. Default builds disable HSE.
-
 [日本語](NATIVE_GS.md)
 
 With a standard runtime, salmonpy.native_gs keeps several DFT ground states in one process.
 Each owns its input, orbitals, density, occupations, eigenvalues, forces, XC and
 MPI children. Creating a different cell/grid/k/electron/atom/XC calculation leaves
 previous owners readable. Ordinary DFT.run retains its separate-process behavior.
+
+## Choose the next operation
+
+| What you have | What to do |
+|---|---|
+| A saved GS and another waveform | [load the GS and create an independent TDDFT model](#gs-to-rt) |
+| A live SCF state | [pause or rewind in memory](#scf-memory) |
+| A checkpoint from a previous job | [resume SCF including mixing history](#scf-disk) |
+| A similar structure and computed GS | [start a new independent SCF from an initial guess](#initial-guess) |
+| Oscillating residuals | [change mixing and continue](#scf-mixing) |
+
+To create a GS, start with the example below. For feature additions, reuse your working library and resources; verify that it supports the added XC/spin/MPI conditions. An SCF restart continues the same state; an initial guess starts a new SCF with fresh mixing history.
 
 ```python
 from types import SimpleNamespace
@@ -87,6 +95,7 @@ uses coarse grids/four iterations for ownership verification, not converged
 material properties. It writes normal solver diagnostics/progress, but no automatic
 GS restart bundle. See [the solver contract](native_adapters/standard_gs.h).
 
+<a id="gs-to-rt"></a>
 ## Existing GS and in-memory TDDFT
 
 `session.load(directory, input_file="rt.inp", material_id="silicon")` reads an
@@ -636,6 +645,7 @@ remains next. Execution order is SCF persistence→state sharing, error recovery
 ABI→NLCC/units. Fast-HSE norm diagnostics and a physical grid campaign are deferred
 at the user's request. No GS datasets are collected by the validation probes.
 
+<a id="scf-memory"></a>
 ## Active SCF pause and in-memory snapshots
 
 New explicitly built CPU runtimes expose SCF protocol1 for periodic,
@@ -804,6 +814,7 @@ The small developer probe is `python tools/test_symmetry_force_units.py NEW_OUTP
 (requires an explicit Fortran compiler; it compiles/audits the actual module, not
 a new GS). It is not a prerequisite for ordinary prebuilt-runtime use.
 
+<a id="scf-disk"></a>
 ### Disk SCF checkpoints and fresh-process continuation
 
 A matching new runtime supports `state.save_scf(new_directory)` and loading in a
@@ -1429,6 +1440,7 @@ for diagnosis or saving. All solver ranks must agree on `allow_unconverged`.
 Numerical update order and SCF thresholds are unchanged. This replaces the old
 policy of automatically proceeding after an unconverged-SCF warning.
 
+<a id="initial-guess"></a>
 ## Use a retained GS as a new SCF initial guess
 
 `session.run(model, initial_guess=source, steps=2, ...)` copies wavefunctions and
@@ -1501,6 +1513,7 @@ existing owners. This does not guarantee recovery from arbitrary MPI/process/OS
 OOM failures. The data interface does not certify every solver physics profile;
 normal unconverged-SCF residual review remains required.
 
+<a id="scf-mixing"></a>
 ### Continue SCF with a different mixing coefficient
 
 `state.set_scf_mixing(0.1)` changes only this state's effective mixing coefficient;

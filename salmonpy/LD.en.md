@@ -2,6 +2,13 @@
 
 `salmonpy.LorentzDrude` provides isotropic passive-pole permittivity and physical polarization P/current J driven by E. Use SALMON atomic/Gaussian units: angular frequencies and damping in inverse atomic time, time in atomic time, and corresponding atomic E/P/J. Convert eV/fs explicitly; pole strengths are dimensionless.
 
+## Add to an existing LD model
+
+- Direction dependence or off-diagonal components: [TensorLorentzDrude](#tensor-response).
+- Fit new measured data: [fitting and provenance](#fit-response). The chosen optimizer may require SciPy.
+- Reuse a stored fit: [optical material catalog](OPTICAL_DATA.en.md); no refitting or download.
+- Reduce update overhead for a tested model: [performance mode](#performance-mode).
+
 ```python
 import numpy as np
 from salmonpy import LorentzDrude
@@ -70,6 +77,7 @@ Local synthetic checks cover MPI1/2 slab/Fresnel agreement at background2.25,
 the zero-dispersion dielectric limit, and direct saved solver state continuation
 with two distinct backgrounds. They do not certify real-material accuracy.
 
+<a id="fit-response"></a>
 ## Constrained fitting and provenance
 
 ```python
@@ -146,6 +154,7 @@ and LDMaterialProvider accept it. This applies across modes, not only3D E/H.
 FDTD.tensor_materials and its run record expose the representation. FDTD called directly from Python now supports isotropic, diagonal and reciprocal off-diagonal tensors; standalone/MPI tensor material response is now implemented below.
 See OPTICAL_DATA.en.md for oxide data, source assumptions and limits.
 
+<a id="tensor-response"></a>
 ## Reciprocal diagonal/off-diagonal LD response
 
 TensorLorentzDrude accepts a real symmetric3x3 strength matrix per pole, a symmetric
@@ -222,6 +231,7 @@ model, report = fit_lorentz_drude_tensor(epsilon, initial=initial,
 # Inspect report before use; this does not start an FDTD calculation.
 ```
 
+<a id="performance-mode"></a>
 ## Standalone performance mode
 
 Pass `execution_mode="performance"` to `new_state(...)` or the batch response

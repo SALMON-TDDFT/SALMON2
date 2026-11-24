@@ -2,6 +2,73 @@
 
 [日本語](README.md)
 
+[First test](#first-test) · [Add to an existing calculation](#add-to-existing)
+
+<a id="add-to-existing"></a>
+## Add a feature to an existing calculation
+
+If installation and a basic calculation already work, start here. Do not reinstall or repeat the first test. Reuse your model, GS, waveform or saved output and prepare only the additional requirements. Check component-specific conditions in the linked guides.
+
+| What to add | Reuse | Additional preparation and entry | Result |
+|---|---|---|---|
+| LD from measured optical constants | Material ID and frequency band | [Optical materials](../OPTICAL_DATA.en.md): `load_material(...).model()`; stored fits need no refitting | LD model, fit error and provenance |
+| Direction-dependent permittivity | LD coefficients, principal axes and orientation | [Tensor LD](../LD.en.md): `TensorLorentzDrude`; check off-diagonal/FDTD conditions | Anisotropic polarization, current and permittivity |
+| Conductivity or permittivity from current | Charge current j and E on matching time samples | [Spectral analysis](../OPTICAL_TRAJECTORIES.en.md), [examples](../WORKFLOWS.md); full tensors need independent driving directions | Optical spectra and valid frequency range |
+| Another pulse on the same material | Saved GS and a new waveform | [Initial states](../INITIAL_STATES.en.md), [retained GS](../NATIVE_GS.en.md); review residuals for a known unconverged GS | Independent TDDFT response |
+| Continue SCF or reuse an initial guess | Retained GS, SCF checkpoint or GS archive | [SCF operations](../NATIVE_GS.en.md); distinguish exact continuation from a new initial guess | Continuation including mixing history, or an independent new SCF |
+| Read current, magnetization and spin current | Output files and ordered restart segments | [Output readers](../OUTPUTS.en.md): `read_table` / `read_spin_dynamics`; no solver | Arrays retaining units and times |
+| Mix LD, SBE and TDDFT | Material definitions, arrangement and rank budget | [Mixed calculations](../COUPLED.en.md): `mpi_mixed_native`; supporting field/electronic libraries and MPI | Coupled fields and point responses |
+| Save and exit by wall time | Existing update loop and aggregate-save function | [Checkpointing](../CHECKPOINTING.en.md): `CheckpointSchedule`; reserve save time | A bundle for the next job |
+| Skip per-step diagnostics | A tested model and input | [Performance mode](../NATIVE_STEPPING.en.md), [LD](../LD.en.md), [SBE](../SBE.en.md); set `execution_mode="performance"` where supported | Less checking/backup overhead |
+| Check FDTD reflection, transmission and absorption | E/H plane data and material E/j | [Energy balance](../API.en.md); align plane positions, times and signs | Diagnostics including scattering and diffraction |
+| Reassess grid spacing and dt | Material, potential and target current | [Convergence diagnostics](../CONVERGENCE.en.md); plan separately from execution | Electron-number conservation and current comparisons |
+| Substitute a custom material response | A→j or E response with explicit units/times | [Custom models](../MATERIALS.en.md); test standalone response and conformance first | Coupling to the existing field |
+
+### Use a stored optical material as LD
+
+```python
+from salmonpy.optical_materials import load_material
+
+data = load_material('au-johnson-1972')
+model, fit = data.model()  # Stored coefficients; no download or refitting.
+print(fit['relative_rms_error'], data.metadata['conditions'])
+```
+
+Requires the installed wheel. Check the fit band and experimental conditions before use. Fit other measured data with [LD fitting](../LD.en.md); the selected optimizer may require optional SciPy.
+
+### Read output split by a restart
+
+```python
+from salmonpy.analysis import read_table
+from salmonpy.outputs import read_spin_dynamics
+
+current = read_table(['job1/rt_rt.data', 'job2/rt_rt.data'])
+spin = read_spin_dynamics(['job1/rt_rt_spin.data', 'job2/rt_rt_spin.data'])
+```
+
+Replace paths with your existing files. This only reads output; it does not rerun calculations. Supply files in calculation order with absolute times. Only exactly matching overlap rows are removed; conflicts are reported. Gaps are not interpolated. Current and spin keep their separate sample grids. Units and current signs are not converted automatically: charge current is `j=-Jm` for SALMON matter-current columns.
+
+### Save and stop by elapsed time
+
+Use this insertion point in an existing loop with an existing save function:
+
+```python
+from salmonpy.checkpointing import CheckpointSchedule
+
+schedule = CheckpointSchedule(stop_after_seconds=3300, comm=comm)
+for step in range(restored_step + 1, final_step + 1):
+    advance_one_step()
+    if schedule.after_step(step, save_all_states):
+        break
+```
+
+`comm` spans the whole coupled calculation; omit it for serial use. Bind `advance_one_step()` and `save_all_states(step)` to your existing functions. Save the field, LD and electronic states together at the same completed step into a new destination. Reserve one step plus checkpoint and cleanup time before the scheduler deadline. A snapshot of only one component is not a coupled restart bundle.
+
+### Ask an AI to add a feature
+
+Search for “extend existing workflow”, then select the task ID for the needed feature and read only its details. State what to reuse and what to change, for example: “Reuse this GS for a circularly polarized pulse; budget4 cores and4GiB.” Do not ask again for known environment, memory or CPU settings. Inspect only missing compatibility information before choosing the additional calculation.
+
+<a id="first-test"></a>
 ## Complete the first test
 
 ```sh

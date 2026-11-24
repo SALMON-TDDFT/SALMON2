@@ -43,3 +43,5 @@ Additional implementation and distribution notes (historical context):
 
 - GS model inputs: [日本語](gs-model-input-notes.ja.md) / [English](gs-model-input-notes.en.md)
 - Si starter distributions: [日本語](si-intro-distribution-notes.ja.md) / [English](si-intro-distribution-notes.en.md)
+
+- Process/output implementation notes: [日本語](output-process-notes.ja.md).

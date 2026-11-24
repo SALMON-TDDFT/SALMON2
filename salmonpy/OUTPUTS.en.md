@@ -7,6 +7,18 @@
 `decomposed_current` methods read indexed data. These are postprocessing operations:
 no solver is started, downloaded or compiled.
 
+## Start from the data you have
+
+| Data | Reader or next analysis |
+|---|---|
+| SALMON text tables | `salmonpy.analysis.read_table(path)` |
+| SOC magnetization and spin current | `read_spin_dynamics(path)`; retain its time grid separately from current |
+| Files before/after a restart | `read_table([before, after])` / `read_spin_dynamics([before, after])` |
+| A named-array archive | `OutputArchive.open` below |
+| Current and E for optical spectra | [optical analysis](OPTICAL_TRAJECTORIES.en.md); check units, signs and times |
+
+Reading does not rerun a calculation. Output archives and restart checkpoints are different. For MPI placement and computation across nodes, see [coupled calculations](COUPLED.en.md).
+
 ## Charge current, magnetization and spin-current dynamics
 
 The existing Fortran solver writes `*_rt.data` and, for SOC, `*_rt_spin.data`.

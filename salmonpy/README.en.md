@@ -2,6 +2,8 @@
 
 [日本語](README.md)
 
+Already using SALMONpy? Go directly to [adding a feature to an existing calculation](examples/README.en.md#add-to-existing).
+
 Use material response, electronic dynamics and light propagation independently
 or through the documented coupling interfaces. Input preparation and analysis
 can also be used on their own.
