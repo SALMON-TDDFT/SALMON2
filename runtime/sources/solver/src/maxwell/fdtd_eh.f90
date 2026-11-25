@@ -126,6 +126,7 @@ module fdtd_eh
     integer             :: ihz_x_is(3),ihz_x_ie(3),ihz_y_is(3),ihz_y_ie(3)                                     !h
     real(8),allocatable :: ex_s(:,:,:),ey_s(:,:,:),ez_s(:,:,:)     !e for save
     real(8),allocatable :: hx_s(:,:,:),hy_s(:,:,:),hz_s(:,:,:)     !h for save
+    real(8),allocatable :: coupling_h_left(:,:,:,:) ! raw preceding H half step; embedding-owned
     real(8),allocatable :: c2_jx(:,:,:),c2_jy(:,:,:),c2_jz(:,:,:)  !coeff. for general curr. dens.
     real(8),allocatable :: rmedia(:,:,:)                           !Material information for tmp.
     real(8),allocatable :: time_lr(:)                              !LR: time

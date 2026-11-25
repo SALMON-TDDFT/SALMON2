@@ -426,6 +426,36 @@ class NativeEHField:
         comm.Allreduce(local,result)
         return result
 
+    def component_field_geometry(self):
+        """E/H origins[quantity,component,axis], global counts and spacing in bohr."""
+        data=self.electric_edge_geometry()
+        E=data['origin'];spacing=data['spacing']
+        H=E+.5*spacing-np.diag(spacing)
+        return dict(counts=data['counts'],origin=np.stack((E,H)),spacing=spacing)
+
+    def component_fields(self,indices):
+        """Raw E and time-centered H, shape[2,N,3], on their Yee grids.
+
+        One reduction within the owning field group. No advance, files or
+        application-wide field replication. H averages the stored half-step
+        brackets at the current integer field step; no spatial collocation.
+        """
+        from .api import _bind_field_operations
+        comm=self.context.solver_comm;error=None;points=None
+        try:
+            points=self._edge_indices(indices)
+            if self.closed or self.failed:raise InputError('usable field required')
+            _bind_field_operations(self.lib,('sp_eh_fields_read',))
+        except Exception as exc:error=str(exc)
+        records=comm.allgather((error,None if error else points.tolist()))
+        if any(e for e,_ in records) or any(v!=records[0][1] for _,v in records):
+            raise InputError('matching valid component-field query indices required: '+str(records))
+        local=np.empty((2,len(points),3));result=np.empty_like(local)
+        code=self._call(self.lib.sp_eh_fields_read,len(points),points,local)
+        _agree(comm,'component-field query failed' if code or not np.isfinite(local).all() else None)
+        comm.Allreduce(local,result)
+        return result
+
     def _edge_indices(self,indices):
         raw=np.asarray(indices)
         counts=np.array(self.calculation.geometry.grid.counts)

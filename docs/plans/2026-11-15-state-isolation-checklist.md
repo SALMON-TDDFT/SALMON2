@@ -2,6 +2,24 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
+## 最新の残作業（2026-11-25 磁気自己場結合の検証後）
+
+空間依存E/H、軌道磁化電流、本計算−自己真空参照の双方向結合は、
+スピンなし固定イオンPZのC₂H₂で接続・直接保存／再開・再試行まで検証済みです。
+分子96／場97からの再開、1／2場ランク、通常出力6ファイルが連続実行と一致しました。
+根拠は末尾と `docs/magnetic-self-field-feedback-validation-2026-11-25.md` を参照します。
+以下を現在の残件の整理とし、後続の古い未完了欄を重複して数えません。
+
+1. **今回の空間依存・磁気結合の物理診断**：電気＋磁気を合わせた離散電荷連続則・仕事量・エネルギー収支。既存の双極子モデルの収支検証とは区別する。
+2. **一般の配置・運用への接続**：固定形状の検証ドライバーを超える配置指定、途中失敗時に全状態を保持する一般的な結合処理。今回の正常再開・意図的再試行の成功だけで包括保証しない。
+3. **近接場の実用途検証**：Tip／Bow Tie、格子点からずれた分子位置、格子・時間刻み・分子領域と物理的応答の収束。
+4. **規模・I/O・施設環境**：場履歴の逐次保持と転送量の削減、多数点・長時間の計測、施設MPI・多ノードでの実証。Macでの少数ランク試験と区別する。
+5. **SOCの残る対象**：MPI分割変更による再開、高速HSEとの組合せ、WSe₂の実用途・物理収束。Niで完了した保持GS／TDDFT・磁化／スピン流の試験を未実装へ戻さない。
+6. **配布・追加対象**：現行の重い計算プログラムのLinux／Intel Mac／施設環境での検証・安定した配布、必要性に応じた追加保存形式・GPU。LD/SBE wheelの既存検証とは区別する。
+
+スピン磁化の空間的な返却と真空放射反作用は、現在のモデルに含めない追加対象です。
+高速HSEの電子数診断と実材料の格子収束調査は、利用者指定の後回しを維持します。
+
 ## 現在の状態（2026-11-23 作業・検証照合）
 
 この節と末尾の最新検証記録を現在の状態として扱います。過去の日付の
@@ -4950,3 +4968,10 @@ GSは許可済みの既存C2H2データだけを再利用。クラウド同期�
 - Verified: actual Hamiltonian derivative absolute error7.08e-12; independent adjoint/work and divergence checks; atomic invalid/overflow rejection; C2H2 direct process-exit restore2->4 reproduces M, interval currents and ordinary observables without evolution.
 - Two FDTD ranks plus bookkeeping: regenerated restored currents and field restart3 reproduce continuous arrays exactly. Magnetic-only E is nonzero; electric+magnetic superposition agrees within4.24e-22. Source-distribution-to-wheel, installed99targeted tests, installed molecular and MPI restart tools passed. See docs/orbital-magnetic-return-validation-2026-11-25.md.
 - Remaining: general self-consistent magnetic own-vacuum coordinator, spin magnetization, full composed charge-continuity/energy validation, physical convergence and scale tests. This closes the response-return component, not those broader items.
+
+### 2026-11-25: orbital magnetic own-vacuum bidirectional feedback
+
+- Done: one owning-field-group E/H query with independent raw H half-step cache, direct persistence and rollback; --orbital-magnetic connects selected total-minus-own-vacuum E/H and one-time electric+magnetic interval current to both groups. No full-grid application-wide replication added.
+- Verified:192 molecular/193 field steps; save96/97, process-exit direct continuation and retry64/128 reproduce all histories, observables and six ordinary files exactly. One/two field ranks per group agree; existing electric-only arrays unchanged. Environment return is nonzero in E and H.
+- Git-only audited build, source106targeted tests, sdist->wheel, installed106tests and installed6-rank restore/retry passed. See docs/magnetic-self-field-feedback-validation-2026-11-25.md.
+- Remaining: arbitrary-layout/failure-atomic production orchestration, spin magnetization, vacuum radiation reaction policy, full charge-continuity/energy and physical convergence checks, performance/scaling. The electric-and-orbital-magnetic own-vacuum response connection is now implemented and validated under the stated conditions.

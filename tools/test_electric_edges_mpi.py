@@ -18,6 +18,7 @@ def main():
     parser.add_argument('--response-history',type=Path)
     parser.add_argument('--response-component',choices=('combined','electric','magnetic'),default='combined')
     parser.add_argument('--baseline',type=Path);parser.add_argument('--density-history',type=Path)
+    parser.add_argument('--check-component-fields',action='store_true')
     parser.add_argument('--save-step',type=int)
     parser.add_argument('--resume',type=Path)
     parser.add_argument('--kernels',type=Path,help='explicit host calculation library for density response')
@@ -96,6 +97,12 @@ def main():
                                             molecule_position=(-2.54,1.62,1.94))
                 fields=[field.E.copy()] if restored_fields is None else restored_fields
                 raw=[field.electric_edges(query)] if restored_raw is None else restored_raw
+                eh_history=[]
+                if args.check_component_fields:
+                    if args.resume:
+                        with np.load(args.resume/f'python-{comm.rank}.npz',allow_pickle=False) as saved:
+                            eh_history=list(saved['EH'])
+                    else:eh_history=[field.component_fields(query)]
                 counts=[]
                 _bind_field_operations(field.lib,('sp_eh_checkpoint','sp_eh_step_indices'))
                 backup=_NativeBackup(field,comm,'sp_eh_step_transaction',field.directory,('A','E','step_index','failed','closed'))
@@ -156,17 +163,22 @@ def main():
                     advance()
                     if token is not None:
                         accepted_E=field.E.copy();accepted_A=field.A.copy();accepted_raw=field.electric_edges(query)
+                        accepted_EH=field.component_fields(query) if args.check_component_fields else None
                         backup.rollback(token);advance()
                         np.testing.assert_array_equal(field.E,accepted_E);np.testing.assert_array_equal(field.A,accepted_A)
                         np.testing.assert_array_equal(field.electric_edges(query),accepted_raw)
+                        if args.check_component_fields:np.testing.assert_array_equal(field.component_fields(query),accepted_EH)
                         backup.release(token);rollback_exact=True
                     fields.append(field.E.copy());raw.append(field.electric_edges(query))
+                    if args.check_component_fields:
+                        components=field.component_fields(query)
+                        np.testing.assert_array_equal(components[0],raw[-1]);eh_history.append(components)
                     if n==args.save_step:
                         checkpoint=args.output/'checkpoint'
                         if comm.rank==0:checkpoint.mkdir()
                         comm.Barrier()
                         assert field._call(field.lib.sp_eh_checkpoint,os.fsencode(checkpoint/f'field-{comm.rank}.bin'),0)==0
-                        np.savez(checkpoint/f'python-{comm.rank}.npz',A=field.A,E=field.E,fields=fields,raw=raw)
+                        np.savez(checkpoint/f'python-{comm.rank}.npz',A=field.A,E=field.E,fields=fields,raw=raw,EH=eh_history)
                         if comm.rank==0:
                             metadata=dict(mode=args.mode,response_component=args.response_component,field_ranks=nfield,steps=steps,dt=dt,step=n,
                                           library_sha256=json.loads(args.build.read_text())['sha256'])
@@ -178,7 +190,8 @@ def main():
                     if args.baseline:
                         with np.load(args.baseline/'history.npz',allow_pickle=False) as expected:
                             np.testing.assert_array_equal(fields,expected['E']);np.testing.assert_array_equal(raw,expected['raw_E'])
-                    np.savez(args.output/'history.npz',E=fields,raw_E=raw)
+                            if args.check_component_fields:np.testing.assert_array_equal(eh_history,expected['EH'])
+                    np.savez(args.output/'history.npz',E=fields,raw_E=raw,EH=eh_history)
                     summary=dict(mode=args.mode,field_ranks=nfield,steps=steps,initial_hold=dt,
                         baseline_exact=bool(args.baseline),invalid_current_preserves_state=invalid_preserved,deep_overflow_preserves_state=invalid_preserved,
                         direct_live_rollback_retry_exact=rollback_exact,owned_entry_counts=counts,

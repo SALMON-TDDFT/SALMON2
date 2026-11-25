@@ -364,3 +364,5 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 - `python -m salmonpy.examples.molecular_charge_density --help`: 対応検証済みの分子TDDFTから密度を明示取得。恒久保存は `--save-density` で選択
 
 - isolated_response の --grid-series は保存したE/Hを逐次渡します。初期入力の幾何条件と直接保存・再開を使います
+
+- 分子の空間依存E/Hと磁気電流の自己真空参照結合は、ISOLATED_TDDFT.md の `test_grid_feedback_mpi.py --orbital-magnetic` を参照してください。固定C₂H₂の接続・再開検証で、物理的収束を保証するものではありません。

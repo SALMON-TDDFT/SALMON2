@@ -471,6 +471,8 @@ end function
     lo=state%fs%mg%is_array;hi=state%fs%mg%ie_array
     allocate(state%current(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
     state%current=0d0
+    allocate(state%fe%coupling_h_left(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
+    call capture_magnetic_left()
     call comm_end_children(state%mpi_child_owner)
     sp_eh_init=0
   end function
@@ -612,6 +614,35 @@ end function
     status=0
   end function
 
+  subroutine capture_magnetic_left()
+    ! Independent from observation buffers, which may be temporally/spatially centered.
+    state%fe%coupling_h_left(1,:,:,:)=state%fe%hx_y+state%fe%hx_z
+    state%fe%coupling_h_left(2,:,:,:)=state%fe%hy_z+state%fe%hy_x
+    state%fe%coupling_h_left(3,:,:,:)=state%fe%hz_x+state%fe%hz_y
+  end subroutine
+
+  integer(c_int) function sp_eh_fields_read(nedges,indices,fields) bind(C) result(status)
+    ! Component grids retained; H at the E step is the mean of its half-step brackets.
+    integer(c_int),value::nedges
+    integer(c_int),intent(in)::indices(3,nedges)
+    real(c_double),intent(out)::fields(3,nedges,2)
+    integer::p,index(3),i,j,k
+    status=10
+    if(nedges<0)return
+    status=sp_eh_edges_read(nedges,indices,fields(:,:,1))
+    if(status/=0)return
+    fields(:,:,2)=0d0
+    do p=1,nedges
+      index=state%fs%lg%is+indices(:,p)
+      if(.not.(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie)))cycle
+      i=index(1);j=index(2);k=index(3)
+      fields(:,p,2)=.5d0*[state%fe%coupling_h_left(1,i,j,k)+state%fe%hx_y(i,j,k)+state%fe%hx_z(i,j,k), &
+                          state%fe%coupling_h_left(2,i,j,k)+state%fe%hy_z(i,j,k)+state%fe%hy_x(i,j,k), &
+                          state%fe%coupling_h_left(3,i,j,k)+state%fe%hz_x(i,j,k)+state%fe%hz_y(i,j,k)]
+    enddo
+    status=0
+  end function
+
   ! Explicit unchecked update: caller owns collective order and valid inputs.
   ! No full-state backup, finite scans, consistency votes or retry contract.
   integer(c_int) function sp_eh_step_performance(npoints,nlocal,owned,J,A_old,A_next,E) bind(C) result(status)
@@ -656,6 +687,7 @@ end function
     enddo
     state%step=state%step+1
     state%fe%iter_sta=state%step;state%fe%iter_end=state%step
+    call capture_magnetic_left()
     call eh_calc(state%fs,state%fe,state%ld,state%current)
     local_E=0d0
     do p=1,npoints
@@ -820,6 +852,7 @@ end function
     endif
     state%step=state%step+1
     state%fe%iter_sta=state%step;state%fe%iter_end=state%step
+    call capture_magnetic_left()
     call eh_calc(state%fs,state%fe,state%ld,state%current,guard,tensor_workspace=tensor_work)
     if(error/=0)then
       state%fe=before%fe;state%ld=before%ld
@@ -1109,7 +1142,7 @@ end function
     real(8),allocatable,intent(inout) :: current(:,:,:,:)
     integer,intent(inout) :: step
     integer,intent(out) :: ios
-    character(24),parameter :: signature='SALMONPY_EH_CHECKPOINT_1'
+    character(24),parameter :: signature='SALMONPY_EH_CHECKPOINT_2'
     character(24) :: magic,expected_magic
     real(8),allocatable::tensor_context(:,:,:,:)
     real(8)::tensor_options(6)
@@ -1121,8 +1154,8 @@ end function
     logical :: obs
     ios=0
     expected_magic=signature
-    if(fe%tensor_enabled)expected_magic='SALMONPY_EH_TENSOR_CP_1'
-    if(fe%subpixel_enabled)expected_magic='SALMONPY_EH_SUBPIXEL_CP1'
+    if(fe%tensor_enabled)expected_magic='SALMONPY_EH_TENSOR_CP_2'
+    if(fe%subpixel_enabled)expected_magic='SALMONPY_EH_SUBPIXEL_CP2'
     expected=[state%fs%lg%is,state%fs%lg%ie,state%fs%mg%is,state%fs%mg%ie, &
               state%fs%mg%is_array,state%fs%mg%ie_array]
     if(loading)then
@@ -1210,6 +1243,7 @@ end function
       if(ios/=0)return
     endif
     call checkpoint_r4(unit,loading,current,ios)
+    call checkpoint_r4(unit,loading,fe%coupling_h_left,ios)
     call checkpoint_r1(unit,loading,fe%c_ebloch_x,ios)
     call checkpoint_r1(unit,loading,fe%c_ebloch_y,ios)
     call checkpoint_r1(unit,loading,fe%c_ebloch_z,ios)

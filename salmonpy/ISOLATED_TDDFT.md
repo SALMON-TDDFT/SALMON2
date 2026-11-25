@@ -524,4 +524,27 @@ current = magnetic.total_current(electric_current, previous=previous_magnetic)
 
 磁化は波動関数と適用済みの場から再取得するため、追加の物理的な履歴を保存しません。直接チェックポイントから復元した直後に前ステップの磁化を取得し、次の分子更新後の磁化と組み合わせれば、再計算なしで区間電流を作れます。C₂H₂で電子ステップ2から4の直接再開後に磁化・区間電流・通常観測量の完全一致を確認しました。
 
-`tools/test_orbital_magnetic_response.py` は実ハミルトニアンの磁場微分と保存／再開を検証します。`tools/test_electric_edges_mpi.py response --response-history ...` は生成された電気・磁気・合計電流をFDTDへ渡します。これらは接続検証です。既存の `test_grid_feedback_mpi.py` は引き続き電気応答だけの自己真空参照試験であり、磁気を含む一般的な双方向更新・自己場処理・物理的収束の検証は別に残ります。
+`tools/test_orbital_magnetic_response.py` は実ハミルトニアンの磁場微分と保存／再開を検証します。`tools/test_electric_edges_mpi.py response --response-history ...` は生成された電気・磁気・合計電流をFDTDへ渡します。これらは接続検証です。`test_grid_feedback_mpi.py` の既定は電気応答のみで、磁気応答を含む自己真空参照は後述の `--orbital-magnetic` で選びます。一般的な異常復帰保証と物理的収束の検証は別に残ります。
+
+## 磁気応答を含む自己真空参照の双方向結合
+
+`tools/test_grid_feedback_mpi.py` の `--orbital-magnetic` は、直接E/H格子入力と軌道磁気電流の返却を、本計算・自己真空参照の両方へ接続します。スピンなし・固定イオン・PZのC₂H₂、電子計算1ランク、各FDTD群1または2ランクが現在の検証対象です。自己真空参照にも同じ分子電流を注入し、本計算からその参照のE/Hを差し引きます。真空中の自己場を除き、環境で散乱して戻った場を残す方針です。真空の放射反作用まで含めた計算ではありません。
+
+`field.component_field_geometry()` はE/Hそれぞれの成分格子の原点を返し、`field.component_fields(indices)` は配列 `[2,N,3]` にEとHを返します。Hは前後の半ステップの平均で、Eと同じ整数ステップ番号です。成分ごとの空間配置は保ちます。Fortranは観測出力用配列を流用せず、前の生のHを独立に保持します。その情報は巻き戻し・ディスク保存の対象です。E/Hは担当FDTD群内の一度の加算通信で取得し、アプリケーション全体へ格子を複製しません。
+
+更新順は次のとおりです。
+
+1. 最初に両方のFDTDを電流ゼロで1回進めます。
+2. 分子ステップn−1からnへの更新には、FDTDのnとn+1のE/Hを使います。まず電流ゼロの試行でn+1を予測します。
+3. 分子の前後の状態から電気分極電流と区間磁化電流をFortranで求め、一度だけ加算します。
+4. 両方のFDTDを試行前へ戻し、同じ合計電流を、それぞれ担当するE成分格子へ一度ずつ注入します。差し引き後のE/Hが予測と一致することを確認して更新を受け入れます。
+
+192分子ステップの試験では、分子96／場97で両FDTD・LD・分子を直接保存します。別のMPI起動で復元し、保存状態から前ステップの磁化を読み出して継続するため、復元のための時間発展は不要です。E/H・分子観測量と通常出力6ファイルは連続実行と完全一致しました。64ステップ目の意図的な失敗・再試行、および各FDTD群1／2ランクの比較も一致しました。磁気なしの既存試験は、同じ入口で `--orbital-magnetic` を省略します。
+
+```sh
+mpiexec -n 6 python tools/test_grid_feedback_mpi.py feedback \
+  FIELD_BUILD E_WORKER VALIDATION_JSON EXISTING_GS NEW_OUTPUT \
+  --orbital-magnetic --ld --field-ranks 2 --steps 192 --save-step 96
+```
+
+再開は同じ入力条件で、新しい出力先と `--resume SAVED_OUTPUT/checkpoint` を指定します。`VALIDATION_JSON` は使用する分子実行ファイルについて、`grid_eh`・`grid_stream`・`charge_density`・`orbital_magnetic` の検証を含む必要があります。インストール済みwheelでは、付属ツールは `salmonpy` の `_runtime_source/tools/` にあります。検証用の固定形状・光源を使う入口であり、任意の構造に対する一般的な実行・異常復帰の保証ではありません。予期しないMPI異常はその試験ジョブを終了します。物理的収束、スピン磁化、真空放射反作用の扱いは別途確認が必要です。

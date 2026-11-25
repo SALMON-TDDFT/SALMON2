@@ -1,8 +1,8 @@
-"""Development electric-only spatial molecular/FDTD feedback and direct restart.
+"""Development spatial electric/orbital-magnetic molecular/FDTD feedback and direct restart.
 
 Run one field group for external controls, two for feedback. Each group has
 FIELD_RANKS solver ranks and one bookkeeping rank. This is a finite-scope
-validation driver, not a general production coordinator or magnetic return.
+validation driver, not a general production failure coordinator.
 """
 import argparse
 from contextlib import ExitStack,contextmanager
@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--steps',type=int,default=8)
     parser.add_argument('--field-ranks',type=int,default=1)
     parser.add_argument('--ld',action='store_true')
+    parser.add_argument('--orbital-magnetic',action='store_true',help='Yee E/H input and orbital magnetic-current return')
     parser.add_argument('--baseline',type=Path)
     parser.add_argument('--inject-reject-step',type=int)
     parser.add_argument('--save-step',type=int)
@@ -56,7 +57,8 @@ def main():
         raise ValueError('launch (field-ranks+1) ranks per group')
     if args.steps<1:raise ValueError('positive step count required')
     pair=world.rank//size;local_world=world.Split(pair,world.rank)
-    dt=.003;start=np.array([10,12,9]);counts=(17,17,21);position=(-2.54,1.62,1.94)
+    dt=.003;start=np.array([8,8,8] if args.orbital_magnetic else [10,12,9])
+    counts=(24,24,24) if args.orbital_magnetic else (17,17,21);position=(-2.54,1.62,1.94)
     indices=np.array([[x,y,z] for z in range(start[2],start[2]+counts[2])
                       for y in range(start[1],start[1]+counts[1])
                       for x in range(start[0],start[0]+counts[0])],dtype=np.int32)
@@ -81,10 +83,13 @@ def main():
                 import traceback
                 traceback.print_exc();world.Abort(1);raise
             backup=_NativeBackup(field,context.solver_comm,'sp_eh_step_transaction',field.directory,('A','E','step_index','failed','closed'))
-        geometry=field.electric_edge_geometry() if field is not None else None
+        geometry=(field.component_field_geometry() if args.orbital_magnetic else field.electric_edge_geometry()) if field is not None else None
         geometry=world.bcast(geometry if world.rank==0 else None,root=0)
         origin=geometry['origin']+start*geometry['spacing']
         def window(left,right,n):
+            if args.orbital_magnetic:
+                return GridFieldSeries(origin,geometry['spacing'],[0.,dt],np.array([left[0],right[0]]),
+                    np.array([left[1],right[1]]),molecule_position=position,time_origin=n*dt)
             return GridFieldSeries(np.stack((origin,origin)),geometry['spacing'],[0.,dt],
                 np.array([left,right]).reshape((2,*shape)),np.zeros((2,*shape)),
                 molecule_position=position,time_origin=n*dt)
@@ -95,7 +100,7 @@ def main():
             for name in ('C_rps.dat','H_rps.dat','input.inp'):shutil.copy2(args.bundle/name,source/name)
             shutil.copytree(args.bundle/'data_for_restart',source/'data_for_restart')
             empty=np.zeros((args.steps+2,*shape))
-            GridFieldSeries(np.stack((origin,origin)),geometry['spacing'],np.arange(args.steps+2)*dt,empty,empty,
+            GridFieldSeries(origin if args.orbital_magnetic else np.stack((origin,origin)),geometry['spacing'],np.arange(args.steps+2)*dt,empty,empty,
                             molecule_position=position).write(source/'salmonpy-near-eh.dat')
             runtime=load_isolated_runtime(args.worker,args.validation)
             model=stack.enter_context(IsolatedTDDFTInitialState.from_salmon(source,'input.inp',runtime=runtime,
@@ -105,7 +110,7 @@ def main():
         traces=observations=None
         if args.resume:
             meta=json.loads((args.resume/'metadata.json').read_text())
-            expected=dict(steps=args.steps,field_ranks=args.field_ranks,ld=args.ld,dt=dt,
+            expected=dict(steps=args.steps,field_ranks=args.field_ranks,ld=args.ld,orbital_magnetic=args.orbital_magnetic,dt=dt,
                           field_sha256=json.loads(args.field_build.read_text())['sha256'])
             if any(meta[k]!=v for k,v in expected.items()):raise ValueError('checkpoint configuration differs')
             if field is not None:
@@ -142,19 +147,20 @@ def main():
         def collect():
             data=None
             if field is not None:
-                values=field.electric_edges(indices).reshape(shape)
+                values=field.component_fields(indices).reshape((2,*shape)) if args.orbital_magnetic else field.electric_edges(indices).reshape(shape)
                 if context.is_leader:data=values
             return world.gather(data,root=0)
         initial=collect()
         if world.rank==0:
             if traces is None:
-                own=initial[size] if feedback else np.zeros(shape)
-                first=selected((initial[0],initial[0]),(own,own),1).E[0]
+                own=initial[size] if feedback else np.zeros_like(initial[0])
+                first_drive=selected((initial[0],initial[0]),(own,own),1)
+                first=np.stack((first_drive.E[0],first_drive.H[0])) if args.orbital_magnetic else first_drive.E[0]
                 traces=dict(total=[initial[0]],own=[own],selected=[first])
                 observations=[] if state is None else [state._engine.current.copy()]
             previous_total=traces['total'][-1];previous_own=traces['own'][-1]
             density=None if state is None else state.charge_density()
-        rejected=False;drive_errors=[]
+        rejected=False;drive_errors=[];magnetic_peak=0.
         for n in range(nstart,args.steps+1):
             while True:
                 token=None if backup is None else backup.capture()
@@ -163,15 +169,20 @@ def main():
                 if not feedback:
                     if backup:backup.release(token)
                     if world.rank==0:
-                        traces['total'].append(trial[0]);traces['own'].append(np.zeros(shape));traces['selected'].append(trial[0])
+                        traces['total'].append(trial[0]);traces['own'].append(np.zeros_like(trial[0]));traces['selected'].append(trial[0])
                     break
                 payloads=None;quantum_token=None
                 if world.rank==0:
                     drive=selected((previous_total,trial[0]),(previous_own,trial[size]),n)
+                    previous_magnetic=state.orbital_magnetic_response() if args.orbital_magnetic else None
                     quantum_token=state.savepoint();state.step_grid_field(drive,step_index=n)
                     next_density=state.charge_density()
                     current=drive.charge_current(next_density.positions,density.charge_density,next_density.charge_density,
                                                 volume_elements=next_density.volume_elements,dt=dt)
+                    if args.orbital_magnetic:
+                        magnetic=state.orbital_magnetic_response()
+                        magnetic_peak=max(magnetic_peak,float(np.max(np.abs(magnetic.current_density(previous=previous_magnetic)))))
+                        current=magnetic.total_current(current,previous=previous_magnetic)
                     payloads=[current if rank in (0,size) else None for rank in range(world.size)]
                 group_current=world.scatter(payloads,root=0)
                 if field is not None:
@@ -187,7 +198,8 @@ def main():
                 accepted=collect();decision=None
                 if world.rank==0:
                     actual=selected((previous_total,accepted[0]),(previous_own,accepted[size]),n)
-                    error=_comparison(drive.E,actual.E,1e-13,1e-10)
+                    error=_comparison(np.stack((drive.E,drive.H)) if args.orbital_magnetic else drive.E,
+                                      np.stack((actual.E,actual.H)) if args.orbital_magnetic else actual.E,1e-13,1e-10)
                     if not error['within_tolerance']:raise AssertionError('selected drive changed after radiation: '+str(error))
                     decision=args.inject_reject_step==n and not rejected
                     drive_errors.append(error['absolute_error'])
@@ -203,7 +215,7 @@ def main():
                 if world.rank==0:
                     state.release_savepoint(quantum_token);density=next_density
                     previous_total=accepted[0];previous_own=accepted[size]
-                    traces['total'].append(previous_total);traces['own'].append(previous_own);traces['selected'].append(actual.E[1])
+                    traces['total'].append(previous_total);traces['own'].append(previous_own);traces['selected'].append(np.stack((actual.E[1],actual.H[1])) if args.orbital_magnetic else actual.E[1])
                     observations.append(state._engine.current.copy())
                     assert state.worker_statistics()['step']==n
                 break
@@ -220,7 +232,7 @@ def main():
                 if world.rank==0:
                     state.save_direct_checkpoint(checkpoint/'molecule')
                     np.savez(checkpoint/'history.npz',**traces,observations=observations)
-                    meta=dict(steps=args.steps,field_ranks=args.field_ranks,ld=args.ld,dt=dt,field_step=n+1,molecular_step=n,
+                    meta=dict(steps=args.steps,field_ranks=args.field_ranks,ld=args.ld,orbital_magnetic=args.orbital_magnetic,dt=dt,field_step=n+1,molecular_step=n,
                               field_sha256=json.loads(args.field_build.read_text())['sha256'])
                     (checkpoint/'metadata.json').write_text(json.dumps(meta,indent=2)+'\n')
                 world.Barrier()
@@ -243,7 +255,8 @@ def main():
                 for file in (Path(state._engine._work.name)/'run').glob('*.data'):shutil.copy2(file,folder/file.name)
             summary=dict(mode=args.mode,ld=args.ld,molecular_steps=args.steps if feedback else None,field_steps=args.steps+1,
                 field_ranks=args.field_ranks,position_bohr=position,patch_counts=counts,
-                policy='environment_scattered_only',electric_only_feedback=True,magnetic_return=False,
+                policy='environment_scattered_only',electric_only_feedback=not args.orbital_magnetic,magnetic_return=args.orbital_magnetic,
+                magnetic_current_peak=magnetic_peak,
                 maximum_drive_change=max(drive_errors,default=0.),rejected_and_retried=rejected,
                 restored_steps=restored_steps,restore_extra_evolutions=0 if args.resume else None,
                 baseline_matched=bool(args.baseline) and (trajectory_control or not args.ld),

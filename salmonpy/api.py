@@ -302,6 +302,7 @@ def _field_operations():
         'step_checked': [('points','int','in'),('J','array','in'),('A','array','in'),('E','array','out')],
         'step_edges': [('points','int','in'),('edges','int','in'),('indices','indices','in'),('J','matrix','in'),('A','matrix','in'),('E','matrix','out')],
         'edges_read': [('edges','int','in'),('indices','indices','in'),('E','matrix','out')],
+        'fields_read': [('edges','int','in'),('indices','indices','in'),('fields','array','out')],
         'edge_geometry': [('counts','mask','out'),('origins','matrix','out'),('spacing','array','out')],
         'sample_h': [('points','int','in'),('H','matrix','out')],
         'box_energy_step': [('box','indices','in'),('values','buffer','out')],
@@ -314,7 +315,7 @@ def _field_operations():
     result = {}
     for name,parameters in specs.items():
         query=name.endswith('_protocol')
-        local=query or name in ('current_mask','plane_read','edges_read','edge_geometry')
+        local=query or name in ('current_mask','plane_read','edges_read','fields_read','edge_geometry')
         entry={'parameters':[{'name':n,'type':t,'direction':d} for n,t,d in parameters],
                'arguments':[t for _,t,_ in parameters], 'returns':'int',
                'collective':'local' if local else 'solver group',
@@ -333,6 +334,7 @@ def _field_operations():
             entry['layout']='indices int32 C(edges,3), zero-based global offsets; J float64 C(edges,3) on E components, no averaging/volume/sign conversion'
             entry['atomicity']='uses the existing checked E/LD/H update and recovery gates'
         if name=='edges_read':entry['layout']='same zero-based edge offsets; only owned E components returned, zero elsewhere; local, read-only'
+        if name=='fields_read':entry['layout']='float64 C(2,N,3), raw E and half-step-centered H on distinct Yee component grids; only owned values, zero elsewhere; local read-only'
         if name=='edge_geometry':entry['layout']='global counts int32[3], E-component origins float64 C(3,3) [component,axis], spacing float64[3]; bohr'
         if name=='step_owned':entry['routing']='J rows follow ascending current-mask rows; local count differs by field rank; A/E retain all mapped rows'
         if name=='step_performance':

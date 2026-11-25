@@ -463,4 +463,22 @@ Current conversion requires Yee origins: E shifted half a cell along its own com
 
 Magnetization is derived from saved wavefunctions and applied fields; no extra physical history is introduced. After direct restoration, read the previous response immediately, then combine with the next accepted response. C2H2 molecular steps2->4 reproduce magnetization, interval currents and ordinary observables bit-exactly without restoration evolution.
 
-`tools/test_orbital_magnetic_response.py` checks finite differences of the actual frozen-state Hamiltonian and direct restart. `tools/test_electric_edges_mpi.py response --response-history ...` injects the resulting electric/magnetic/combined currents into FDTD. These are connection checks. The existing `test_grid_feedback_mpi.py` remains an electric-only own-vacuum feedback test; a general magnetic bidirectional coordinator, self-field policy and physical convergence are separate work.
+`tools/test_orbital_magnetic_response.py` checks finite differences of the actual frozen-state Hamiltonian and direct restart. `tools/test_electric_edges_mpi.py response --response-history ...` injects the resulting electric/magnetic/combined currents into FDTD. These are connection checks. The default `test_grid_feedback_mpi.py` mode is electric-only; its `--orbital-magnetic` own-vacuum extension is described below. General failure recovery and physical convergence remain separate work.
+
+## Bidirectional coupling with orbital magnetic response and an own-vacuum reference
+
+`tools/test_grid_feedback_mpi.py --orbital-magnetic` connects direct E/H input and orbital magnetic-current return to both total and own-vacuum FDTD groups. Verified scope: spinless fixed-ion PZ C2H2, one electronic worker and one/two ranks in each field group. Both groups receive the same molecular current. Subtracting their E/H removes the vacuum self-field and retains the environment-scattered return. This policy does not include vacuum radiation reaction.
+
+`field.component_field_geometry()` returns distinct E/H component origins. `field.component_fields(indices)` returns `[2,N,3]`: raw E and H averaged from adjacent half-step brackets at the same integer field step. Spatial staggering is preserved. Fortran retains the preceding raw H independently of observation buffers; rollback and disk checkpoints include it. A single owning-field-group reduction collects E/H; full grids are not replicated across all application ranks.
+
+First hold both FDTD groups once with zero current. Molecular update n-1->n uses field frames n,n+1. A zero-current trial predicts frame n+1; Fortran obtains electric polarization current and the interval orbital magnetic current, and adds them exactly once. Restore both fields, inject the same combined current into each group's owned E components and accept only when the selected E/H matches the prediction.
+
+The192-molecular-step trial saves molecular96/field97, including both FDTD/LD states and the molecule. A fresh MPI launch restores them and reads the previous magnetization from the restored quantum state, without extra evolution. E/H, molecular observables and six ordinary streams matched continuous execution bit-exactly. Rejection/retry at step64 and one/two field ranks per group also matched. Omit `--orbital-magnetic` for the existing electric-only case.
+
+```sh
+mpiexec -n 6 python tools/test_grid_feedback_mpi.py feedback \
+  FIELD_BUILD E_WORKER VALIDATION_JSON EXISTING_GS NEW_OUTPUT \
+  --orbital-magnetic --ld --field-ranks 2 --steps 192 --save-step 96
+```
+
+Resume with matching inputs, a new output directory and `--resume SAVED_OUTPUT/checkpoint`. The executable-bound receipt needs `grid_eh`, `grid_stream`, `charge_density` and `orbital_magnetic` evidence. Installed wheels place the tool in the package's `_runtime_source/tools/`. This uses a fixed validation geometry/source; it is not a general arbitrary-geometry or failure-atomic production coordinator. Unexpected MPI errors terminate the test job. Physical convergence, spin magnetization and vacuum radiation reaction remain separate work.

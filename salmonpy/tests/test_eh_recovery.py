@@ -82,3 +82,24 @@ class ComponentCurrentIndexTests(unittest.TestCase):
         operations=_field_operations()
         self.assertIn('rank-local',operations['sp_eh_step_edges']['routing'])
         self.assertEqual(operations['sp_eh_edges_read']['collective'],'local')
+
+
+class ComponentEHQueryTests(unittest.TestCase):
+    def test_geometry_and_registered_read_only_operation(self):
+        from salmonpy.api import _field_operations
+        self.assertEqual(_field_operations()['sp_eh_fields_read']['collective'],'local')
+        self.assertEqual(_field_operations()['sp_eh_fields_read']['arguments'][-1],'array')
+        f=NativeEHField.__new__(NativeEHField)
+        f.electric_edge_geometry=lambda:dict(counts=(40,40,40),origin=np.full((3,3),-39.)+np.eye(3),spacing=np.full(3,2.))
+        geometry=f.component_field_geometry()
+        np.testing.assert_array_equal(geometry['origin'][0],np.full((3,3),-39.)+np.eye(3))
+        np.testing.assert_array_equal(geometry['origin'][1],np.full((3,3),-38.)-np.eye(3))
+
+        f.calculation=SimpleNamespace(geometry=SimpleNamespace(grid=SimpleNamespace(counts=(40,40,40))))
+        f.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=lambda value:[value],Allreduce=lambda local,out:np.copyto(out,local)))
+        f.closed=f.failed=False
+        def read(n,indices,values):
+            self.assertEqual(values.shape,(2,n,3));values[0]=2.;values[1]=3.;return 0
+        f.lib=SimpleNamespace(sp_eh_fields_read=Function(read));f._call=lambda fn,*args:fn(*args)
+        result=f.component_fields([[2,3,4]])
+        np.testing.assert_array_equal(result,np.array([[[2.,2.,2.]],[[3.,3.,3.]]]))

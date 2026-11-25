@@ -368,3 +368,5 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 - `python -m salmonpy.examples.molecular_charge_density --help`: Explicit density readout from a validated molecular runtime; permanent storage requires --save-density
 
 - isolated_response --grid-series streams saved E/H with fixed prepared geometry and direct checkpoint/restart
+
+- For spatial molecular E/H and orbital magnetic own-vacuum feedback, see `test_grid_feedback_mpi.py --orbital-magnetic` in ISOLATED_TDDFT.en.md. This is a fixed-C2H2 connection/restart trial, not a physical-convergence guarantee.
