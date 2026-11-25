@@ -6,6 +6,7 @@ module salmonpy_grid_field
  implicit none
  private
  public::grid_validate,grid_values,grid_potentials,grid_line_phase
+ public::grid_magnetic_add,grid_phase_magnetic_add
  public::sp_grid_protocol,sp_grid_fields,sp_grid_potentials,sp_grid_pack,sp_grid_average
 contains
  integer(c_int) function sp_grid_protocol() bind(C)
@@ -194,6 +195,105 @@ contains
   enddo
   enddo
   if(.not.ieee_is_finite(phase))status=4
+ end subroutine
+ subroutine grid_magnetic_add(counts,origins,spacing,position,r,q,M,status)
+  ! Add -d(q.A/c)/dH / cell_volume, transpose of grid_potentials.
+  integer,intent(in)::counts(3)
+  real(8),intent(in)::origins(3,3),spacing(3),position(3),r(3),q(3)
+  real(8),intent(inout)::M(3,counts(1),counts(2),counts(3))
+  integer,intent(out)::status
+  real(8),parameter::nodes(3)=[-.774596669241483377d0,0d0,.774596669241483377d0]
+  real(8),parameter::weights(3)=[5d0/9d0,8d0/9d0,5d0/9d0]
+  real(8)::next_face(3,3),increment(3),x,f,tol,left,right,t,w,point(3),basis(0:1,3),v(3),dv
+  integer::d,k,j,plane,index(3),ix,iy,iz
+  integer(8)::iterations
+  status=4;dv=product(spacing)
+  if(.not.ieee_is_finite(dv).or.dv<=0d0.or.any(counts<2))return
+  do k=1,3
+   if(.not.ieee_is_finite(r(k)).or..not.ieee_is_finite(q(k)))return
+  enddo
+  v=-[r(2)*q(3)-r(3)*q(2),r(3)*q(1)-r(1)*q(3),r(1)*q(2)-r(2)*q(1)]/(137.035999084d0*dv)
+  next_face=huge(1d0);increment=0d0
+  do k=1,3
+   if(r(k)==0d0)cycle
+   increment(k)=spacing(k)/abs(r(k))
+   do d=1,3
+    x=(position(k)-origins(k,d))/spacing(k)
+    tol=32d0*epsilon(1d0)*max(1d0,abs(x))
+    if(r(k)>0d0)then
+     plane=floor(x+tol)+1
+    else
+     plane=ceiling(x-tol)-1
+    endif
+    next_face(k,d)=(origins(k,d)+plane*spacing(k)-position(k))/r(k)
+   enddo
+  enddo
+  left=0d0;iterations=0
+  do while(left<1d0)
+   right=min(1d0,minval(next_face));if(right<left)return
+   do j=1,3
+    t=.5d0*((right-left)*nodes(j)+right+left);w=.5d0*(right-left)*weights(j)*t
+    point=position+t*r
+    do d=1,3
+     do k=1,3
+      x=(point(k)-origins(k,d))/spacing(k)
+      if(.not.ieee_is_finite(x))return
+      tol=32d0*epsilon(1d0)*max(1d0,abs(x))
+      if(x< -tol.or.x>counts(k)-1+tol)return
+      x=min(max(x,0d0),real(counts(k)-1,8));index(k)=min(floor(x)+1,counts(k)-1)
+      f=x-(index(k)-1);basis(1,k)=f;basis(0,k)=1d0-f
+     enddo
+     do iz=0,1
+     do iy=0,1
+     do ix=0,1
+      M(d,index(1)+ix,index(2)+iy,index(3)+iz)= &
+       M(d,index(1)+ix,index(2)+iy,index(3)+iz)+v(d)*w*basis(ix,1)*basis(iy,2)*basis(iz,3)
+     enddo
+     enddo
+     enddo
+    enddo
+   enddo
+   do d=1,3
+   do k=1,3
+    if(next_face(k,d)<=right+32d0*epsilon(1d0))next_face(k,d)=next_face(k,d)+increment(k)
+   enddo
+   enddo
+   left=right;iterations=iterations+1
+   if(iterations>3_8*sum(int(counts,8))+1_8)return
+  enddo
+  status=0
+ end subroutine
+ subroutine grid_phase_magnetic_add(counts,origins,spacing,field_center,center,start,finish,gradient,M,status)
+  integer,intent(in)::counts(3)
+  real(8),intent(in)::origins(3,3),spacing(3)
+  real(8),intent(in)::field_center(3),center(3),start(3),finish(3)
+  real(8),intent(in)::gradient
+  real(8),intent(inout)::M(3,counts(1),counts(2),counts(3))
+  integer,intent(out)::status
+  real(8),parameter::nodes(8)=[.095012509837637440d0,.281603550779258913d0, &
+    .458016777657227386d0,.617876244402643748d0,.755404408355003034d0, &
+    .865631202387831744d0,.944575023073232576d0,.989400934991649933d0]
+  real(8),parameter::weights(8)=[.189450610455068496d0,.182603415044923589d0, &
+    .169156519395002538d0,.149595988816576732d0,.124628971255533872d0, &
+    .095158511682492785d0,.062253523938647893d0,.027152459411754095d0]
+  real(8)::r(3),q(3),t,length_in_cells
+  integer::segments,segment,k,side
+  status=4;length_in_cells=2d0*maxval(abs(finish-start)/spacing)
+  if(.not.ieee_is_finite(length_in_cells))return
+  if(length_in_cells>real(huge(segments)-1,8))return
+  segments=max(1,ceiling(length_in_cells))
+  do segment=1,segments
+  do k=1,8
+  do side=-1,1,2
+   t=(segment-.5d0+.5d0*side*nodes(k))/segments
+   r=start+t*(finish-start)-center
+   q=gradient*.5d0*weights(k)*(finish-start)/segments
+   call grid_magnetic_add(counts,origins,spacing,field_center,r,q,M,status)
+   if(status/=0)return
+  enddo
+  enddo
+  enddo
+
  end subroutine
  integer(c_int) function sp_grid_fields(n,counts,origins,spacing,field_center,center,points,data,E,H) &
   bind(C) result(status)

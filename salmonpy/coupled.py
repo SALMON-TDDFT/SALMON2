@@ -386,6 +386,54 @@ class NativeEHField:
         """Advance with identical global point currents on every field rank."""
         return self._advance(J_previous,owned=False)
 
+    def advance_edges(self,indices,current):
+        """Checked step with rank-local E-component currents, without averaging.
+
+        Zero-based global indices[N,3]; current[N,3] in atomic units. Only each
+        rank's owned cells contribute. Include the same edge at most once per
+        source (duplicate rows intentionally superpose). List lengths may differ.
+        """
+        return self._advance(np.zeros_like(self.A),owned=False,edges=(indices,current))
+
+    def electric_edge_geometry(self):
+        """Local read-only global counts, E origins[component,axis], spacing."""
+        from .api import _bind_field_operations
+        if self.closed or self.failed:raise InputError('usable field required')
+        _bind_field_operations(self.lib,('sp_eh_edge_geometry',))
+        counts=np.empty(3,dtype=np.int32);origins=np.empty((3,3));spacing=np.empty(3)
+        if self._call(self.lib.sp_eh_edge_geometry,counts,origins,spacing):raise RuntimeFailure('E-component geometry unavailable')
+        return dict(counts=tuple(map(int,counts)),origin=origins,spacing=spacing)
+
+    def electric_edges(self,indices):
+        """Collectively sample raw E components at matching global offsets.
+
+        This explicit read sums owned values within the field group, not globally
+        across the application. It neither advances a field nor writes files.
+        """
+        from .api import _bind_field_operations
+        comm=self.context.solver_comm;error=None;points=None
+        try:
+            points=self._edge_indices(indices)
+            if self.closed or self.failed:raise InputError('usable field required')
+            _bind_field_operations(self.lib,('sp_eh_edges_read',))
+        except Exception as exc:error=str(exc)
+        records=comm.allgather((error,None if error else points.tolist()))
+        if any(e for e,_ in records) or any(v!=records[0][1] for _,v in records):
+            raise InputError('matching valid E-component query indices required: '+str(records))
+        local=np.empty((len(points),3));result=np.empty_like(local)
+        code=self._call(self.lib.sp_eh_edges_read,len(points),points,local)
+        _agree(comm,'E-component query failed' if code or not np.isfinite(local).all() else None)
+        comm.Allreduce(local,result)
+        return result
+
+    def _edge_indices(self,indices):
+        raw=np.asarray(indices)
+        counts=np.array(self.calculation.geometry.grid.counts)
+        if raw.ndim!=2 or raw.shape[1]!=3 or raw.dtype.kind not in 'iu':
+            raise InputError('integer edge indices[N,3] required')
+        if np.any(raw<0) or np.any(raw>=counts):raise InputError('edge offsets outside global grid')
+        return np.ascontiguousarray(raw,dtype=np.int32)
+
     def advance_owned(self,J_previous):
         """Coupling path: only current_rows are meaningful off the field leader."""
         if self.current_rows is None:return self.advance(J_previous)
@@ -419,11 +467,18 @@ class NativeEHField:
         self.A=next_A;self.E=E;self.step_index+=1
         return self.A.copy()
 
-    def _advance(self,J_previous,*,owned):
-        if self.execution_mode=='performance':return self._advance_performance(J_previous,owned=owned)
+    def _advance(self,J_previous,*,owned,edges=None):
+        if self.execution_mode=='performance' and edges is None:return self._advance_performance(J_previous,owned=owned)
         comm=self.context.solver_comm;error=None
         try:
             if self.closed or self.failed or self.step_index>=self.capacity:raise InputError('closed, failed or exhausted field')
+            if edges is not None:
+                if self.execution_mode!='checked':raise InputError('direct edge currents currently require checked execution mode')
+                from .api import _bind_field_operations
+                from .field_input import _real
+                edge_indices=self._edge_indices(edges[0])
+                edge_current=np.ascontiguousarray(_real(edges[1],(len(edge_indices),3),'edge currents'))
+                _bind_field_operations(self.lib,('sp_eh_step_edges',))
             J=np.array(J_previous,dtype=np.float64,order='C')
             if J.shape!=self.A.shape or not np.isfinite(J).all():raise InputError('finite point currents required')
             if self.step_index==0 and np.any(J):raise InputError('initial feedback current must be zero')
@@ -432,7 +487,7 @@ class NativeEHField:
         except Exception as exc:error=f'{type(exc).__name__}: {exc}'
         # One admission exchange contains both local validity and exact values.
         # Every member makes the same decision, including on remote failure.
-        checks=comm.allgather((error,None if error or owned else J.tolist()))
+        checks=comm.allgather((error,None if error or owned else (J.tolist() if edges is None else 'component-current-lists')))
         errors=[item[0] for item in checks]
         if any(errors):raise InputError(str(errors))
         values=[item[1] for item in checks]
@@ -441,7 +496,9 @@ class NativeEHField:
         workspace_rejected=False
         try:
             checked=getattr(self.lib,'sp_eh_step_checked',None)
-            if owned:
+            if edges is not None:
+                code=self._call(self.lib.sp_eh_step_edges,len(self.point_ids),len(edge_indices),edge_indices,edge_current,self.A,E)
+            elif owned:
                 from .api import _bind_field_operations
                 _bind_field_operations(self.lib,('sp_eh_step_owned',))
                 fn=self.lib.sp_eh_step_owned

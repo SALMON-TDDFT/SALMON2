@@ -70,7 +70,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.quickstart': ('run',), 'salmonpy.subpix
                    'FDTDResult',
                    'FDTDMPI',
                    'SalmonExecutable'),
- 'salmonpy.isolated_tddft': ('IsolatedRuntime', 'load_isolated_runtime', 'DipoleObservables', 'IsolatedTDDFTInitialState', 'IsolatedTDDFTState', 'IsolatedSavepoint'),
+ 'salmonpy.isolated_tddft': ('IsolatedRuntime', 'load_isolated_runtime', 'DipoleObservables', 'ChargeDensitySamples', 'OrbitalMagneticResponse', 'IsolatedTDDFTInitialState', 'IsolatedTDDFTState', 'IsolatedSavepoint'),
  'salmonpy.dipole_source': ('DipoleMap', 'drive_native_dipoles', 'MolecularDrive', 'select_molecular_field', 'MolecularFrame', 'MolecularFeedback'),
  'salmonpy.near_field': ('ElectricPotentialSeries','NearFieldSeries','NearFieldFrame','couple_path_samples','GridFieldSeries'),
  'salmonpy.field_sampling': ('SampledField', 'sample_packet'),
@@ -300,6 +300,9 @@ def _field_operations():
         'step_owned': [('points','int','in'),('local_points','int','in'),('J','array','in'),('A','array','in'),('E','array','out')],
         'step_performance': [('points','int','in'),('local_points','int','in'),('owned','int','in'),('J','array','in'),('old_A','array','in'),('A','array','out'),('E','array','out')],
         'step_checked': [('points','int','in'),('J','array','in'),('A','array','in'),('E','array','out')],
+        'step_edges': [('points','int','in'),('edges','int','in'),('indices','indices','in'),('J','matrix','in'),('A','matrix','in'),('E','matrix','out')],
+        'edges_read': [('edges','int','in'),('indices','indices','in'),('E','matrix','out')],
+        'edge_geometry': [('counts','mask','out'),('origins','matrix','out'),('spacing','array','out')],
         'sample_h': [('points','int','in'),('H','matrix','out')],
         'box_energy_step': [('box','indices','in'),('values','buffer','out')],
         'plane_read': [('axis','int','in'),('offset','int','in'),('values_count','int','in'),('info','buffer','out'),('values','buffer','out')],
@@ -311,7 +314,7 @@ def _field_operations():
     result = {}
     for name,parameters in specs.items():
         query=name.endswith('_protocol')
-        local=query or name in ('current_mask','plane_read')
+        local=query or name in ('current_mask','plane_read','edges_read','edge_geometry')
         entry={'parameters':[{'name':n,'type':t,'direction':d} for n,t,d in parameters],
                'arguments':[t for _,t,_ in parameters], 'returns':'int',
                'collective':'local' if local else 'solver group',
@@ -325,6 +328,12 @@ def _field_operations():
         if name in ('step','step_checked','step_owned'):
             entry['current']='physical charge-current density j in atomic units (C parameter named J); previous half-step; no volume multiplier or sign conversion'
             entry['atomicity']='use declared protected-step transaction/coordinator; raw call is not universal rollback'
+        if name=='step_edges':
+            entry['routing']='rank-local lists: only locally owned cells consumed; different list sizes allowed; duplicates add'
+            entry['layout']='indices int32 C(edges,3), zero-based global offsets; J float64 C(edges,3) on E components, no averaging/volume/sign conversion'
+            entry['atomicity']='uses the existing checked E/LD/H update and recovery gates'
+        if name=='edges_read':entry['layout']='same zero-based edge offsets; only owned E components returned, zero elsewhere; local, read-only'
+        if name=='edge_geometry':entry['layout']='global counts int32[3], E-component origins float64 C(3,3) [component,axis], spacing float64[3]; bohr'
         if name=='step_owned':entry['routing']='J rows follow ascending current-mask rows; local count differs by field rank; A/E retain all mapped rows'
         if name=='step_performance':
             entry['requires']='performance mode; caller guarantees matching collective order, current ownership and valid data; no rollback/retry guarantee'

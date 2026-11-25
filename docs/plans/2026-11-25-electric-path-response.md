@@ -1,0 +1,7 @@
+# Electric path response
+
+Next stage after approved off-grid dipole feedback: implement the transpose of the electric Iwasa line-integral operator in Fortran. Signed charge-density samples and their volume elements produce a polarization grid; a density difference produces the interval-average current. The output is on the input E-component grids, not on already-averaged macro sites. No extra application-wide communication or backend state is needed for this stateless operator.
+
+Steps: failing work/moment tests; Fortran cell-split deposition; Python geometry dispatch; independent Fortran nonuniform/staggered work test and failure atomicity; wheel installation and guide/JSON/checklist update. Keep the existing forward field kernel unchanged. This is an electric-response operator for custom/read-out densities, not live density transfer, magnetic response or a completed spatial TDDFT feedback driver. Do not feed these component-grid currents through the macro-site deposition map a second time. A later solver bridge must add them directly to the corresponding component grids, with a matching own-vacuum reference.
+
+Completed the array-level implementation, independent Fortran tests, Git-only source preparation, sdist/wheel installation,101installed tests(99pass/2skip), saved-array example and localized guides/AI contract. See docs/electric-path-response-validation-2026-11-25.md. Live worker/FDTD bridge remains pending.

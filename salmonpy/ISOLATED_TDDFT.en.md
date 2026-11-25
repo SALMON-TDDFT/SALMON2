@@ -224,7 +224,7 @@ Supply both initial brackets explicitly; missing endpoints are not guessed or ex
 Molecular positions and expansion centers are real coordinates; they need not coincide with FDTD grid points.
 Fit surrounding E/H samples about the chosen center without moving the molecule to a grid point or
 substituting a nearest-neighbor field. This is a one-way conversion of saved fields into TDDFT input.
-Interpolation, current deposition and energy consistency for feedback into FDTD require a separate design.
+The electric path-current map and checked FDTD injection are described below; the orbital magnetic return interface is described below.
 Samples should cover the molecular electronic-density region. A single smooth expansion across a metal
 interface, or extrapolation outside the sampled region, is not an accuracy guarantee.
 
@@ -377,3 +377,90 @@ A 27-site 3D LD/FDTD saved-field test reached80 molecular updates. Direct restar
 continuous execution exactly. Uniform-field harmonics matched the batch reference within about4e-12 e*bohr.
 However, the actual FDTD tests had large field-approximation residuals; these are not near-field physical-accuracy validations.
 Use the spatial E/H near-field mode above when both electric and magnetic coupling are needed.
+
+## Distributing charge response for spatial electric fields
+
+`GridFieldSeries.charge_polarization` and `charge_current` implement the transpose of the electric path-integral operator in Fortran. They return polarization or interval-average current on the E-component grids. Input `charge_density` is **signed physical charge density**, e/bohr³, not positive electron number density. Electrons alone have negative charge density. Supply point quadrature volumes in bohr³ through `volume_elements`. Fixed ionic charges cancel from the current difference only for unchanged ionic positions, sample points and volumes.
+
+```python
+J = field_series.charge_current(
+    molecular_positions, old_charge_density, new_charge_density,
+    volume_elements=volumes, dt=dt)
+P = field_series.charge_polarization(
+    molecular_positions, new_charge_density, volume_elements=volumes)
+```
+
+Paths translate TDDFT coordinates relative to the expansion center to the FDTD molecule position and split at component-grid cell faces. Output shape is `[z,y,x,component]`; P has units e/bohr², J atomic units. Components use the input E grids. The spatial work identity is `dt*sum_grid(E*J*dV)=sum_molecule(delta_rho_charge*V_e*dv)`, where `V_e(r)=(r-R).integral(E(R+s*(r-R)),s=0..1)` is the electric path integral entering the electron Hamiltonian. This identity for supplied arrays does not establish temporal accuracy or full-domain energy balance.
+
+This is an array-level calculation component, usable with charge densities supplied by custom code. Explicit worker-density acquisition and direct component-grid current injection are now available below. Live grid input and electric-only own-vacuum feedback are validated in the development driver below; a general production coordinator is not provided. Do not send this J through DipoleMap or the macro-site current entry: that would apply another interpolation. The separate orbital magnetization-current interface is described below; complete coupled charge-continuity validation remains open. Use `python -m salmonpy.examples.grid_electric_response --help` for saved-array preparation.
+
+## Read TDDFT charge density and pass component currents
+
+`state.charge_density()` explicitly reads the current accepted electronic charge density, without propagation, reinitialization or replay. Its owned, read-only `ChargeDensitySamples` contains `step_index`, `time`, `positions` in bohr, negative electronic `charge_density` in e/bohr³ and `volume_elements` in bohr³. Ions are excluded; fixed ions cancel from endpoint differences.
+
+```python
+old = state.charge_density()
+state.step(E)
+new = state.charge_density()
+J = series.charge_current(new.positions, old.charge_density, new.charge_density,
+                          volume_elements=new.volume_elements, dt=state.dt)
+```
+
+This is supported for validated molecular PZ, fixed-ion, single-rank executables. The public loader verifies the executable SHA256 and `charge_density` evidence. It is not automatic per-step output: each explicit request updates a binary transfer file inside the private worker directory. Account for this I/O at scale. Permanent density storage remains opt-in. Direct electronic checkpoints already contain density; readout after restoration uses that accepted step without evolution.
+
+`field.advance_edges(indices,current)` directly consumes physical current density already placed on E components. `indices[N,3]` are zero-based global grid offsets; `current[N,3]` is in atomic units, without another volume or sign factor. Each field rank consumes only owned cells, so list lengths may differ. Duplicate rows add. This entry currently requires checked mode and retains the existing recovery gates and E->LD->H update. Do not add a second macro-site interpolation or pass a current defined on a different component grid.
+
+`electric_edge_geometry()` returns global counts, origins[component,axis] in bohr and spacing. `electric_edges(indices)` explicitly reads E components and sums owned values within the field group only; no application-wide MPI communication is added. Current is averaged over the interval about to be advanced. A coupling scheme may require trial/rollback and an own-vacuum reference: these interfaces alone are not a self-consistent spatial feedback driver.
+
+Real C2H2(18,432 samples) readout left observations bit-exact against an independent control; process-exit restart at electronic step2 matched densities and observations exactly. Charge changes were converted in Fortran and radiated through one/two field ranks. Direct injection matched the existing deposition; NaN rejection, direct live rollback/retry and a separate-process direct field checkpoint continuation matched array controls. These are software connection tests, not physical convergence or complete spatial molecular feedback validation.
+
+## Streamed grid input and explicit step numbers
+
+A runtime with matching validation evidence accepts `state.step_grid_field(window,step_index=n)`. `window` is a two-frame GridFieldSeries with relative times `[0,dt]` and `time_origin=n*dt`. Its E/H frames represent FDTD steps **n,n+1**; the call advances molecular step **n-1 to n**. Origins, spacing, counts, molecule position and integration center must match the prepared input.
+
+```python
+window = GridFieldSeries(origin, spacing, [0., dt],
+                         [E_n, E_next], [H_n, H_next],
+                         molecule_position=position, center=center,
+                         time_origin=n*dt)
+state.step_grid_field(window, step_index=n)
+```
+
+Fortran validates the target step, fixed geometry/dt and every value before installing either frame. Wrong geometry, NaN/Infinity and incomplete transfers preserve numerical state. Electric-only input must cover electronic integration paths. Before first enabling H, stencil-halo and nonlocal projector paths must also fit; insufficient coverage rejects H while electric-only continuation remains available. Orbital magnetic input is supported; this does not add spin/SOC magnetic response.
+
+Initialization still requires salmonpy-near-eh.dat. For unknown future fields, explicitly prepare max_steps+2 zero or otherwise chosen placeholder frames with the fixed geometry, then replace each required pair. Allocated history remains proportional to max_steps*patch_cells. Use a molecular patch and estimate memory/private transfer I/O for long runs.
+
+The existing isolated_response example accepts `--grid-series FIELDS.npz`. Supply origin, spacing, times, E, H, molecule_position and center with frames0..N+1. E_NPZ retains N additional uniform-field vectors and dt. Use --direct-checkpoint / --resume-direct; E-only propagation replay cannot reconstruct spatial input. Step labels are local to this run. Recording a source-time origin does not recreate earlier illumination of the GS.
+
+## Validated electric spatial feedback
+
+`tools/test_grid_feedback_mpi.py` combines public density readout, streamed input and direct current injection in a finite-scope validation driver. Total and own-source-only vacuum FDTD groups are separate. Fortran subtracts their fields and maps molecular charge changes to polarization current; only owning field ranks consume their current rows. Full grids are not broadcast to every application rank.
+
+First hold FDTD once with zero current. Molecular update0->1 consumes FDTD frames1,2 and finishes at field2. Update95->96 consumes frames96,97 and finishes at field97. A trial field predicts the drive; restoring fields and injecting the response must yield a matching selected drive. Current support is placed in vacuum. These tests pass zero H to the molecule: this is **electric-only feedback**, not complete magnetic-return E/H coupling.
+
+Off-grid C2H2 passed outer MPI4/6 checks. The192-molecular-step LD case produced an environment-return field difference about4.0e-7 au; predictor/accepted selected-field disagreement was about1.4e-17 au. Rejection/retry and process-exit restoration at molecular96/field97 matched continuous arrays and ordinary output streams bit-exactly, with0extra evolution on restoration. This validates software connections, not physical convergence or arbitrary material layouts. Unexpected errors terminate this validation MPI job; it is not a general production recovery coordinator.
+
+## Return spinless orbital magnetic response
+
+The electric interaction remains in the length gauge: a uniform field gives the electron scalar potential `r·E`. With magnetic fields, the magnetic vector potential remains in the kinetic term `(p + A_mag/c)^2/2`, where `A_mag = -r × ∫₀¹ s B(R+s r) ds`. This does not switch the electric drive back to the velocity gauge. A uniform magnetic field gives `A_mag = B × r/2`; conversely `B = curl A_mag`. Recovering the supplied field through that identity requires a solenoidal field and allowance for interpolation error.
+
+With matching executable-bound evidence, `state.orbital_magnetic_response()` reads the occupied-state orbital magnetization without propagation. Initial scope: spinless fixed-ion molecule, orthogonal cell, direct E/H grids and one electronic worker rank. Spin magnetization is excluded.
+
+Fortran computes `M = -δ〈H〉/δB` from the actual applied Hamiltonian: local paramagnetic and diamagnetic terms and the derivative of the nonlocal projector path phases. Input H denotes vacuum B at the molecule. In Gaussian/atomic units the returned magnetic charge current is `j_M = c curl M`.
+
+```python
+previous_magnetic = state.orbital_magnetic_response()  # molecular step n-1
+state.step_grid_field(window, step_index=n)
+magnetic = state.orbital_magnetic_response()
+# electric_current contains ONLY the density-derived electric polarization current
+current = magnetic.total_current(electric_current, previous=previous_magnetic)
+# Route these E-component samples to their owning field ranks, then advance_edges once.
+```
+
+`magnetization[z,y,x,3]` uses the supplied H-component grids. `current_density()` returns the instantaneous magnetic current alone. With `previous=...`, adjacent accepted magnetizations are averaged in Fortran to obtain the interval current. `total_current(...,previous=...)` adds that interval current once to the electric polarization current. Do not supply an already complete orbital current: that would double count the magnetic part.
+
+Current conversion requires Yee origins: E shifted half a cell along its own component and H along the other two axes. Include padding around magnetization support and its circulating current; magnetization must vanish at positive patch faces. A truncated curl that would discard surface current is rejected. Off-grid molecule positions are supported. Spatial derivatives, path adjoints, interval averaging and current summation run in Fortran.
+
+Magnetization is derived from saved wavefunctions and applied fields; no extra physical history is introduced. After direct restoration, read the previous response immediately, then combine with the next accepted response. C2H2 molecular steps2->4 reproduce magnetization, interval currents and ordinary observables bit-exactly without restoration evolution.
+
+`tools/test_orbital_magnetic_response.py` checks finite differences of the actual frozen-state Hamiltonian and direct restart. `tools/test_electric_edges_mpi.py response --response-history ...` injects the resulting electric/magnetic/combined currents into FDTD. These are connection checks. The existing `test_grid_feedback_mpi.py` remains an electric-only own-vacuum feedback test; a general magnetic bidirectional coordinator, self-field policy and physical convergence are separate work.

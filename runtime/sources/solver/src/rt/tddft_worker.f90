@@ -366,6 +366,10 @@ contains
       case('PROBE_E');operation=5
       case('SAVE_E');operation=6
       case('LOAD_E');operation=7
+      case('DENSITY_E');operation=8
+      case('GRID_E');operation=9
+      case('ORBITAL_E');operation=10
+      case('ORBITAL_AUDIT_E');operation=11
       end select
       if(operation/=0)then
         A=0d0;worker_next_A=.true.;return

@@ -1,7 +1,8 @@
 """Prescribed molecular fields from collocated spatial E/H samples.
 
 Numerical fitting, solid harmonics, derivatives and residuals run in Fortran.
-This is a one-way, saved-field interface; it does not deposit radiation sources.
+Prescribed/streamed grid input data and stateless electric response maps are provided here.
+These maps do not by themselves run a live molecular/FDTD feedback driver.
 """
 from dataclasses import dataclass
 import ctypes as c
@@ -42,7 +43,11 @@ def _kernel(name):
                 'sp_grid_fields':[c.c_int]+[c.c_void_p]*9,
                 'sp_grid_potentials':[c.c_int]+[c.c_void_p]*9,
                 'sp_grid_pack':[c.c_int]+[c.c_void_p]*6,
-                'sp_grid_average':[c.c_int]+[c.c_void_p]*3}
+                'sp_grid_average':[c.c_int]+[c.c_void_p]*3,
+                'sp_grid_electric_response':[c.c_int,c.c_int]+[c.c_void_p]*9+[c.c_double,c.c_void_p],
+                'sp_grid_difference':[c.c_int]+[c.c_void_p]*3,
+                'sp_grid_magnetization_current':[c.c_void_p]*4,
+                'sp_grid_current_sum':[c.c_int]+[c.c_void_p]*3}
     fn.argtypes=signatures[name]
     return fn
 
@@ -503,6 +508,57 @@ class GridFieldSeries:
 
     def potentials(self,positions,*,step_index):
         return self._evaluate(positions,step_index,True)
+
+    def difference(self,reference):
+        """Subtract a matching reference in Fortran; no time or space resampling."""
+        if not isinstance(reference,GridFieldSeries):raise InputError('GridFieldSeries reference required')
+        if (self.counts!=reference.counts or self.time_origin!=reference.time_origin or
+            any(not np.array_equal(getattr(self,k),getattr(reference,k)) for k in
+                ('origin','spacing','times','molecule_position','center'))):
+            raise InputError('grid reference geometry/time labels differ')
+        result=[]
+        for name in ('E','H'):
+            total=getattr(self,name);own=getattr(reference,name);out=np.empty_like(total)
+            _grid_check(_kernel('sp_grid_difference')(_integer(total.size,'grid sample count',1,2**31-1),_ptr(total),_ptr(own),_ptr(out)))
+            result.append(out)
+        return GridFieldSeries(self.origin,self.spacing,self.times,*result,
+            molecule_position=self.molecule_position,center=self.center,time_origin=self.time_origin)
+
+    def _charge_response(self,positions,old,new,volume_elements,dt,mode):
+        points=np.asarray(positions)
+        if points.ndim!=2 or points.shape[1]!=3 or not len(points):
+            raise InputError('charge positions[N,3] required in TDDFT coordinates')
+        points=_real(points,points.shape,'charge positions')
+        old=_real(old,(len(points),),'old signed charge density')
+        new=_real(new,(len(points),),'signed charge density')
+        volumes=_real(volume_elements,(len(points),),'volume elements in bohr^3')
+        if np.any(volumes<0):raise InputError('nonnegative volume elements required')
+        dt=float(_real(dt,(),'response dt'))
+        if dt<=0:raise InputError('positive response dt required')
+        counts=np.array(self.counts,dtype=np.intc)
+        result=np.empty(self.E.shape[1:])
+        fn=_kernel('sp_grid_electric_response')
+        _grid_check(fn(mode,len(points),_ptr(counts),_ptr(self.origin[0]),_ptr(self.spacing),
+            _ptr(self.molecule_position),_ptr(self.center),_ptr(points),_ptr(volumes),_ptr(old),_ptr(new),dt,_ptr(result)))
+        return _real(result,result.shape,'electric-grid response')
+
+    def charge_polarization(self,positions,charge_density,*,volume_elements):
+        """Electric-path transpose P[z,y,x,component] in e/bohr^2.
+
+        Input is signed physical charge density e/bohr^3, not positive electron
+        number density. The result belongs on E-component grids, not macro sites.
+        This stateless operation does not advance FDTD or a molecular worker.
+        """
+        return self._charge_response(positions,charge_density,charge_density,volume_elements,1.,0)
+
+    def charge_current(self,positions,old_charge_density,new_charge_density,*,volume_elements,dt):
+        """Interval current from signed charge-density change, in atomic units.
+
+        Positions/volumes must be identical at both endpoints. Fixed ionic charges
+        cancel in the difference. This is electric polarization current; orbital
+        magnetization response and a live FDTD bridge are not included.
+        """
+        return self._charge_response(positions,old_charge_density,new_charge_density,volume_elements,dt,1)
 
     def write(self,path):
         """Write prepared histories only; never launch TDDFT or overwrite files."""

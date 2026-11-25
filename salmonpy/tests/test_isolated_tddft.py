@@ -511,3 +511,40 @@ class IsolatedTDDFTTests(unittest.TestCase):
         for indices in ((8,7,7),(8,8,8),(0,0,-1),(True,1,0)):
             with self.assertRaises(InputError):
                 _check_molecular_steps(*indices)
+
+
+class ChargeDensityReadoutTests(unittest.TestCase):
+    def test_owned_samples_and_transfer_rejection(self):
+        from salmonpy.isolated_tddft import ChargeDensitySamples,_decode_charge_density,IsolatedTDDFTState
+        samples=np.array([[.1,.2,.3,-.4,.5],[.6,.7,.8,-.9,.5]])
+        raw=np.array([16909060,1,3,2],dtype=np.int32).tobytes()+samples.tobytes()
+        value=_decode_charge_density(raw,step=3,dt=.02)
+        self.assertEqual(value.step_index,3);self.assertEqual(value.time,.06)
+        np.testing.assert_array_equal(value.charge_density,[-.4,-.9])
+        self.assertFalse(value.positions.flags.writeable)
+        samples[:]=100
+        np.testing.assert_array_equal(value.positions[0],[.1,.2,.3])
+        for bad in (raw[:15],raw[:-1],raw+b'x',np.array([16909060,1,4,2],dtype=np.int32).tobytes()+raw[16:]):
+            with self.assertRaises(RuntimeFailure):_decode_charge_density(bad,step=3,dt=.02)
+        with self.assertRaises(InputError):ChargeDensitySamples(0,0.,[[0,0,0]],[np.nan],[1.])
+        state=object.__new__(IsolatedTDDFTState)
+        with self.assertRaisesRegex(InputError,'validation'):state.charge_density()
+
+
+class LiveGridInputTests(unittest.TestCase):
+    def test_target_step_contract_before_transfer(self):
+        from types import SimpleNamespace
+        from salmonpy.isolated_tddft import IsolatedTDDFTState
+        from salmonpy.near_field import GridFieldSeries
+        field=GridFieldSeries((-40.,)*3,(80.,)*3,[0.,.01],np.zeros((2,2,2,2,3)),np.zeros((2,2,2,2,3)),time_origin=.01)
+        state=object.__new__(IsolatedTDDFTState);state._grid_stream_enabled=True
+        calls=[]
+        state._engine=SimpleNamespace(_near_spec=('grid',),_steps=0,_capacity=4,dt=.01,
+            _stage_grid_field=lambda window,n:calls.append((window,n)),step=lambda E:calls.append(tuple(E)),
+            current=np.array([0.,0.,0.,0.,0.,0.,10.,0.,1.]),time=.01,execution_mode='checked')
+        with self.assertRaises(InputError):state.step_grid_field(field,step_index=2)
+        self.assertEqual(calls,[])
+        state.step_grid_field(field,step_index=np.int64(1))
+        self.assertIs(calls[0][0],field);self.assertEqual(calls[0][1],1)
+        state._grid_stream_enabled=False
+        with self.assertRaises(InputError):state.step_grid_field(field,step_index=1)

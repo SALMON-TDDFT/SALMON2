@@ -558,6 +558,60 @@ end function
     sp_eh_step_checked=step_checked(npoints,J,E,A)
   end function
 
+  ! Rank-local physical currents already located on E components. Only owned
+  ! cells are consumed. No macro-to-edge averaging and no current broadcast.
+  integer(c_int) function sp_eh_step_edges(npoints,nedges,indices,J,A,E) bind(C)
+    integer(c_int),value::npoints,nedges
+    integer(c_int),intent(in)::indices(3,nedges)
+    real(c_double),intent(in)::J(3,nedges),A(3,npoints)
+    real(c_double),intent(out)::E(3,npoints)
+    real(8)::zero(3,npoints)
+    zero=0d0
+    sp_eh_step_edges=step_checked(npoints,zero,E,A,owned=.true.,edge_indices=indices,edge_current=J)
+  end function
+
+  ! Read-only geometry and owned raw E values. No MPI or time advance.
+  integer(c_int) function sp_eh_edge_geometry(counts,origins,spacing) bind(C) result(status)
+    integer(c_int),intent(out)::counts(3)
+    real(c_double),intent(out)::origins(3,3),spacing(3)
+    integer::d,k
+    status=12
+    if(.not.allocated(state))return
+    if(allocated(pending))return
+    counts=state%fs%lg%ie-state%fs%lg%is+1;spacing=state%fs%hgs
+    do d=1,3
+    do k=1,3
+      origins(k,d)=state%fe%coo(state%fs%lg%is(k),k)
+      if(k==d)origins(k,d)=origins(k,d)+.5d0*spacing(k)
+    enddo
+    enddo
+    status=0
+  end function
+
+  integer(c_int) function sp_eh_edges_read(nedges,indices,E) bind(C) result(status)
+    integer(c_int),value::nedges
+    integer(c_int),intent(in)::indices(3,nedges)
+    real(c_double),intent(out)::E(3,nedges)
+    integer::p,index(3),i,j,k
+    status=12
+    if(.not.allocated(state))return
+    if(allocated(pending))return
+    status=10
+    do p=1,nedges
+      if(any(indices(:,p)<0).or.any(indices(:,p)>state%fs%lg%ie-state%fs%lg%is))return
+    enddo
+    E=0d0
+    do p=1,nedges
+      index=state%fs%lg%is+indices(:,p)
+      if(.not.(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie)))cycle
+      i=index(1);j=index(2);k=index(3)
+      E(:,p)=[state%fe%ex_y(i,j,k)+state%fe%ex_z(i,j,k), &
+              state%fe%ey_z(i,j,k)+state%fe%ey_x(i,j,k), &
+              state%fe%ez_x(i,j,k)+state%fe%ez_y(i,j,k)]
+    enddo
+    status=0
+  end function
+
   ! Explicit unchecked update: caller owns collective order and valid inputs.
   ! No full-state backup, finite scans, consistency votes or retry contract.
   integer(c_int) function sp_eh_step_performance(npoints,nlocal,owned,J,A_old,A_next,E) bind(C) result(status)
@@ -623,11 +677,13 @@ end function
     status=0
   end function sp_eh_step_performance
 
-  integer function step_checked(npoints,J,E,A,owned) result(status)
+  integer function step_checked(npoints,J,E,A,owned,edge_indices,edge_current) result(status)
     integer,intent(in)::npoints
     real(8),intent(in)::J(3,npoints)
     real(8),intent(in),optional::A(3,npoints)
     logical,intent(in),optional :: owned
+    integer,intent(in),optional::edge_indices(:,:)
+    real(8),intent(in),optional::edge_current(:,:)
     real(8),intent(out)::E(3,npoints)
     logical::entered
     status=0;E=0d0
@@ -638,14 +694,14 @@ end function
     entered=status==0
     call comm_get_max(status,nproc_group_global)
     if(status==0)then
-      status=step_checked_impl(npoints,J,E,A,owned)
+      status=step_checked_impl(npoints,J,E,A,owned,edge_indices,edge_current)
     else
       status=16
     endif
     if(entered)call comm_end_children(state%mpi_child_owner)
   end function
 
-  integer function step_checked_impl(npoints,J,E,A,owned) result(status)
+  integer function step_checked_impl(npoints,J,E,A,owned,edge_indices,edge_current) result(status)
     use salmon_global,only:dt_em,obs_samp_em
 #ifdef SALMONPY_RECOVERY_TESTING
     use parallelization,only:nproc_id_global
@@ -655,6 +711,8 @@ end function
     real(8),intent(in) :: J(3,npoints)
     real(8),intent(in),optional :: A(3,npoints)
     logical,intent(in),optional :: owned
+    integer,intent(in),optional::edge_indices(:,:)
+    real(8),intent(in),optional::edge_current(:,:)
     real(8),intent(out) :: E(3,npoints)
     type(restore_candidate) :: before
     type(s_tensor_step_workspace),target :: tensor_work
@@ -672,9 +730,9 @@ end function
     endif
     local_current=.false.
     if(present(owned))local_current=owned
-    mode=merge(1,0,present(A))+merge(2,0,local_current)
+    mode=merge(1,0,present(A))+merge(2,0,local_current)+merge(4,0,present(edge_indices))
     call comm_bcast(mode,nproc_group_global)
-    if(mode/=merge(1,0,present(A))+merge(2,0,local_current))error=11
+    if(mode/=merge(1,0,present(A))+merge(2,0,local_current)+merge(4,0,present(edge_indices)))error=11
     call comm_get_max(error,nproc_group_global)
     if(error/=0)then
       status=error;return
@@ -686,7 +744,16 @@ end function
     if(allocated(state%fe%iobs_num_ene))then
       if(any(state%fe%iobs_num_ene>0))error=15
     endif
+    if(present(edge_indices).neqv.present(edge_current))error=10
+    if(present(edge_indices).and.present(edge_current))then
+      if(size(edge_indices,1)/=3.or.size(edge_current,1)/=3.or. &
+         size(edge_indices,2)/=size(edge_current,2))error=10
+      do p=1,size(edge_indices,2)
+        if(any(edge_indices(:,p)<0).or.any(edge_indices(:,p)>state%fs%lg%ie-state%fs%lg%is))error=10
+      enddo
+    endif
     finite_input=.true.
+    if(present(edge_current))call accumulate_finite(edge_current,finite_input)
     call accumulate_finite(J,finite_input)
     if(present(A))call accumulate_finite(A,finite_input)
     if(.not.finite_input)error=10
@@ -743,6 +810,14 @@ end function
         enddo
       enddo
     enddo
+    if(present(edge_indices).and.present(edge_current))then
+      do p=1,size(edge_indices,2)
+        index=state%fs%lg%is+edge_indices(:,p)
+        if(.not.(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie)))cycle
+        state%current(:,index(1),index(2),index(3))= &
+          state%current(:,index(1),index(2),index(3))+edge_current(:,p)
+      enddo
+    endif
     state%step=state%step+1
     state%fe%iter_sta=state%step;state%fe%iter_end=state%step
     call eh_calc(state%fs,state%fe,state%ld,state%current,guard,tensor_workspace=tensor_work)

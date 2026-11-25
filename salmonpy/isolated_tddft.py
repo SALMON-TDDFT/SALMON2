@@ -10,9 +10,9 @@ from .timing import TimeSpec, InputPort
 from .snapshots import _fingerprint
 from .tddft import TDDFTInitialState, TDDFTState, _digest
 from .ld import _array_unchecked
-from .sbe import _frozen
+from .sbe import _frozen,_integer
 
-__all__ = ['IsolatedRuntime','load_isolated_runtime','DipoleObservables',
+__all__ = ['IsolatedRuntime','load_isolated_runtime','DipoleObservables','ChargeDensitySamples','OrbitalMagneticResponse',
            'IsolatedTDDFTInitialState','IsolatedTDDFTState','IsolatedSavepoint']
 _CAPABILITIES = {'isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint','direct-disk-state'}
 
@@ -72,6 +72,21 @@ def _receipt(payload, executable):
         except (KeyError,TypeError,ValueError):
             solid_valid=False
         if not solid_valid:raise InputError('invalid spherical-harmonic field validation evidence')
+    if 'charge_density' in data:
+        evidence=data['charge_density']
+        if (not isinstance(evidence,dict) or evidence.get('schema')!='salmonpy.charge-density-validation/1'
+            or not all(evidence.get(k) is True for k in ('signed_charge','read_only','direct_restart_exact'))):
+            raise InputError('invalid charge-density validation evidence')
+    if 'orbital_magnetic' in data:
+        evidence=data['orbital_magnetic']
+        if (not isinstance(evidence,dict) or evidence.get('schema')!='salmonpy.orbital-magnetic-validation/1'
+            or not all(evidence.get(k) is True for k in ('hamiltonian_derivative','nonlocal_projectors','direct_restart_exact'))):
+            raise InputError('invalid orbital magnetic validation evidence')
+    if 'grid_stream' in data:
+        evidence=data['grid_stream']
+        if (not isinstance(evidence,dict) or evidence.get('schema')!='salmonpy.grid-stream-validation/1'
+            or not all(evidence.get(k) is True for k in ('prescribed_matches','direct_restart_exact','rejection_preserves_state'))):
+            raise InputError('invalid live grid validation evidence')
     if 'near_eh' in data:
         try:
             evidence=data['near_eh']
@@ -212,6 +227,40 @@ class _EEngine(TDDFTState):
             return values
         except InputError as exc:
             raise NumericalError('isolated worker returned nonfinite observables') from exc
+
+    def charge_density(self):
+        if not self.usable:raise SnapshotError('density read requires an accepted usable worker')
+        status,step,_=self._command('DENSITY_E',8)
+        if status:raise RuntimeFailure('density transfer rejected without propagation: '+str(status))
+        if step!=self._steps:raise RuntimeFailure('density transfer step differs from state')
+        path=Path(self._work.name)/'run/salmonpy-charge-samples.bin'
+        return _decode_charge_density(path.read_bytes(),step=step,dt=self.dt)
+
+    def orbital_magnetic_response(self):
+        if not self.usable:raise SnapshotError('magnetic read requires an accepted usable worker')
+        status,step,_=self._command('ORBITAL_E',10)
+        if status:raise RuntimeFailure('orbital magnetic query rejected without propagation: '+str(status))
+        if step!=self._steps:raise RuntimeFailure('orbital response step differs from state')
+        raw=(Path(self._work.name)/'run/salmonpy-orbital-response.bin').read_bytes()
+        if len(raw)<192:raise RuntimeFailure('truncated orbital response')
+        magic,version,actual,nx,ny,nz=map(int,np.frombuffer(raw[:24],dtype=np.int32))
+        if magic!=16909060 or version!=1 or actual!=step or min(nx,ny,nz)<2 or len(raw)!=192+nx*ny*nz*24:
+            raise RuntimeFailure('orbital response geometry/step/size differs')
+        metadata=np.frombuffer(raw,offset=24,count=21,dtype=np.float64)
+        M=np.frombuffer(raw,offset=192,dtype=np.float64).reshape(nz,ny,nx,3)
+        return OrbitalMagneticResponse(step,step*self.dt,metadata[:18].reshape(2,3,3),metadata[18:],M)
+
+    def _stage_grid_field(self,window,n):
+        if not self.usable:raise SnapshotError('live grid staging requires an accepted usable worker')
+        header=np.array([16909060,1,n,*window.counts],dtype=np.int32)
+        geometry=np.array([*window.center,*window.molecule_position,self.dt,*window.origin.ravel(),*window.spacing])
+        frames=np.stack((np.stack((window.E[0],window.H[0])),np.stack((window.E[1],window.H[1]))))
+        path=Path(self._work.name)/'run/salmonpy-grid-frames.bin'
+        with path.open('wb') as stream:
+            stream.write(header.tobytes());stream.write(geometry.tobytes());stream.write(frames.tobytes())
+        status,step,_=self._command('GRID_E',9)
+        if status:raise InputError('live grid transfer rejected; check fixed geometry, target step and complete finite E/H: '+str(status))
+        if step!=self._steps:raise RuntimeFailure('live grid staging advanced or changed the worker step')
 
     def _snapshot_settings(self):
         return _fingerprint((super()._snapshot_settings(),tuple(self._position),self._worker_mode))
@@ -552,12 +601,123 @@ class IsolatedTDDFTInitialState:
         dt=float(_real(dt,(),'dt'))
         if dt<=0: raise InputError('positive dt required')
         position=_real(position,(3,),'position')
-        return IsolatedTDDFTState(_EEngine(self._model,dt,position,execution_mode=execution_mode,
+        result=IsolatedTDDFTState(_EEngine(self._model,dt,position,execution_mode=execution_mode,
                                                 native_near_field=self.native_near_field,electric_potential=self.electric_potential,near_field=self.near_field),position)
+        result._charge_density_enabled='charge_density' in json.loads(self.runtime.validation)
+        result._orbital_magnetic_enabled='orbital_magnetic' in json.loads(self.runtime.validation)
+        result._grid_stream_enabled='grid_stream' in json.loads(self.runtime.validation)
+        return result
 
     def close(self): self._model.close()
     def __enter__(self): return self
     def __exit__(self,*args): self.close()
+
+
+@dataclass(frozen=True,slots=True,eq=False)
+class ChargeDensitySamples:
+    """Read-only electronic charge density (negative electron number density).
+
+    Positions are TDDFT coordinates in bohr, densities e/bohr^3, volumes bohr^3.
+    Ionic charges are not included; fixed ions cancel from density differences.
+    """
+    step_index: int
+    time: float
+    positions: object
+    charge_density: object
+    volume_elements: object
+
+    def __post_init__(self):
+        if type(self.step_index) is not int or self.step_index<0:raise InputError('nonnegative integer density step required')
+        time=float(_real(self.time,(),'density time'))
+        if time<0:raise InputError('nonnegative density time required')
+        object.__setattr__(self,'time',time)
+        points=np.asarray(self.positions)
+        if points.ndim!=2 or points.shape[1]!=3 or not len(points):raise InputError('density positions[N,3] required')
+        object.__setattr__(self,'positions',_real(points,points.shape,'density positions'))
+        object.__setattr__(self,'charge_density',_real(self.charge_density,(len(points),),'signed charge density'))
+        volumes=_real(self.volume_elements,(len(points),),'density volume elements')
+        if np.any(volumes<=0):raise InputError('positive density volume elements required')
+        object.__setattr__(self,'volume_elements',volumes)
+
+
+@dataclass(frozen=True,slots=True,eq=False)
+class OrbitalMagneticResponse:
+    """Spinless orbital M=-d<E>/dH on the supplied component H grids.
+
+    Gaussian/atomic units, H=B in vacuum. Does not contain electric polarization
+    current or spin magnetization. The Hamiltonian's applied endpoint is used.
+    """
+    step_index: int
+    time: float
+    origin: object
+    spacing: object
+    magnetization: object
+
+    def __post_init__(self):
+        _integer(self.step_index,'orbital response step',0,2**31-1)
+        time=float(_real(self.time,(),'orbital response time'))
+        if time<0:raise InputError('nonnegative response time required')
+        object.__setattr__(self,'time',time)
+        object.__setattr__(self,'origin',_real(self.origin,(2,3,3),'component origins'))
+        spacing=_real(self.spacing,(3,),'spacing')
+        if np.any(spacing<=0):raise InputError('positive spacing required')
+        object.__setattr__(self,'spacing',spacing)
+        M=np.asarray(self.magnetization)
+        if M.ndim!=4 or M.shape[-1]!=3 or min(M.shape[:3])<2:raise InputError('magnetization[z,y,x,3] required')
+        object.__setattr__(self,'magnetization',_real(M,M.shape,'orbital magnetization'))
+
+    def current_density(self,*,previous=None):
+        """Only c*curl(M), on E components. Add once to dP/dt, not a full orbital current.
+
+        With previous, average adjacent accepted magnetizations in Fortran for
+        the interval current. Otherwise return the instantaneous endpoint current.
+        Requires Yee component origins and a zero positive-face padding layer.
+        The patch must cover the molecular support and its surface current.
+        """
+        from .near_field import _kernel,_ptr
+        expected=self.origin[0]+.5*self.spacing-np.diag(self.spacing)
+        tolerance=64*np.finfo(float).eps*max(1.,float(np.max(np.abs(expected))))
+        if not np.allclose(self.origin[1],expected,rtol=0,atol=tolerance):
+            raise InputError('magnetic return requires Yee-aligned E/H component origins')
+        M=self.magnetization
+        if previous is not None:
+            if (not isinstance(previous,OrbitalMagneticResponse) or previous.step_index+1!=self.step_index
+                or previous.time>=self.time or previous.magnetization.shape!=M.shape
+                or not np.array_equal(previous.origin,self.origin) or not np.array_equal(previous.spacing,self.spacing)):
+                raise InputError('adjacent accepted magnetic responses with identical geometry required')
+            n=_integer(M.size,'magnetic sample count',1,2**31-1);centered=np.empty_like(M)
+            code=_kernel('sp_grid_average')(n,_ptr(previous.magnetization),_ptr(M),_ptr(centered))
+            if code:raise NumericalError('magnetic interval averaging rejected: '+str(code))
+            M=centered
+        counts=np.array(M.shape[2::-1],dtype=np.int32);result=np.empty_like(M)
+        status=_kernel('sp_grid_magnetization_current')(_ptr(counts),_ptr(self.spacing),_ptr(M),_ptr(result))
+        if status==1:raise InputError('magnetic current requires finite samples and a zero positive-face padding layer')
+        if status==4:raise NumericalError('nonfinite orbital magnetic curl')
+        if status:raise RuntimeFailure('orbital magnetic curl allocation failed')
+        result.setflags(write=False);return result
+
+    def total_current(self,electric_current,*,previous=None):
+        """Add c*curl(M) once to the electric polarization current, in Fortran.
+
+        Do not pass a current that already contains orbital magnetic response.
+        """
+        from .near_field import _kernel,_ptr
+        magnetic=self.current_density(previous=previous)
+        electric=_real(electric_current,magnetic.shape,'electric polarization current')
+        n=_integer(electric.size,'current element count',1,2**31-1);result=np.empty_like(electric)
+        status=_kernel('sp_grid_current_sum')(n,_ptr(electric),_ptr(magnetic),_ptr(result))
+        if status==4:raise NumericalError('nonfinite combined current')
+        if status:raise RuntimeFailure('current combination rejected: '+str(status))
+        result.setflags(write=False);return result
+
+
+def _decode_charge_density(raw,*,step,dt):
+    if len(raw)<16:raise RuntimeFailure('truncated density transfer header')
+    magic,version,actual,n=np.frombuffer(raw[:16],dtype=np.int32)
+    if magic!=16909060 or version!=1 or actual!=step or n<1 or len(raw)!=16+int(n)*40:
+        raise RuntimeFailure('density transfer format/step differs')
+    data=np.frombuffer(raw,offset=16,dtype=np.float64).reshape(int(n),5)
+    return ChargeDensitySamples(step,step*dt,data[:,:3],data[:,3],data[:,4])
 
 
 class IsolatedTDDFTState:
@@ -587,6 +747,18 @@ class IsolatedTDDFTState:
     @property
     def internal_energy(self): return self.observables.internal_energy
 
+    def orbital_magnetic_response(self):
+        """Read only -d<E>/dH; no propagation and no electric/spin current."""
+        if not getattr(self,'_orbital_magnetic_enabled',False):
+            raise InputError('runtime validation does not declare orbital magnetic return')
+        return self._engine.orbital_magnetic_response()
+
+    def charge_density(self):
+        """Explicit current-step density read; no time evolution or replay."""
+        if not getattr(self,'_charge_density_enabled',False):
+            raise InputError('runtime validation does not declare charge-density readout')
+        return self._engine.charge_density()
+
     def step(self,E):
         E=(_array_unchecked(E,'E',(3,)) if self.execution_mode=='performance' else _real(E,(3,),'E'))
         self._engine.step(E)
@@ -615,11 +787,33 @@ class IsolatedTDDFTState:
         """Explicitly retire a live savepoint; leave the current state unchanged."""
         self._engine.release_savepoint(token)
 
+    def step_grid_field(self,window,*,step_index,E_extra=(0.,0.,0.)):
+        """Advance target step n with grid frames labeled n,n+1.
+
+        window has two relative times 0,dt and time_origin=n*dt. Geometry is
+        fixed by the prepared initial grid. Direct saves retain streamed fields.
+        """
+        from .near_field import GridFieldSeries
+        if not getattr(self,'_grid_stream_enabled',False):raise InputError('runtime validation does not declare live grid input')
+        if self._engine._near_spec!=('grid',):raise InputError('prepared direct-grid near_field=True state required')
+        n=self._engine._steps+1
+        step_index=_integer(step_index,'step_index',1,self._engine._capacity)
+        if step_index!=n or n>self._engine._capacity:
+            raise InputError('live grid target must equal the next molecular step')
+        if not isinstance(window,GridFieldSeries) or len(window.times)!=2:
+            raise InputError('two-frame GridFieldSeries required')
+        if not np.isclose(window.times[1],self.dt,rtol=1e-12,atol=0.) or not np.isclose(window.time_origin,n*self.dt,rtol=1e-12,atol=1e-15):
+            raise InputError('live grid frames must carry field-step labels n,n+1 at fixed dt')
+        E=_real(E_extra,(3,),'additional uniform E')
+        self._engine._stage_grid_field(window,n)
+        self._engine.step(E)
+        return self.observables
+
     def step_near_field(self, left, right, *, E_extra=(0.,0.,0.)):
         from .near_field import NearFieldFrame
         spec=self._engine._near_spec
         if spec is None:raise InputError('near_field=True state required')
-        if spec[0]=='grid':raise InputError('prepared grid histories advance with step(E_extra), not coefficient frames')
+        if spec[0]=='grid':raise InputError('use step(E_extra) for prepared grids or step_grid_field for live grids, not coefficient frames')
         n=self._engine._steps+1
         for frame,index in ((left,n),(right,n+1)):
             if not isinstance(frame,NearFieldFrame) or frame.step_index!=index:

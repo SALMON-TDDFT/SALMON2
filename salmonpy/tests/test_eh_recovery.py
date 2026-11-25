@@ -64,3 +64,21 @@ class FieldRecoveryTests(unittest.TestCase):
         self.assertEqual(events,['leave'])
         with self.assertRaises(InputError):f.advance(np.ones((1,3)))
         self.assertTrue(f.failed);self.assertEqual(f.step_index,1)
+
+
+class ComponentCurrentIndexTests(unittest.TestCase):
+    def test_local_lists_and_operation_contract(self):
+        from types import SimpleNamespace
+        from salmonpy.coupled import NativeEHField
+        from salmonpy.errors import InputError
+        from salmonpy.api import _field_operations
+        field=object.__new__(NativeEHField)
+        field.calculation=SimpleNamespace(geometry=SimpleNamespace(grid=SimpleNamespace(counts=(40,40,40))))
+        empty=field._edge_indices(np.empty((0,3),dtype=int))
+        self.assertEqual(empty.shape,(0,3))
+        np.testing.assert_array_equal(field._edge_indices([[1,2,3]]),[[1,2,3]])
+        for bad in ([[1.,2.,3.]],[[40,0,0]],[[-1,0,0]],[[True,False,True]]):
+            with self.assertRaises(InputError):field._edge_indices(bad)
+        operations=_field_operations()
+        self.assertIn('rank-local',operations['sp_eh_step_edges']['routing'])
+        self.assertEqual(operations['sp_eh_edges_read']['collective'],'local')

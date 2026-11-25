@@ -362,3 +362,9 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 ```
 
 [Details and units](../OUTPUTS.en.md). This is postprocessing only; no solver is launched.
+
+- `python -m salmonpy.examples.grid_electric_response INPUT.npz NEW_OUTPUT.npz --dt DT`: Prepare electric-path polarization/current from saved charge densities; not a feedback driver
+
+- `python -m salmonpy.examples.molecular_charge_density --help`: Explicit density readout from a validated molecular runtime; permanent storage requires --save-density
+
+- isolated_response --grid-series streams saved E/H with fixed prepared geometry and direct checkpoint/restart

@@ -16,7 +16,7 @@ add_custom_target(ld_audit ALL
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/salmonpy")
 # The shared LD kernel conditionally includes test-only allocation injection.
 set_source_files_properties("${ROOT}/native/lorentz_drude.f90" PROPERTIES Fortran_PREPROCESS ON)
-add_library(salmonpy_ld SHARED "${ROOT}/native/near_field_coupling.f90" "${ROOT}/native/grid_field.f90" "${ROOT}/native/solid_harmonics.f90" "${ROOT}/native/fdtd_energy.f90" "${ROOT}/native/molecular_feedback.f90" "${ROOT}/native/subpixel_smoothing.f90" "${ROOT}/native/lorentz_drude_tensor.f90" "${ROOT}/native/lorentz_drude_fit.f90" "${ROOT}/salmonpy/convergence_kernel.f90" "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90" "${ROOT}/salmonpy/ld_handles.f90"
+add_library(salmonpy_ld SHARED "${ROOT}/native/grid_response.f90" "${ROOT}/native/near_field_coupling.f90" "${ROOT}/native/grid_field.f90" "${ROOT}/native/solid_harmonics.f90" "${ROOT}/native/fdtd_energy.f90" "${ROOT}/native/molecular_feedback.f90" "${ROOT}/native/subpixel_smoothing.f90" "${ROOT}/native/lorentz_drude_tensor.f90" "${ROOT}/native/lorentz_drude_fit.f90" "${ROOT}/salmonpy/convergence_kernel.f90" "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90" "${ROOT}/salmonpy/ld_handles.f90"
   "${ROOT}/native/sbe_types.f90" "${ROOT}/native/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90" "${ROOT}/salmonpy/sbe_handles.f90")
 if(APPLE)
   target_link_libraries(salmonpy_ld PRIVATE "-framework Accelerate")
@@ -337,3 +337,11 @@ install(FILES "${ROOT}/tests/runtime/test_nickel_soc.f90" "${ROOT}/tests/runtime
 install(FILES "${ROOT}/salmonpy/NICKEL_SOC.md" "${ROOT}/salmonpy/NICKEL_SOC.en.md" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/salmonpy/near_field.py" DESTINATION salmonpy)
+
+# Explicit charge-density/component-current validation tools; no physical CI job.
+install(FILES "${ROOT}/tools/test_charge_density_readout.py" "${ROOT}/tools/test_electric_edges_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/runtime/test_electric_path_response.f90" DESTINATION salmonpy/_runtime_source/tests/runtime)
+
+install(FILES "${ROOT}/tools/test_grid_field_stream.py" "${ROOT}/tools/test_grid_feedback_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_orbital_magnetic_response.py" DESTINATION salmonpy/_runtime_source/tools)

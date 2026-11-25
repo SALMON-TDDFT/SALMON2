@@ -212,3 +212,73 @@ class SolidFieldTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p=grid.write(Path(tmp)/'grid.dat')
             self.assertTrue(p.read_text().startswith('SALMONPY_NEAR_GRID_V1'))
+
+
+class ElectricPathResponseTests(unittest.TestCase):
+    def test_spatial_work_and_integrated_dipole(self):
+        from salmonpy.near_field import GridFieldSeries
+        rng=np.random.default_rng(1955)
+        E=rng.normal(size=(2,9,9,9,3))*.01;H=np.zeros_like(E)
+        origins=np.full((2,3,3),-2.)
+        origins[0,0,0]+=.03;origins[0,1,1]-=.04;origins[0,2,2]+=.02
+        field=GridFieldSeries(origins,(.5,)*3,[0.,.02],E,H,molecule_position=(.17,-.23,.31),center=(.2,-.3,.1))
+        points=rng.uniform(-1.,1.,(37,3));volumes=rng.uniform(.001,.003,37)
+        old=-rng.uniform(.1,1.,37);new=old+rng.uniform(-.01,.01,37)
+        J=field.charge_current(points,old,new,volume_elements=volumes,dt=.02)
+        V,_=field.potentials(points,step_index=0)
+        work=np.sum(E[0]*J)*.125*.02
+        np.testing.assert_allclose(work,np.sum((new-old)*volumes*V),rtol=2e-13,atol=1e-18)
+        P=field.charge_polarization(points,new,volume_elements=volumes)
+        np.testing.assert_allclose(np.sum(P,axis=(0,1,2))*.125,np.sum(new[:,None]*volumes[:,None]*(points-field.center),axis=0),atol=2e-17)
+        Pold=field.charge_polarization(points,old,volume_elements=volumes)
+        np.testing.assert_allclose((P-Pold)/.02,J,atol=2e-16)
+        self.assertFalse(J.flags.writeable)
+        with self.assertRaises(ValueError):field.charge_current([[100.,0.,0.]],[1.],[2.],volume_elements=[1.],dt=.02)
+
+
+class GridReferenceTests(unittest.TestCase):
+    def test_fortran_reference_subtraction_and_geometry(self):
+        from salmonpy.near_field import GridFieldSeries,_kernel
+        from salmonpy.errors import InputError
+        E=np.ones((2,2,2,2,3));H=E*.2
+        total=GridFieldSeries((-40.,)*3,(80.,)*3,[0.,.01],E,H,time_origin=.03)
+        own=GridFieldSeries((-40.,)*3,(80.,)*3,[0.,.01],E*.3,H*.5,time_origin=.03)
+        result=total.difference(own)
+        np.testing.assert_array_equal(result.E,E-E*.3);np.testing.assert_array_equal(result.H,H-H*.5)
+        self.assertEqual(result.time_origin,.03)
+        with self.assertRaises(InputError):total.difference(GridFieldSeries((-41.,)*3,(80.,)*3,[0.,.01],E,H,time_origin=.03))
+        a=np.array([np.finfo(float).max]);b=-a;out=np.array([-7.])
+        self.assertEqual(_kernel('sp_grid_difference')(1,a.ctypes.data,b.ctypes.data,out.ctypes.data),4)
+        np.testing.assert_array_equal(out,[-7.])
+
+
+class OrbitalMagneticReturnTests(unittest.TestCase):
+    def test_yee_curl_and_electric_current_counted_once(self):
+        from salmonpy.isolated_tddft import OrbitalMagneticResponse
+        from salmonpy.errors import InputError
+        origin=np.stack((np.eye(3)*.5,.5-np.eye(3)*.5))
+        M=np.zeros((7,7,7,3));M[2:4,2:4,2:4,2]=.001
+        result=OrbitalMagneticResponse(2,.006,origin,np.ones(3),M)
+        Jm=result.current_density();self.assertGreater(np.max(np.abs(Jm)),0.)
+        Je=np.full_like(M,.2);combined=result.total_current(Je)
+        np.testing.assert_array_equal(combined,Je+Jm)
+        np.testing.assert_array_equal(Je,.2);self.assertFalse(combined.flags.writeable)
+        previous=OrbitalMagneticResponse(1,.003,origin,np.ones(3),M/3)
+        np.testing.assert_allclose(result.current_density(previous=previous),Jm*(2./3.),rtol=1e-14,atol=1e-17)
+        with self.assertRaises(InputError):result.current_density(previous=result)
+        div=np.zeros(M.shape[:3])
+        for d,axis in enumerate((2,1,0)):
+            div+=Jm[...,d]-np.roll(Jm[...,d],1,axis=axis)
+        np.testing.assert_allclose(div,0.,atol=1e-16)
+        with self.assertRaises(ValueError):result.magnetization[0,0,0,0]=1.
+        bad=OrbitalMagneticResponse(2,.006,np.zeros((2,3,3)),np.ones(3),M)
+        with self.assertRaises(InputError):bad.current_density()
+        M[-1,-1,-1]=1.
+        edge=OrbitalMagneticResponse(2,.006,origin,np.ones(3),M)
+        with self.assertRaises(InputError):edge.current_density()
+
+    def test_public_readout_requires_runtime_evidence(self):
+        from salmonpy.isolated_tddft import IsolatedTDDFTState
+        from salmonpy.errors import InputError
+        state=object.__new__(IsolatedTDDFTState)
+        with self.assertRaises(InputError):state.orbital_magnetic_response()

@@ -419,9 +419,235 @@ recursive subroutine isolated_state_control(operation,status)
   endif
   call isolated_state_control(2,status)
 
+ case(8)
+  call isolated_density_samples(status)
+ case(9)
+  call isolated_grid_stage(status)
+ case(10,11)
+  call isolated_orbital_response(operation==11,status)
  case default
   status=11
  end select
+end subroutine
+
+! Install both live E/H frames only after complete validation. No evolution.
+subroutine isolated_grid_stage(status)
+ use iso_c_binding,only:c_int
+ use salmonpy_grid_field,only:grid_validate,grid_values
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ integer,intent(out)::status
+ integer(c_int)::header(6)
+ real(8)::geometry(7),origins(3,3,2),spacing(3),point(3),mapped(3),ev(3),hv(3)
+ real(8),allocatable::frames(:,:,:,:,:,:)
+ integer::u,ios,close_ios,allocation_status,k,n,valid,corner,d,index(3),atom,j,ilma
+ integer(8)::bytes,position_in_file
+ status=34
+ if(.not.allocated(rt%near_grid_values))return
+ n=itt+1
+ if(n<1.or.n>rt%max_steps)return
+ status=35
+ open(newunit=u,file='salmonpy-grid-frames.bin',access='stream',form='unformatted', &
+      status='old',action='read',iostat=ios)
+ if(ios/=0)return
+ read(u,iostat=ios)header
+ if(ios/=0)goto 900
+ if(any(header/=[16909060_c_int,1_c_int,int(n,c_int),int(rt%near_grid_counts,c_int)]))goto 900
+ read(u,iostat=ios)geometry,origins,spacing
+ if(ios/=0)goto 900
+ if(any(geometry(1:3)/=rt%near_geometry(1:3)).or.any(geometry(4:6)/=rt%near_grid_center))goto 900
+ if(.not.ieee_is_finite(geometry(7)))goto 900
+ if(abs(geometry(7)-rt%time_step)>1d-12*rt%time_step)goto 900
+ if(any(origins/=rt%near_grid_origins).or.any(spacing/=rt%near_grid_spacing))goto 900
+ allocate(frames(3,rt%near_grid_counts(1),rt%near_grid_counts(2),rt%near_grid_counts(3),2,2), &
+          stat=allocation_status)
+ if(allocation_status/=0)then
+  status=32;goto 900
+ endif
+ read(u,iostat=ios)frames
+ if(ios/=0)goto 900
+ inquire(unit=u,size=bytes,pos=position_in_file,iostat=ios)
+ if(ios/=0)goto 900
+ if(bytes/=position_in_file-1_8)goto 900
+ do k=1,2
+  call grid_validate(rt%near_grid_counts,rt%near_grid_origins,rt%near_grid_spacing,frames(:,:,:,:,:,k),valid)
+  if(valid/=0)goto 900
+ enddo
+ ! Fixed ions and geometry: check extended magnetic query locations once,
+ ! before enabling H for an initially electric-only model. Rectangular coverage
+ ! of endpoints also covers all straight integration paths between them.
+ if(.not.rt%near_magnetic.and.any(frames(:,:,:,:,2,:)/=0d0))then
+  do corner=0,7
+   do d=1,3
+    index(d)=merge(mg%ie_array(d),mg%is_array(d),btest(corner,d-1))
+    point(d)=lg%coordinate(lg%is(d),d)+(index(d)-lg%is(d))*system%Hgs(d)
+   enddo
+   mapped=rt%near_grid_center+point-rt%near_geometry(1:3)
+   call grid_values(rt%near_grid_counts,origins,spacing,frames(:,:,:,:,:,1),mapped,ev,hv,valid)
+   if(valid/=0)goto 900
+  enddo
+  do ilma=1,ppg%nlma
+   atom=ppg%ia_tbl(ilma)
+   mapped=rt%near_grid_center+system%Rion(:,atom)-rt%near_geometry(1:3)
+   call grid_values(rt%near_grid_counts,origins,spacing,frames(:,:,:,:,:,1),mapped,ev,hv,valid)
+   if(valid/=0)goto 900
+   do j=1,ppg%mps(atom)
+    mapped=rt%near_grid_center+system%Rion(:,atom)+ppg%rxyz(:,j,atom)-rt%near_geometry(1:3)
+    call grid_values(rt%near_grid_counts,origins,spacing,frames(:,:,:,:,:,1),mapped,ev,hv,valid)
+    if(valid/=0)goto 900
+   enddo
+  enddo
+ endif
+ close(u,iostat=close_ios)
+ if(close_ios/=0)return
+ rt%near_grid_values(:,:,:,:,:,n:n+1)=frames
+ if(any(frames(:,:,:,:,2,:)/=0d0))rt%near_magnetic=.true.
+ status=0;return
+900 continue
+ close(u,iostat=close_ios)
+end subroutine
+
+! Read-only -d<E>/dH query. All scratch/model copies are local to this operation.
+subroutine isolated_orbital_response(audit,status)
+ use iso_c_binding,only:c_int
+ use salmonpy_orbital_response,only:orbital_grid_magnetization
+ use hamiltonian,only:hpsi
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ logical,intent(in)::audit
+ integer,intent(out)::status
+ type(s_orbital)::psi,applied
+ type(s_dft_system)::trial_system
+ type(s_rt)::trial_rt
+ type(s_pp_grid)::trial_ppg
+ real(8),allocatable::M(:,:,:,:),direction(:,:,:,:)
+ real(8)::energies(2,2),epsilon,weight,expectation,derivative,errors(2),predicted
+ integer::u,ios,close_ios,d,ix,iy,iz,im,ik,io,k,side,code
+ integer(c_int)::header(6)
+ status=34
+ if(yn_spinorbit/='n'.or.yn_periodic/='n'.or.yn_md/='n')return
+ if(.not.allocated(rt%near_grid_values))return
+ ! Match the occupied orbital at the accepted endpoint, including restored parity.
+ if(mod(itt-Mit,2)==1)then
+  psi=spsi_out
+ else
+  psi=spsi_in
+ endif
+ call orbital_grid_magnetization(mg,lg,system,info,stencil,ppg,rt,psi,M,status)
+ if(status/=0)return
+ status=33
+ if(.not.audit)then
+  open(newunit=u,file='salmonpy-orbital-response.bin',access='stream',form='unformatted', &
+       status='replace',action='write',iostat=ios)
+  if(ios/=0)return
+  header=[16909060_c_int,1_c_int,int(itt,c_int),int(rt%near_grid_counts,c_int)]
+  write(u,iostat=ios)header
+  if(ios==0)write(u,iostat=ios)rt%near_grid_origins,rt%near_grid_spacing
+  if(ios==0)write(u,iostat=ios)M
+  close(u,iostat=close_ios)
+  if(ios/=0.or.close_ios/=0)return
+ else
+  ! Explicit audit only: finite differences of the actual Hamiltonian, frozen psi.
+  allocate(direction(3,rt%near_grid_counts(1),rt%near_grid_counts(2),rt%near_grid_counts(3)),stat=code)
+  status=32;if(code/=0)return
+  do iz=1,rt%near_grid_counts(3)
+  do iy=1,rt%near_grid_counts(2)
+  do ix=1,rt%near_grid_counts(1)
+  do d=1,3
+   direction(d,ix,iy,iz)=sin(real(ix+2*iy+3*iz+d,8))
+  enddo
+  enddo
+  enddo
+  enddo
+  predicted=-sum(M*direction)*product(rt%near_grid_spacing)
+  do k=1,2
+   epsilon=10d0**(-k-2)
+   do side=1,2
+    trial_system=system;trial_rt=rt;trial_ppg=ppg;applied=psi
+    trial_rt%near_magnetic=.true.
+    trial_rt%near_grid_values(:,:,:,:,2,rt%near_index)= &
+      rt%near_grid_values(:,:,:,:,2,rt%near_index)+(2*side-3)*epsilon*direction
+    call apply_near_magnetic(rt%near_index,mg,lg,trial_system,trial_rt,info,trial_ppg)
+    call hpsi(psi,applied,info,mg,V_local,trial_system,stencil,srg,trial_ppg)
+    expectation=0d0
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+     weight=system%rocc(io,ik,1)*system%wtk(ik)*system%Hvol
+     do iz=mg%is(3),mg%ie(3)
+     do iy=mg%is(2),mg%ie(2)
+     do ix=mg%is(1),mg%ie(1)
+      expectation=expectation+weight*real(conjg(psi%zwf(ix,iy,iz,1,io,ik,im))* &
+                                          applied%zwf(ix,iy,iz,1,io,ik,im),8)
+     enddo
+     enddo
+     enddo
+    enddo
+    enddo
+    enddo
+    energies(side,k)=expectation
+   enddo
+   derivative=(energies(2,k)-energies(1,k))/(2d0*epsilon)
+   errors(k)=abs(derivative-predicted)
+  enddo
+  do k=1,2
+   if(.not.ieee_is_finite(errors(k)))return
+  enddo
+  open(newunit=u,file='salmonpy-orbital-audit.bin',access='stream',form='unformatted', &
+       status='replace',action='write',iostat=ios)
+  if(ios/=0)return
+  write(u,iostat=ios)predicted,errors,energies
+  close(u,iostat=close_ios)
+  if(ios/=0.or.close_ios/=0)return
+ endif
+ status=0
+end subroutine
+
+! Explicit read-only density transfer. A private cache is consumed by the
+! Python owner; it is not part of physical state or a permanent output stream.
+subroutine isolated_density_samples(status)
+ use iso_c_binding,only:c_int
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ integer,intent(out)::status
+ integer::u,ios,close_ios,a,ix,iy,iz,spin,n,allocation_status
+ integer(8)::count
+ real(8),allocatable::samples(:,:)
+ integer(c_int)::header(4)
+ status=32
+ if(any(mg%is/=lg%is).or.any(mg%ie/=lg%ie))return
+ count=product(int(mg%ie-mg%is+1,8))
+ if(count<1.or.count>huge(1_c_int))return
+ n=int(count)
+ allocate(samples(5,n),stat=allocation_status)
+ if(allocation_status/=0)return
+ a=0
+ do iz=mg%is(3),mg%ie(3)
+ do iy=mg%is(2),mg%ie(2)
+ do ix=mg%is(1),mg%ie(1)
+  a=a+1
+  samples(1:3,a)=[lg%coordinate(ix,1),lg%coordinate(iy,2),lg%coordinate(iz,3)]
+  samples(4,a)=0d0
+  do spin=1,size(rho_s)
+   samples(4,a)=samples(4,a)-rho_s(spin)%f(ix,iy,iz)
+  enddo
+  samples(5,a)=system%Hvol
+ enddo
+ enddo
+ enddo
+ do a=1,n
+ do spin=1,5
+  if(.not.ieee_is_finite(samples(spin,a)))return
+ enddo
+ enddo
+ if(system%Hvol<=0d0)return
+ status=33
+ open(newunit=u,file='salmonpy-charge-samples.bin',access='stream',form='unformatted', &
+      status='replace',action='write',iostat=ios)
+ if(ios/=0)return
+ header=[16909060_c_int,1_c_int,int(itt,c_int),int(n,c_int)]
+ write(u,iostat=ios)header
+ if(ios==0)write(u,iostat=ios)samples
+ close(u,iostat=close_ios)
+ if(ios/=0.or.close_ios/=0)return
+ status=0
 end subroutine
 
 integer(8) function checkpoint_io_limit()

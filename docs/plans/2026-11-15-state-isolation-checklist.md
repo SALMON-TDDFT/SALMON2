@@ -4913,3 +4913,40 @@ GSは許可済みの既存C2H2データだけを再利用。クラウド同期�
 - Vacuum/LD 4-rank oscillator feedback passed; LD nonzero scattered feedback, work relative residual below2e-14.
 - C2H2 off-grid position(-.54,1.62,1.94),64 steps, process-exit bundle restore at field27/molecule26: all frames and both field streams exact,0extra evolution. Existing GS reused.
 - Japanese/English guides, AI guide text and public sample updated. Full spatial/magnetic Iwasa reciprocal response, discrete charge continuity and physical tip/bow-tie convergence remain pending; dipole feedback must not be described as completing those tasks.
+
+### 2026-11-25: electric path-response operator
+
+- Implemented stateless Fortran transpose of electric path integrals: signed charge-density samples/volume elements -> E-component polarization and interval current. Off-grid center/position and staggered component origins supported; no extra communication.
+- Independent Fortran nonuniform-field trial: work absolute/relative error6.62e-24/1.84e-16, integrated dipole error1.63e-19; invalid endpoint/NaN/Infinity/overflow retain output. Existing forward solver unchanged.
+- Pending: live molecular density acquisition, direct component-current injection/own-reference driver and end-to-end restart for spatial response; magnetic response and discrete charge-continuity validation. This operator does not complete spatial TDDFT/FDTD feedback.
+
+- Electric path-response distribution verified: Git-only preparation and sdist-to-wheel passed; installed101tests(99pass/2optional skips), independent Fortran test and saved-array example passed. Validation record: docs/electric-path-response-validation-2026-11-25.md.
+
+### 2026-11-25: density readout and direct E-component currents
+
+- Molecular charge_density() readout implemented: signed electronic density, coordinates and volume elements; no propagation/replay. Explicit private worker transfer file, not automatic permanent output. Executable-bound optional validation evidence gates the public getter.
+- Direct checked advance_edges(), E-component geometry and raw reads implemented; only owned edge currents consumed, different local list lengths allowed, no macro deposition repeated. Existing E/LD/H order and recovery reused; no application-wide communication added.
+- Real C2H2 18,432 points: independent control and process-exit electronic density restart2->4 exact,0extra electronic evolution. Actual density currents radiated through one/two field ranks. Direct-current macro control exact; NaN rejection, live rollback/retry and two-rank FDTD process-exit direct restart exact,0setup evolution calls.
+- Pending: live spatial-field TDDFT input and a coordinated trial/own-vacuum feedback driver; magnetic response, discrete continuity and physical convergence. These connectors do not complete spatial bidirectional coupling.
+
+- Distribution verification: source121pass; installed158tests(156pass/2optional skips), real density readout/opt-in output, one/two-rank prescribed radiation and direct process-exit field restart passed. Previous64-step coupled frames bit-exact. See docs/live-electric-connections-validation-2026-11-25.md.
+
+### 2026-11-25: streamed grid fields and electric feedback validation
+
+- Implemented step_grid_field two-frame input for target n with FDTD frames n,n+1; fixed geometry/dt and full buffers validated before publication. First H activation checks halo/projector coverage. Direct checkpoints retain streamed fields; no E-only replay.
+- Streamed/prescribed C2H2 E/H match all9observables; magnetic negative control, malformed geometry/Infinity and process-exit direct restart verified. Source-time/frame labels documented. Existing isolated_response gains --grid-series instead of another sample.
+- Electric-only total/own-vacuum FDTD feedback driver verified at outer4/6ranks with off-grid molecule. Vacuum controls, rejection/retry and joint direct restart match arrays/ordinary streams.192-step LD return field about4e-7 au exceeds roundoff; accepted/predicted drive disagreement about1.4e-17 au. Joint save at molecular96/field97 restores without extra evolution.
+- Remaining: general production coordinator and broader composed-failure guarantees, magnetic current return, rolling storage/I/O/performance optimization, physical convergence and realistic tip/bow-tie cases. The development driver is not a general production API.
+
+### 2026-11-25: installed streamed-field and electric-feedback verification
+
+- Git-only solver build and source-distribution-to-wheel passed; installed targeted129tests passed. Public isolated_response --grid-series matches the accepted-step reference.
+- Final executable and installed-wheel6-rank LD feedback: direct restore molecular96/FDTD97, retry128 and192-step continuous control agree; six ordinary output streams are byte-identical, with zero extra restoration evolution.
+- See docs/grid-field-feedback-validation-2026-11-25.md. Magnetic-current return, general production coordinator, rolling storage and physical convergence remain open; this test does not close those items.
+
+### 2026-11-25: spinless orbital magnetic return
+
+- Done: read-only Fortran M=-delta<E>/delta B with local paramagnetic/diamagnetic and nonlocal projector phase terms; Yee c*curl(M), adjacent-step interval averaging and one-time electric/magnetic current sum. Electric coupling remains length gauge.
+- Verified: actual Hamiltonian derivative absolute error7.08e-12; independent adjoint/work and divergence checks; atomic invalid/overflow rejection; C2H2 direct process-exit restore2->4 reproduces M, interval currents and ordinary observables without evolution.
+- Two FDTD ranks plus bookkeeping: regenerated restored currents and field restart3 reproduce continuous arrays exactly. Magnetic-only E is nonzero; electric+magnetic superposition agrees within4.24e-22. Source-distribution-to-wheel, installed99targeted tests, installed molecular and MPI restart tools passed. See docs/orbital-magnetic-return-validation-2026-11-25.md.
+- Remaining: general self-consistent magnetic own-vacuum coordinator, spin magnetization, full composed charge-continuity/energy validation, physical convergence and scale tests. This closes the response-return component, not those broader items.

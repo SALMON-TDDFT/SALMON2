@@ -358,3 +358,9 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 ```
 
 [詳細と単位](../OUTPUTS.md)。この入口は後処理だけで計算を起動しません。
+
+- `python -m salmonpy.examples.grid_electric_response INPUT.npz NEW_OUTPUT.npz --dt DT`: 保存した電荷密度から電場経路に沿った分極・電流を準備（双方向実行ではない）
+
+- `python -m salmonpy.examples.molecular_charge_density --help`: 対応検証済みの分子TDDFTから密度を明示取得。恒久保存は `--save-density` で選択
+
+- isolated_response の --grid-series は保存したE/Hを逐次渡します。初期入力の幾何条件と直接保存・再開を使います
