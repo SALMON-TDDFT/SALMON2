@@ -21,6 +21,16 @@ class SolidFieldTests(unittest.TestCase):
         for step,dt in ((0,.003),(5,.003),(1,.004)):
             with self.assertRaises(InputError):history.window(step_index=step,dt=dt)
 
+        # The live public entry must describe one-way execution, not expose a
+        # second mode argument that could select feedback accidentally.
+        import subprocess,sys
+        result=subprocess.run([sys.executable,'-m','salmonpy.examples.molecular_fdtd_response','--help'],
+                              capture_output=True,text=True,check=True)
+        self.assertIn('--stop-after',result.stdout)
+        self.assertIn('--resume',result.stdout)
+        self.assertIn('no molecular current',result.stdout)
+        self.assertNotIn('{external,feedback',result.stdout)
+
     def test_uniform_quadrupole_and_curl_residual(self):
         from salmonpy.near_field import ElectricPotentialSeries
         points=np.array([[x,y,z] for x in (-1.,0.,1.) for y in (-1.,0.,1.) for z in (-1.,0.,1.)])

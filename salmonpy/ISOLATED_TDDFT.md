@@ -4,7 +4,7 @@ PZ・固定イオン・非偏極・スカラー擬ポテンシャル・中点伝
 
 ## 用途から選ぶ
 
-- **FDTDの近接場で分子を励起する**：[一方向の励起](#one-way-grid)から始めます。現在推奨する入口です。場は保存データから読み、分子電流はFDTDへ返しません。
+- **FDTDの近接場で分子を励起する**：[一方向の励起](#one-way-grid)から始めます。現在推奨する入口です。一度の起動で両方を進める方法と、保存した場を読む方法があります。分子電流はFDTDへ返しません。
 - **一様な電場で分子を励起する**：下の「計算プログラムと初期状態」を使います。
 - 双方向の自己場差し引きを扱う後半の説明は、検証用の別経路です。一方向計算には不要です。
 
@@ -18,6 +18,29 @@ PZ・固定イオン・非偏極・スカラー擬ポテンシャル・中点伝
 一定dtでフレーム0..N+1を用意します。分子のステップn-1→nには場のフレームn,n+1を渡します。`history.window(step_index=n,dt=dt)` がその2枚を取り出します。フィット、空間平均、時間補間は加えず、空間補間と経路積分による結合はFortranで処理します。`time_origin` は元データの時刻の記録であり、それ以前の分子の励起は再現しません。
 
 `--stop-after 2 --direct-checkpoint NEW_CHECKPOINT` で途中保存し、同じコマンドの出力先を変えて `--resume-direct NEW_CHECKPOINT` で続けます。全履歴、準備済み形状、dt、計算容量、計算プログラムを揃えます。入力場も保存状態に保持され、再計算せず次の分子ステップから再開します。出力の `restore_statistics` と `final_statistics` で更新回数を確認できます。ステップ番号、双極子、電子分極の変化、電子数を保存します。内部エネルギーは全フレームで取得できる場合に保存し、取得可否も記録します。追加の一様電場ファイルは不要です。
+
+### 一度の起動でFDTDと分子を進める
+
+FDTDと分子TDDFTを一つのPythonプログラムから順に呼ぶ例もあります。場をファイルへ書いてから別の計算を起動する必要はありません。一方向とは、分子の電流をFDTDへ返さないという意味です。
+
+```sh
+OMP_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.molecular_fdtd_response FIELD_BUILD WORKER VALIDATION EXISTING_C2H2_BUNDLE run-live --field-ranks 2 --steps 96 --ld
+```
+
+`FIELD_BUILD`はFDTD共有ライブラリのbuild.json、`WORKER`と`VALIDATION`は分子実行ファイルとその検証記録です。`EXISTING_C2H2_BUNDLE`には既存GSの再開データ、C/H擬ポテンシャル、`input.inp`を置きます。サンプルが実際のパッチ形状に合わせた初期入力を作るので、FIELDS.npzや`.dat`の事前生成は不要です。GS計算・ビルド・ダウンロードは行いません。
+
+これは固定形状の接続例です。40³・幅2bohrのFDTD格子、任意で合成LD箱、格子点からずれたC2H2位置、24³の場パッチ、dt=0.003auを使います。任意のナノ構造をこのコマンドだけで指定する入口ではありません。FDTDは1または2ランク、ほかに調整用1ランクを使います。上の3ランクの例では分子ワーカーが別プロセスで1つ起動するため、計4プロセス分のCPU資源を見込みます。`--field-ranks 1`ならMPIは2ランクです。分子へのE/Hは成分ごとの空間分布を保持し、Fortranの補間・経路積分で入力します。自己真空参照は起動しません。
+
+```sh
+OMP_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.molecular_fdtd_response FIELD_BUILD WORKER VALIDATION EXISTING_C2H2_BUNDLE run-first --field-ranks 2 --steps 96 --ld --stop-after 48
+OMP_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.molecular_fdtd_response FIELD_BUILD WORKER VALIDATION EXISTING_C2H2_BUNDLE run-resumed --field-ranks 2 --steps 96 --ld --resume run-first/checkpoint
+```
+
+分子48／FDTD49で場・LD・分子を保存して終了し、同じランク配置・入力・最大ステップ数で再開します。`--save-step 48`なら保存後も継続します。この例の保存先は出力先直下の`checkpoint`で、一回の起動で1つだけ作ります。
+
+`summary.json`に実際の分子・FDTDステップ番号、更新回数、返却と自己真空参照の有無を記録します。`history.npz`の`observations[k]`は分子ステップkの9成分（電子分極変化3、全電荷双極子3、電子数、内部エネルギー、エネルギー取得フラグ）です。`total[j]`は`field_step[j]`で示すFDTDステップj+1のE/H。0ステップ目は`field-step-0.npz`の`EH`にあります。再開した実行の履歴には保存前の履歴も含まれるため、前の出力とさらに結合する必要はありません。分子の通常出力は`molecule-streams`に保存します。大きな計算向けのI/O量削減や任意のMPI障害からの復旧を保証する例ではありません。
+
+以下は、FDTDを既に計算済みで、保存した場から分子だけを計算する場合の手順です。
 
 ### 入力を同じ場データから準備する
 

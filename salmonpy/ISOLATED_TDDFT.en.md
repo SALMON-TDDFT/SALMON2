@@ -4,7 +4,7 @@ Explicit process-isolated PZ, fixed ions, unpolarized scalar pseudopotentials an
 
 ## Choose a calculation
 
-- **Excite a molecule with an FDTD near field**: start with [one-way excitation](#one-way-grid), the recommended entry point. Fields are read from saved data; molecular current is not returned to FDTD.
+- **Excite a molecule with an FDTD near field**: start with [one-way excitation](#one-way-grid), the recommended entry point. Choose a single launch or a saved field history; molecular current is not returned to FDTD.
 - **Excite a molecule with a uniform electric field**: use “Calculation program and initial state” below.
 - The later bidirectional/self-vacuum sections describe a separate validation route and are not needed for one-way excitation.
 
@@ -18,6 +18,29 @@ Prepare the existing GS bundle with matching `salmonpy-near-eh.dat` grid geometr
 Frames are numbered 0..N+1 at constant dt. Molecular step n-1 -> n uses frames n,n+1. `history.window(step_index=n,dt=dt)` constructs that pair without fitting, spatial averaging or temporal interpolation. The Fortran worker performs spatial interpolation and the molecular path-integral coupling. Source `time_origin` is recorded as provenance; it does not recreate earlier molecular excitation.
 
 Use `--stop-after 2 --direct-checkpoint NEW_CHECKPOINT`, then run the same command with a new output directory and `--resume-direct NEW_CHECKPOINT`. Restore requires the same full history, prepared geometry, dt, capacity and runtime. The saved state retains its staged fields; resumption starts at the next molecular step without replay. Inspect `restore_statistics` and `final_statistics` in the output metadata. Outputs include molecular step numbers, dipole, electronic change, electron number and, when available at every frame, internal energy. Availability is recorded. No auxiliary uniform-E archive is required.
+
+### Advance FDTD and the molecule in one launch
+
+The same Python program can advance FDTD and molecular TDDFT in sequence; it need not write a field archive and start a separate response job. One-way means molecular current is not returned to FDTD.
+
+```sh
+OMP_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.molecular_fdtd_response FIELD_BUILD WORKER VALIDATION EXISTING_C2H2_BUNDLE run-live --field-ranks 2 --steps 96 --ld
+```
+
+FIELD_BUILD is the FDTD shared-library build.json; WORKER and VALIDATION identify the molecular executable and its evidence. EXISTING_C2H2_BUNDLE supplies existing GS restart data, C/H potentials and input.inp. The example prepares the molecular input for the actual field patch, so no FIELDS.npz or `.dat` preparation is required. It does not run SCF, build or download anything.
+
+This is a fixed connection example: a 40³ FDTD grid with 2 bohr spacing, an optional synthetic LD box, off-grid C2H2 position, 24³ field patch and dt = 0.003 au. The command is not an arbitrary nanostructure configuration interface. Use 1 or 2 field ranks plus one coordination rank. The three-rank command also starts one separate molecular worker process, requiring CPU resources for four processes in total. For `--field-ranks 1` use two MPI ranks. Spatially resolved component E/H enters the Fortran interpolation/path coupling; no own-vacuum FDTD is started.
+
+```sh
+OMP_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.molecular_fdtd_response FIELD_BUILD WORKER VALIDATION EXISTING_C2H2_BUNDLE run-first --field-ranks 2 --steps 96 --ld --stop-after 48
+OMP_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.molecular_fdtd_response FIELD_BUILD WORKER VALIDATION EXISTING_C2H2_BUNDLE run-resumed --field-ranks 2 --steps 96 --ld --resume run-first/checkpoint
+```
+
+This saves field/LD/molecule at molecular step 48 / FDTD step 49 and exits. Resume with the same rank layout, inputs and capacity. `--save-step 48` instead saves and continues. This example creates one checkpoint directory per invocation, named `checkpoint` inside the output directory.
+
+`summary.json` reports actual molecular/field indices, update counts, feedback and self-reference flags. In `history.npz`, observations[k] contains nine worker values at molecular step k: three electronic dipole changes, three total charge-dipole components, electron number, internal energy, energy-availability flag. total[j] is E/H at FDTD step j+1, explicitly labeled by field_step[j]. Step 0 is `EH` in `field-step-0.npz`. Resumed histories already include the saved prefix; do not concatenate the previous run again. Ordinary molecular streams are saved in molecule-streams. This fixture does not guarantee large-scale I/O efficiency or general MPI-failure recovery.
+
+The following route is for an already-computed field history, when only the molecular response needs to be run.
 
 ### Prepare both inputs from the same field data
 

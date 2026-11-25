@@ -4988,3 +4988,9 @@ GSは許可済みの既存C2H2データだけを再利用。クラウド同期�
 - Shared `GridFieldSeries.window` and `molecular_grid_response` example use complete E/H grids with explicit n,n+1 frames, no molecular spatial averaging and no self-vacuum subtraction. Direct checkpoints reuse existing worker state.
 - Actual saved LD + 3D-FDTD E/H (two field solver ranks) drove off-grid C2H2 for96steps. Separate-process direct restore at48 gave bit-exact concatenated output arrays; restoration added0updates and continuation48updates. Records: calc2026/salmonpy-c2h2-nearfield-20261125/one-way-ld-fdtd-c2h2/comparison.json. No new GS/FDTD calculation or physical-convergence claim.
 - Source and installed wheel:32related tests each passed. Sdist->wheel and installed actual-field resume passed; installed/source resumed arrays bit-exact. Radiation and feedback remain deferred by current user scope.
+
+### 2026-11-25: single-launch one-way FDTD -> molecular TDDFT
+
+- Shared the existing spatial coupling runner between the validation tool and a public one-way example; no duplicated numerical implementation.
+- One field group supplies full component E/H, no quantum-to-field current or own-vacuum group. Joint direct field/LD/molecular save/resume and explicit field/molecular step labels are verified.
+- Completed96molecular/97field steps; aligned saved-field response and field-only control match exactly. Installed stop48/field49 and separate-launch resume match every history array and four ordinary streams,0restore evolutions.45tests each on source/wheel. See docs/live-one-way-molecular-validation-2026-11-25.md. No molecular feedback or radiation was added.
