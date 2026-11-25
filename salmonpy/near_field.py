@@ -490,6 +490,20 @@ class GridFieldSeries:
     @property
     def counts(self):return (self.E.shape[3],self.E.shape[2],self.E.shape[1])
 
+    def window(self,*,step_index,dt):
+        """Frames n,n+1 for molecular step n-1 -> n; never evolves a solver.
+
+        Source time_origin remains provenance of the complete history. The
+        returned pair uses local field-step labels required by step_grid_field.
+        No interpolation or resampling of time is implicit.
+        """
+        n=_integer(step_index,'step_index',1,len(self.times)-2)
+        dt=float(_real(dt,(),'dt'))
+        if dt<=0 or not np.isclose(self.times[1],dt,rtol=1e-12,atol=0.):
+            raise InputError('grid history must contain frames 0..N+1 at the molecular dt')
+        return GridFieldSeries(self.origin,self.spacing,[0.,dt],self.E[n:n+2],self.H[n:n+2],
+            molecule_position=self.molecule_position,center=self.center,time_origin=n*dt)
+
     def _evaluate(self,positions,step_index,potentials):
         step=_integer(step_index,'step_index',0,len(self.times)-1)
         points=np.asarray(positions)

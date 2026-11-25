@@ -370,3 +370,5 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 - isolated_response --grid-series streams saved E/H with fixed prepared geometry and direct checkpoint/restart
 
 - For spatial molecular E/H and orbital magnetic own-vacuum feedback, see `test_grid_feedback_mpi.py --orbital-magnetic` in ISOLATED_TDDFT.en.md. This is a fixed-C2H2 connection/restart trial, not a physical-convergence guarantee.
+
+- `molecular_grid_response.py`: Saved spatial FDTD E/H drives the molecule only; direct restart, no current returned to FDTD.

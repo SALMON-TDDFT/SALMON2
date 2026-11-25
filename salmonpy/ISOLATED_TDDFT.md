@@ -548,3 +548,13 @@ mpiexec -n 6 python tools/test_grid_feedback_mpi.py feedback \
 ```
 
 再開は同じ入力条件で、新しい出力先と `--resume SAVED_OUTPUT/checkpoint` を指定します。`VALIDATION_JSON` は使用する分子実行ファイルについて、`grid_eh`・`grid_stream`・`charge_density`・`orbital_magnetic` の検証を含む必要があります。インストール済みwheelでは、付属ツールは `salmonpy` の `_runtime_source/tools/` にあります。検証用の固定形状・光源を使う入口であり、任意の構造に対する一般的な実行・異常復帰の保証ではありません。予期しないMPI異常はその試験ジョブを終了します。物理的収束、スピン磁化、真空放射反作用の扱いは別途確認が必要です。
+
+## 空間依存FDTD E/Hによる一方向の励起
+
+`python -m salmonpy.examples.molecular_grid_response WORKER VALIDATION BUNDLE input.inp FIELDS.npz NEW_OUTPUT` で、保存したFDTDの場から分子だけを時間発展させます。FDTDの起動、分子電流の返却、自己真空参照の差し引き、放射計算は行いません。分子が照明場やナノ構造に及ぼす影響は無視します。
+
+既存GSの入力一式には、同じ格子形状の `salmonpy-near-eh.dat` を準備します。計算プログラムの検証記録には `grid_eh` と `grid_stream` が必要です。FIELDS.npzには `origin`, `spacing`, `times`, `E`, `H`, `molecule_position`, `center` と任意の `time_origin` を保存します。E/Hの形は `[フレーム,z,y,x,3]`。Yee格子の各成分の原点は保持します。HはFDTDの成分取得機能で整数ステップに時刻を揃えた値を使い、未処理の半ステップ値を渡しません。単位は原子単位、分子位置の媒質は真空です。
+
+一定dtでフレーム0..N+1を用意します。分子のステップn-1→nには場のフレームn,n+1を渡します。`history.window(step_index=n,dt=dt)` がその2枚を取り出します。フィット、空間平均、時間補間は加えず、空間補間と経路積分による結合はFortranで処理します。`time_origin` は元データの時刻の記録であり、それ以前の分子の励起は再現しません。
+
+`--stop-after 2 --direct-checkpoint NEW_CHECKPOINT` で途中保存し、同じコマンドの出力先を変えて `--resume-direct NEW_CHECKPOINT` で続けます。全履歴、準備済み形状、dt、計算容量、計算プログラムを揃えます。入力場も保存状態に保持され、再計算せず次の分子ステップから再開します。出力の `restore_statistics` と `final_statistics` で更新回数を確認できます。ステップ番号、双極子、電子分極の変化、電子数を保存します。内部エネルギーは全フレームで取得できる場合に保存し、取得可否も記録します。追加の一様電場ファイルは不要です。

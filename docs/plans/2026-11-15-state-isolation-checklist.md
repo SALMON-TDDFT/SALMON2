@@ -2,7 +2,7 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## 最新の残作業（2026-11-25 磁気自己場結合の検証後）
+## 最新の残作業（2026-11-25 一方向の分子励起を優先）
 
 空間依存E/H、軌道磁化電流、本計算−自己真空参照の双方向結合は、
 スピンなし固定イオンPZのC₂H₂で接続・直接保存／再開・再試行まで検証済みです。
@@ -10,7 +10,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 根拠は末尾と `docs/magnetic-self-field-feedback-validation-2026-11-25.md` を参照します。
 以下を現在の残件の整理とし、後続の古い未完了欄を重複して数えません。
 
-1. **今回の空間依存・磁気結合の物理診断**：電気＋磁気を合わせた離散電荷連続則・仕事量・エネルギー収支。既存の双極子モデルの収支検証とは区別する。
+1. **今回の空間依存・磁気結合の物理診断**：電気＋磁気を合わせた離散電荷連続則・仕事量・エネルギー収支。既存の双極子モデルの収支検証とは区別する。 **双方向結合を再開する際に自己場の分担を再設計**：全自己真空E/H差し引きは環境散乱だけの比較近似と位置付け、分子自身の縦クーロン場のみを除く案を検討する。近接場の空間分布と環境の縦電場は保持する。根拠と未解決点は `2026-11-25-molecular-self-field-review.md`。
 2. **一般の配置・運用への接続**：固定形状の検証ドライバーを超える配置指定、途中失敗時に全状態を保持する一般的な結合処理。今回の正常再開・意図的再試行の成功だけで包括保証しない。
 3. **近接場の実用途検証**：Tip／Bow Tie、格子点からずれた分子位置、格子・時間刻み・分子領域と物理的応答の収束。
 4. **規模・I/O・施設環境**：場履歴の逐次保持と転送量の削減、多数点・長時間の計測、施設MPI・多ノードでの実証。Macでの少数ランク試験と区別する。
@@ -4975,3 +4975,16 @@ GSは許可済みの既存C2H2データだけを再利用。クラウド同期�
 - Verified:192 molecular/193 field steps; save96/97, process-exit direct continuation and retry64/128 reproduce all histories, observables and six ordinary files exactly. One/two field ranks per group agree; existing electric-only arrays unchanged. Environment return is nonzero in E and H.
 - Git-only audited build, source106targeted tests, sdist->wheel, installed106tests and installed6-rank restore/retry passed. See docs/magnetic-self-field-feedback-validation-2026-11-25.md.
 - Remaining: arbitrary-layout/failure-atomic production orchestration, spin magnetization, vacuum radiation reaction policy, full charge-continuity/energy and physical convergence checks, performance/scaling. The electric-and-orbital-magnetic own-vacuum response connection is now implemented and validated under the stated conditions.
+
+### 2026-11-25: self-field partition review
+
+- Reviewed actual selected-field subtraction, retained Hartree, spatial polarization current and orbital magnetic response against primary literature. Full own-vacuum E/H subtraction is an environment-scattered-only approximation, not a gauge requirement or a removal of only duplicated Hartree interaction.
+- Proposed direction: retain spatial response; remove only the molecule's duplicated longitudinal vacuum Coulomb field; preserve environment longitudinal fields and molecular transverse/magnetic radiation. Still requires a matched discrete charge/Poisson coupling, consistent time stepping and an energy derivation before implementation.
+- No numerical path or physical results changed. Review: docs/plans/2026-11-25-molecular-self-field-review.md.
+
+### 2026-11-25: one-way spatial excitation first
+
+- User narrowed the current scope to FDTD -> molecular TDDFT only. Radiation, rescattering and self-field feedback redesign are deferred.
+- Shared `GridFieldSeries.window` and `molecular_grid_response` example use complete E/H grids with explicit n,n+1 frames, no molecular spatial averaging and no self-vacuum subtraction. Direct checkpoints reuse existing worker state.
+- Actual saved LD + 3D-FDTD E/H (two field solver ranks) drove off-grid C2H2 for96steps. Separate-process direct restore at48 gave bit-exact concatenated output arrays; restoration added0updates and continuation48updates. Records: calc2026/salmonpy-c2h2-nearfield-20261125/one-way-ld-fdtd-c2h2/comparison.json. No new GS/FDTD calculation or physical-convergence claim.
+- Source and installed wheel:32related tests each passed. Sdist->wheel and installed actual-field resume passed; installed/source resumed arrays bit-exact. Radiation and feedback remain deferred by current user scope.

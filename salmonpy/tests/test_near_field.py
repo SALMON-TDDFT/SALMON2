@@ -6,6 +6,21 @@ from salmonpy.field_sampling import SampledField
 
 
 class SolidFieldTests(unittest.TestCase):
+    def test_one_way_grid_windows_have_explicit_step_labels(self):
+        from salmonpy.near_field import GridFieldSeries
+        from salmonpy.errors import InputError
+        E=np.arange(6*2*2*2*3,dtype=float).reshape(6,2,2,2,3)
+        history=GridFieldSeries((0,0,0),(1,1,1),np.arange(6)*.003,E,-E,
+                                molecule_position=(.2,.3,.4),time_origin=10.)
+        pair=history.window(step_index=3,dt=.003)
+        np.testing.assert_array_equal(pair.E,E[3:5])
+        np.testing.assert_array_equal(pair.H,-E[3:5])
+        self.assertAlmostEqual(pair.time_origin,.009)
+        np.testing.assert_array_equal(pair.molecule_position,history.molecule_position)
+        self.assertFalse(pair.E.flags.writeable)
+        for step,dt in ((0,.003),(5,.003),(1,.004)):
+            with self.assertRaises(InputError):history.window(step_index=step,dt=dt)
+
     def test_uniform_quadrupole_and_curl_residual(self):
         from salmonpy.near_field import ElectricPotentialSeries
         points=np.array([[x,y,z] for x in (-1.,0.,1.) for y in (-1.,0.,1.) for z in (-1.,0.,1.)])

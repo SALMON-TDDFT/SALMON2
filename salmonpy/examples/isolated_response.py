@@ -55,8 +55,7 @@ def main():
             for n,value in enumerate(E[start:stop],start+1):
                 if grid is None:frames.append(state.step(value))
                 else:
-                    window=GridFieldSeries(grid.origin,grid.spacing,[0.,dt],grid.E[n:n+2],grid.H[n:n+2],
-                        molecule_position=grid.molecule_position,center=grid.center,time_origin=n*dt)
+                    window=grid.window(step_index=n,dt=dt)
                     frames.append(state.step_grid_field(window,step_index=n,E_extra=value))
             if a.direct_checkpoint:state.save_direct_checkpoint(a.direct_checkpoint)
             if a.checkpoint: state.save_checkpoint(a.checkpoint)

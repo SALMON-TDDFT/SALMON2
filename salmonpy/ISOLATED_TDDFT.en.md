@@ -482,3 +482,13 @@ mpiexec -n 6 python tools/test_grid_feedback_mpi.py feedback \
 ```
 
 Resume with matching inputs, a new output directory and `--resume SAVED_OUTPUT/checkpoint`. The executable-bound receipt needs `grid_eh`, `grid_stream`, `charge_density` and `orbital_magnetic` evidence. Installed wheels place the tool in the package's `_runtime_source/tools/`. This uses a fixed validation geometry/source; it is not a general arbitrary-geometry or failure-atomic production coordinator. Unexpected MPI errors terminate the test job. Physical convergence, spin magnetization and vacuum radiation reaction remain separate work.
+
+## One-way spatial FDTD E/H excitation
+
+Use `python -m salmonpy.examples.molecular_grid_response WORKER VALIDATION BUNDLE input.inp FIELDS.npz NEW_OUTPUT`. This reads a saved FDTD history and evolves only the molecule. It does not start FDTD, return molecular current, subtract a self-vacuum reference or calculate radiation. Molecular back-action on the illuminating structure is neglected.
+
+Prepare the existing GS bundle with matching `salmonpy-near-eh.dat` grid geometry and a worker validation record declaring `grid_eh` and `grid_stream`. FIELDS.npz contains `origin`, `spacing`, `times`, `E`, `H`, `molecule_position`, `center` and optional `time_origin`. E/H shape is `[frames,z,y,x,3]`; distinct Yee-component origins are preserved. Supply time-centered H from the FDTD component-field reader, not uncentered half-step H. Atomic units and vacuum at the molecule apply.
+
+Frames are numbered 0..N+1 at constant dt. Molecular step n-1 -> n uses frames n,n+1. `history.window(step_index=n,dt=dt)` constructs that pair without fitting, spatial averaging or temporal interpolation. The Fortran worker performs spatial interpolation and the molecular path-integral coupling. Source `time_origin` is recorded as provenance; it does not recreate earlier molecular excitation.
+
+Use `--stop-after 2 --direct-checkpoint NEW_CHECKPOINT`, then run the same command with a new output directory and `--resume-direct NEW_CHECKPOINT`. Restore requires the same full history, prepared geometry, dt, capacity and runtime. The saved state retains its staged fields; resumption starts at the next molecular step without replay. Inspect `restore_statistics` and `final_statistics` in the output metadata. Outputs include molecular step numbers, dipole, electronic change, electron number and, when available at every frame, internal energy. Availability is recorded. No auxiliary uniform-E archive is required.

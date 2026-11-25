@@ -91,7 +91,7 @@ def run(executable,bundle,validation,output):
     with model(stream_bundle) as public_model:
         with public_model.new_state(dt=dt) as public:
             for n in range(1,steps+1):
-                public.step_grid_field(window(n),step_index=n)
+                public.step_grid_field(prepared.window(step_index=n,dt=dt),step_index=n)
                 np.testing.assert_array_equal(public._engine.current,values[n-1])
     np.savez(root/'response.npz',observations=values,charge_density=densities)
     summary=dict(steps=4,saved_step=2,prepared_streamed_bit_exact=True,orbital_magnetic_input=True,magnetic_effect=magnetic_effect,

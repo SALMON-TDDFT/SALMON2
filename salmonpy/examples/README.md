@@ -366,3 +366,5 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 - isolated_response の --grid-series は保存したE/Hを逐次渡します。初期入力の幾何条件と直接保存・再開を使います
 
 - 分子の空間依存E/Hと磁気電流の自己真空参照結合は、ISOLATED_TDDFT.md の `test_grid_feedback_mpi.py --orbital-magnetic` を参照してください。固定C₂H₂の接続・再開検証で、物理的収束を保証するものではありません。
+
+- `molecular_grid_response.py`: 保存した空間依存FDTD E/Hから分子だけを励起。直接保存／再開に対応し、電流はFDTDへ返さない。
