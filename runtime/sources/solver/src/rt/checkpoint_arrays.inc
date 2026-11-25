@@ -2398,6 +2398,278 @@ subroutine checkpoint_io_s_rt(unit,reading,value,ios)
     if(ios/=0)return
     enddo
   endif
+  if(reading)then
+    read(unit,iostat=ios)value%solid_lmax,value%solid_center,value%solid_radius
+  else
+    write(unit,iostat=ios)value%solid_lmax,value%solid_center,value%solid_radius
+  endif
+  if(ios/=0)return
+  present_array=allocated(value%solid_coeff)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%solid_coeff))deallocate(value%solid_coeff)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_io_limit())then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_io_limit()/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%solid_coeff))then
+        if(any(lo(1:2)/=lbound(value%solid_coeff)).or.any(hi(1:2)/=ubound(value%solid_coeff)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%solid_coeff(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%solid_coeff);hi(1:2)=ubound(value%solid_coeff)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%solid_coeff
+    else
+      write(unit,iostat=ios) value%solid_coeff
+    endif
+    if(ios/=0)return
+  endif
+  if(reading)then
+    read(unit,iostat=ios)value%near_lmax,value%near_index,value%near_geometry,value%near_magnetic
+  else
+    write(unit,iostat=ios)value%near_lmax,value%near_index,value%near_geometry,value%near_magnetic
+  endif
+  if(ios/=0)return
+  present_array=allocated(value%near_Ecoeff)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%near_Ecoeff))deallocate(value%near_Ecoeff)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_io_limit())then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_io_limit()/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%near_Ecoeff))then
+        if(any(lo(1:3)/=lbound(value%near_Ecoeff)).or.any(hi(1:3)/=ubound(value%near_Ecoeff)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%near_Ecoeff(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%near_Ecoeff);hi(1:3)=ubound(value%near_Ecoeff)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%near_Ecoeff
+    else
+      write(unit,iostat=ios) value%near_Ecoeff
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%near_Hcoeff)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%near_Hcoeff))deallocate(value%near_Hcoeff)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_io_limit())then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_io_limit()/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%near_Hcoeff))then
+        if(any(lo(1:3)/=lbound(value%near_Hcoeff)).or.any(hi(1:3)/=ubound(value%near_Hcoeff)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%near_Hcoeff(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%near_Hcoeff);hi(1:3)=ubound(value%near_Hcoeff)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%near_Hcoeff
+    else
+      write(unit,iostat=ios) value%near_Hcoeff
+    endif
+    if(ios/=0)return
+  endif
+  if(reading)then
+    read(unit,iostat=ios)value%near_grid_counts,value%near_grid_origins,value%near_grid_spacing,value%near_grid_center
+  else
+    write(unit,iostat=ios)value%near_grid_counts,value%near_grid_origins,value%near_grid_spacing,value%near_grid_center
+  endif
+  if(ios/=0)return
+  present_array=allocated(value%near_grid_values)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%near_grid_values))deallocate(value%near_grid_values)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:6),hi(1:6)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,6
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_io_limit())then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_io_limit()/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(any(lo(1:5)/=1).or.lo(6)/=0.or.hi(1)/=3.or.hi(5)/=2.or. &
+         any(hi(2:4)/=value%near_grid_counts).or.hi(6)/=value%max_steps+1)then
+        ios=1;return
+      endif
+      if(allocated(value%near_grid_values))then
+        if(any(lo(1:6)/=lbound(value%near_grid_values)).or.any(hi(1:6)/=ubound(value%near_grid_values)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%near_grid_values(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3), &
+          lo(4):hi(4),lo(5):hi(5),lo(6):hi(6)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:6)=lbound(value%near_grid_values);hi(1:6)=ubound(value%near_grid_values)
+      write(unit,iostat=ios)lo(1:6),hi(1:6)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%near_grid_values
+    else
+      write(unit,iostat=ios) value%near_grid_values
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%near_projectors)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%near_projectors))deallocate(value%near_projectors)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_io_limit())then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_io_limit()/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%near_projectors))then
+        if(any(lo(1:3)/=lbound(value%near_projectors)).or.any(hi(1:3)/=ubound(value%near_projectors)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%near_projectors(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%near_projectors);hi(1:3)=ubound(value%near_projectors)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%near_projectors
+    else
+      write(unit,iostat=ios) value%near_projectors
+    endif
+    if(ios/=0)return
+  endif
+  call checkpoint_io_s_vector(unit,reading,value%near_Ac,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%near_div,ios)
+  if(ios/=0)return
   call checkpoint_io_s_scalar(unit,reading,value%vonf,ios)
   if(ios/=0)return
   call checkpoint_io_s_vector(unit,reading,value%j_e,ios)

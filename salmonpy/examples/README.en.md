@@ -249,6 +249,8 @@ Run configured Si DFT→TDDFT: [configured_si.py](configured_si.py), [guide](../
 | [mpi_point_identity.py](mpi_point_identity.py) | Point and material identities over MPI | 3 ranks; new output |
 | [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1D field coupled to independent TDDFT groups | 3 ranks with --material-ranks 1; solver build and GS |
 | [isolated_response.py](isolated_response.py) | Isolated E-driven dipole response | Validated E-worker, validation record, GS bundle, E NPZ |
+| [prepare_grid_field.py](prepare_grid_field.py) | Saved FDTD E/H → molecular input; preparation only | E/H NPZ, patch geometry, molecular position |
+| [fit_near_field.py](fit_near_field.py) | Compress spatial E/H into fitted fields; preparation only | E/H NPZ, center, degree and optional decay |
 | [dipole_radiation.py](dipole_radiation.py) | Dipole-to-current mapping for FDTD | No data, or --archive and --cell-volume; no FDTD propagation |
 
 MPI samples also display `--help` from ordinary Python. Computation requires mpi4py and compatible MPI. Check rank options before launching; some defaults exceed a four-core budget.

@@ -107,3 +107,273 @@ The caller creates `resumed` with the same initial data/settings. `salmonpy.isol
 Use [Molecular/FDTD coupling](DIPOLE_RADIATION.en.md), `MolecularFeedback` and the complete `examples/molecular_feedback.py` for feedback. Cancellation uses `savepoint/restore_savepoint/release_savepoint` without electron-history recomputation. Own-vacuum subtraction also removes vacuum radiation reaction.
 
 The short C2H2 PZ MPI6 test uses64 field intervals: normal execution needs63 electronic updates; one rejected interval and retry needs64. The PID stays constant within each run. Restore adds zero evolution calls and every accepted saved array/six-face record exactly matches the previous result. This is wiring validation, not converged optical accuracy.
+
+## Near field from prescribed dipole sources
+
+Select the SALMON input dipole sources with `from_salmon(..., native_near_field=True)`.
+The default is disabled. The source settings are `num_dipole_source`,
+`cood_dipole_source`, `vec_dipole_source` and `rad_dipole_source`.
+A validation record for this executable must explicitly include near-field comparisons;
+ordinary uniform-field evidence does not enable the feature.
+Short C2H2 tests verified batch dipoles, independent states, live restoration and direct disk restart after process exit. These are software tests, not physical convergence checks.
+
+The scope is PZ, fixed ions, scalar pseudopotentials and one rank.
+At most two sources are supported, with a positive finite radius and `Acos2` or `Ecos2` pulses.
+Source coordinates and radius follow the SALMON input unit system; Python `step(E)` remains in atomic units.
+The input spatial profile and pulse envelopes are retained. `step(E)` supplies an **additional uniform field**.
+Zero sources use the uniform-field path. Restoration requires matching source inputs and mode.
+
+This exposes prescribed dipole sources, separately from general spatial E/H input.
+
+## Spatial E/H near-field mode
+
+`from_salmon(..., near_field=True)` couples spatial E/H to molecular electrons.
+The current scope is **PZ, fixed ions, unpolarized scalar pseudopotentials, CPU, one rank**.
+Magnetic coupling is orbital. Spin/SOC magnetic coupling and radiation feedback to FDTD are outside this interface.
+The molecular region is vacuum: Gaussian atomic units give `B=H`.
+
+### Direct FDTD grid input without an expansion
+
+`GridFieldSeries` directly interpolates saved E/H and evaluates the electric path integral of
+Takenaka, Taketsugu and Iwasa. No multipole degree or decay rate is selected. The current provider
+uses a uniform3D Cartesian grid with trilinear interpolation, splitting integration at component-grid
+cell faces. Orbital magnetic coupling uses the same interpolated fields.
+
+```python
+from salmonpy.near_field import GridFieldSeries
+
+# Collocated SampledField objects. H_left is at n-1/2, H_right at n+1/2.
+grid = GridFieldSeries.from_yee_samples(
+    E_samples, H_left, H_right,
+    counts=(16, 17, 17), origin=(7., -15., -15.), spacing=(2., 2., 2.),
+    molecule_position=(21.2, .7, .9), center=(0., 0., 0.), time_origin=.303)
+grid.write('NEW_INPUT_BUNDLE/salmonpy-near-eh.dat')  # preparation only, reuse a saved GS
+
+with IsolatedTDDFTInitialState.from_salmon(
+        'NEW_INPUT_BUNDLE', 'rt.inp', runtime=runtime,
+        max_steps=20, near_field=True) as initial:
+    with initial.new_state(dt=.003) as state:
+        for _ in range(7):
+            state.step([0., 0., 0.])  # additional uniform E; grid fields come from prepared history
+        state.save_direct_checkpoint('NEW_CHECKPOINT')
+```
+
+Coordinates/spacing are bohr, time is atomic time. Counts are sample-node counts, not the entire
+FDTD simulation size. Origin is the first sample position. molecule_position is the FDTD position
+of the integration center; center is that same point in TDDFT coordinates. Fortran maps
+`FDTD position = molecule_position + (TDDFT position-center)`; neither position must be a grid node. Axes must share their orientation; rotations are not inferred.
+The patch must cover the electronic box, stencil halo and nonlocal-projector paths, not just the atoms.
+No extrapolation or implicit periodic wrapping occurs. The molecular region is vacuum with H=B.
+
+If H is already centered at E times, use `from_samples(E_samples,H_samples,...)`.
+Structured arrays use `GridFieldSeries(origin,spacing,times,E,H,...)`, with E/H shaped
+`[time,z,y,x,component]`. Staggered spatial origins use `[E/H,component,axis]`; extract a common
+patch with the same counts/spacing for all components. Structured half-step H arrays can use
+`from_yee_arrays(...,H_left_times=...,H_right_times=...)`. Temporal centering, interpolation and
+integration run in Fortran; missing H or endpoints are not inferred.
+
+Input size scales with grid points times frames; extract only the needed local patch and time window.
+Provide relative times starting at0 with constant dt matching TDDFT and frames0..max_steps+1. Update n reads
+frames n and n+1 and advances through `step(E_extra)`. Do not use the coefficient-only `step_near_field`.
+The original field time is retained as time_origin in the input file; it does not reproduce prior molecular
+exposure. Specify the initial electronic and illumination conditions. Direct checkpoints retain grid data,
+coordinate mapping and electronic state; restore with the same model, dt and calculation program.
+
+Use `python -m salmonpy.examples.prepare_grid_field --help` for preparation only; no solver is launched.
+The executable requires direct-grid validation evidence. Orbital magnetic coupling is tested separately
+from the original electric-only paper; spin coupling and feedback radiation are outside this endpoint.
+Interpolation cannot reconstruct unresolved FDTD information; check field-grid and molecular convergence.
+
+Analytic staggered affine fields/path integrals agree within about2.1e-17 absolute error.
+For a smooth field, spacing0.5/0.25/0.125bohr gives relative RMS E errors6.60/1.46/0.328% and
+potential errors3.42/0.646/0.0901%. Actual saved LD/FDTD fields driving an off-grid C2H2 molecule
+match continuous execution after a process-exit restart at step7 through20 for all nine observables
+and output streams. These verify connection/restart, not physical convergence of a real nanostructure.
+
+### Choose the expansion center during fitting
+
+```python
+from salmonpy.near_field import NearFieldSeries
+
+# Matching-position/time SampledField objects: E:au/H:au, positions in bohr.
+near = NearFieldSeries.from_samples(
+    E_samples, H_samples, center=(0., 0., 0.), radius=8., lmax=1)
+print(near.center, near.relative_residual)  # columns: E, H
+near.write('GS_BUNDLE/salmonpy-near-eh.dat')  # preparation only; no TDDFT launch
+```
+
+An explicit molecular center is recommended. If omitted, Fortran chooses the sample centroid in the first fit;
+if radius is omitted, it uses the farthest sample distance. Center and radius remain fixed for all frames and restarts.
+Radius normalizes the basis; it does not improve the underlying FDTD resolution.
+
+Each Cartesian E/H component includes real solid harmonics with radial terms.
+`lmax` is the maximum total degree d. Terms are ordered d=0..lmax, then angular
+l=d,d-2,..., then m=-l..l, multiplying `(r/radius)^d Y_lm`. Thus d=l+2k includes the
+radial factors r^(2k). There are P=(lmax+1)(lmax+2)(lmax+3)/6 terms per component;
+`E_coefficients`/`H_coefficients` have shape `[time,P,xyz]`.
+Their units differ from the electric-potential-only coefficients. lmax=0 is uniform; lmax=1 includes field gradients,
+thus electric quadrupole coupling. Uniform H produces orbital magnetic-dipole coupling.
+Higher orders are available, but a finite expansion need not represent an arbitrary field exactly.
+Residuals above the default 5% warn while still returning usable fits.
+
+For Yee half-step H, call `NearFieldSeries.from_yee_samples(E_samples,H_left,H_right,...)`.
+E is at n, H_left at n-1/2, H_right at n+1/2. The positions/times are checked and H is averaged in Fortran.
+Supply both initial brackets explicitly; missing endpoints are not guessed or extrapolated.
+
+
+Molecular positions and expansion centers are real coordinates; they need not coincide with FDTD grid points.
+Fit surrounding E/H samples about the chosen center without moving the molecule to a grid point or
+substituting a nearest-neighbor field. This is a one-way conversion of saved fields into TDDFT input.
+Interpolation, current deposition and energy consistency for feedback into FDTD require a separate design.
+Samples should cover the molecular electronic-density region. A single smooth expansion across a metal
+interface, or extrapolation outside the sampled region, is not an accuracy guarantee.
+
+The required order for tips and bow ties has not been established. Vary apex radius, gap, molecular
+position and fitting region as well as order; check absolute and relative errors at held-out points.
+The radial-complete finite basis spans all polynomials through the requested total degree.
+It does not recover information unresolved by FDTD or enforce Maxwell consistency. Check residuals
+at independent positions and the FDTD resolution before claiming molecular accuracy.
+
+
+The earlier diagnostic compared the angular-only representation with complete polynomials.
+The TDDFT input now includes radial terms through the same total degree. Small grid-point
+residuals still do not establish between-grid or molecular-response accuracy. Insufficient sample
+count or rank is rejected as unavailable, not treated as convergence. At degree8, P=165 independent
+coefficients per component require at least165 full-rank sample points. The V3 field file and V7
+direct checkpoint identify this representation; older field files/checkpoints must be regenerated.
+
+A connection test reused the C2H2 GS for20 updates with nonzero quadratic radial E/H terms.
+After saving update7 and terminating the process, all nine observables for the remaining13 updates
+matched continuous execution exactly, with zero additional evolution during restoration.
+Independent analytic fields of total degree2/4/6/8 gave off-sample E/H errors at most about1.3e-15 au.
+These verify representation and connection, not physical convergence for tips or bow ties.
+
+
+### Fields with directional exponential decay
+
+```python
+near = NearFieldSeries.from_samples(
+    E_samples, H_samples, center=(0., 0., 0.), radius=8., lmax=4,
+    decay_vector=(0., 0., .25))  # inverse bohr; decay along positive z
+near.write('GS_BUNDLE/salmonpy-near-eh.dat')  # preparation only
+```
+
+Each E/H component uses `exp(-decay_vector dot (r-center)) (|r-center|/radius)^d Y_lm`.
+Radius normalizes the polynomial part; the decay vector stays in inverse bohr. The default
+zero vector retains the polynomial representation. E and H share the vector, fixed across frames
+and restarts along with center/radius/degree. Pass the same vector to `NearFieldFrame.from_samples`.
+No automatic rate selection occurs. If a rate is selected using separate tuning points, retain
+independent final validation points; the selected rate need not identify a unique physical decay length.
+One factor is not a general tip/bow-tie field model, and grows in the opposite direction; evaluate
+within the validated region covering the molecule.
+
+Fortran separates field representation from molecular coupling integrals. Electric coupling integrates
+E along the center-to-electron path; magnetic coupling integrates the path-parameter-weighted H.
+Stable exponential moments avoid small-argument cancellation; magnetic projector phases use an
+exponential-aware line quadrature. A common sampled-path integration entry is available for future
+representations; this does not implement direct FDTD interpolation or two-way feedback.
+
+
+Custom field representations can call `salmonpy.near_field.couple_path_samples(displacement, parameters, weights, E, H)`.
+Displacement is in bohr; parameters run from0 to1; weights integrate that dimensionless parameter.
+E/H are collocated `[points,3]` arrays on the path. Results are electron scalar potential energy and A/c.
+The caller supplies field samples and quadrature nodes/weights and checks quadrature convergence.
+This function does not advance TDDFT.
+
+Preparation example: `python -m salmonpy.examples.fit_near_field --help`.
+The execution example `examples/isolated_response.py` accepts `--near-field`.
+Fitting, writing input and importing never launch TDDFT.
+
+### Pass coefficients at each update
+
+```python
+with IsolatedTDDFTInitialState.from_salmon(
+        'GS_BUNDLE', 'rt.inp', runtime=runtime, max_steps=80,
+        near_field=True) as initial:
+    with initial.new_state(dt=.003) as state:
+        saved = state.savepoint()
+        frame = state.step_near_field(near.frame(1), near.frame(2))
+        state.restore_savepoint(saved)
+        state.release_savepoint(saved)
+        state.step_near_field(near.frame(1), near.frame(2))
+        state.save_direct_checkpoint('NEW_CHECKPOINT')
+```
+
+Update n consumes field frames n and n+1 in SALMON's existing order.
+Frames carry center, radius, order, time, step index and E/H coefficients.
+`NearFieldFrame.from_samples(...,step_index=n,center=...,radius=...)` fits one spatial E/H frame;
+your own code may also construct a `NearFieldFrame` directly from coefficients.
+To revise a shared field frame already used by a preceding update, restore a savepoint from before that update.
+
+For an unknown future field, use the initial frame's `write_live_input(path,max_steps=...,dt=...)`
+and call `step_near_field` for every update. This held initial template is not a forecast.
+Ordinary `step(E_extra)` uses the already supplied E/H history plus the additional uniform E argument.
+
+Use live savepoints or direct disk checkpoints. E-only replay snapshots do not encode live spatial coefficients
+and are not offered in near-field mode. The coefficient history, center, radius, magnetic arrays and nonlocal
+phases are saved directly. Restoration does not repeat electronic evolution.
+
+### Coupling and validation scope
+
+For displacement r from the chosen center, Fortran evaluates
+`V_e=r·integral_0^1 E(s r) ds` and `A/c=-r×integral_0^1 s H(s r) ds/c`.
+V_e is the electron scalar energy. The symmetrized kinetic operator retains orbital magnetic coupling and A²;
+nonlocal projectors use line-integral phases from their ion centers.
+This is a prescribed classical-field [radial-gauge potential construction](https://arxiv.org/abs/physics/0204034).
+
+Short C2H2 tests cover electric quadrupole/magnetic effects, live versus prescribed coefficients,
+restoration to the initial state and direct restart after process exit. They do not establish material-response
+convergence. Check expansion order, FDTD/electronic grids, dt and fit residuals for the target observable. Independently fitting E/H does not automatically enforce Maxwell consistency.
+A field-free GS exposed to nonzero initial E/H evolves from that specified initial state;
+preceding irradiation history or a field-dressed GS is not created automatically.
+
+## Quasistatic electric-potential approximation of saved fields
+
+`salmonpy.near_field.ElectricPotentialSeries` fits collocated E samples using real regular solid harmonics in Fortran.
+**It approximates the scalar electric-potential component, rather than providing general near-field E/H coupling.**
+It does not include H coupling, magnetic multipoles, radiation feedback or information unresolved by the FDTD grid.
+
+```python
+from salmonpy.near_field import ElectricPotentialSeries
+
+# electric_samples: SampledField('E', times, positions, values, 'E:au')
+# Positions are in bohr; align component locations and times first.
+potential = ElectricPotentialSeries.from_samples(
+    electric_samples, center=(0., 0., 0.), radius=8., lmax=2)
+print(potential.relative_residual)
+potential.write('GS_BUNDLE/salmonpy-ylm.dat')  # preparation only, no solver launch
+```
+
+An explicit `reference=vacuum_samples` subtracts matching-position/time vacuum samples with the same incident source;
+subtraction also runs in Fortran. Relative residuals above the default 5% warn and remain available.
+Near a zero field, also compare `electric_field(...)` with the original samples.
+Increasing order does not generally restore missing magnetic or rotational field components.
+
+The real basis uses the [NIST complex normalization](https://dlmf.nist.gov/14.30#E1):
+positive m uses `sqrt(2)*(-1)^m*Re(Ylm)`; negative m uses the corresponding positive-order imaginary part with the same factor.
+Order is l=1..lmax, then m=-l..l; lmax=1..8 is supported.
+`V_e=sum(c_lm*(r/radius)^l*Y_lm)`, `E=grad(V_e)`; coefficients are Hartree.
+The constant l=0 term is omitted. The regular expansion assumes no external charges inside the region.
+
+Execution is a separate explicit operation and requires spherical-harmonic validation evidence for this executable.
+
+```python
+with IsolatedTDDFTInitialState.from_salmon(
+        'GS_BUNDLE', 'rt.inp', runtime=runtime, max_steps=80,
+        electric_potential=True) as initial:
+    with initial.new_state(dt=.003) as state:
+        for _ in range(40):
+            state.step([0., 0., 0.])  # additional uniform E
+        state.save_direct_checkpoint('NEW_CHECKPOINT')
+```
+
+Coefficient times start at zero with constant dt and cover indices0..max_steps+1.
+Update n reads coefficients n and n+1 in SALMON's existing sequence.
+Use `restore_direct_checkpoint` with matching model, dt and executable.
+For a selected FDTD time window, retain the original field step/time and the molecular time origin explicitly.
+Starting a field-free GS at that window does not reproduce a molecule already exposed to its preceding history.
+
+A 27-site 3D LD/FDTD saved-field test reached80 molecular updates. Direct restart after process exit at update40 matched
+continuous execution exactly. Uniform-field harmonics matched the batch reference within about4e-12 e*bohr.
+However, the actual FDTD tests had large field-approximation residuals; these are not near-field physical-accuracy validations.
+Use the spatial E/H near-field mode above when both electric and magnetic coupling are needed.

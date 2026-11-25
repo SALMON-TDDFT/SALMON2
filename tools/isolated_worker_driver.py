@@ -11,7 +11,9 @@ import numpy as np
 
 
 class IsolatedWorker:
-    def __init__(self, executable, directory, input_text, *, dt, capacity, timeout=30.):
+    def __init__(self, executable, directory, input_text, *, dt, capacity, timeout=30., worker_mode="E3"):
+        if worker_mode not in ('E3','E3N','E3Y','E3M'):
+            raise ValueError('isolated worker mode must be E3, E3N, E3Y or E3M')
         self.dt = dt
         self.time = 0.
         self.steps = 0
@@ -21,7 +23,7 @@ class IsolatedWorker:
         self._savepoint = None
         self._events = queue.Queue()
         env = dict(os.environ)
-        env.update(SALMONPY_TDDFT_WORKER='E3', OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
+        env.update(SALMONPY_TDDFT_WORKER=worker_mode, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
                    MKL_NUM_THREADS='1', VECLIB_MAXIMUM_THREADS='1')
         self._proc = subprocess.Popen([str(executable)], cwd=directory, env=env,
                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,

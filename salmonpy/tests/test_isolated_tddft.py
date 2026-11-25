@@ -34,7 +34,7 @@ for line in sys.stdin:
   continue
  if p[0] in ('INIT_E','INIT_E_PERFORMANCE'):
   dt=float(p[1]);prefix='SALMONPY_TDDFT_E_PERFORMANCE_V3' if p[0]=='INIT_E_PERFORMANCE' else 'SALMONPY_TDDFT_E_V3'
- elif p[0]=='STEP_E':
+ elif p[0] in ('STEP_E','STEP_EH'):
   n+=1;updates+=1;e=list(map(float,p[1:]));v=[.9*x+dt*e[k%3]+.001*n for k,x in enumerate(v)]
  elif p[0]=='CLOSE':break
  else:continue
@@ -72,6 +72,56 @@ class IsolatedTDDFTTests(unittest.TestCase):
 
     def state(self,dt=.02,**kwargs):
         state=self.model.new_state(dt=dt,**kwargs);self.addCleanup(state.close);return state
+
+    def test_native_near_field_requires_evidence_and_binds_mode(self):
+        from salmonpy.isolated_tddft import IsolatedTDDFTInitialState,load_isolated_runtime
+        with self.assertRaisesRegex(InputError,'near-field'):
+            IsolatedTDDFTInitialState.from_salmon(self.bundle,'rt.inp',runtime=self.runtime,native_near_field=True)
+        data=receipt(self.binary)
+        data['native_near_field']={'schema':'salmonpy.isolated-near-field-validation/1',
+            'steps':20,'reference_max_abs_error':0.,'zero_source_max_abs_error':0.,
+            'interleaved_independence':True,'savepoint_same_process':True,
+            'direct_disk_process_exit_exact':True}
+        self.validation.write_text(json.dumps(data))
+        runtime=load_isolated_runtime(self.binary,self.validation)
+        with IsolatedTDDFTInitialState.from_salmon(self.bundle,'rt.inp',runtime=runtime,native_near_field=True) as model:
+            with model.new_state(dt=.02) as near:
+                self.assertEqual(near._engine._worker_mode,'E3N')
+                near.step([.01,0.,0.])
+                saved=near.snapshot()
+                checkpoint=Path(self.tmp.name)/'near-field-checkpoint'
+                near.save_direct_checkpoint(checkpoint)
+                expected=near.step([.02,0.,0.]).dipole
+                with model.new_state(dt=.02) as restored:
+                    restored.restore_direct_checkpoint(checkpoint)
+                    self.assertEqual(restored._engine._worker_mode,'E3N')
+                    self.assertEqual(restored.worker_statistics()['updates'],0)
+                    np.testing.assert_array_equal(restored.step([.02,0.,0.]).dipole,expected)
+                with self.model.new_state(dt=.02) as uniform:
+                    with self.assertRaises(SnapshotError):uniform.restore(saved)
+                    with self.assertRaises(SnapshotError):uniform.restore_direct_checkpoint(checkpoint)
+        data['near_eh']=dict(schema='salmonpy.near-eh-validation/3',radial_terms=True,exponential_envelope=True,uniform_matches=True,
+            magnetic_effect=True,electric_quadrupole=True,checkpoint_process_exit_exact=True,
+            center_preserved=True,restore_extra_evolutions=0)
+        self.validation.write_text(json.dumps(data))
+        runtime=load_isolated_runtime(self.binary,self.validation)
+        (self.bundle/'salmonpy-near-eh.dat').write_text('SALMONPY_NEAR_EH_V3\n0 22\n0 0 0 1 0 0 0 .02\n')
+        from salmonpy.near_field import NearFieldSeries
+        frames=NearFieldSeries((0,0,0),1.,0,np.arange(22)*.02,np.zeros((22,1,3)),np.zeros((22,1,3)))
+        with IsolatedTDDFTInitialState.from_salmon(self.bundle,'rt.inp',runtime=runtime,max_steps=20,near_field=True) as model:
+            with model.new_state(dt=.02) as state:
+                state.step_near_field(frames.frame(1),frames.frame(2))
+                destination=Path(self.tmp.name)/'eh-checkpoint'
+                state.save_direct_checkpoint(destination)
+                expected=state.step_near_field(frames.frame(2),frames.frame(3)).dipole
+                with self.assertRaises(SnapshotError):state.snapshot()
+            with model.new_state(dt=.02) as resumed:
+                resumed.restore_direct_checkpoint(destination)
+                np.testing.assert_array_equal(resumed.step_near_field(frames.frame(2),frames.frame(3)).dipole,expected)
+        data['native_near_field']['zero_source_max_abs_error']=1e-6
+        self.validation.write_text(json.dumps(data))
+        with self.assertRaisesRegex(InputError,'near-field'):
+            load_isolated_runtime(self.binary,self.validation)
 
     def test_performance_mode_live_and_disk_restore_and_failed_worker(self):
         a=self.state();b=self.state(execution_mode='performance')

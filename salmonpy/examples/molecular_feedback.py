@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--checkpoint-interval-steps',type=int,help='direct checkpoint every N accepted steps; continue')
     parser.add_argument('--checkpoint-interval-seconds',type=float,help='periodic direct checkpoint in elapsed seconds; continue')
     parser.add_argument('--stop-after-seconds',type=float,help='save a direct checkpoint and exit after this elapsed wall time')
+    parser.add_argument('--molecule-position',nargs=3,type=float,metavar=('X','Y','Z'),help='off-grid dipole position in bohr; uses reciprocal eight-site mapping')
     args=parser.parse_args()
     from mpi4py import MPI
     from salmonpy.distributed import SolverGroup,ParallelPlan,ParallelContext
@@ -48,10 +49,18 @@ def main():
     nfield=prod(args.field_grid);group_size=nfield+1
     if any(n<1 for n in args.field_grid) or world.size!=2*group_size:
         raise ValueError('launch 2*(NX*NY*NZ+1) ranks with positive field-grid dimensions')
+    field_grid=Grid((40,40,40),(2.,)*3)
+    position=(-1.,1.,1.) if args.molecule_position is None else tuple(args.molecule_position)
+    if args.molecule_position is None:
+        mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.]);points={10:(19,20,20)}
+    else:
+        mapping,indices=DipoleMap.from_grid('molecule',position,origin=tuple(a[0] for a in field_grid.coordinates),
+            spacing=field_grid.spacing,counts=field_grid.counts)
+        points=dict(zip(mapping.point_ids,map(tuple,indices)))
     pair=world.rank//group_size
     local_world=world.Split(pair,world.rank)
     plan=ParallelPlan((SolverGroup('field',tuple(range(nfield)),role='field'),
-                      SolverGroup('bookkeeping',(nfield,),point_ids=(10,))))
+                      SolverGroup('bookkeeping',(nfield,),point_ids=mapping.point_ids)))
     try:
         with ExitStack() as states,ParallelContext.create(local_world,plan) as context:
             state=None;error=None
@@ -61,7 +70,7 @@ def main():
                     runtime=load_isolated_runtime(args.worker,args.validation)
                     model=states.enter_context(IsolatedTDDFTInitialState.from_salmon(
                         args.bundle,args.input,runtime=runtime,max_steps=args.steps,threads=1))
-                    state=states.enter_context(model.new_state(dt=args.dt,position=(-1.,1.,1.),execution_mode=args.execution_mode))
+                    state=states.enter_context(model.new_state(dt=args.dt,position=position,execution_mode=args.execution_mode))
                 except Exception as exc:error=str(exc)
             error=world.bcast(error,root=0)
             if error:raise RuntimeError(error)
@@ -74,17 +83,17 @@ def main():
                         if args.ld and pair==0:
                             shapes=(Shape('box',(6.,12.,12.),(6.,0.,0.)),)
                             materials=(LorentzDrude(plasma_frequency=20.,strength=[1.],resonance=[0.],damping=[2.]),)
-                        calculation=FDTD(Geometry(Grid((40,40,40),(2.,)*3),shapes),materials,args.dt,args.steps,
+                        calculation=FDTD(Geometry(field_grid,shapes),materials,args.dt,args.steps,
                             source=PlaneWave(AcosPulse(.1 if pair==0 else 0.,20.,.15),0,-16.),
                             observations=((-1.,1.,1.),))
                         field=NativeEHField(context,calculation,args.field_build,args.output/('field-'+str(pair)),
-                            points={10:(19,20,20)},grid=tuple(args.field_grid),execution_mode=args.execution_mode)
+                            points=points,grid=tuple(args.field_grid),execution_mode=args.execution_mode)
                 except Exception as exc:error=str(exc)
                 errors=world.allgather(error)
                 if any(errors):raise RuntimeError(str(errors))
                 observer=None if field is None else field.energy_observer((13,13,13),(27,27,27))
                 coupling=MolecularFeedback(world,field,state=state,
-                    mapping=DipoleMap(('molecule',),(10,),[[1.]],[8.]),
+                    mapping=mapping,
                     total_root=0,reference_root=group_size,policy='environment_scattered_only',observer=observer,execution_mode=args.execution_mode)
                 restored_steps=None
                 if args.resume:

@@ -40,6 +40,41 @@ class DipoleMap:
                             ('weights', weights), ('cell_volumes', volumes)):
             object.__setattr__(self, name, value)
 
+    @classmethod
+    def from_grid(cls, molecule_id, position, *, origin, spacing, counts, point_ids=tuple(range(8))):
+        """Return (map, zero-based indices[8,3]) for one off-grid dipole.
+
+        origin is the coordinate of macro sample index (0,0,0), not a Yee
+        edge origin. Create both FDTD contexts with these same point indices.
+        The site-to-Yee map remains owned by the field. No extrapolation.
+        """
+        import ctypes as c
+        raw=np.asarray(counts)
+        if raw.shape!=(3,) or raw.dtype.kind not in 'iu' or np.any(raw<2) or np.any(raw>np.iinfo(np.int32).max):
+            raise InputError('three integer grid counts >=2 required')
+        counts=np.ascontiguousarray(raw,dtype=np.int32)
+        vectors=[np.ascontiguousarray(_real(a,(3,),name)) for a,name in
+                 ((origin,'sample origin'),(spacing,'spacing'),(position,'molecule position'))]
+        indices=np.empty((8,3),dtype=np.int32);weights=np.empty((8,1));volumes=np.empty(8)
+        fn=_molecular_function('sp_molecular_grid_map',[c.c_void_p]*7)
+        if fn(counts.ctypes.data,*(a.ctypes.data for a in vectors),indices.ctypes.data,
+              weights.ctypes.data,volumes.ctypes.data):
+            raise InputError('molecule lies outside sample grid or grid metadata is invalid')
+        if len(point_ids)!=8:raise InputError('eight distinct point IDs required')
+        mapping=cls((molecule_id,),tuple(point_ids),weights,volumes)
+        indices=np.frombuffer(indices.tobytes(),dtype=np.int32).reshape(8,3)
+        return mapping,indices
+
+    def sample_field(self, fields):
+        """Reciprocal site-to-molecule field map; pairs with current()."""
+        import ctypes as c
+        fields=np.ascontiguousarray(_real(fields,(len(self.point_ids),3),'site fields'))
+        result=np.empty((len(self.molecule_ids),3))
+        fn=_molecular_function('sp_molecular_sample',[c.c_int,c.c_int]+[c.c_void_p]*3)
+        code=fn(len(self.point_ids),len(self.molecule_ids),self.weights.ctypes.data,fields.ctypes.data,result.ctypes.data)
+        if code:raise NumericalError('molecular field sampling failed')
+        return _real(result,result.shape,'molecular fields')
+
     def polarization(self, dipoles):
         p = _real(dipoles, (len(self.molecule_ids), 3), 'charge dipoles')
         return _mapped_dipoles(self,p,p,dt=1.,mode=0,name='polarization')
@@ -392,7 +427,9 @@ class MolecularFrame:
         from .config import _copy_json, _freeze
         for name in ('total_E','own_E','selected_E','drive_E'):
             object.__setattr__(self,name,_real(getattr(self,name),(3,),name))
-        object.__setattr__(self,'current',_real(self.current,(1,3),'charge current'))
+        raw=np.asarray(self.current)
+        if raw.ndim!=2 or raw.shape[1]!=3 or len(raw)<1:raise InputError('charge current[points,3] required')
+        object.__setattr__(self,'current',_real(self.current,raw.shape,'charge current'))
         object.__setattr__(self,'field_energy',_freeze(_copy_json(self.field_energy)))
 
     @classmethod
@@ -405,7 +442,7 @@ class MolecularFrame:
         names=('field_step','field_time','molecule','total_E','own_E','selected_E','drive_E','current','field_energy')
         for name,value in zip(names,args):
             if name in ('total_E','own_E','selected_E','drive_E','current'):
-                shape=(1,3) if name=='current' else (3,)
+                shape=np.shape(value) if name=='current' else (3,)
                 value=_frozen(_array_unchecked(value,name,shape),check=False)
             elif name=='field_energy':value=_freeze(_copy_json(value))
             object.__setattr__(result,name,value)
@@ -442,8 +479,8 @@ class MolecularFeedback:
             if (type(total_root) is not int or type(reference_root) is not int
                     or total_root==reference_root or not 0<=total_root<comm.size
                     or not 0<=reference_root<comm.size):raise InputError('distinct field leader ranks required')
-            if not isinstance(mapping,DipoleMap) or len(mapping.molecule_ids)!=1 or len(mapping.point_ids)!=1:
-                raise InputError('single molecule and single macro point required')
+            if not isinstance(mapping,DipoleMap) or len(mapping.molecule_ids)!=1:
+                raise InputError('single molecule required; multiple reciprocal sample points are supported')
             if (state is not None)!=(comm.rank==total_root):raise InputError('molecular state belongs only on total_root')
             if state is not None and state.time!=0.:raise InputError('fresh molecular state required')
             if field is not None:
@@ -700,8 +737,8 @@ class MolecularFeedback:
                 if stats['step']!=record['molecular_step'] or stats['updates']!=0:
                     raise InputError('molecular restore step differs or performed propagation')
                 left=_real(saved['left'],(3,),'saved selected E')
-                selected=_selected_molecular_field(record['rows'][self.total_root]['E'][0],
-                                                   record['rows'][self.reference_root]['E'][0])
+                selected=_selected_molecular_field(self.mapping.sample_field(record['rows'][self.total_root]['E'])[0],
+                                                   self.mapping.sample_field(record['rows'][self.reference_root]['E'])[0])
                 if not np.array_equal(left,selected):raise InputError('saved selected E differs from the two field samples')
                 bridge=_IsolatedDipoleTrial(self.state,self.mapping,initial_field=left)
         except Exception as exc:error=type(exc).__name__+': '+str(exc)
@@ -788,7 +825,7 @@ class MolecularFeedback:
     def _packet(self,error=None,*,observe=False):
         try:
             energy=None if self.observer is None or not observe else self.observer.sample_step()
-            E=None if self.field is None else self.field.E[0].copy()
+            E=None if self.field is None else self.mapping.sample_field(self.field.E)[0]
         except Exception as exc:
             error=type(exc).__name__+': '+str(exc);E=None;energy=None
         return dict(error=error,E=E,energy=energy)
@@ -829,7 +866,7 @@ class MolecularFeedback:
         try:
             if error is None and self.field is not None:
                 self._needs_rollback=True
-                self.field.advance(np.zeros((1,3)))
+                self.field.advance(np.zeros((len(self.mapping.point_ids),3)))
         except Exception as exc:error=type(exc).__name__+': '+str(exc)
         packets=self.comm.gather(self._packet(error,observe=error is None),root=self.total_root)
         error=None;frame=None
@@ -840,7 +877,7 @@ class MolecularFeedback:
                 selected=_selected_molecular_field(packets[self.total_root]['E'],packets[self.reference_root]['E'])
                 if np.any(selected):raise InputError('initial molecular E must be zero; increase source separation or delay')
                 self._bridge=_IsolatedDipoleTrial(self.state,self.mapping,initial_field=selected)
-                frame=self._frame(packets,np.zeros(3),np.zeros((1,3)))
+                frame=self._frame(packets,np.zeros(3),np.zeros((len(self.mapping.point_ids),3)))
             except Exception as exc:error=type(exc).__name__+': '+str(exc)
         error=self.comm.bcast(error,root=self.total_root)
         if error:self._recover(token,(error,))
@@ -861,7 +898,7 @@ class MolecularFeedback:
         try:
             if error is None and self.field is not None:
                 self._needs_rollback=True
-                self.field.advance(np.zeros((1,3)))
+                self.field.advance(np.zeros((len(self.mapping.point_ids),3)))
         except Exception as exc:error=type(exc).__name__+': '+str(exc)
         packets=self.comm.gather(self._packet(error),root=self.total_root)
         payload=None

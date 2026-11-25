@@ -32,6 +32,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                      pp, ppg, ppn, unfold, delta_t, openmp_mode, run_config, memory_gs )
   use inputoutput
+  use tddft_worker,only:worker_solid_load,worker_near_load
   use tddft_worker,only:worker_requested,worker_E_requested,worker_initial_A
   use salmonpy_gs_seed,only:s_gs_seed,load_gs_seed
   use math_constants, only: pi, zi
@@ -225,10 +226,14 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   rt%Ac_tot(1:3, 0:rt%max_steps+1) = rt%Ac_ext(1:3, 0:rt%max_steps+1)
   if(worker_E_requested())then
+    rt%Ac_ext=0d0
+    rt%Ac_tot=0d0
     do itt=0,rt%max_steps+1
       rt%E_ext(:,itt)=worker_initial_A
     enddo
   endif
+  call worker_solid_load(rt)
+  call worker_near_load(rt)
   rt%E_tot(1:3, 0:rt%max_steps+1) = rt%E_ext(1:3, 0:rt%max_steps+1) 
   
   if (yn_restart == 'n') Mit=0

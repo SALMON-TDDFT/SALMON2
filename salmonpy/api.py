@@ -72,6 +72,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.quickstart': ('run',), 'salmonpy.subpix
                    'SalmonExecutable'),
  'salmonpy.isolated_tddft': ('IsolatedRuntime', 'load_isolated_runtime', 'DipoleObservables', 'IsolatedTDDFTInitialState', 'IsolatedTDDFTState', 'IsolatedSavepoint'),
  'salmonpy.dipole_source': ('DipoleMap', 'drive_native_dipoles', 'MolecularDrive', 'select_molecular_field', 'MolecularFrame', 'MolecularFeedback'),
+ 'salmonpy.near_field': ('ElectricPotentialSeries','NearFieldSeries','NearFieldFrame','couple_path_samples','GridFieldSeries'),
  'salmonpy.field_sampling': ('SampledField', 'sample_packet'),
  'salmonpy.field_input': ('FieldValue', 'FieldPacket', 'FieldContract', 'FieldAdapter'),
  'salmonpy.fields': ('FieldSamples', 'AcosPulse', 'sample_pulses'),

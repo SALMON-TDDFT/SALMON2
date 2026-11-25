@@ -22,7 +22,7 @@ for _ in range(steps - 1):
 
 `world` is the caller's MPI communicator; `group_size` includes each field group and its bookkeeping ranks. `state` is `None` except on the reporting rank. `observer` is each field's `energy_observer(...)`, or `None` everywhere when not observing. Save `first` too if needed. `MolecularFrame` is returned only on the reporting rank; peers return `None`. It retains fields, current, dipole, electron number, freshness-aware internal energy and optional box energy observations. `record()` returns a detached serializable dictionary. There is no automatic file output.
 
-The current entry supports one molecule/point with laboratory-axis dipoles and midpoint E driving. Initial selected E must be zero; otherwise increase source separation or delay. The field clock leads the electronic clock by dt. Subtracting the own-vacuum field removes vacuum radiation reaction too. Do not advance participating states outside the coupling while using it.
+The current entry supports one molecule and one or more macro sample sites with laboratory-axis dipoles and midpoint E driving. Initial selected E must be zero; otherwise increase source separation or delay. The field clock leads the electronic clock by dt. Subtracting the own-vacuum field removes vacuum radiation reaction too. Do not advance participating states outside the coupling while using it.
 
 An inconsistent accepted endpoint or exception in the root-only `step(validate=callback)` rejects the interval. Catch `StepRecoveryError` on all ranks and retry only when `original_preserved=True`. There is no automatic retry. Validators must be read-only and perform no MPI operations. Electron restoration uses a direct live savepoint without replay. Worker loss or an indeterminate restore returns original_preserved=False and forbids retry.
 
@@ -393,3 +393,24 @@ Pass an executable-matching validation record to `load_isolated_runtime(EXECUTAB
 Run the public `molecular_feedback` sample in separate save and resume jobs with identical executable, inputs, dt, step capacity and MPI layout. For six ranks, use `--field-grid 2 1 1 --steps 64 --execution-mode performance --ld` and first `--checkpoint STATE_DIR --stop-after 32`, then `--resume STATE_DIR` with a new output directory. Both FDTD states are saved at step 32 and the molecule at step 31.
 
 Resume verifies actual Fortran field indices and the molecular index. `restore_statistics.updates` must be 0; only 32 new molecular updates are needed to reach field step 64. Inspect `restored_steps`, `restore_statistics` and `molecular_execution_mode` in the sample output. Frame history is for analysis and is never replayed to restore numerical state. Changed MPI layouts or executable versions are outside this checkpoint guarantee.
+
+## Bidirectional dipoles away from grid points
+
+In the dipole approximation, `DipoleMap.from_grid` selects eight surrounding macro sample sites without moving the molecule. `origin` is the coordinate of macro sample index (0,0,0), not an electric Yee-component origin. Lengths are bohr; volumes are bohr³. No extrapolation is performed.
+
+```python
+mapping, indices = DipoleMap.from_grid(
+    'molecule', (-2.54, 1.62, 1.94),
+    origin=(-39., -39., -39.), spacing=(2., 2., 2.), counts=(40, 40, 40))
+points = dict(zip(mapping.point_ids, map(tuple, indices)))
+# Create both total and own-vacuum NativeEHField contexts with these points.
+# Pass mapping to MolecularFeedback.
+```
+
+Fortran constructs trilinear weights and evaluates `E_m=sum(w_i*E_i)` and interval-average charge-current density `j_i=w_i*delta_p/(V_i*dt)`. Consequently, `dt*sum(V_i*E_i.dot(j_i))=E_m.dot(delta_p)`. This is a spatial work identity, not a guarantee of temporal accuracy or complete field energy balance. It composes with the existing reciprocal macro-to-Yee sampling/deposition; do not deposit a second current directly on edges. `mapping.sample_field(fields)` returns molecular fields from macro-site fields.
+
+`MolecularFeedback` accepts one molecule and multiple macro sites. `frame.current` has shape `[macro_sites,3]`. The own-vacuum reference must use identical sites, weights and boundaries. Source neighborhoods must remain vacuum. Run the existing molecular_feedback example with `--molecule-position -2.54 1.62 1.94`; existing `--checkpoint` / `--resume` options apply.
+
+In a 64-step C2H2 trial, process-exit restoration at field step27 (molecular step26) matched every frame and both field output streams exactly, with zero electronic evolution during restoration. Vacuum/LD oscillator feedback and the reciprocal spatial work identity were also checked.
+
+This is uniform molecular drive and dipole radiation. It does not return the full multipole response of the spatial E/H and path-integral GridFieldSeries input. That requires a reciprocal current distribution and magnetic response corresponding to the molecular Hamiltonian. Discrete charge continuity and physical tip/bow-tie convergence were not established by these tests.

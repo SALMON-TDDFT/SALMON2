@@ -128,3 +128,42 @@ class MolecularEnergyWorkTests(unittest.TestCase):
         self.assertEqual(total[-1,1],6.)
         self.assertEqual(own[-1,1],2.)
         self.assertEqual(result[-1,1],4.)
+
+
+class OffGridDipoleTests(unittest.TestCase):
+    def test_affine_sampling_and_reciprocal_work(self):
+        from salmonpy.dipole_source import DipoleMap
+        origin=np.array([-3.,-2.,-1.]);spacing=np.array([2.,3.,4.]);position=origin+spacing*[.23,.61,.47]
+        mapping,indices=DipoleMap.from_grid('off-grid',position,origin=origin,spacing=spacing,counts=(4,4,4))
+        xyz=origin+indices*spacing
+        E=np.column_stack((1+xyz[:,0]+2*xyz[:,1],xyz[:,2]-xyz[:,0],3-xyz[:,1]))
+        sampled=mapping.sample_field(E)
+        expected=[[1+position[0]+2*position[1],position[2]-position[0],3-position[1]]]
+        np.testing.assert_allclose(sampled,expected,atol=2e-15)
+        dp=np.array([[.3,-.2,.1]]);j=mapping.current(np.zeros((1,3)),dp,dt=.07)
+        self.assertAlmostEqual(float(np.sum(E*j*mapping.cell_volumes[:,None])*.07),float(np.sum(sampled*dp)),places=13)
+        np.testing.assert_allclose(np.sum(j*mapping.cell_volumes[:,None],axis=0),dp[0]/.07,atol=2e-15)
+        self.assertFalse(indices.flags.writeable)
+        with self.assertRaises(InputError):DipoleMap.from_grid('bad',[100.,0.,0.],origin=origin,spacing=spacing,counts=(4,4,4))
+
+    def test_grid_endpoints_and_native_rejection_are_atomic(self):
+        import ctypes as c
+        from salmonpy.dipole_source import DipoleMap,_molecular_function
+        for position in ((0.,0.,0.),(6.,6.,6.)):
+            mapping,indices=DipoleMap.from_grid('endpoint',position,origin=(0.,)*3,spacing=(2.,)*3,counts=(4,)*3)
+            np.testing.assert_allclose(mapping.sample_field(np.ones((8,3))),np.ones((1,3)))
+            self.assertEqual(np.count_nonzero(mapping.weights),1)
+        fn=_molecular_function('sp_molecular_grid_map',[c.c_void_p]*7)
+        counts=np.array([4,4,4],dtype=np.int32);origin=np.zeros(3);spacing=np.ones(3);position=np.ones(3)
+        indices=np.full((8,3),-7,dtype=np.int32);weights=np.full(8,-7.);volumes=np.full(8,-7.)
+        for value in (np.nan,np.inf,10.):
+            position[0]=value
+            self.assertEqual(fn(*(a.ctypes.data for a in (counts,origin,spacing,position,indices,weights,volumes))),1)
+            np.testing.assert_array_equal(indices,-7);np.testing.assert_array_equal(weights,-7);np.testing.assert_array_equal(volumes,-7)
+        mapping,_=DipoleMap.from_grid('sample',(.1,.2,.3),origin=(0.,)*3,spacing=(1.,)*3,counts=(3,)*3)
+        fn=_molecular_function('sp_molecular_sample',[c.c_int,c.c_int]+[c.c_void_p]*3)
+        field=np.ones((8,3));result=np.full((1,3),-7.)
+        for value in (np.nan,np.inf):
+            field[-1,-1]=value
+            self.assertEqual(fn(8,1,mapping.weights.ctypes.data,field.ctypes.data,result.ctypes.data),1)
+            np.testing.assert_array_equal(result,-7.)

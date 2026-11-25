@@ -44,6 +44,59 @@ def _receipt(payload, executable):
             valid = valid and type(value) in (int,float) and np.isfinite(value) and 0 <= value <= 1.e-10
     except (KeyError, TypeError, ValueError, RecursionError) as exc:
         raise InputError('invalid isolated-worker revision5 validation receipt') from exc
+    if 'native_near_field' in data:
+        evidence = data['native_near_field']
+        try:
+            near_valid = (evidence['schema']=='salmonpy.isolated-near-field-validation/1'
+                          and type(evidence['steps']) is int and evidence['steps']>=20
+                          and evidence['interleaved_independence'] is True
+                          and evidence['savepoint_same_process'] is True
+                          and evidence['direct_disk_process_exit_exact'] is True)
+            for key in ('reference_max_abs_error','zero_source_max_abs_error'):
+                value=evidence[key]
+                near_valid = near_valid and type(value) in (int,float) and np.isfinite(value) and 0<=value<=1.e-10
+            near_valid = near_valid and evidence['zero_source_max_abs_error']==0
+        except (KeyError,TypeError,ValueError):
+            near_valid=False
+        if not near_valid:
+            raise InputError('invalid near-field validation evidence')
+    if 'solid_field' in data:
+        try:
+            solid=data['solid_field']
+            solid_valid=(solid['schema']=='salmonpy.solid-field-validation/1'
+                         and solid['direct_disk_process_exit_exact'] is True
+                         and solid['savepoint_same_process'] is True
+                         and solid['uniform_max_abs_error']>=0
+                         and solid['uniform_max_abs_error']<=1.e-10
+                         and solid['quadrupole_response_nonzero'] is True)
+        except (KeyError,TypeError,ValueError):
+            solid_valid=False
+        if not solid_valid:raise InputError('invalid spherical-harmonic field validation evidence')
+    if 'near_eh' in data:
+        try:
+            evidence=data['near_eh']
+            near_valid=(evidence['schema']=='salmonpy.near-eh-validation/3'
+                        and evidence['radial_terms'] is True
+                        and evidence['exponential_envelope'] is True
+                        and evidence['uniform_matches'] is True
+                        and evidence['magnetic_effect'] is True
+                        and evidence['electric_quadrupole'] is True
+                        and evidence['checkpoint_process_exit_exact'] is True
+                        and evidence['center_preserved'] is True
+                        and type(evidence['restore_extra_evolutions']) is int
+                        and evidence['restore_extra_evolutions']==0)
+        except (KeyError,TypeError,ValueError):
+            near_valid=False
+        if not near_valid:raise InputError('invalid spatial E/H validation evidence')
+    if 'grid_eh' in data:
+        try:
+            evidence=data['grid_eh']
+            grid_valid=(evidence['schema']=='salmonpy.grid-field-validation/1'
+                and all(evidence[k] is True for k in ('uniform_matches','off_grid_linear_exact',
+                    'staggered_components','cell_crossing_integral','checkpoint_process_exit_exact'))
+                and type(evidence['restore_extra_evolutions']) is int and evidence['restore_extra_evolutions']==0)
+        except (KeyError,TypeError):grid_valid=False
+        if not grid_valid:raise InputError('invalid direct-grid field validation evidence')
     if not valid or _digest(executable.path)!=executable.sha256:
         raise InputError('isolated E-worker revision5 evidence or binary hash does not match')
 
@@ -114,6 +167,13 @@ class IsolatedSavepoint:
         object.__setattr__(self, '_observables', _real(self._observables, (9,), 'savepoint observations'))
 
 
+def _near_feature(path):
+    with Path(path).open() as stream:magic=stream.readline().strip()
+    if magic=='SALMONPY_NEAR_GRID_V1':return 'grid_eh'
+    if magic=='SALMONPY_NEAR_EH_V3':return 'near_eh'
+    raise InputError('unsupported prepared spatial E/H format; regenerate the field input')
+
+
 class _EEngine(TDDFTState):
     _worker_mode = 'E3'
     _reply_prefix = ('SALMONPY_TDDFT_E_V3 ', 'SALMONPY_E_STATE_V1 ')
@@ -124,7 +184,18 @@ class _EEngine(TDDFTState):
     _reply_size = 9
     _snapshot_kind = 'isolated-TDDFT-E-dipole-replay'
 
-    def __init__(self,model,dt,position,*,execution_mode="checked"):
+    def __init__(self,model,dt,position,*,execution_mode="checked",native_near_field=False,electric_potential=False,near_field=False):
+        self._worker_mode = "E3M" if near_field else ("E3Y" if electric_potential else ("E3N" if native_near_field else "E3"))
+        self._near_spec = None
+        if near_field:
+            with (model._snapshot/'salmonpy-near-eh.dat').open() as stream:
+                magic=stream.readline().strip()
+                if magic=='SALMONPY_NEAR_GRID_V1':
+                    self._near_spec=('grid',)
+                else:
+                    lmax=int(stream.readline().split()[0])
+                    geometry=tuple(float(v) for v in stream.readline().split()[:7])
+                    self._near_spec=(lmax,geometry)
         self._position = position
         super().__init__(model,dt,np.zeros(3),execution_mode=execution_mode)
 
@@ -143,7 +214,7 @@ class _EEngine(TDDFTState):
             raise NumericalError('isolated worker returned nonfinite observables') from exc
 
     def _snapshot_settings(self):
-        return _fingerprint((super()._snapshot_settings(),tuple(self._position)))
+        return _fingerprint((super()._snapshot_settings(),tuple(self._position),self._worker_mode))
 
     def _spawn(self):
         self._savepoint = None
@@ -253,19 +324,19 @@ class _EEngine(TDDFTState):
             raise RuntimeFailure('native savepoint release failed')
         self._savepoint = None
 
-    def step(self, E):
+    def step(self, E, *, spatial_command=None):
         if self._direct_failed or self._restore_pending is not None:
             raise RuntimeFailure('isolated worker has an incomplete or failed direct restore')
-        if self.execution_mode=='performance':return super().step(E)
-        if self._savepoint is None and not self._direct_origin:
+        if self.execution_mode=='performance' and self._worker_mode!='E3M':return super().step(E)
+        if self._savepoint is None and not self._direct_origin and self._worker_mode!='E3M':
             return super().step(E)
         # The live-savepoint route never enters TDDFTState's process/replay recovery.
-        E = _real(E, (3,), 'E')
+        E = (_array_unchecked(E,'E',(3,)) if self.execution_mode=='performance' else _real(E, (3,), 'E'))
         if self._steps >= self._capacity:
             raise InputError('isolated worker capacity exhausted')
         if not np.isfinite((self._steps+1)*self.dt):raise InputError('isolated time overflow')
         try:
-            self._send(self._step_command+' '+' '.join(f'{v:.17e}' for v in E))
+            self._send(spatial_command if spatial_command is not None else self._step_command+' '+' '.join(f'{v:.17e}' for v in E))
             current = self._receive(self._steps+1)
         except Exception as exc:
             self._direct_failed = True
@@ -360,7 +431,8 @@ class _EEngine(TDDFTState):
             raise SnapshotError('invalid isolated direct checkpoint: '+str(exc)) from exc
         candidate = None
         try:
-            candidate = _EEngine(self._model, self.dt, self._position,execution_mode=self.execution_mode)
+            candidate = _EEngine(self._model, self.dt, self._position,execution_mode=self.execution_mode,
+                                 native_near_field=self._worker_mode=="E3N",electric_potential=self._worker_mode=="E3Y",near_field=self._worker_mode=="E3M")
             run = Path(candidate._work.name)/'run'
             shutil.copyfile(root/'isolated-state.bin', run/'isolated-state.bin')
             status, actual_step, updates = candidate._command('LOAD_E', 7)
@@ -396,6 +468,7 @@ class _EEngine(TDDFTState):
                 candidate.close()
 
     def snapshot(self):
+        if self._worker_mode=='E3M':raise SnapshotError('near-field states use live savepoints or direct checkpoints')
         if self._savepoint is not None:
             raise SnapshotError('release the live savepoint before creating a replay snapshot')
         return super().snapshot()
@@ -406,6 +479,7 @@ class _EEngine(TDDFTState):
         return super().restore_checkpoint(directory, max_bytes=max_bytes)
 
     def restore(self, snapshot):
+        if self._worker_mode=='E3M':raise SnapshotError('near-field states use live savepoints or direct checkpoints')
         if self._savepoint is not None:
             raise SnapshotError('release the live savepoint before replay restoration')
         return super().restore(snapshot)
@@ -422,21 +496,64 @@ class IsolatedTDDFTInitialState:
     """Owned native GS snapshot; states lease it and own independent processes."""
     _model: TDDFTInitialState = field(repr=False)
     runtime: IsolatedRuntime
+    native_near_field: bool = False
+    electric_potential: bool = False
+    near_field: bool = False
+
+    def __post_init__(self):
+        if type(self.near_field) is not bool:
+            raise InputError('near_field must be bool')
+        if self.near_field and (self.electric_potential or not ({'near_eh','grid_eh'} & set(json.loads(self.runtime.validation)))):
+            raise InputError('select validated near_field separately from electric_potential')
+        if self.near_field and _near_feature(self._model._snapshot/'salmonpy-near-eh.dat') not in json.loads(self.runtime.validation):
+            raise InputError('validation evidence for this field representation required')
+        if type(self.electric_potential) is not bool:
+            raise InputError('electric_potential must be bool')
+        if self.electric_potential and 'solid_field' not in json.loads(self.runtime.validation):
+            raise InputError('spherical-harmonic field validation evidence required')
+        if type(self.native_near_field) is not bool:
+            raise InputError('native_near_field must be bool')
+        if self.native_near_field and 'native_near_field' not in json.loads(self.runtime.validation):
+            raise InputError('near-field validation evidence required for this executable')
 
     @classmethod
-    def from_salmon(cls,directory,input_file,*,runtime,max_steps=1000,threads=1,timeout=300.):
+    def from_salmon(cls,directory,input_file,*,runtime,max_steps=1000,threads=1,timeout=300.,native_near_field=False,electric_potential=False,near_field=False):
         if not isinstance(runtime,IsolatedRuntime):
             raise InputError('validated IsolatedRuntime required; periodic A runtime is not sufficient')
         _receipt(runtime.validation,runtime.executable)
+        if type(native_near_field) is not bool:
+            raise InputError('native_near_field must be bool')
+        if native_near_field and 'native_near_field' not in json.loads(runtime.validation):
+            raise InputError('near-field validation evidence required for this executable')
+        if type(electric_potential) is not bool:
+            raise InputError('electric_potential must be bool')
+        if electric_potential:
+            if 'solid_field' not in json.loads(runtime.validation):
+                raise InputError('spherical-harmonic field validation evidence required')
+            path=Path(directory)/'salmonpy-ylm.dat'
+            if not path.is_file() or path.is_symlink():
+                raise InputError('prepared salmonpy-ylm.dat file required in the input bundle')
+        if type(near_field) is not bool:
+            raise InputError('near_field must be bool')
+        if near_field:
+            if electric_potential or not ({'near_eh','grid_eh'} & set(json.loads(runtime.validation))):
+                raise InputError('select validated near_field separately from electric_potential')
+            path=Path(directory)/'salmonpy-near-eh.dat'
+            if not path.is_file() or path.is_symlink():
+                raise InputError('prepared salmonpy-near-eh.dat required in the input bundle')
+            feature=_near_feature(path)
+            if feature not in json.loads(runtime.validation):raise InputError('validation evidence for this field representation required')
+
         model=TDDFTInitialState.from_salmon(directory,input_file,executable=runtime.executable,
                                           max_steps=max_steps,threads=threads,timeout=timeout)
-        return cls(model,runtime)
+        return cls(model,runtime,native_near_field,electric_potential,near_field)
 
     def new_state(self,*,dt,position=(0.,0.,0.),execution_mode="checked"):
         dt=float(_real(dt,(),'dt'))
         if dt<=0: raise InputError('positive dt required')
         position=_real(position,(3,),'position')
-        return IsolatedTDDFTState(_EEngine(self._model,dt,position,execution_mode=execution_mode),position)
+        return IsolatedTDDFTState(_EEngine(self._model,dt,position,execution_mode=execution_mode,
+                                                native_near_field=self.native_near_field,electric_potential=self.electric_potential,near_field=self.near_field),position)
 
     def close(self): self._model.close()
     def __enter__(self): return self
@@ -498,8 +615,31 @@ class IsolatedTDDFTState:
         """Explicitly retire a live savepoint; leave the current state unchanged."""
         self._engine.release_savepoint(token)
 
-    def snapshot(self): return self._engine.snapshot()
-    def restore(self,snapshot): self._engine.restore(snapshot)
+    def step_near_field(self, left, right, *, E_extra=(0.,0.,0.)):
+        from .near_field import NearFieldFrame
+        spec=self._engine._near_spec
+        if spec is None:raise InputError('near_field=True state required')
+        if spec[0]=='grid':raise InputError('prepared grid histories advance with step(E_extra), not coefficient frames')
+        n=self._engine._steps+1
+        for frame,index in ((left,n),(right,n+1)):
+            if not isinstance(frame,NearFieldFrame) or frame.step_index!=index:
+                raise InputError('spatial fields must carry step indices n and n+1')
+            if (frame.lmax!=spec[0] or tuple((*frame.center,frame.radius,*frame.decay_vector))!=spec[1]
+                    or not np.isclose(frame.time,index*self.dt,rtol=1.e-12,atol=1.e-15)):
+                raise InputError('spatial field center/radius/decay/order/time differs from initialized model')
+        E=_real(E_extra,(3,),'additional uniform E')
+        values=(*E,n,*left.E_coefficients.ravel(),*right.E_coefficients.ravel(),
+                *left.H_coefficients.ravel(),*right.H_coefficients.ravel())
+        command='STEP_EH '+' '.join(format(float(v),'.17e') for v in values[:3])+' '+str(n)+' '+' '.join(format(float(v),'.17e') for v in values[4:])
+        self._engine.step(E,spatial_command=command)
+        return self.observables
+
+    def snapshot(self):
+        if self._engine._worker_mode=='E3M':raise SnapshotError('near-field states use live savepoints or direct checkpoints')
+        return self._engine.snapshot()
+    def restore(self,snapshot):
+        if self._engine._worker_mode=='E3M':raise SnapshotError('near-field states use live savepoints or direct checkpoints')
+        self._engine.restore(snapshot)
     def save_direct_checkpoint(self, directory):
         """Save numerical state directly; no E-history replay is needed to resume."""
         self._engine.save_direct_checkpoint(directory)

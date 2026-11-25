@@ -132,7 +132,7 @@ def run(executable, reference, directory):
     print(json.dumps(report, indent=2))
 
 
-def run_direct_disk(executable, reference, directory):
+def run_direct_disk(executable, reference, directory, *, worker_mode="E3"):
     """Raw-worker process-exit proof; requires no pre-existing runtime receipt."""
     from isolated_worker_driver import IsolatedWorker
     from salmonpy.field_input import FieldPacket, FieldValue
@@ -145,12 +145,14 @@ def run_direct_disk(executable, reference, directory):
             folder=case/name;folder.mkdir()
             for asset in ('C_rps.dat','H_rps.dat'):shutil.copy2(reference/'gs'/asset,folder/asset)
             shutil.copytree(reference/'gs/data_for_restart',folder/'data_for_restart')
+            if worker_mode=='E3M':shutil.copy2(reference/'first/salmonpy-near-eh.dat',folder/'salmonpy-near-eh.dat')
+            if worker_mode=='E3Y':shutil.copy2(reference/'first/salmonpy-ylm.dat',folder/'salmonpy-ylm.dat')
             return folder
         def step(worker,n):
             vector=((.01,.003,.02),(.02,-.004,-.01),(-.01,.005,.006))[(n-1)%3]
             return worker.step_fields(FieldPacket(E=FieldValue(vector,time=n*.003,position=(0,0,0),unit='E:au')))
         first=prepare('first')
-        with IsolatedWorker(executable,first,contents,dt=.003,capacity=20) as a:
+        with IsolatedWorker(executable,first,contents,dt=.003,capacity=20,worker_mode=worker_mode) as a:
             for n in range(1,saved_step+1):step(a,n)
             pid=a._proc.pid
             assert a.control('SAVE_E')==(6,0,saved_step,saved_step)
@@ -159,7 +161,7 @@ def run_direct_disk(executable, reference, directory):
             expected=[step(a,n) for n in range(saved_step+1,21)]
         expected_streams={f.name:f.read_bytes() for f in first.glob('*.data')}
         second=prepare('second');shutil.copyfile(first/'isolated-state.bin',second/'isolated-state.bin')
-        with IsolatedWorker(executable,second,contents,dt=.003,capacity=20) as b:
+        with IsolatedWorker(executable,second,contents,dt=.003,capacity=20,worker_mode=worker_mode) as b:
             assert b._proc.pid!=pid
             assert b.control('LOAD_E')==(7,0,saved_step,0)
             for name,raw in streams.items():(second/name).write_bytes(raw)
@@ -176,7 +178,7 @@ def run_direct_disk(executable, reference, directory):
     return report
 
 
-def run_savepoint(executable,reference,directory,*,saved_step=7):
+def run_savepoint(executable,reference,directory,*,saved_step=7,worker_mode="E3"):
     from isolated_worker_driver import IsolatedWorker
     if type(saved_step) is not int or not 0<=saved_step<=20:raise ValueError("saved step must be in 0..20")
     from salmonpy.field_input import FieldPacket,FieldValue
@@ -187,12 +189,14 @@ def run_savepoint(executable,reference,directory,*,saved_step=7):
         folder=root/name;folder.mkdir()
         for name in ('C_rps.dat','H_rps.dat'):shutil.copy2(reference/'gs'/name,folder/name)
         shutil.copytree(reference/'gs/data_for_restart',folder/'data_for_restart')
+        if worker_mode=='E3M':shutil.copy2(reference/'first/salmonpy-near-eh.dat',folder/'salmonpy-near-eh.dat')
+        if worker_mode=='E3Y':shutil.copy2(reference/'first/salmonpy-ylm.dat',folder/'salmonpy-ylm.dat')
         return folder
     def step(worker,n):
         samples=((.01,.003,.02),(.02,-.004,-.01),(-.01,.005,.006))
         return worker.step_fields(FieldPacket(E=FieldValue(samples[(n-1)%3],time=n*.003,position=(0,0,0),unit='E:au')))
-    with IsolatedWorker(executable,prepare('direct'),contents,dt=.003,capacity=20) as a, \
-         IsolatedWorker(executable,prepare('control'),contents,dt=.003,capacity=20) as b:
+    with IsolatedWorker(executable,prepare('direct'),contents,dt=.003,capacity=20,worker_mode=worker_mode) as a, \
+         IsolatedWorker(executable,prepare('control'),contents,dt=.003,capacity=20,worker_mode=worker_mode) as b:
         original_pid=a._proc.pid
         for n in range(1,saved_step+1):np.testing.assert_array_equal(step(a,n),step(b,n))
         before=b.dipoles.copy();saved=a.capture()

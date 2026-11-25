@@ -8,6 +8,73 @@ contains
 integer(c_int) function sp_molecular_protocol() bind(C)
  sp_molecular_protocol=1
 end function
+! Weights on macro sample sites. Native Yee sampling/deposition composes
+! with this reciprocal map; no second direct edge deposition is performed.
+integer(c_int) function sp_molecular_grid_map(counts,origin,spacing,position,indices,weights,volumes) &
+ bind(C) result(status)
+ integer(c_int),intent(in)::counts(3)
+ real(c_double),intent(in)::origin(3),spacing(3),position(3)
+ integer(c_int),intent(inout)::indices(3,8)
+ real(c_double),intent(inout)::weights(8),volumes(8)
+ integer::base(3),ix,iy,iz,i,d,staged_indices(3,8)
+ real(8)::q,f(3),w(8),volume,tolerance
+ status=1
+ if(any(counts<2))return
+ volume=1d0
+ do d=1,3
+  if(.not.ieee_is_finite(origin(d)).or..not.ieee_is_finite(position(d)))return
+  if(.not.ieee_is_finite(spacing(d)).or.spacing(d)<=0d0)return
+  q=(position(d)-origin(d))/spacing(d)
+  if(.not.ieee_is_finite(q))return
+  tolerance=32d0*epsilon(1d0)*max(1d0,abs(q))
+  if(q< -tolerance.or.q>counts(d)-1+tolerance)return
+  q=min(max(0d0,q),real(counts(d)-1,8))
+  base(d)=min(floor(q),counts(d)-2);f(d)=q-base(d)
+  volume=volume*spacing(d)
+ enddo
+ if(.not.ieee_is_finite(volume).or.volume<=0d0)return
+ i=0
+ do iz=0,1
+ do iy=0,1
+ do ix=0,1
+  i=i+1;staged_indices(:,i)=base+[ix,iy,iz]
+  w(i)=merge(f(1),1d0-f(1),ix==1)*merge(f(2),1d0-f(2),iy==1)*merge(f(3),1d0-f(3),iz==1)
+ enddo
+ enddo
+ enddo
+ indices=staged_indices;weights=w;volumes=volume;status=0
+end function
+integer(c_int) function sp_molecular_sample(np,nm,weights,fields,result) bind(C) result(status)
+ integer(c_int),value::np,nm
+ real(c_double),intent(in)::weights(nm,np),fields(3,np)
+ real(c_double),intent(inout)::result(3,nm)
+ real(8),allocatable::staged(:,:)
+ integer::i,m,d,ios
+ status=1
+ if(np<1.or.nm<1)return
+ do i=1,np
+ do d=1,3
+  if(.not.ieee_is_finite(fields(d,i)))return
+ enddo
+ do m=1,nm
+  if(.not.ieee_is_finite(weights(m,i)).or.weights(m,i)<0d0)return
+ enddo
+ enddo
+ status=2;allocate(staged(3,nm),stat=ios);if(ios/=0)return
+ staged=0d0
+ do m=1,nm
+ do i=1,np
+  staged(:,m)=staged(:,m)+weights(m,i)*fields(:,i)
+ enddo
+ enddo
+ status=4
+ do m=1,nm
+ do d=1,3
+  if(.not.ieee_is_finite(staged(d,m)))return
+ enddo
+ enddo
+ result=staged;status=0
+end function
 integer(c_int) function sp_molecular_midpoint(dt,omega,volume,p,v,total_left,total_right,own_left,own_right, &
                                              p_new,v_new,current,statistics) bind(C) result(status)
  real(c_double),value::dt,omega,volume

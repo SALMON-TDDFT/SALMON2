@@ -4829,3 +4829,87 @@ f4cc1b03はローカルcommit済み・未push。その後の対角背景／非�
 - [x] 初見検索の補強：「はじめて／最初の計算」を初回テストへ、「つなぎたい／connect」とTDDFT・FDTDの模型名だけの指定を結合タスクへ案内。概要取得・言語別詳細取得の分離を保持。
 
 - [x] 既存利用者向け導線：日英サンプル集に既存データ・追加準備・最小例・結果の目的別索引を追加。READMEから直結し、LD／出力／保持GS／保存再開には操作別索引を追加。AIは導入確認済みなら再導入・quickstart・既知資源の再質問を省き、追加機能へ進む。
+
+
+### 2026-11-25 分子の既存近接場の公開作業
+
+- [x] 双極子源を明示選択するPython入口と、源の時間波形を保持する子プロセス経路を追加。一様Eは追加電場として扱い、源なしは従来経路。保存設定に選択モードを含める。
+- [x] GS不要のFortran試験で、2源・源内の正則化・Acos2/Ecos2・一様Eの重ね合わせを独立解析式と照合。1/2スレッド成功。Python19試験成功。新しいプログラムはソース／全アプリケーションオブジェクトの禁止ソルバー監査済み。
+- [ ] 既存C2H2 GSを使う本体比較・独立状態・直接ディスク再開を実測し、実行ファイルに紐付く追加検証記録を生成。今回の作業用GSコピーと出力保存は許可待ち。完了するまで従来の検証記録で有効化しない。
+- [ ] FDTD電場のYlm展開と分子への接続。展開中心・規格化・半径依存・電場の成分・時間ステップ番号を明示し、数値処理はFortran/Cで行う。双方向結合の仕事量検査は別途必要。
+
+- [x] 変更後のLibxc付きソースで固定密度PZ／Libxc-PZ／Libxc-PBEのXC変分、NLCC力、MPI2/4×OMP1/2の回帰を確認してソース識別子を更新。記録はcalc2026/salmonpy-nearfield-final-test_nlcc_* と salmonpy-nearfield-final-nlcc-mpi24-20261125。MPI専用試験へ1ランクを誤指定した失敗記録も保存。GSデータの生成・保存なし。
+
+
+### 2026-11-25 近接場の実分子比較と準静的Ylm接続
+
+- [x] 今回のGS作業用コピー・出力保存を利用者が許可。既存C2H2 GSを再利用し、新しいSCFなしで本体の双極子源と比較。差約1.1e-21 e*bohr、源なし完全一致。同一プロセスの退避・独立状態・別プロセスへの直接ディスク再開と出力ファイルも一致。公開Python入口でも確認。
+- [x] Fortran共通カーネルで実Ylmの正則展開・電場フィット・解析微分。1..8次、3次の独立解析式、8次係数回収、一様/四重極場、回転電場の残差を検査。入射波が同じ真空参照との差もFortranで明示計算。
+- [x] 保存した電場からの準静的電位近似を分子TDDFTへ一方向接続。通常の一様Eは変更前後でビット一致。Ylmの一様場は本体との双極子差約3.9e-12 e*bohr。3D LD/FDTDの27点→C2H2で80更新、40更新からの別プロセス直接再開が完全一致し、復元による追加更新0回。時系列係数・中心・半径は状態所有で直接保存。
+- [x] 最終ソースのPZ/Libxc-PZ/Libxc-PBE固定密度XC、NLCC力、MPI2/4×OMP1/2回帰を確認。近接場記録はcalc2026/salmonpy-c2h2-nearfield-20261125、GS不要記録はcalc2026/salmonpy-solid-final-*。クラウド同期は未確認。
+- [ ] 一般近接場は空間依存E(r,t),H(r,t)を基本入力とする。Ylmは表現/転送方法。現在の電位近似は準静的な電気成分に限定し、一般E/H対応として公開しない。実FDTDの全場/散乱場で近似残差が大きい例を保存し、物理精度の検証済み扱いにしない。E1/E2と磁気結合、電磁場の時刻・位置の整合、双方向の放射/仕事量の検証が残る。
+
+
+### 2026-11-25 E/H近接場と電気・磁気多極子結合
+
+- [x] near_field=True、NearFieldSeries/NearFieldFrameで空間E/Hと実Ylm係数を受け渡す。中心はフィット時に指定、またはFortranでサンプル重心として決定し、半径・次数・時刻・ステップ番号と固定保存。自作コードの係数も受け付ける。
+- [x] FortranでE/H各3成分を独立フィットし、動径方向のゲージの電気/磁気ポテンシャルを生成。電気双極子/四重極、軌道磁気結合、A²、原子中心の非局所位相を実装。解析的Lz作用と位相で約8e-15以内、NaN/Inf拒否、Yee半ステップHのFortran平均を検査。
+- [x] Gitだけの書き出しからソースを準備・監査・ビルド。PZ/Libxc-PZ/Libxc-PBE固定密度XC、NLCC力、MPI2/4×OMP1/2回帰を確認。従来の一様Eは本体と約3.9e-12 e*bohr以内。通常経路の旧/新数値配列は別途比較して記録。
+- [x] C2H2の事前入力/ライブ係数は完全一致。磁場導入後にステップ0へ直接復元し、磁気資源/位相が残らず再試行が一致。7更新からの別プロセス直接再開は追加電子更新0回で完全一致。電子数減少率約8.9e-16。展開中心(.2,-.3,.1)を保存/再開。
+- [x] 実3D LD/FDTDの27点でE/Hを取得、半ステップを揃え、分子80更新へ接続。40更新からの別プロセス直接再開、ライブ/事前入力が完全一致。これらは接続/再開の試験で、展開残差が大きい立ち上がりの例も保存し、物理精度を保証しない。
+- [x] 日英ガイド、準備/実行サンプル、公開APIとAI JSONを同期。近接場ではEだけのreplayを使わず、直接保存/復元を案内する。
+- [ ] スピン/SOC磁気結合、磁気多極子を含む双方向放射/仕事量、Maxwell整合性の専用診断、物理量の展開次数/格子/dt収束は別途必要。先の「E/Hが未実装」という記録はこの実装で更新されたが、これらの項目は完了扱いにしない。
+
+検証記録: calc2026/salmonpy-c2h2-nearfield-20261125/eh-with-fdtd-validation/summary.json。
+GSは許可済みの既存C2H2データだけを再利用。クラウド同期は未確認。
+
+### 2026-11-25: off-grid molecular input scope
+
+- Spatial E/H conversion is a one-way TDDFT input; no grid-point matching is required.
+- Pending: Tip/Bow Tie order scans with held-out samples and off-grid molecular centers; general radial-basis adequacy.
+- Separate future task: interpolation/deposition and work balance for complete two-way coupling.
+
+### 2026-11-25: molecular-size radial diagnostic
+
+- Completed held-out comparison of harmonic/complete-polynomial bases in2.12–8.47angstrom cubes, degrees1–8 at steps40/71/82; unavailable ranks separated. Missing radial curvature materially affects residuals.
+- Pending: independent between-grid reference, radial-complete production representation and its molecular validation; Tip/Bow Tie physical tests remain pending. No solver/Hamiltonian change in this diagnostic.
+
+### 2026-11-25: radial-complete molecular input
+
+- Implemented Fortran r^(l+2k)Ylm basis through total degree8, electric/magnetic potentials, projector phases, prepared/live TDDFT input and direct checkpoint. FieldV2/checkpointV5; no old-format fallback.
+- Verified independent analytic off-grid fields/potentials through degree8, actual C2H2 degree2 radial input and process-exit disk restart at7/20 with all9 observables bit-exact and0 extra evolution; independent control state unchanged.
+- Updated Japanese/English guide, AI JSON, preparation example and diagnostic tools. Pending Tip/Bow Tie field convergence, molecular observable convergence and separate bidirectional feedback design.
+
+### 2026-11-25: exponential decay representation comparison
+
+- Completed Fortran-only same-linear-coefficient comparison, independent rate tuning and off-grid validation:336 cases including directional Laplace fields, mixed decay lengths, off-candidate rates and non-exponential control.
+- Strong directional-decay degree8 residual7.18% ->.31%; lateral dependence still matters and selected rate is not a unique physical decay length.
+- Pending: optional exponential representation in TDDFT with electric/magnetic integral evaluation, owned parameters and direct restart; not currently a supported input option. Tip/Bow Tie physical tests remain pending.
+
+### 2026-11-25: field representation and coupling separated
+
+- Implemented optional fixed directional exponential envelope in Fortran fitting/evaluation, electric/magnetic molecular potentials and nonlocal projector phases; default polynomial retained.
+- Added common Fortran path integrals and Python couple_path_samples for custom field representations. This is a potential-evaluation entry, not a direct-grid TDDFT or two-way feedback provider.
+- Fixed decay parameters are retained with center/degree in live frames and direct checkpoints; mismatched per-step parameters rejected before updates. Prototype C2H2 process-exit restart agrees exactly with no extra evolution.
+- Independent strong-decay off-grid production E/V errors .4003%/.1687%; generic integrals and magnetic phases checked. Git-tracked-only preparation/build and independent wheel verified (77pass,2skip). Time-varying exponential C2H2 restart7->20 all9observables exact,0extra evolution; ordinary/polynomial before-after differences0. Actual Tip/Bow Tie fields and physical convergence remain pending.
+
+### 2026-11-25: direct FDTD-grid molecular input
+
+- Implemented GridFieldSeries: uniform Cartesian3D E/H, component-aware trilinear interpolation,
+  independent off-grid molecule_position/TDDFT center mapping, Fortran cell-split electric/sH integrals,
+  magnetic phases, packing and half-step centering. Direct grid uses prepared histories, no Ylm fit.
+- Independent Fortran staggered affine/path error2.08e-17; smooth-grid refinement h=.5/.25/.125bohr
+  E relative RMS6.602/1.455/.3285%, potential3.418/.6464/.09014%. Invalid sources/queries retain outputs.
+- Actual LD/FDTD64^3 saved fields,4624 local sites -> C2H2 at(21.2,.7,.9)bohr,20 steps;
+  process-exit restore7->20 all9observables and output streams bit-exact, additional evolution0,
+  independent state unchanged. No new GS. source time origin.303au retained as input provenance.
+- Updated Japanese/English guides, AI contract, preparation example and example index.
+  Installed wheel: 80 tests (78 passed, 2 optional skips); independent Fortran analytic checks and real C2H2 process-exit restart passed. Separate remaining work: live grid streaming, other-grid/time
+  resampling, rotations/nonuniform grids, actual Tip/Bow Tie field convergence and two-way feedback.
+
+### 2026-11-25: off-grid dipole feedback
+
+- Fortran eight-site trilinear weights, reciprocal field sampling/current deposition and multi-site MolecularFeedback are implemented; existing Yee maps compose without double deposition.
+- Vacuum/LD 4-rank oscillator feedback passed; LD nonzero scattered feedback, work relative residual below2e-14.
+- C2H2 off-grid position(-.54,1.62,1.94),64 steps, process-exit bundle restore at field27/molecule26: all frames and both field streams exact,0extra evolution. Existing GS reused.
+- Japanese/English guides, AI guide text and public sample updated. Full spatial/magnetic Iwasa reciprocal response, discrete charge continuity and physical tip/bow-tie convergence remain pending; dipole feedback must not be described as completing those tasks.

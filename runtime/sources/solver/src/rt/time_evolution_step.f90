@@ -48,7 +48,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use fdtd_coulomb_gauge, only: fdtd_singlescale,fourier_singlescale
   use sendrecv_grid, only: update_overlap_complex8
   use salmon_xc, only: exchange_correlation,salmon_xctype_tbmbj
-  use em_field, only: calcVbox, calc_emfields
+  use em_field, only: calcVbox, calc_emfields,apply_near_magnetic
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
   use dm_unfold_sub, only: dm_unfold
@@ -134,6 +134,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   select case(iperiodic)
   case(0)
     if(ae_shape1 /= 'impulse') call calcVbox(mg,lg,itt,system,rt,Vbox)
+    call apply_near_magnetic(itt,mg,lg,system,rt,info,ppg)
     if(ihpsieff==1) then
 !$OMP parallel do collapse(3) private(is,iz,iy,ix)
       do is=1,nspin
@@ -720,6 +721,7 @@ contains
   select case(iperiodic)
   case(0)
     if(ae_shape1 /= 'impulse') call calcVbox(mg,lg,itt+1,system,rt,Vbox)
+    call apply_near_magnetic(itt+1,mg,lg,system,rt,info,ppg)
     if(ihpsieff==1) then
 !$OMP parallel do collapse(3) private(is,iz,iy,ix)
       do is=1,nspin

@@ -1287,7 +1287,7 @@ integer(c_int) function tddft_close_impl()
   tddft_close_impl=0
 end function
 
-! Native ABI checkpoint v3. Caller authenticates the file, binary, GS and configuration.
+! Native ABI checkpoint v4. Caller authenticates the file, binary, GS and configuration.
 ! XC identity and scalar cval are stored; Libxc resources are rebuilt by initialization.
 ! TB-mBJ's automatic c is evaluation-local, not a persistent mutable XC field.
 ! All ranks call collectively with DISTINCT paths and an unchanged process topology.
@@ -1368,7 +1368,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   if(allocated(state%spsi_in%zwf))state%checkpoint_array_limit=max(state%checkpoint_array_limit,size(state%spsi_in%zwf,kind=8))
   if(allocated(state%spsi_in%rwf))state%checkpoint_array_limit=max(state%checkpoint_array_limit,size(state%spsi_in%rwf,kind=8))
   call checkpoint_copy(copy,.false.)
-  expected=[3,nproc_size_global,nproc_id_global,nt,state%system%nspin,state%system%no,state%system%nk, &
+  expected=[4,nproc_size_global,nproc_id_global,nt,state%system%nspin,state%system%no,state%system%nk, &
     state%lg%num,state%mg%is,state%mg%ie,state%mg%is_array,state%mg%ie_array, &
     state%info%io_s,state%info%io_e,state%info%ik_s,state%info%ik_e,state%info%im_s,state%info%im_e, &
     storage_size(1d0),storage_size(1),storage_size((0d0,0d0)),0,0]
@@ -1379,7 +1379,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   endif
   opened=ios==0
   if(opened)then
-    magic='SALMONPY_TDDFT_NATIVE_V3'
+    magic='SALMONPY_TDDFT_NATIVE_V4'
     header=expected;saved_dt=dt;cell=state%system%primitive_a
     expected_xc_names=[character(256)::xc,xname,cname]
     expected_xc_codes=[state%xc_func%xctype,state%xc_func%ispin]
@@ -1390,7 +1390,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
     if(reading)then
       read(u,iostat=ios)magic,header,saved_dt,cell
       if(ios==0)then
-        if(magic/='SALMONPY_TDDFT_NATIVE_V3'.or.any(header/=expected))ios=1
+        if(magic/='SALMONPY_TDDFT_NATIVE_V4'.or.any(header/=expected))ios=1
         if(saved_dt/=dt.or.any(cell/=state%system%primitive_a))ios=1
       endif
     else
@@ -1410,10 +1410,10 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
     endif
     if(ios==0)call checkpoint_io(u,reading,copy,ios)
     if(ios==0)then
-      magic='SALMONPY_TDDFT_COMPLETE_V3'
+      magic='SALMONPY_TDDFT_COMPLETE_V4'
       if(reading)then
         read(u,iostat=ios)magic
-        if(ios==0.and.magic/='SALMONPY_TDDFT_COMPLETE_V3')ios=1
+        if(ios==0.and.magic/='SALMONPY_TDDFT_COMPLETE_V4')ios=1
         if(ios==0)then
           read(u,iostat=ios)extra
           if(is_iostat_end(ios))then

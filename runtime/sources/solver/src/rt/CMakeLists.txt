@@ -2,6 +2,9 @@ set(SOURCES
     tddft_worker.f90
     dip.f90
     em_field.f90
+    near_field_coupling.f90
+    grid_field.f90
+    solid_harmonics.f90
     initialization_rt.f90
     main_tddft.f90
     md.f90

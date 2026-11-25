@@ -22,7 +22,7 @@ for _ in range(steps - 1):
 
 `world` は呼び出し元のMPIコミュニケータ、`group_size` は各FDTD群と補助ランクを合わせた大きさです。`state` は代表ランク以外では `None`。`observer` は各場の `energy_observer(...)`、観測不要なら全ランクで `None` です。`start()` の戻り値も必要に応じて保存します。`MolecularFrame` は代表ランクだけに返り、他のランクでは `None` です。電場、電流、双極子、電子数、鮮度を反映した内部エネルギー、任意の六面収支を保持し、`record()` は独立した保存用辞書を返します。自動的なファイル出力は行いません。
 
-結合は一分子・一点、実験室座標の双極子、中点E駆動です。初期の選択電場はゼロとし、非ゼロなら光源の距離・遅延を見直します。場の時刻は電子状態よりdt先です。自己真空場の差し引きは真空中の放射反作用も除きます。分子状態と場を結合の外から途中更新しないでください。
+結合は一分子・一つ以上のマクロ点、実験室座標の双極子、中点E駆動です。初期の選択電場はゼロとし、非ゼロなら光源の距離・遅延を見直します。場の時刻は電子状態よりdt先です。自己真空場の差し引きは真空中の放射反作用も除きます。分子状態と場を結合の外から途中更新しないでください。
 
 受理端点の不一致や、代表ランクだけで実行する `step(validate=callback)` の例外は、その区間を取り消します。全ランクで `StepRecoveryError` を捕まえ、`original_preserved=True` のときだけ同じ `step()` を再試行できます。自動再試行はありません。コールバックは観測の確認だけに使い、状態を変更したりMPI通信を行ったりしません。電子状態は直接退避で復元し、履歴再生しません。ワーカー喪失など復元を確定できない場合はoriginal_preserved=Falseとして返し、再試行を認めません。
 
@@ -376,3 +376,39 @@ mpiexec -n 6 python -m salmonpy.examples.molecular_feedback FIELD_BUILD WORKER V
 ```
 
 保存時は本計算FDTDと自己真空参照FDTDが32ステップ、分子が31ステップ終了です。再開時は両FDTDのFortran内の番号と分子の実測番号を照合し、分子ワーカーの `restore_statistics.updates` が0であることを確認します。64ステップまでの再開ジョブで新たに進める分子の更新は32回だけです。サンプル出力の `restored_steps`、`restore_statistics`、`molecular_execution_mode` で確認できます。履歴フレームは解析用で、復元のために再計算しません。異なるMPI分割・実行ファイルへの移行はこの形式の保証に含みません。
+
+## 格子点からずれた分子の双方向結合
+
+双極子近似では、分子を格子点へ移動せずに `DipoleMap.from_grid` で周囲8点を選べます。
+`origin` はFDTDのマクロ観測点の添字(0,0,0)の座標で、YeeのE成分の原点とは異なります。
+長さはbohr、体積はbohr³です。格子外への外挿は行いません。
+
+```python
+mapping, indices = DipoleMap.from_grid(
+    'molecule', (-2.54, 1.62, 1.94),
+    origin=(-39., -39., -39.), spacing=(2., 2., 2.), counts=(40, 40, 40))
+points = dict(zip(mapping.point_ids, map(tuple, indices)))
+# 本計算と自己真空参照の両方を、同じ points で作る。
+# field = NativeEHField(..., points=points)
+# MolecularFeedback(..., mapping=mapping, ...)
+```
+
+Fortranが三線形の重みを作り、分子の場を `E_m=Σ_i w_i E_i`、
+放射する区間平均電流密度を `j_i=w_i Δp/(V_i dt)` として計算します。
+したがって同じ場・双極子増分なら `dt Σ_i V_i E_i·j_i = E_m·Δp` です。
+この関係は空間の受け渡しの仕事量の一致であり、時間積分や全領域のエネルギー収支を単独で保証しません。
+FDTD内部のマクロ点とYee成分の既存の相反な対応を合成するため、Yee辺へ別途二重に電流を加えません。
+`mapping.sample_field(fields)` はマクロ点の場から分子の場を返します。
+
+`MolecularFeedback` は単一分子・複数マクロ点を受け付けます。返す `frame.current` は
+`[マクロ点数,3]` です。自己真空参照でも同じ8点・重み・境界を使い、分配先の近傍は真空に置きます。
+`python -m salmonpy.examples.molecular_feedback ... --molecule-position -2.54 1.62 1.94`
+で試せます。保存・再開には既存の `--checkpoint` / `--resume` を使います。
+
+64ステップのC₂H₂試験で、場のステップ27（分子26）からの別プロセス再開は全フレームと
+両FDTDの出力が完全一致し、復元時の時間発展は0回でした。真空/LD中の振動子試験と
+補間・電流分配の仕事量の一致も確認しています。
+
+これは一様な分子駆動と双極子放射の近似です。`GridFieldSeries` の空間依存E/H・経路積分入力と
+同じ多極子応答を双方向に戻す機能ではありません。その場合はハミルトニアンと対になる電流分布・
+磁気応答の戻し方が別途必要です。離散的な電荷連続則やTip/Bow Tieの物理的収束は今回の検証範囲外です。

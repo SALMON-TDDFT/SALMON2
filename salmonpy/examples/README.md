@@ -262,6 +262,8 @@ See [CONFIG.en.md](../CONFIG.en.md) / [CONFIG.md](../CONFIG.md).
 | [mpi_point_identity.py](mpi_point_identity.py) | MPIで点IDと材料情報を保持 | 3 ranks; new output |
 | [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1次元場と独立TDDFT群を結合 | 3 ranks with --material-ranks 1; 計算処理 build and GS |
 | [isolated_response.py](isolated_response.py) | 孤立系のE駆動・双極子出力 | Validated E-worker, receipt, GS bundle, E NPZ |
+| [prepare_grid_field.py](prepare_grid_field.py) | FDTDのE/Hを分子入力にする（準備のみ） | E/HのNPZ、パッチの格子情報、分子位置 |
+| [fit_near_field.py](fit_near_field.py) | 空間依存E/Hを展開で圧縮する（準備のみ） | E/HのNPZ、中心、次数、任意の減衰率 |
 | [dipole_radiation.py](dipole_radiation.py) | 双極子からFDTDへ渡す電流を作成 | No data, or --archive and --cell-volume; no FDTD propagation |
 
 MPIサンプルも通常のPythonから `--help` を表示できます。実計算には mpi4py と互換MPIが必要です。MPIの既定ランク数が予算を超える場合は、そのまま実行せず、対応するランク数指定を確認してください。

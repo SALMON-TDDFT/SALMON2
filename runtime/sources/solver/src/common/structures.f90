@@ -716,6 +716,20 @@ module structures
     type(s_scalar),allocatable :: vloc_t(:), vloc_new(:)
     type(s_scalar),allocatable :: vloc_old(:,:)  ! vloc_old(spin,iteration)
     type(s_scalar),allocatable :: rho0_s(:) ! =rho_s(1:nspin) @ t=0 (GS)
+    ! Prescribed spatial field belongs to this RT state, including direct restart.
+    integer :: solid_lmax=0
+    real(8) :: solid_center(3)=0d0,solid_radius=1d0
+    real(8),allocatable :: solid_coeff(:,:)
+    integer :: near_lmax=0,near_index=0
+    real(8) :: near_geometry(7)=[0d0,0d0,0d0,1d0,0d0,0d0,0d0]
+    logical :: near_magnetic=.false.
+    real(8),allocatable :: near_Ecoeff(:,:,:),near_Hcoeff(:,:,:)
+    integer :: near_grid_counts(3)=0
+    real(8) :: near_grid_origins(3,3,2)=0d0,near_grid_spacing(3)=1d0,near_grid_center(3)=0d0
+    real(8),allocatable :: near_grid_values(:,:,:,:,:,:)
+    type(s_vector) :: near_Ac
+    type(s_scalar) :: near_div
+    complex(8),allocatable :: near_projectors(:,:,:)
     type(s_scalar) :: vonf
     type(s_vector) :: j_e ! microscopic electron number current density
     ! for projection_option

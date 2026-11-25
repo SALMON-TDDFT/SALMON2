@@ -19,16 +19,16 @@ def oscillator_step(p, v, E, dt, omega):
     return q,w,float(stats[5])
 
 
-def centered_loop(world,field,steps,dt,omega,volume):
+def centered_loop(world,field,steps,dt,omega,volume,mapping):
     """Trial/rollback/correct current; only accepted field output survives."""
     from salmonpy.native_steps import _NativeBackup
     from salmonpy.dipole_source import (_midpoint_oscillator,_molecular_work,
                                        _selected_molecular_field,_molecular_summary)
     backup=None if field is None else _NativeBackup(field,field.context.solver_comm,
         'sp_eh_step_transaction',field.directory,('A','E','step_index','failed','closed'))
-    zero=np.zeros((1,3));p=np.zeros(3);v=np.zeros(3)
+    zero=np.zeros((len(mapping.point_ids),3));p=np.zeros(3);v=np.zeros(3)
     if field is not None:field.advance(zero)
-    gathered=world.gather(None if field is None else field.E[0].copy(),root=0)
+    gathered=world.gather(None if field is None else mapping.sample_field(field.E)[0],root=0)
     records=[];ps=[];js=[];statistics=[]
     if world.rank==0:
         left_total=gathered[0];left_own=gathered[2]
@@ -37,15 +37,16 @@ def centered_loop(world,field,steps,dt,omega,volume):
     for n in range(1,steps):
         token=None if backup is None else backup.capture()
         if field is not None:field.advance(zero)
-        trial=world.gather(None if field is None else field.E[0].copy(),root=0)
+        trial=world.gather(None if field is None else mapping.sample_field(field.E)[0],root=0)
         if world.rank==0:
             q,w,current,_=_midpoint_oscillator(p,v,left_total,trial[0],dt=dt,omega=omega,volume=volume,
                                              own_left=left_own,own_right=trial[2])
+            current=mapping.current([p],[q],dt=dt)
         else:current=None
         current=world.bcast(current,root=0)
         if backup is not None:backup.rollback(token)
-        if field is not None:field.advance(current[None,:])
-        accepted=world.gather(None if field is None else field.E[0].copy(),root=0)
+        if field is not None:field.advance(current)
+        accepted=world.gather(None if field is None else mapping.sample_field(field.E)[0],root=0)
         if world.rank==0:
             checked_p,checked_v,_,_=_midpoint_oscillator(p,v,left_total,accepted[0],dt=dt,omega=omega,
                 volume=volume,own_left=left_own,own_right=accepted[2])
@@ -56,7 +57,7 @@ def centered_loop(world,field,steps,dt,omega,volume):
             statistics.append(stat)
             p,v=q,w;left_total=accepted[0];left_own=accepted[2]
             records.append([left_total,left_own,_selected_molecular_field(left_total,left_own)])
-            ps.append(p.copy());js.append(current.copy())
+            ps.append(p.copy());js.append(current[0].copy() if len(mapping.point_ids)==1 else current.copy())
         if backup is not None:backup.release(token)
     if world.rank!=0:return None
     return np.asarray(records),np.asarray(ps),np.asarray(js),np.asarray(statistics),_molecular_summary(statistics)
@@ -227,9 +228,14 @@ def main():
     parser.add_argument('--energy-box',nargs=6,type=int,metavar=('LX','LY','LZ','UX','UY','UZ'),help='inclusive inner box; opt-in field energy observation')
     parser.add_argument('--dt',type=float,default=.003)
     parser.add_argument('--steps',type=int,default=64)
+    parser.add_argument('--molecule-position',nargs=3,type=float)
+    parser.add_argument('--kernels',type=Path)
     args=parser.parse_args()
     if not np.isfinite(args.source_amplitude):parser.error('finite source amplitude required')
     if not np.isfinite(args.dt) or args.dt<=0 or args.steps<2:parser.error('positive dt and steps>=2 required')
+    if args.kernels is not None:
+        import salmonpy._material_handles as handles
+        handles._library_path=lambda:args.kernels.resolve()
     from mpi4py import MPI
     from salmonpy.coupled import NativeEHField
     from salmonpy.distributed import ParallelPlan,ParallelContext,SolverGroup
@@ -240,6 +246,14 @@ def main():
     from salmonpy._material_handles import default_sbe_api as default_api
     from salmonpy.field_input import FieldValue
     from salmonpy.dipole_source import select_molecular_field
+    from salmonpy.dipole_source import DipoleMap
+    if args.molecule_position is not None:
+        if args.mode=='replay' or args.isolated_executable is not None or args.schedule!='centered':
+            parser.error('off-grid oscillator probe supports external/centered feedback only')
+        mapping,indices=DipoleMap.from_grid('oscillator',args.molecule_position,origin=(-39.,)*3,spacing=(2.,)*3,counts=(40,)*3)
+        points=dict(zip(mapping.point_ids,map(tuple,indices)))
+    else:
+        mapping=DipoleMap(('oscillator',),(10,),[[1.]],[8.]);points={10:(19,20,20)}
     world=MPI.COMM_WORLD
     feedback=args.mode=='feedback'
     isolated=args.isolated_executable is not None
@@ -261,7 +275,8 @@ def main():
             runtime=json.loads(args.build.read_text())
             if (control['mode']!='external' or control['dt']!=args.dt or control['steps']!=args.steps
                     or control['library_sha256']!=runtime['sha256'] or control['environment']!=args.environment
-                    or control['source_amplitude']!=args.source_amplitude):
+                    or control['source_amplitude']!=args.source_amplitude
+                    or control.get('molecule_position')!=args.molecule_position):
                 raise ValueError('baseline mode/dt/steps/library/environment mismatch')
         except Exception as exc:error=str(exc)
     replay_current=replay_field=None
@@ -284,7 +299,7 @@ def main():
     sub=world.Split(pair,world.rank)
     dt=args.dt;steps=args.steps;volume=8.;omega=2.
     plan=ParallelPlan((SolverGroup('field',tuple(range(field_ranks)),role='field'),
-        SolverGroup('labels',(field_ranks,),point_ids=(10,))))
+        SolverGroup('labels',(field_ranks,),point_ids=mapping.point_ids)))
     try:
         if world.rank==0:args.output.mkdir(parents=True,exist_ok=False)
         world.Barrier()
@@ -301,12 +316,12 @@ def main():
                         source=PlaneWave(AcosPulse(args.source_amplitude if pair==0 else 0.,20.,.15),0,-16.),
                         observations=((-1.,1.,1.),))
                     field=NativeEHField(context,calculation,args.build,args.output/('field-'+str(pair)),
-                        points={10:(19,20,20)},grid=tuple(args.field_grid))
+                        points=points,grid=tuple(args.field_grid))
                 if isolated:
                     isolated_loop(world,field,args)
                     return
                 if feedback and args.schedule=='centered':
-                    result=centered_loop(world,field,steps,dt,omega,volume)
+                    result=centered_loop(world,field,steps,dt,omega,volume,mapping)
                     if world.rank==0:
                         records,ps,js,stats,totals=result
                         with np.load(args.baseline/'history.npz',allow_pickle=False) as baseline:
@@ -329,7 +344,7 @@ def main():
                             relative_accumulated_balance=float(totals[9]),
                             relative_temporal_work_error=float(totals[10]),
                             full_field_energy_balance=False,physical_validation=False,
-                            material_environment=args.environment,TDDFT_attached=False,
+                            material_environment=args.environment,TDDFT_attached=False,molecule_position=args.molecule_position,
                             scattered_feedback_max=feedback_max,
                             molecular_kernel_sha256=default_api().sha256,
                             baseline_sha256={name:hashlib.sha256((args.baseline/name).read_bytes()).hexdigest() for name in ('report.json','history.npz')},
@@ -341,14 +356,14 @@ def main():
                         (args.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
                         print('PASS centered-feedback',flush=True)
                     return
-                p=np.zeros(3);v=np.zeros(3);current=np.zeros((1,3))
+                p=np.zeros(3);v=np.zeros(3);current=np.zeros((len(mapping.point_ids),3))
                 previous=None;records=[];balance=[];work=[];ps=[p.copy()];js=[]
                 for n in range(1,steps+1):
                     if args.mode=='replay' and world.rank==0:
                         if n>=2:current=replay_current[n-2][None,:]
                         js.append(current[0].copy())
                     if field is not None:field.advance(current)
-                    gathered=world.gather(None if field is None else field.E[0].copy(),root=0)
+                    gathered=world.gather(None if field is None else mapping.sample_field(field.E)[0],root=0)
                     if world.rank==0:
                         total=gathered[0];own=gathered[2] if feedback else np.zeros(3)
                         if feedback:
@@ -372,7 +387,7 @@ def main():
                     current=world.bcast(current if world.rank==0 else None,root=0)
                 if world.rank==0:
                     records=np.asarray(records)
-                    report=dict(mode=args.mode,environment=args.environment,dt=dt,steps=steps,source_amplitude=args.source_amplitude,initial_hold=dt,
+                    report=dict(mode=args.mode,environment=args.environment,dt=dt,steps=steps,source_amplitude=args.source_amplitude,molecule_position=args.molecule_position,initial_hold=dt,
                                 full_field_energy_balance=False,physical_validation=False,
                                 library_sha256=field.manifest['library_sha256'])
                     if args.mode=='replay':

@@ -436,6 +436,8 @@ end subroutine add_Ac_from_file
 !===================================================================================================================================
 
 subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
+  use salmonpy_solid_harmonics,only:solid_basis,solid_size,near_potentials
+  use salmonpy_grid_field,only:grid_potentials
   use structures, only: s_rgrid, s_dft_system, s_rt, s_scalar
   use communication, only: comm_is_root
   use misc_routines, only: get_wtime
@@ -446,10 +448,11 @@ subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
   type(s_dft_system),intent(inout) :: system
   type(s_scalar),intent(inout)     :: Vbox
   type(s_rt),intent(in) :: rt
-  integer :: ix,iy,iz,jj
+  integer :: ix,iy,iz,jj,grid_status
   integer :: ix_sta_Vbox(3),ix_end_Vbox(3)
   integer :: ipulse
   real(8) :: env_trigon_1,env_trigon_2
+  real(8) :: solid_value(solid_size),solid_gradient(3,solid_size),coordinate(3),near_scalar,near_vector(3)
   real(8) :: E_ext(3)
   integer,parameter :: Nd = 4
 
@@ -560,6 +563,48 @@ subroutine calcVbox(mg,lg,itt_t,system,rt,Vbox)
     end if
   end if
 
+  if(allocated(rt%solid_coeff))then
+    if(itt_t<lbound(rt%solid_coeff,2).or.itt_t>ubound(rt%solid_coeff,2)) &
+      error stop 'SALMONpy spatial field step is outside saved history'
+!$OMP parallel do collapse(2) private(ix,iy,iz,coordinate,solid_value,solid_gradient)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      coordinate=([lg%coordinate(ix,1),lg%coordinate(iy,2),lg%coordinate(iz,3)]-rt%solid_center)/rt%solid_radius
+      call solid_basis(coordinate,rt%solid_lmax,solid_value,solid_gradient)
+      Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+dot_product(solid_value(:size(rt%solid_coeff,1)),rt%solid_coeff(:,itt_t))
+    enddo
+    enddo
+    enddo
+  endif
+
+  if(allocated(rt%near_grid_values))then
+!$OMP parallel do collapse(2) private(ix,iy,iz,coordinate,near_scalar,near_vector,grid_status)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      coordinate=[lg%coordinate(ix,1),lg%coordinate(iy,2),lg%coordinate(iz,3)]-rt%near_geometry(1:3)
+      call grid_potentials(rt%near_grid_counts,rt%near_grid_origins,rt%near_grid_spacing, &
+        rt%near_grid_values(:,:,:,:,:,itt_t),rt%near_grid_center,coordinate,near_scalar,near_vector,grid_status)
+      if(grid_status/=0)error stop 'SALMONpy E/H grid must cover molecular integration paths'
+      Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+near_scalar
+    enddo
+    enddo
+    enddo
+  elseif(allocated(rt%near_Ecoeff))then
+!$OMP parallel do collapse(2) private(ix,iy,iz,coordinate,near_scalar,near_vector)
+    do iz=mg%is(3),mg%ie(3)
+    do iy=mg%is(2),mg%ie(2)
+    do ix=mg%is(1),mg%ie(1)
+      coordinate=[lg%coordinate(ix,1),lg%coordinate(iy,2),lg%coordinate(iz,3)]-rt%near_geometry(1:3)
+      call near_potentials(coordinate,rt%near_lmax,rt%near_geometry(4), &
+        rt%near_Ecoeff(:,:,itt_t),rt%near_Hcoeff(:,:,itt_t),near_scalar,near_vector,rt%near_geometry(5:7))
+      Vbox%f(ix,iy,iz)=Vbox%f(ix,iy,iz)+near_scalar
+    enddo
+    enddo
+    enddo
+  endif
+
   return
 end subroutine calcVbox
 
@@ -619,6 +664,99 @@ subroutine set_vonf(mg,lg,Hgs,rt)
 
   return
 end subroutine set_vonf
+
+! Apply orbital magnetic coupling on the same field index as the scalar term.
+subroutine apply_near_magnetic(itt,mg,lg,system,rt,info,ppg)
+  use structures,only:s_rgrid,s_dft_system,s_rt,s_parallel_info,s_pp_grid
+  use salmonpy_solid_harmonics,only:near_potentials,near_line_integral
+  use salmonpy_grid_field,only:grid_potentials,grid_line_phase
+  implicit none
+  integer,intent(in)::itt
+  type(s_rgrid),intent(in)::mg,lg
+  type(s_dft_system),intent(inout)::system
+  type(s_rt),intent(inout)::rt
+  type(s_parallel_info),intent(in)::info
+  type(s_pp_grid),intent(inout)::ppg
+  real(8)::coordinate(3),scalar,vector(3),finish(3),phase
+  integer::ix,iy,iz,ilma,atom,j,ik,status
+  if(.not.allocated(rt%near_Ecoeff).and..not.allocated(rt%near_grid_values))return
+  rt%near_index=itt
+  if(.not.allocated(rt%near_projectors))then
+    allocate(rt%near_projectors(ppg%nps,ppg%nlma,info%ik_s:info%ik_e),stat=status)
+    if(status/=0)error stop 'SALMONpy magnetic projector allocation failed'
+    rt%near_projectors=cmplx(0d0,0d0,kind=8)
+    if(allocated(ppg%zekr_uV))then
+      do ilma=1,ppg%nlma
+        atom=ppg%ia_tbl(ilma)
+        rt%near_projectors(1:ppg%mps(atom),ilma,:)=ppg%zekr_uV(1:ppg%mps(atom),ilma,:)
+      enddo
+    endif
+  endif
+  if(.not.rt%near_magnetic)return
+  if(.not.allocated(rt%near_Ac%v))then
+    allocate(rt%near_Ac%v(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2), &
+      mg%is_array(3):mg%ie_array(3)),rt%near_div%f(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2), &
+      mg%is(3):mg%ie(3)),stat=status)
+    if(status/=0)error stop 'SALMONpy magnetic resource allocation failed'
+    rt%near_div%f=0d0
+  endif
+!$OMP parallel do collapse(2) private(ix,iy,iz,coordinate,scalar,vector,status)
+  do iz=mg%is_array(3),mg%ie_array(3)
+  do iy=mg%is_array(2),mg%ie_array(2)
+  do ix=mg%is_array(1),mg%ie_array(1)
+    coordinate=[lg%coordinate(lg%is(1),1)+(ix-lg%is(1))*system%Hgs(1), &
+                lg%coordinate(lg%is(2),2)+(iy-lg%is(2))*system%Hgs(2), &
+                lg%coordinate(lg%is(3),3)+(iz-lg%is(3))*system%Hgs(3)]-rt%near_geometry(1:3)
+    if(allocated(rt%near_grid_values))then
+      call grid_potentials(rt%near_grid_counts,rt%near_grid_origins,rt%near_grid_spacing, &
+        rt%near_grid_values(:,:,:,:,:,itt),rt%near_grid_center,coordinate,scalar,vector,status)
+      if(status/=0)error stop 'SALMONpy E/H grid must cover the molecular stencil halo'
+    else
+    call near_potentials(coordinate,rt%near_lmax,rt%near_geometry(4), &
+      rt%near_Ecoeff(:,:,itt),rt%near_Hcoeff(:,:,itt),scalar,vector,rt%near_geometry(5:7))
+    endif
+    rt%near_Ac%v(:,ix,iy,iz)=vector
+  enddo
+  enddo
+  enddo
+  do ilma=1,ppg%nlma
+    atom=ppg%ia_tbl(ilma)
+    do j=1,ppg%mps(atom)
+      finish=system%Rion(:,atom)+ppg%rxyz(:,j,atom)
+      if(allocated(rt%near_grid_values))then
+        call grid_line_phase(rt%near_grid_counts,rt%near_grid_origins,rt%near_grid_spacing, &
+          rt%near_grid_values(:,:,:,:,:,itt),rt%near_grid_center,rt%near_geometry(1:3), &
+          system%Rion(:,atom),finish,phase,status)
+        if(status/=0)error stop 'SALMONpy E/H grid must cover magnetic nonlocal paths'
+      else
+      phase=near_line_integral(system%Rion(:,atom),finish,rt%near_geometry(1:4), &
+        rt%near_lmax,rt%near_Hcoeff(:,:,itt),rt%near_geometry(5:7))
+      endif
+      do ik=info%ik_s,info%ik_e
+        rt%near_projectors(j,ilma,ik)=exp(cmplx(0d0,-phase,kind=8))*ppg%uv(j,ilma)
+      enddo
+    enddo
+  enddo
+  call activate_near_magnetic(system,rt,ppg)
+end subroutine
+
+! Restoration only copies saved numerical resources; no Hamiltonian application.
+subroutine activate_near_magnetic(system,rt,ppg)
+  use structures,only:s_dft_system,s_rt,s_pp_grid
+  implicit none
+  type(s_dft_system),intent(inout)::system
+  type(s_rt),intent(in)::rt
+  type(s_pp_grid),intent(inout)::ppg
+  if(.not.allocated(rt%near_Ecoeff).and..not.allocated(rt%near_grid_values))return
+  if(.not.rt%near_magnetic)then
+    if(allocated(system%Ac_micro%v))deallocate(system%Ac_micro%v)
+    if(allocated(system%div_Ac%f))deallocate(system%div_Ac%f)
+    if(allocated(rt%near_projectors))ppg%zekr_uV=rt%near_projectors
+    return
+  endif
+  system%Ac_micro=rt%near_Ac;system%div_Ac=rt%near_div
+  ppg%zekr_uV=rt%near_projectors
+end subroutine
 
 end module em_field
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130

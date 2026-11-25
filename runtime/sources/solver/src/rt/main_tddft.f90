@@ -20,6 +20,7 @@
 
 subroutine main_tddft
 use tddft_worker
+use em_field,only:apply_near_magnetic,activate_near_magnetic
 use salmonpy_step_output
 use dip, only: subdip,calc_dip
 use density_matrix, only: calc_current
@@ -130,6 +131,8 @@ if(trim(context_mode)=="1")then
 endif
 #endif
 
+call apply_near_magnetic(0,mg,lg,system,rt,info,ppg)
+
 if(worker_requested()) then
   if(worker_E_requested()) then
     call subdip(info%icomm_r,0,rt,lg,mg,system,rho_s,worker_ne,poisson,energy%E_tot,pp)
@@ -169,7 +172,7 @@ call timer_begin(LOG_RT_ITERATION)
 itt=Mit
 TE : do while(itt<nt.or.worker_E_requested())
   if(worker_requested()) then
-    if(.not.worker_next_A(worker_A,worker_operation)) exit TE
+    if(.not.worker_next_A(worker_A,worker_operation,rt,itt+1)) exit TE
     if(worker_operation/=0)then
       call isolated_state_control(worker_operation,worker_status)
       call worker_state_reply(worker_operation,worker_status,itt,worker_updates)
@@ -374,6 +377,7 @@ recursive subroutine isolated_state_control(operation,status)
     V_local=worker_saved%V_local
     Vxc=worker_saved%Vxc
     rt=worker_saved%rt
+    call activate_near_magnetic(system,rt,ppg)
     poisson=worker_saved%poisson
     energy=worker_saved%energy
   system%xc_payload=worker_saved%xc
@@ -425,17 +429,21 @@ integer(8) function checkpoint_io_limit()
 end function
 
 subroutine isolated_disk_io(reading,status)
+ use salmonpy_grid_field,only:grid_validate
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  logical,intent(in)::reading
  integer,intent(out)::status
- integer::u,ios,close_status,header(8),expected(8),extra
+ integer::u,ios,close_status,header(8),expected(8),extra,grid_step,grid_status,k
  real(8)::saved_dt,cell(3,3)
  character(32)::magic
  worker_checkpoint_limit=max(64_8*(int(nt,8)+1_8),64_8*int(system%ngrid,8))
  if(allocated(spsi_in%zwf))worker_checkpoint_limit=max(worker_checkpoint_limit,size(spsi_in%zwf,kind=8))
  if(allocated(spsi_in%rwf))worker_checkpoint_limit=max(worker_checkpoint_limit,size(spsi_in%rwf,kind=8))
+ if(allocated(rt%near_Ecoeff))worker_checkpoint_limit=max(worker_checkpoint_limit,size(rt%near_Ecoeff,kind=8))
+ if(allocated(rt%near_grid_values)) &
+  worker_checkpoint_limit=max(worker_checkpoint_limit,size(rt%near_grid_values,kind=8))
  expected=[1,nt,system%nspin,system%no,system%nk,lg%num]
- header=expected;saved_dt=dt;cell=system%primitive_a;magic='SALMONPY_ISOLATED_DIRECT_V1'
+ header=expected;saved_dt=dt;cell=system%primitive_a;magic='SALMONPY_ISOLATED_DIRECT_V7'
  if(reading)then
   open(newunit=u,file='isolated-state.bin',access='stream',form='unformatted',status='old', &
     action='read',iostat=ios)
@@ -448,18 +456,32 @@ subroutine isolated_disk_io(reading,status)
  if(reading)then
   read(u,iostat=ios)magic,header,saved_dt,cell
   if(ios==0)then
-   if(magic/='SALMONPY_ISOLATED_DIRECT_V1'.or.any(header/=expected))ios=1
+   if(magic/='SALMONPY_ISOLATED_DIRECT_V7'.or.any(header/=expected))ios=1
    if(saved_dt/=dt.or.any(cell/=system%primitive_a))ios=1
   endif
  else
   write(u,iostat=ios)magic,header,saved_dt,cell
  endif
  if(ios==0)call isolated_payload_io(u,reading,worker_saved,ios)
+ if(ios==0.and.reading)then
+  if(allocated(worker_saved%rt%near_grid_values))then
+   do k=1,3
+    if(.not.ieee_is_finite(worker_saved%rt%near_grid_center(k)).or. &
+       .not.ieee_is_finite(worker_saved%rt%near_geometry(k)))ios=1
+   enddo
+   do grid_step=0,nt+1
+    if(ios/=0)exit
+    call grid_validate(worker_saved%rt%near_grid_counts,worker_saved%rt%near_grid_origins, &
+      worker_saved%rt%near_grid_spacing,worker_saved%rt%near_grid_values(:,:,:,:,:,grid_step),grid_status)
+    if(grid_status/=0)ios=1
+   enddo
+  endif
+ endif
  if(ios==0)then
-  magic='SALMONPY_ISOLATED_COMPLETE_V1'
+  magic='SALMONPY_ISOLATED_COMPLETE_V7'
   if(reading)then
    read(u,iostat=ios)magic
-   if(ios==0.and.magic/='SALMONPY_ISOLATED_COMPLETE_V1')ios=1
+   if(ios==0.and.magic/='SALMONPY_ISOLATED_COMPLETE_V7')ios=1
    if(ios==0)then
     read(u,iostat=ios)extra
     if(is_iostat_end(ios))then

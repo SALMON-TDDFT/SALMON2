@@ -17,6 +17,9 @@ def main():
     parser.add_argument('--direct-checkpoint',help='new direct numerical checkpoint directory')
     parser.add_argument('--resume-direct',help='direct numerical checkpoint to import before continuing')
     parser.add_argument('--stop-after',type=int,help='accepted step at which to stop and save')
+    parser.add_argument('--native-near-field',action='store_true',help='retain prescribed dipole sources from SALMON input')
+    parser.add_argument('--electric-potential',action='store_true',help='use prepared salmonpy-ylm.dat; electric-only approximation, not general E/H coupling')
+    parser.add_argument('--near-field',action='store_true',help='spatial E/H from prepared salmonpy-near-eh.dat')
     a=parser.parse_args()
     with np.load(a.E_npz,allow_pickle=False) as data:
         E=data['E'].copy();raw_dt=data['dt']
@@ -27,7 +30,8 @@ def main():
         dt=float(raw_dt)
     runtime=load_isolated_runtime(a.executable,a.validation)
     with IsolatedTDDFTInitialState.from_salmon(a.bundle,a.input_file,runtime=runtime,
-                                              max_steps=len(E),threads=1) as model:
+                                              max_steps=len(E),threads=1,native_near_field=a.native_near_field,
+                                              electric_potential=a.electric_potential,near_field=a.near_field) as model:
         with model.new_state(dt=dt) as state:
             if a.resume_direct:
                 state.restore_direct_checkpoint(a.resume_direct)
@@ -43,7 +47,10 @@ def main():
                          'E':np.vstack((np.zeros(3) if start==0 else E[start-1],E[start:stop])),
                          'dipole':np.array([f.dipole for f in frames]),
                          'electronic_change':np.array([f.electronic_change for f in frames])},
-                metadata={'backend':'isolated-PZ-E3','gauge':'length',
+                metadata={'backend':'isolated-PZ','gauge':'length',
+                          'prescribed_dipole_sources':a.native_near_field,
+                          'quasistatic_electric_potential':a.electric_potential,
+                          'spatial_EH':a.near_field,
                           'units':{'time':'atomic_time','E':'E:au','dipole':'e*bohr','electronic_change':'e*bohr'},
                           'executable_sha256':runtime.executable.sha256,
                           'convergence':'caller responsibility; not checked by this sample'})
