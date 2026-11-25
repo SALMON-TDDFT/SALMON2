@@ -36,6 +36,9 @@ class RuntimeSources(unittest.TestCase):
                           ('lorentz_drude.f90','src/maxwell/lorentz_drude.f90')]:
    self.assertEqual(effective[external]['sha256'],sha(root/'native'/kernel))
    self.assertEqual(effective[external]['source'],'sources/solver/'+external)
+  worker=(root/'runtime/sources/solver/src/rt/tddft_worker.f90').read_text()
+  self.assertEqual([n for n,line in enumerate(worker.splitlines(),1) if len(line)>132],[],
+                   'worker source must compile with the standard free-form line limit')
   parser=(root/'runtime/sources/solver/src/io/inputoutput.f90').read_text()
   self.assertIn('!SALMONPY_END_INPUT',parser)
   self.assertIn('if(.not.worker_embedded) call worker_configure()',parser)

@@ -32,7 +32,9 @@ contains
     character(8) :: value
     integer :: status
     call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
-    worker_requested=worker_embedded.or.(status==0.and.(trim(value)=='1'.or.trim(value)=='E3'.or.trim(value)=='E3N'.or.trim(value)=='E3Y'.or.trim(value)=='E3M'))
+    worker_requested=worker_embedded.or.(status==0.and.( &
+      trim(value)=='1'.or.trim(value)=='E3'.or.trim(value)=='E3N'.or. &
+      trim(value)=='E3Y'.or.trim(value)=='E3M'))
   end function
 
   logical function worker_E_requested()
