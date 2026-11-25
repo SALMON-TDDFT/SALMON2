@@ -2,6 +2,90 @@
 
 Explicit process-isolated PZ, fixed ions, unpolarized scalar pseudopotentials and middlepoint propagation. Crystalline TDDFT/SBE remain A-driven. The response is a charge dipole, not a current density. Grid, dt and electronic-box convergence remain the user's responsibility.
 
+## Choose a calculation
+
+- **Excite a molecule with an FDTD near field**: start with [one-way excitation](#one-way-grid), the recommended entry point. Fields are read from saved data; molecular current is not returned to FDTD.
+- **Excite a molecule with a uniform electric field**: use “Calculation program and initial state” below.
+- The later bidirectional/self-vacuum sections describe a separate validation route and are not needed for one-way excitation.
+
+<a id="one-way-grid"></a>
+## One-way spatial FDTD E/H excitation
+
+Use `python -m salmonpy.examples.molecular_grid_response WORKER VALIDATION BUNDLE input.inp FIELDS.npz NEW_OUTPUT`. This reads a saved FDTD history and evolves only the molecule. It does not start FDTD, return molecular current, subtract a self-vacuum reference or calculate radiation. Molecular back-action on the illuminating structure is neglected.
+
+Prepare the existing GS bundle with matching `salmonpy-near-eh.dat` grid geometry and a worker validation record declaring `grid_eh` and `grid_stream`. FIELDS.npz contains `origin`, `spacing`, `times`, `E`, `H`, `molecule_position`, `center` and optional `time_origin`. E/H shape is `[frames,z,y,x,3]`; distinct Yee-component origins are preserved. Supply time-centered H from the FDTD component-field reader, not uncentered half-step H. Atomic units and vacuum at the molecule apply.
+
+Frames are numbered 0..N+1 at constant dt. Molecular step n-1 -> n uses frames n,n+1. `history.window(step_index=n,dt=dt)` constructs that pair without fitting, spatial averaging or temporal interpolation. The Fortran worker performs spatial interpolation and the molecular path-integral coupling. Source `time_origin` is recorded as provenance; it does not recreate earlier molecular excitation.
+
+Use `--stop-after 2 --direct-checkpoint NEW_CHECKPOINT`, then run the same command with a new output directory and `--resume-direct NEW_CHECKPOINT`. Restore requires the same full history, prepared geometry, dt, capacity and runtime. The saved state retains its staged fields; resumption starts at the next molecular step without replay. Inspect `restore_statistics` and `final_statistics` in the output metadata. Outputs include molecular step numbers, dipole, electronic change, electron number and, when available at every frame, internal energy. Availability is recorded. No auxiliary uniform-E archive is required.
+
+### Prepare both inputs from the same field data
+
+`molecule-input` is a prepared directory containing existing GS restart data, pseudopotentials and isolated RT input `rt.inp`. No GS is computed here. Replace `salmon` and `validation.json` with your validated executable and its record. Save the FDTD fields to `FIELDS.npz` with the following layout.
+
+| Item | Shape and meaning |
+|---|---|
+| `E`, `H` | `[N+2,nz,ny,nx,3]`, atomic units, fixed grid geometry at every frame |
+| `times` | `[N+2]`, atomic time, starting at0 with constant dt; N>=1 is the number of molecular steps |
+| `origin` | `[3]` for collocated fields or `[2,3,3]`=`[E/H,component,axis]` for Yee fields, bohr |
+| `spacing` | `[3]`, Cartesian grid spacing, bohr |
+| `molecule_position` | `[3]`, integration center in FDTD coordinates, bohr; need not coincide with a grid point |
+| `center` | `[3]`, the same integration center in TDDFT coordinates, bohr |
+| `time_origin` | Optional scalar, original source starting time in atomic units; not the restart step number |
+
+For `field.component_fields(indices)`, the result is `[2,points,3]`. Order rectangular-patch indices by z,y,x with x fastest, then reshape to `[2,nz,ny,nx,3]`. Stack accepted-step samples and separate E/H. Record the component origins from `field.component_field_geometry()` plus the patch starting index times spacing. This reader already centers H at the integer field step. Do not replace distinct component origins with a single collocated origin. Read only accepted FDTD steps.
+
+Run this preparation once to create the initialization file from the **same FIELDS.npz used for evolution**. It starts no solver. The `.dat` file is never overwritten; use a new preparation directory if it already exists.
+
+```python
+from pathlib import Path
+import numpy as np
+from salmonpy.near_field import GridFieldSeries
+
+with np.load("FIELDS.npz", allow_pickle=False) as data:
+    names = ("origin", "spacing", "times", "E", "H", "molecule_position", "center")
+    history = GridFieldSeries(
+        **{name: data[name] for name in names},
+        time_origin=float(data["time_origin"]) if "time_origin" in data else 0.)
+history.write(Path("molecule-input") / "salmonpy-near-eh.dat")
+```
+
+`prepare_grid_field.py` is a separate preparation example for samples with explicit point coordinates. Its input NPZ layout differs from the grid archive above; do not pass that NPZ directly to this response example. The code above supplies the two matching inputs.
+
+### Run, save and resume
+
+For a history supporting at least two molecular steps, use new output/checkpoint directory names. Both invocations use the same complete field history and initial bundle.
+
+```sh
+python -m salmonpy.examples.molecular_grid_response salmon validation.json molecule-input rt.inp FIELDS.npz result-1 --stop-after 2 --direct-checkpoint checkpoint-2
+python -m salmonpy.examples.molecular_grid_response salmon validation.json molecule-input rt.inp FIELDS.npz result-2 --resume-direct checkpoint-2
+```
+
+For uninterrupted evolution, omit `--stop-after` and `--direct-checkpoint` and choose a different output directory. These commands start the molecule only, not an MPI FDTD calculation. Current molecular scope: PZ, fixed ions, unpolarized scalar pseudopotentials, CPU one rank.
+
+### Read and join output segments
+
+Each output directory contains numerical arrays in `arrays.npz` and run conditions/counters in `manifest.json` under `metadata`. The first resumed frame is the saved endpoint. Verify that endpoint matches, omit exactly one copy, then concatenate once at the end.
+
+```python
+import json
+from pathlib import Path
+import numpy as np
+
+metadata = json.loads(Path("result-2/manifest.json").read_text())["metadata"]
+print(metadata["restore_statistics"], metadata["final_statistics"])
+with np.load("result-1/arrays.npz", allow_pickle=False) as first, \
+        np.load("result-2/arrays.npz", allow_pickle=False) as second:
+    for name in ("molecular_step", "time", "dipole", "electronic_change", "electron_number"):
+        np.testing.assert_array_equal(first[name][-1], second[name][0])
+    combined = {
+        name: np.concatenate((first[name], second[name][1:]), axis=0)
+        for name in ("molecular_step", "time", "dipole", "electronic_change", "electron_number")
+    }
+```
+
+`restore_statistics["updates"]` counts new evolution calls immediately after restore (normally0); `final_statistics["updates"]` counts updates in the receiving process. `internal_energy` exists only when every output frame in a segment provides it. Join it only if both segments provide it; never replace unavailable values with zero. Check `metadata["internal_energy_available"]`.
+
 ## Calculation program and initial state
 
 ```python
@@ -482,13 +566,3 @@ mpiexec -n 6 python tools/test_grid_feedback_mpi.py feedback \
 ```
 
 Resume with matching inputs, a new output directory and `--resume SAVED_OUTPUT/checkpoint`. The executable-bound receipt needs `grid_eh`, `grid_stream`, `charge_density` and `orbital_magnetic` evidence. Installed wheels place the tool in the package's `_runtime_source/tools/`. This uses a fixed validation geometry/source; it is not a general arbitrary-geometry or failure-atomic production coordinator. Unexpected MPI errors terminate the test job. Physical convergence, spin magnetization and vacuum radiation reaction remain separate work.
-
-## One-way spatial FDTD E/H excitation
-
-Use `python -m salmonpy.examples.molecular_grid_response WORKER VALIDATION BUNDLE input.inp FIELDS.npz NEW_OUTPUT`. This reads a saved FDTD history and evolves only the molecule. It does not start FDTD, return molecular current, subtract a self-vacuum reference or calculate radiation. Molecular back-action on the illuminating structure is neglected.
-
-Prepare the existing GS bundle with matching `salmonpy-near-eh.dat` grid geometry and a worker validation record declaring `grid_eh` and `grid_stream`. FIELDS.npz contains `origin`, `spacing`, `times`, `E`, `H`, `molecule_position`, `center` and optional `time_origin`. E/H shape is `[frames,z,y,x,3]`; distinct Yee-component origins are preserved. Supply time-centered H from the FDTD component-field reader, not uncentered half-step H. Atomic units and vacuum at the molecule apply.
-
-Frames are numbered 0..N+1 at constant dt. Molecular step n-1 -> n uses frames n,n+1. `history.window(step_index=n,dt=dt)` constructs that pair without fitting, spatial averaging or temporal interpolation. The Fortran worker performs spatial interpolation and the molecular path-integral coupling. Source `time_origin` is recorded as provenance; it does not recreate earlier molecular excitation.
-
-Use `--stop-after 2 --direct-checkpoint NEW_CHECKPOINT`, then run the same command with a new output directory and `--resume-direct NEW_CHECKPOINT`. Restore requires the same full history, prepared geometry, dt, capacity and runtime. The saved state retains its staged fields; resumption starts at the next molecular step without replay. Inspect `restore_statistics` and `final_statistics` in the output metadata. Outputs include molecular step numbers, dipole, electronic change, electron number and, when available at every frame, internal energy. Availability is recorded. No auxiliary uniform-E archive is required.

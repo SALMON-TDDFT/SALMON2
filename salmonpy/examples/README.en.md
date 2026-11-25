@@ -248,6 +248,7 @@ Run configured Si DFT→TDDFT: [configured_si.py](configured_si.py), [guide](../
 | [mpi_recorded_material.py](mpi_recorded_material.py) | Recorded custom/SBE serial–MPI comparison | 3 ranks; optional SBE catalog |
 | [mpi_point_identity.py](mpi_point_identity.py) | Point and material identities over MPI | 3 ranks; new output |
 | [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1D field coupled to independent TDDFT groups | 3 ranks with --material-ranks 1; solver build and GS |
+| [molecular_grid_response.py](molecular_grid_response.py) | One-way spatial E/H molecular excitation and direct restart | Validated executable, GS bundle, grid-layout FIELDS.npz; [preparation](../ISOLATED_TDDFT.en.md#one-way-grid) |
 | [isolated_response.py](isolated_response.py) | Isolated E-driven dipole response | Validated E-worker, validation record, GS bundle, E NPZ |
 | [prepare_grid_field.py](prepare_grid_field.py) | Saved FDTD E/H → molecular input; preparation only | E/H NPZ, patch geometry, molecular position |
 | [fit_near_field.py](fit_near_field.py) | Compress spatial E/H into fitted fields; preparation only | E/H NPZ, center, degree and optional decay |
@@ -370,5 +371,3 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 - isolated_response --grid-series streams saved E/H with fixed prepared geometry and direct checkpoint/restart
 
 - For spatial molecular E/H and orbital magnetic own-vacuum feedback, see `test_grid_feedback_mpi.py --orbital-magnetic` in ISOLATED_TDDFT.en.md. This is a fixed-C2H2 connection/restart trial, not a physical-convergence guarantee.
-
-- `molecular_grid_response.py`: Saved spatial FDTD E/H drives the molecule only; direct restart, no current returned to FDTD.

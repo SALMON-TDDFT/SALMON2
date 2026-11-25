@@ -2,6 +2,90 @@
 
 PZ・固定イオン・非偏極・スカラー擬ポテンシャル・中点伝播を、明示的な別プロセスで使います。結晶のTDDFT/SBEは従来どおりA駆動です。返す量は電荷双極子であり、電流密度ではありません。格子・時間刻み・計算箱の収束は利用者が確認します。
 
+## 用途から選ぶ
+
+- **FDTDの近接場で分子を励起する**：[一方向の励起](#one-way-grid)から始めます。現在推奨する入口です。場は保存データから読み、分子電流はFDTDへ返しません。
+- **一様な電場で分子を励起する**：下の「計算プログラムと初期状態」を使います。
+- 双方向の自己場差し引きを扱う後半の説明は、検証用の別経路です。一方向計算には不要です。
+
+<a id="one-way-grid"></a>
+## 空間依存FDTD E/Hによる一方向の励起
+
+`python -m salmonpy.examples.molecular_grid_response WORKER VALIDATION BUNDLE input.inp FIELDS.npz NEW_OUTPUT` で、保存したFDTDの場から分子だけを時間発展させます。FDTDの起動、分子電流の返却、自己真空参照の差し引き、放射計算は行いません。分子が照明場やナノ構造に及ぼす影響は無視します。
+
+既存GSの入力一式には、同じ格子形状の `salmonpy-near-eh.dat` を準備します。計算プログラムの検証記録には `grid_eh` と `grid_stream` が必要です。FIELDS.npzには `origin`, `spacing`, `times`, `E`, `H`, `molecule_position`, `center` と任意の `time_origin` を保存します。E/Hの形は `[フレーム,z,y,x,3]`。Yee格子の各成分の原点は保持します。HはFDTDの成分取得機能で整数ステップに時刻を揃えた値を使い、未処理の半ステップ値を渡しません。単位は原子単位、分子位置の媒質は真空です。
+
+一定dtでフレーム0..N+1を用意します。分子のステップn-1→nには場のフレームn,n+1を渡します。`history.window(step_index=n,dt=dt)` がその2枚を取り出します。フィット、空間平均、時間補間は加えず、空間補間と経路積分による結合はFortranで処理します。`time_origin` は元データの時刻の記録であり、それ以前の分子の励起は再現しません。
+
+`--stop-after 2 --direct-checkpoint NEW_CHECKPOINT` で途中保存し、同じコマンドの出力先を変えて `--resume-direct NEW_CHECKPOINT` で続けます。全履歴、準備済み形状、dt、計算容量、計算プログラムを揃えます。入力場も保存状態に保持され、再計算せず次の分子ステップから再開します。出力の `restore_statistics` と `final_statistics` で更新回数を確認できます。ステップ番号、双極子、電子分極の変化、電子数を保存します。内部エネルギーは全フレームで取得できる場合に保存し、取得可否も記録します。追加の一様電場ファイルは不要です。
+
+### 入力を同じ場データから準備する
+
+`molecule-input` は、既存GSの再開データ・擬ポテンシャル・孤立系RT入力 `rt.inp` を揃えた準備先です。ここでGS計算は行いません。`salmon` は使用する検証済み実行ファイル、`validation.json` はその検証記録に置き換えます。まず次の形式でFDTDの場を `FIELDS.npz` に保存してください。
+
+| 項目 | 形と意味 |
+|---|---|
+| `E`, `H` | `[N+2,nz,ny,nx,3]`。電場・磁場とも原子単位。全フレームの格子形状は固定 |
+| `times` | `[N+2]`、原子時間。0から一定dtで増える。Nは分子を進めるステップ数で1以上 |
+| `origin` | 共通格子なら`[3]`、Yee格子なら`[2,3,3]`＝`[E/H,成分,座標軸]`、bohr |
+| `spacing` | `[3]`、各軸の格子幅、bohr |
+| `molecule_position` | `[3]`、FDTD座標での分子の積分中心、bohr。格子点に一致する必要はない |
+| `center` | `[3]`、同じ積分中心のTDDFT座標、bohr |
+| `time_origin` | 任意のスカラー。元のFDTDデータの開始時刻、原子時間。再開ステップ番号とは別 |
+
+FDTDの`field.component_fields(indices)`を保存する場合、戻り値は`[2,点数,3]`です。indicesをz→y→x（xが最速）の順に並べて矩形パッチを読み、`[2,nz,ny,nx,3]`へ整形します。各ステップの先頭軸を重ねてE/Hを取り出します。`field.component_field_geometry()`の成分別originにパッチ開始インデックス×spacingを足した原点を記録します。この取得機能のHは整数ステップに揃え済みです。配置が異なるE/Hを同じ原点とみなさないでください。サンプリングは確定したFDTDステップで行います。
+
+次の準備コードを一度実行すると、**計算に使うFIELDS.npzそのもの**から初期化用ファイルも作れます。計算は起動しません。既存の`salmonpy-near-eh.dat`は上書きせず、新しい準備先を使います。
+
+```python
+from pathlib import Path
+import numpy as np
+from salmonpy.near_field import GridFieldSeries
+
+with np.load("FIELDS.npz", allow_pickle=False) as data:
+    names = ("origin", "spacing", "times", "E", "H", "molecule_position", "center")
+    history = GridFieldSeries(
+        **{name: data[name] for name in names},
+        time_origin=float(data["time_origin"]) if "time_origin" in data else 0.)
+history.write(Path("molecule-input") / "salmonpy-near-eh.dat")
+```
+
+`prepare_grid_field.py`は点座標付きサンプルから`.dat`を作る別の準備例です。その入力NPZは上表の格子形式とは異なるため、そのまま今回の計算例には渡しません。ここでは上のコードで2つの入力を揃えます。
+
+### 計算・途中保存・再開
+
+分子を2ステップ以上進める場データを用意した場合の例です。出力先と保存先は未使用の名前にします。2回目も同じFIELDS.npzと入力一式を使います。
+
+```sh
+python -m salmonpy.examples.molecular_grid_response salmon validation.json molecule-input rt.inp FIELDS.npz result-1 --stop-after 2 --direct-checkpoint checkpoint-2
+python -m salmonpy.examples.molecular_grid_response salmon validation.json molecule-input rt.inp FIELDS.npz result-2 --resume-direct checkpoint-2
+```
+
+途中停止しない連続計算では、1行目から`--stop-after`と`--direct-checkpoint`を省き、別の出力先にします。ここで起動するのは分子計算のみで、MPIでFDTDを起動するコマンドではありません。現在の分子経路はPZ・固定イオン・非偏極スカラー擬ポテンシャル・CPU1ランクです。
+
+### 出力を読む・再開前後を結合する
+
+各出力先の`arrays.npz`に数値配列、`manifest.json`の`metadata`に実行条件と更新回数があります。再開後の最初のフレームは保存点そのものです。同じ保存点が一致することを確認し、後半の先頭を1枚だけ除いて、最後に一度結合します。
+
+```python
+import json
+from pathlib import Path
+import numpy as np
+
+metadata = json.loads(Path("result-2/manifest.json").read_text())["metadata"]
+print(metadata["restore_statistics"], metadata["final_statistics"])
+with np.load("result-1/arrays.npz", allow_pickle=False) as first, \
+        np.load("result-2/arrays.npz", allow_pickle=False) as second:
+    for name in ("molecular_step", "time", "dipole", "electronic_change", "electron_number"):
+        np.testing.assert_array_equal(first[name][-1], second[name][0])
+    combined = {
+        name: np.concatenate((first[name], second[name][1:]), axis=0)
+        for name in ("molecular_step", "time", "dipole", "electronic_change", "electron_number")
+    }
+```
+
+`restore_statistics["updates"]`は復元直後の新規時間発展回数（通常0）、`final_statistics["updates"]`はそのプロセスで進めた回数です。`internal_energy`は全出力フレームで取得できる区間にだけ存在します。結合する両区間にある場合だけ同様に扱い、存在しない値を0で補いません。`metadata["internal_energy_available"]`で取得可否を確認します。
+
 ## 計算プログラムと初期状態
 
 ```python
@@ -548,13 +632,3 @@ mpiexec -n 6 python tools/test_grid_feedback_mpi.py feedback \
 ```
 
 再開は同じ入力条件で、新しい出力先と `--resume SAVED_OUTPUT/checkpoint` を指定します。`VALIDATION_JSON` は使用する分子実行ファイルについて、`grid_eh`・`grid_stream`・`charge_density`・`orbital_magnetic` の検証を含む必要があります。インストール済みwheelでは、付属ツールは `salmonpy` の `_runtime_source/tools/` にあります。検証用の固定形状・光源を使う入口であり、任意の構造に対する一般的な実行・異常復帰の保証ではありません。予期しないMPI異常はその試験ジョブを終了します。物理的収束、スピン磁化、真空放射反作用の扱いは別途確認が必要です。
-
-## 空間依存FDTD E/Hによる一方向の励起
-
-`python -m salmonpy.examples.molecular_grid_response WORKER VALIDATION BUNDLE input.inp FIELDS.npz NEW_OUTPUT` で、保存したFDTDの場から分子だけを時間発展させます。FDTDの起動、分子電流の返却、自己真空参照の差し引き、放射計算は行いません。分子が照明場やナノ構造に及ぼす影響は無視します。
-
-既存GSの入力一式には、同じ格子形状の `salmonpy-near-eh.dat` を準備します。計算プログラムの検証記録には `grid_eh` と `grid_stream` が必要です。FIELDS.npzには `origin`, `spacing`, `times`, `E`, `H`, `molecule_position`, `center` と任意の `time_origin` を保存します。E/Hの形は `[フレーム,z,y,x,3]`。Yee格子の各成分の原点は保持します。HはFDTDの成分取得機能で整数ステップに時刻を揃えた値を使い、未処理の半ステップ値を渡しません。単位は原子単位、分子位置の媒質は真空です。
-
-一定dtでフレーム0..N+1を用意します。分子のステップn-1→nには場のフレームn,n+1を渡します。`history.window(step_index=n,dt=dt)` がその2枚を取り出します。フィット、空間平均、時間補間は加えず、空間補間と経路積分による結合はFortranで処理します。`time_origin` は元データの時刻の記録であり、それ以前の分子の励起は再現しません。
-
-`--stop-after 2 --direct-checkpoint NEW_CHECKPOINT` で途中保存し、同じコマンドの出力先を変えて `--resume-direct NEW_CHECKPOINT` で続けます。全履歴、準備済み形状、dt、計算容量、計算プログラムを揃えます。入力場も保存状態に保持され、再計算せず次の分子ステップから再開します。出力の `restore_statistics` と `final_statistics` で更新回数を確認できます。ステップ番号、双極子、電子分極の変化、電子数を保存します。内部エネルギーは全フレームで取得できる場合に保存し、取得可否も記録します。追加の一様電場ファイルは不要です。

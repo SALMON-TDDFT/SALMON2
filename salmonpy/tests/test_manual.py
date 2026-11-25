@@ -77,7 +77,9 @@ class ManualTest(unittest.TestCase):
         self.assertIn('do not negate again', task['outputs'])
 
     def test_search(self):
-        for query,expected in [('バンド図を描きたい','bands'),('TDDFT','tddft'),('ドルーデ','ld'),('runtime','runtime')]:
+        for query,expected in [('バンド図を描きたい','bands'),('TDDFT','tddft'),('ドルーデ','ld'),('runtime','runtime'),
+                               ('FDTD 近接場 分子 一方向','isolated_tddft'),
+                               ('FDTD molecular one-way excitation','isolated_tddft')]:
             self.assertEqual(search(query)['tasks'][0]['id'],expected)
         for query in ('はじめて','初めて','最初の計算','first calculation','getting started'):
             self.assertEqual(search(query)['tasks'][0]['id'],'first_calculation')

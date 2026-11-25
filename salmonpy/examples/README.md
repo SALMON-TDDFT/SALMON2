@@ -261,6 +261,7 @@ See [CONFIG.en.md](../CONFIG.en.md) / [CONFIG.md](../CONFIG.md).
 | [mpi_recorded_material.py](mpi_recorded_material.py) | 記録付き自作物質／SBEの直列・MPI比較 | 3 ranks; optional SBE catalog |
 | [mpi_point_identity.py](mpi_point_identity.py) | MPIで点IDと材料情報を保持 | 3 ranks; new output |
 | [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1次元場と独立TDDFT群を結合 | 3 ranks with --material-ranks 1; 計算処理 build and GS |
+| [molecular_grid_response.py](molecular_grid_response.py) | 空間E/Hによる一方向の分子励起・直接再開 | 検証済み実行ファイル・GS入力一式・格子形式FIELDS.npz。[準備手順](../ISOLATED_TDDFT.md#one-way-grid) |
 | [isolated_response.py](isolated_response.py) | 孤立系のE駆動・双極子出力 | Validated E-worker, receipt, GS bundle, E NPZ |
 | [prepare_grid_field.py](prepare_grid_field.py) | FDTDのE/Hを分子入力にする（準備のみ） | E/HのNPZ、パッチの格子情報、分子位置 |
 | [fit_near_field.py](fit_near_field.py) | 空間依存E/Hを展開で圧縮する（準備のみ） | E/HのNPZ、中心、次数、任意の減衰率 |
@@ -366,5 +367,3 @@ python -m salmonpy.examples.outputs_roundtrip NEW_OUTPUT --rt-data material_rt.d
 - isolated_response の --grid-series は保存したE/Hを逐次渡します。初期入力の幾何条件と直接保存・再開を使います
 
 - 分子の空間依存E/Hと磁気電流の自己真空参照結合は、ISOLATED_TDDFT.md の `test_grid_feedback_mpi.py --orbital-magnetic` を参照してください。固定C₂H₂の接続・再開検証で、物理的収束を保証するものではありません。
-
-- `molecular_grid_response.py`: 保存した空間依存FDTD E/Hから分子だけを励起。直接保存／再開に対応し、電流はFDTDへ返さない。
