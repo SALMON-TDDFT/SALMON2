@@ -345,3 +345,9 @@ install(FILES "${ROOT}/tests/runtime/test_electric_path_response.f90" DESTINATIO
 install(FILES "${ROOT}/tools/test_grid_field_stream.py" "${ROOT}/tools/test_grid_feedback_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/tools/test_orbital_magnetic_response.py" DESTINATION salmonpy/_runtime_source/tools)
+
+# Manual half-step audit; never executed as a required material-physics CI test.
+install(FILES "${ROOT}/tools/test_molecular_timing_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+# Manual frozen-state current/energy audit; not a required material-physics CI job.
+install(FILES "${ROOT}/tools/test_endpoint_observables_mpi.py" DESTINATION salmonpy/_runtime_source/tools)

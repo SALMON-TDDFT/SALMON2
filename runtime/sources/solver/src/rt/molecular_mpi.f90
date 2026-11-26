@@ -12,7 +12,7 @@ contains
   version=0
 #ifdef USE_MPI
 #ifndef USE_OPENACC
-  version=2
+  version=3
 #endif
 #endif
  end function

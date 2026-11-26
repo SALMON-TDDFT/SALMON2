@@ -280,11 +280,13 @@ def main(argv=None,*,mode=None):
                         environment_difference=_comparison(traces['selected'],saved['selected'],0.,0.)
                         assert environment_difference['absolute_error']>0.
             np.savez(args.output/'history.npz',**traces,observations=observations,
-                     field_step=np.arange(1,len(traces['total'])+1),molecular_step=np.arange(len(observations)))
+                     field_step=np.arange(1,len(traces['total'])+1),molecular_step=np.arange(len(observations)),
+                     electronic_field_half_step=2*np.arange(len(observations))+1,
+                     electronic_field_time=(np.arange(len(observations))+.5)*dt)
             if state is not None:
                 folder=args.output/'molecule-streams';folder.mkdir()
                 for file in (Path(state._engine._work.name)/'run').glob('*.data'):shutil.copy2(file,folder/file.name)
-            summary=dict(mode=args.mode,ld=args.ld,molecular_steps=state.worker_statistics()['step'] if state is not None else None,field_steps=field.step_index,
+            summary=dict(electronic_clock_offset='1/2',used_grid_frame='n; n+1 is prefetch only for middlepoint',mode=args.mode,ld=args.ld,molecular_steps=state.worker_statistics()['step'] if state is not None else None,field_steps=field.step_index,
                 worker_statistics=state.worker_statistics() if state is not None else None,
                 feedback_enabled=feedback,self_vacuum_reference=feedback,
                 field_ranks=args.field_ranks,position_bohr=position,patch_counts=counts,

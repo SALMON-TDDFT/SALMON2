@@ -15,9 +15,32 @@ Use `python -m salmonpy.examples.molecular_grid_response WORKER VALIDATION BUNDL
 
 Prepare the existing GS bundle with matching `salmonpy-near-eh.dat` grid geometry and a worker validation record declaring `grid_eh` and `grid_stream`. FIELDS.npz contains `origin`, `spacing`, `times`, `E`, `H`, `molecule_position`, `center` and optional `time_origin`. E/H shape is `[frames,z,y,x,3]`; distinct Yee-component origins are preserved. Supply time-centered H from the FDTD component-field reader, not uncentered half-step H. Atomic units and vacuum at the molecule apply.
 
-Frames are numbered 0..N+1 at constant dt. Molecular step n-1 -> n uses frames n,n+1. `history.window(step_index=n,dt=dt)` constructs that pair without fitting, spatial averaging or temporal interpolation. The Fortran worker performs spatial interpolation and the molecular path-integral coupling. Source `time_origin` is recorded as provenance; it does not recreate earlier molecular excitation.
+Frames are numbered 0..N+1 at constant dt. Molecular step n-1 -> n transfers frames n,n+1 (using n only). `history.window(step_index=n,dt=dt)` constructs that pair without fitting, spatial averaging or temporal interpolation. The Fortran worker performs spatial interpolation and the molecular path-integral coupling. Source `time_origin` is recorded as provenance; it does not recreate earlier molecular excitation.
 
 Use `--stop-after 2 --direct-checkpoint NEW_CHECKPOINT`, then run the same command with a new output directory and `--resume-direct NEW_CHECKPOINT`. Restore requires the same full history, prepared geometry, dt, capacity and runtime. The saved state retains its staged fields; resumption starts at the next molecular step without replay. Inspect `restore_statistics` and `final_statistics` in the output metadata. Outputs include molecular step numbers, dipole, electronic change, electron number and, when available at every frame, internal energy. Availability is recorded. No auxiliary uniform-E archive is required.
+
+### Half-steps and update numbers
+
+This molecular entry requires `middlepoint`, not two ETRS propagations of dt/2. Molecular update n-1 -> n uses FDTD E(n) and H centered at that same field step. Frame n+1 is prefetched in the two-frame packet but is not used by the current update. Averaging frames n and n+1 would advance the drive by another half-step.
+
+Use integer k = field time / (dt/2) to compare the clocks:
+
+| Quantity | Half-step number k |
+|---|---:|
+| Old psi(n-1), old A, previous J, old raw H | 2n-1 |
+| FDTD E(n), H(n) supplied to the molecule | 2n |
+| New psi(n), new A, new J, new raw H | 2n+1 |
+| Next prefetched FDTD E/H frame | 2n+2 |
+
+A/J are shown for comparison with crystal A-to-J coupling. The molecular one-way entry returns no current to FDTD.
+
+The raw H brackets are averaged to obtain molecular H(n). `component_fields()` returns this centered H; `sample_magnetic_field()` returns raw half-step H and is a different entry.
+
+Electronic local time n*dt corresponds to field time (n+1/2)*dt. Initial psi(0) has k=1: the supplied GS is assigned that start time, without simulating field0 -> field1/2 first.
+
+Output `time` is the electronic local clock. Use `electronic_field_time` to plot together with E/H, and `electronic_field_half_step` for exact integer comparisons. Do not silently reuse one time array for E and electronic response in spectral analysis. The MPI controller exposes the same numbering in `controller.clock`. At molecular48/FDTD49, electronic k=97 while E has k=98; direct restart preserves this relation with zero restoration updates.
+
+For a uniform E packet passed to `step_fields()`, use the midpoint of the next electronic interval: `state.time + state.dt/2`. The unlabeled `step(E)` consumes that midpoint value. Packet time is on the electronic local clock; do not insert the FDTD-clock timestamp unchanged. Unequal-dt interpolation/subcycling is not automatic.
 
 ### Use MPI inside the molecule
 
@@ -38,9 +61,9 @@ OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_re
 OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mpi-resumed --field-ranks 2 --molecule-ranks 2 --steps 96 --ld --resume run-mpi-first/checkpoint
 ```
 
-This directly saves field/LD/molecule at molecular step 48 / field step 49. Keep capacity 96, inputs, binary, MPI decomposition and thread settings for restart. Electronic payloads are rank-distinct. Input/binary/layout and file consistency are checked before loading. No elapsed evolution is replayed. Migration to a different MPI layout is not supported by this entry.
+This directly saves field/LD/molecule at molecular step 48 / field step 49. Keep capacity 96, inputs, binary, dt and thread settings for restart. Electronic payloads are rank-distinct. Input/binary/layout and file consistency are checked before loading. No elapsed evolution is replayed. The molecular orbital/spatial layout may change; retain the field decomposition.
 
-Read response/arrays.npz and metadata in response/manifest.json. Molecular arrays use molecular_step; E/H uses field_step. Molecular n-1 -> n consumes field n,n+1, so there is one additional field frame. Resumed histories already include the saved prefix; do not concatenate the previous job again. Check zero updates in restore_statistics and new updates in worker_statistics. Equal histories and ordinary streams were verified for this configuration, not physical optical convergence.
+Read response/arrays.npz and metadata in response/manifest.json. Molecular arrays use molecular_step; E/H uses field_step. Molecular n-1 -> n transfers field n,n+1 (using n only), so there is one additional field frame. Resumed histories already include the saved prefix; do not concatenate the previous job again. Check zero updates in restore_statistics and new updates in worker_statistics. Equal histories and ordinary streams were verified for this configuration, not physical optical convergence.
 
 Use `--molecule-grid NX NY NZ` to choose the molecular spatial decomposition. The default `1 1 1` keeps orbital decomposition. Its product must divide `--molecule-ranks`; the remaining factor divides orbitals. This changes neither the molecular grid size nor the FDTD decomposition.
 
@@ -51,7 +74,7 @@ OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_re
 OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-space4 --field-ranks 2 --molecule-ranks 4 --molecule-grid 2 1 2 --steps 96 --ld
 ```
 
-For spatial restart, retain the same grid/rank arguments in both launches. Add `--stop-after 48` to the first launch, then use a fresh output directory and `--resume SAVED_OUTPUT/checkpoint`. Keep `--steps 96` in both. Spatial runs differ from an independent one-rank control by less than 4e-13 in the observations. Direct restart with two z ranks or four x/z ranks matches all continuous histories and four ordinary streams bit-exactly, with zero restoration updates. These are connection/restart checks, not physical-convergence evidence.
+For same-layout spatial restart, retain the same grid/rank arguments in both launches. Add `--stop-after 48` to the first launch, then use a fresh output directory and `--resume SAVED_OUTPUT/checkpoint`. Keep `--steps 96` in both. Spatial runs differ from an independent one-rank control by less than 4e-13 in the observations. Direct restart with two z ranks or four x/z ranks matches all continuous histories and four ordinary streams bit-exactly, with zero restoration updates. These are connection/restart checks, not physical-convergence evidence.
 
 The same entry supports mixed orbital/spatial decomposition. With four molecular ranks, `--molecule-grid 1 1 2` gives two spatial times two orbital divisions. With eight molecular ranks, `--molecule-grid 2 1 2` gives four spatial times two orbital divisions. Including two field ranks, total MPI counts are six and ten respectively.
 
@@ -61,9 +84,20 @@ OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_re
 OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mixed-resumed --field-ranks 2 --molecule-ranks 4 --molecule-grid 1 1 2 --steps 96 --ld --resume run-mixed/checkpoint
 ```
 
-Both mixed layouts ran96steps against the independent one-rank control for the same fixed C2H2 case. Dipole/electron-number differences are below4e-13; FDTD E/H are exact. Direct restart from molecular48/field49 reproduces all continuous histories and four ordinary streams bit-exactly for both layouts, with zero restoration updates. Scope: one Mac, CPU PZ, fixed ions, spinless, one thread per rank. This does not enable changed orbital/spatial layouts at restart.
+Both mixed layouts ran96steps against the independent one-rank control for the same fixed C2H2 case. Dipole/electron-number differences are below4e-13; FDTD E/H are exact. Direct restart from molecular48/field49 reproduces all continuous histories and four ordinary streams bit-exactly for both layouts, with zero restoration updates. Scope: one Mac, CPU PZ, fixed ions, spinless, one thread per rank. For a changed molecular layout, follow the procedure below.
 
-For component use, all molecular ranks call run_molecular_mpi(..., decomposition=(1, N_ob, NX, NY, NZ)); the field root drives MolecularMPIController. The former remains inside Fortran for the molecular lifetime, ending when the controller closes. N_ob is the orbital division count; molecular ranks equal N_ob*NX*NY*NZ. Supply the same decomposition to MolecularMPIController. Communicators and work directories remain caller-owned, and caller MPI survives return. This entry supports one lifetime per process. Controller save_direct_checkpoint()/restore_direct_checkpoint() directly save/load an unchanged layout. It does not promise general recovery from process/MPI/deep numerical failure or whole-application rollback after a partly failed restore. End the job on such a failure and restart from a saved state. Density/orbital-magnetization readout remains on the existing single-rank interface and is not exposed by the molecular MPI controller.
+To restart with a changed molecular layout, select the new molecular rank count and `--molecule-grid` in the resume command. This example saves one molecular rank and resumes with orbital2 x spatial2 (four molecular ranks); FDTD remains on two ranks:
+
+```sh
+OMP_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-layout-first --field-ranks 2 --molecule-ranks 1 --steps 96 --ld --stop-after 48
+OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-layout-resumed --field-ranks 2 --molecule-ranks 4 --molecule-grid 1 1 2 --steps 96 --ld --resume run-layout-first/checkpoint
+```
+
+Fortran copies saved wavefunctions, density and potential histories into the new owning regions. No SCF or elapsed time step is recomputed. New workers still initialize from the existing GS and prepare their calculation resources. Immediately after restoration, restore_statistics reports molecular48/updates0. Changing MPI reduction order introduces roundoff; compare changed layouts with tolerances. Inputs, library, dt and capacity must remain the same.
+
+The fixed C2H2 validation covers one molecular rank <-> four ranks with orbital2 x spatial2, and a same-count change from orbital2 x spatial2 to orbital1 x spatial4. Over96steps, differences from continuous execution are below1.3e-13 e bohr in dipole and3.7e-13 in electron number. FDTD E/H and its two output files are exact; molecular ordinary streams match within tolerances. Same-layout restart remains bit-exact in all arrays and four ordinary files. Every changed-layout restoration adds zero updates. Scope: CPU PZ, fixed ions, spinless; multiple nodes and other physical settings require separate verification.
+
+For component use, all molecular ranks call run_molecular_mpi(..., decomposition=(1, N_ob, NX, NY, NZ)); the field root drives MolecularMPIController. The former remains inside Fortran for the molecular lifetime, ending when the controller closes. N_ob is the orbital division count; molecular ranks equal N_ob*NX*NY*NZ. Supply the same decomposition to MolecularMPIController. Communicators and work directories remain caller-owned, and caller MPI survives return. This entry supports one lifetime per process. Controller save_direct_checkpoint()/restore_direct_checkpoint() directly save/load numerical state, including into a fresh molecular group with a different layout. It does not promise general recovery from process/MPI/deep numerical failure or whole-application rollback after a partly failed restore. End the job on such a failure and restart from a saved state. Density/orbital-magnetization readout remains on the existing single-rank interface and is not exposed by the molecular MPI controller.
 
 ### Advance FDTD and the molecule in one launch
 
@@ -197,7 +231,7 @@ Only the two audited principal output streams are currently supported. Unsupport
 ```python
 from salmonpy.field_input import FieldPacket, FieldValue
 frame = state.step_fields(FieldPacket(E=FieldValue(
-    [0., 0., 1.e-5], time=state.time+state.dt,
+    [0., 0., 1.e-5], time=state.time+state.dt/2,
     position=(0.,0.,0.), unit='E:au')))
 ```
 
@@ -327,7 +361,7 @@ integration run in Fortran; missing H or endpoints are not inferred.
 
 Input size scales with grid points times frames; extract only the needed local patch and time window.
 Provide relative times starting at0 with constant dt matching TDDFT and frames0..max_steps+1. Update n reads
-frames n and n+1 and advances through `step(E_extra)`. Do not use the coefficient-only `step_near_field`.
+frames n and n+1 (using n only) and advances through `step(E_extra)`. Do not use the coefficient-only `step_near_field`.
 The original field time is retained as time_origin in the input file; it does not reproduce prior molecular
 exposure. Specify the initial electronic and illumination conditions. Direct checkpoints retain grid data,
 coordinate mapping and electronic state; restore with the same model, dt and calculation program.
@@ -452,7 +486,7 @@ with IsolatedTDDFTInitialState.from_salmon(
         state.save_direct_checkpoint('NEW_CHECKPOINT')
 ```
 
-Update n consumes field frames n and n+1 in SALMON's existing order.
+Update n transfers frames n and n+1; the supported midpoint propagation uses n only.
 Frames carry center, radius, order, time, step index and E/H coefficients.
 `NearFieldFrame.from_samples(...,step_index=n,center=...,radius=...)` fits one spatial E/H frame;
 your own code may also construct a `NearFieldFrame` directly from coefficients.
@@ -521,7 +555,7 @@ with IsolatedTDDFTInitialState.from_salmon(
 ```
 
 Coefficient times start at zero with constant dt and cover indices0..max_steps+1.
-Update n reads coefficients n and n+1 in SALMON's existing sequence.
+Update n transfers coefficients n and n+1; the supported midpoint propagation reads n only.
 Use `restore_direct_checkpoint` with matching model, dt and executable.
 For a selected FDTD time window, retain the original field step/time and the molecular time origin explicitly.
 Starting a field-free GS at that window does not reproduce a molecule already exposed to its preceding history.
@@ -586,6 +620,8 @@ Initialization still requires salmonpy-near-eh.dat. For unknown future fields, e
 The existing isolated_response example accepts `--grid-series FIELDS.npz`. Supply origin, spacing, times, E, H, molecule_position and center with frames0..N+1. E_NPZ retains N additional uniform-field vectors and dt. Use --direct-checkpoint / --resume-direct; E-only propagation replay cannot reconstruct spatial input. Step labels are local to this run. Recording a source-time origin does not recreate earlier illumination of the GS.
 
 ## Validated electric spatial feedback
+
+The following bidirectional trial is a development path. Current recommended use is one-way excitation; this half-step audit does not validate the timing of its returned currents.
 
 `tools/test_grid_feedback_mpi.py` combines public density readout, streamed input and direct current injection in a finite-scope validation driver. Total and own-source-only vacuum FDTD groups are separate. Fortran subtracts their fields and maps molecular charge changes to polarization current; only owning field ranks consume their current rows. Full grids are not broadcast to every application rank.
 

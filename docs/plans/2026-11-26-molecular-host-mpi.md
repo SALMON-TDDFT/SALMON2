@@ -31,8 +31,9 @@ applies to the separate-process worker, not this explicit host-MPI interface.
 Validated scope: CPU PZ, fixed ions, spinless molecule, orbital decomposition
 with one/two orbital ranks or spatial layouts (2,1,1), (1,2,1), (1,1,2),
 and (2,1,2), plus mixed orbital2 x spatial2/4, with two field ranks on one Mac. Dedicated main-thread
-ranks support one molecular lifetime per process. Restart currently requires the
-same decomposition and matching binary/input identity.
+ranks support one molecular lifetime per process. Restart requires matching binary/input identity. Molecular layouts may change
+under the conditions in `../molecular-repartition-validation-2026-11-26.md`;
+the joint sample retains the field layout.
 
 Spatial validation and same-layout direct restart are recorded in
 `../molecular-spatial-mpi-validation-2026-11-26.md`.

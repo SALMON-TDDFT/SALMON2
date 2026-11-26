@@ -19,6 +19,29 @@ PZ・固定イオン・非偏極・スカラー擬ポテンシャル・中点伝
 
 `--stop-after 2 --direct-checkpoint NEW_CHECKPOINT` で途中保存し、同じコマンドの出力先を変えて `--resume-direct NEW_CHECKPOINT` で続けます。全履歴、準備済み形状、dt、計算容量、計算プログラムを揃えます。入力場も保存状態に保持され、再計算せず次の分子ステップから再開します。出力の `restore_statistics` と `final_statistics` で更新回数を確認できます。ステップ番号、双極子、電子分極の変化、電子数を保存します。内部エネルギーは全フレームで取得できる場合に保存し、取得可否も記録します。追加の一様電場ファイルは不要です。
 
+### 半ステップと更新番号
+
+この分子入口の伝播法は`middlepoint`です。`aetrs`のΔt/2を2回行う方式ではありません。分子の更新n−1→nで使うのは、FDTDステップnのEと、同じステップに揃えたHです。2枚組で渡すn+1は先読みであり、現在の更新では使いません。nとn+1を平均して渡すと、場をさらに半ステップ進める誤りになります。
+
+番号を整数で比較するため、FDTDの時刻をΔt/2で割った番号kを使います。
+
+| 量 | 番号k |
+|---|---:|
+| 更新前の電子状態ψ(n−1)、更新前のA、前回J、更新前の生のH | 2n−1 |
+| FDTDのE(n)、分子へ渡すH(n) | 2n |
+| 更新後の電子状態ψ(n)、更新後のA、新しいJ、生のH | 2n+1 |
+| 分子用に先読みするFDTDの次のE/H | 2n+2 |
+
+AとJは結晶のA→J結合との比較です。分子の一方向入口ではJをFDTDへ返しません。
+
+生のHは半ステップずれるため、分子用のH(n)は前後の生のHの平均です。`component_fields()`はこの平均済みHを返します。`sample_magnetic_field()`は生の半ステップHを返す別の入口なので、混同しません。
+
+電子のローカル時計nΔtは、FDTDの時計では(n+1/2)Δtに対応します。初期状態ψ(0)の番号はk=1です。電子がFDTDの0→1/2を計算したという意味ではなく、用意したGSをこの開始状態として使います。
+
+出力の`time`は電子のローカル時計です。E/Hと同じ横軸に描く場合は`electronic_field_time`を使い、整数の照合には`electronic_field_half_step`を使います。スペクトル解析でも、Eと電子応答へ同じ時刻配列を無条件に共用しません。MPI入口の`controller.clock`でも番号を読めます。例えば分子48／FDTD49で保存した場合、電子はk=97、FDTDのEはk=98です。直接再開後も、この対応と更新回数0を確認します。
+
+一様Eを`step_fields()`へ渡す時刻も、電子更新n−1→nの中点、すなわち`state.time + state.dt/2`です。`step(E)`は時刻ラベルなしの値をその中点で使う入口です。ここでのパケット時刻は電子のローカル時計であり、FDTDの時計をそのまま入れません。異なるΔtの補間やサブサイクルは自動では行いません。
+
 ### 分子内部もMPI並列にする
 
 外側のPythonで場と分子にランクを分け、分子用のグループをFortranへ渡せます。分子の中では軌道と実空間の格子をMPIで分割できます。計算用共有ライブラリに分子MPIの入口が必要です。以前の実行ファイルと検証記録を渡す方式とは別で、対応するライブラリの`build.json`と既存のC2H2入力一式を使います。共有ライブラリは配布物を使うか、[計算プログラムの準備](RUNTIME.md)に従って明示的にビルドしてください。import時には準備しません。
@@ -40,7 +63,7 @@ OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_re
 OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-space4 --field-ranks 2 --molecule-ranks 4 --molecule-grid 2 1 2 --steps 96 --ld
 ```
 
-空間分割で保存／再開する時は、上と同じ分割指定を両方のコマンドに付け、最初の起動に`--stop-after 48`、次の起動に新しい出力先と`--resume SAVED_OUTPUT/checkpoint`を指定します。最大ステップ数は両方とも96のままです。検証では、空間分割と独立した1ランク実行の差は観測量で4×10⁻¹³以内でした。z方向2分割とx/z方向4分割の直接再開は、連続実行の全配列と通常出力4ファイルに完全一致し、復元時の時間発展は0回でした。これは接続と再開の検証であり、物理的収束の保証ではありません。
+同じ空間分割で保存／再開する時は、上と同じ分割指定を両方のコマンドに付け、最初の起動に`--stop-after 48`、次の起動に新しい出力先と`--resume SAVED_OUTPUT/checkpoint`を指定します。最大ステップ数は両方とも96のままです。検証では、空間分割と独立した1ランク実行の差は観測量で4×10⁻¹³以内でした。z方向2分割とx/z方向4分割の直接再開は、連続実行の全配列と通常出力4ファイルに完全一致し、復元時の時間発展は0回でした。これは接続と再開の検証であり、物理的収束の保証ではありません。
 
 場と分子がアクセスできる共有作業フォルダを出力先に使います。場の代表ランクがE/H入力を書き、分子の代表ランクが一度だけ読み、その分子グループ内へ配ります。毎ステップの通信にアプリケーション全体の集約は使いません。mpi4pyと計算ライブラリには同じMPI実装が必要です。分子ランクは計算中専用で、同じプロセス内で他の計算やファイル操作を並行させません。
 
@@ -49,9 +72,9 @@ OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_re
 OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mpi-resumed --field-ranks 2 --molecule-ranks 2 --steps 96 --ld --resume run-mpi-first/checkpoint
 ```
 
-分子48／場49で、場・LD・分子をまとめて直接保存します。再開時も最大ステップ数96、入力、バイナリ、MPI分割、スレッド設定を揃えます。分子の保存データは内部ランク別で、入力・バイナリ・MPI分割とファイルの整合性を確認して復元します。波動関数からの再計算や、経過したステップの再実行はしません。異なるMPI分割への移行はこの入口では扱いません。
+分子48／場49で、場・LD・分子をまとめて直接保存します。再開時も最大ステップ数96、入力、バイナリ、時間刻み、スレッド設定を揃えます。分子の保存データは内部ランク別で、入力・バイナリ・MPI分割とファイルの整合性を確認して復元します。波動関数からの再計算や、経過したステップの再実行はしません。分子側の軌道・空間分割は変更できます。FDTD側の分割は保存時と同じにします。
 
-結果は`response/arrays.npz`、実行情報は`response/manifest.json`の`metadata`です。分子の配列は`molecular_step`、E/Hは`field_step`で対応付けます。分子のステップn−1→nには場のn,n+1を使うため、場のフレームが分子より1枚多くなります。再開後の履歴には保存前も含まれ、前ジョブの配列を再結合する必要はありません。`restore_statistics`の更新回数0と、`worker_statistics`の新規更新回数を確認してください。保存／再開を含む同じ設定で全履歴と通常出力の一致を確認していますが、光学物性の収束を保証する試験ではありません。
+結果は`response/arrays.npz`、実行情報は`response/manifest.json`の`metadata`です。分子の配列は`molecular_step`、E/Hは`field_step`で対応付けます。分子の更新用に場のn,n+1を先読みするため、場のフレームが分子より1枚多くなります。再開後の履歴には保存前も含まれ、前ジョブの配列を再結合する必要はありません。`restore_statistics`の更新回数0と、`worker_statistics`の新規更新回数を確認してください。保存／再開を含む同じ設定で全履歴と通常出力の一致を確認していますが、光学物性の収束を保証する試験ではありません。
 
 軌道と空間を同時に分割する場合も、同じ入口を使います。例えば、分子4ランクに`--molecule-grid 1 1 2`を指定すると、空間2分割×軌道2分割です。分子8ランクに`--molecule-grid 2 1 2`なら空間4分割×軌道2分割になります。場に2ランクを使う場合、MPIの総数はそれぞれ6／10です。
 
@@ -61,9 +84,20 @@ OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_re
 OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mixed-resumed --field-ranks 2 --molecule-ranks 4 --molecule-grid 1 1 2 --steps 96 --ld --resume run-mixed/checkpoint
 ```
 
-同じ固定C2H2例で、両方の混合分割による96ステップ計算を独立した1ランク実行と比較しました。双極子・電子数の差は4×10⁻¹³以内で、FDTDのE/Hは完全一致しました。両方の混合分割について、分子48／場49からの直接再開も、全履歴と通常出力4ファイルが連続実行に完全一致し、復元時の時間発展は0回です。これらは1台のMac・PZ・固定イオン・スピンなし・1ランク1スレッドの検証です。空間分割数と軌道分割数を再開時に変える機能ではありません。
+同じ固定C2H2例で、両方の混合分割による96ステップ計算を独立した1ランク実行と比較しました。双極子・電子数の差は4×10⁻¹³以内で、FDTDのE/Hは完全一致しました。両方の混合分割について、分子48／場49からの直接再開も、全履歴と通常出力4ファイルが連続実行に完全一致し、復元時の時間発展は0回です。これらは1台のMac・PZ・固定イオン・スピンなし・1ランク1スレッドの検証です。分子側の分割を変える再開は、次の手順を使います。
 
-部品として使う場合は、分子グループ全員で`run_molecular_mpi(..., decomposition=(1, N_ob, NX, NY, NZ))`を呼び、場側の代表ランクが`MolecularMPIController`で入力します。前者は分子の寿命の間Fortran内で待機・計算する呼び出しで、後者の`close()`で終了します。`N_ob`は軌道分割数で、分子グループのランク数は`N_ob*NX*NY*NZ`です。`MolecularMPIController`にも同じ`decomposition`を渡します。通信グループと作業先は呼び出し元が所有し、終了後もMPIは利用できます。この入口は1プロセスにつき1寿命です。`controller.save_direct_checkpoint()`／`restore_direct_checkpoint()`は同じ配置での直接保存／復元です。プロセス終了・MPI異常・深部数値異常からの一般的な復旧や、復元途中の全グループの一括巻き戻しは保証しません。異常時はジョブを終了し、保存状態から新しい起動で再開します。密度・軌道磁化の読み出しは従来の1ランク側の機能で、分子MPI側にはまだ接続していません。
+分子側のMPI分割を変えて再開する場合は、新しいランク数と`--molecule-grid`を再開コマンドで指定します。次は分子1ランクで保存し、軌道2×空間2の4ランクへ変更する例です。FDTDはどちらも2ランクです。
+
+```sh
+OMP_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-layout-first --field-ranks 2 --molecule-ranks 1 --steps 96 --ld --stop-after 48
+OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-layout-resumed --field-ranks 2 --molecule-ranks 4 --molecule-grid 1 1 2 --steps 96 --ld --resume run-layout-first/checkpoint
+```
+
+保存された波動関数・密度・ポテンシャル履歴をFortranで新しい担当範囲へ直接移します。SCFや経過した時間ステップは再計算しません。新しいプロセスの起動時には既存GSの読込と計算資源の準備を行います。復元直後の`restore_statistics`は分子48・更新回数0です。MPIの加算順が変わるため、分割変更後は丸め誤差を含む許容誤差付きで比較します。入力、使用ライブラリ、時間刻み、最大ステップ数を変える再開とは別です。
+
+固定C2H2例では、1ランク↔軌道2×空間2の4ランク、および同じ4ランクで軌道2×空間2→軌道1×空間4を検証しました。96ステップの連続実行との差は、双極子で1.3×10⁻¹³ e bohr以内、電子数で3.7×10⁻¹³以内です。FDTDのE/Hと出力2ファイルは完全一致し、分子の通常出力も許容誤差内で一致します。同じ分割で再開する場合は、全配列と通常出力4ファイルが完全一致します。分割変更後も復元時の時間発展は0回でした。対象はCPU・PZ・固定イオン・スピンなしで、多ノードや他の物理条件への一般化は別途検証が必要です。
+
+部品として使う場合は、分子グループ全員で`run_molecular_mpi(..., decomposition=(1, N_ob, NX, NY, NZ))`を呼び、場側の代表ランクが`MolecularMPIController`で入力します。前者は分子の寿命の間Fortran内で待機・計算する呼び出しで、後者の`close()`で終了します。`N_ob`は軌道分割数で、分子グループのランク数は`N_ob*NX*NY*NZ`です。`MolecularMPIController`にも同じ`decomposition`を渡します。通信グループと作業先は呼び出し元が所有し、終了後もMPIは利用できます。この入口は1プロセスにつき1寿命です。`controller.save_direct_checkpoint()`／`restore_direct_checkpoint()`は直接保存／復元です。分子の配置を変えた新しいグループへも復元できます。プロセス終了・MPI異常・深部数値異常からの一般的な復旧や、復元途中の全グループの一括巻き戻しは保証しません。異常時はジョブを終了し、保存状態から新しい起動で再開します。密度・軌道磁化の読み出しは従来の1ランク側の機能で、分子MPI側にはまだ接続していません。
 
 ### 一度の起動でFDTDと分子を進める
 
@@ -197,7 +231,7 @@ E・時刻は原子単位、双極子はe·bohrです。`dipole` はイオンと
 ```python
 from salmonpy.field_input import FieldPacket, FieldValue
 frame = state.step_fields(FieldPacket(E=FieldValue(
-    [0., 0., 1.e-5], time=state.time+state.dt,
+    [0., 0., 1.e-5], time=state.time+state.dt/2,
     position=(0.,0.,0.), unit='E:au')))
 ```
 
@@ -325,7 +359,7 @@ HをEの時刻へ揃えて保存済みなら `from_samples(E_samples, H_samples,
 
 入力サイズは時刻数×格子点数に比例するため、必要な局所パッチと区間を切り出します。
 格子の時系列は相対時刻0から一定dtで、入力フレーム0〜max_steps+1を用意します。入力のdtとTDDFTのdtを揃えます。
-ステップnではフレームnとn+1を使い、`step(E_extra)`で進めます。`step_near_field`は展開係数用なので使いません。
+ステップnではフレームnとn+1を渡し、現在の中点伝播ではnだけを使い、`step(E_extra)`で進めます。`step_near_field`は展開係数用なので使いません。
 元のFDTD時刻は`time_origin`として入力ファイルにも記録します。この情報で分子の過去の時間発展を
 再現したことにはなりません。初期状態と照射開始の条件を明示してください。
 保存／再開では格子データ・座標対応と電子状態を保持し、同じ入力モデル・dt・計算プログラムで
@@ -522,7 +556,7 @@ with IsolatedTDDFTInitialState.from_salmon(
 ```
 
 係数表の時刻は0から一定dtで、`0..max_steps+1`の行が必要です。
-更新番号nではSALMONの既存処理に従いnとn+1の係数を参照します。
+更新番号nではnとn+1の係数を渡します。現在の中点伝播が参照するのはnです。
 dt・入力・実行ファイルが同じ状態へ、通常と同じ`restore_direct_checkpoint`で復元できます。
 FDTDの途中の時間窓を使う場合、元の時間ステップ・時刻と分子側の時刻原点の対応を保存してください。
 場のないGSからその窓で開始する計算は、前の照射履歴を持つ分子の継続とは異なります。
@@ -628,6 +662,8 @@ FIELDS.npzには `origin, spacing, times, E, H, molecule_position, center` を�
 ステップ番号はこの実行での番号です。原データの開始時刻を記録しても、GSが過去の照射を受けた状態にはなりません。
 
 ## 空間依存電場による双方向結合の検証範囲
+
+以下は開発用の双方向試験です。現在の推奨経路は一方向入力で、今回の半ステップ監査では、この返却電流の時刻整合を検証していません。
 
 `tools/test_grid_feedback_mpi.py` は、公開の密度取得・逐次入力・直接電流注入を組み合わせた検証用ドライバーです。
 本計算と、対象分子だけが放射する自己真空参照のFDTDを別の群で進め、両者の差をFortranで計算します。

@@ -467,6 +467,7 @@ contains
       case('ORBITAL_E');operation=10
       case('ORBITAL_AUDIT_E');operation=11
       case('OBSERVE_E');operation=12
+      case('REPARTITION_E');operation=13
       end select
       if(operation/=0)then
         A=0d0;worker_next_A=.true.;return

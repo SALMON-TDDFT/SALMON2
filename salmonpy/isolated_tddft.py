@@ -719,8 +719,8 @@ class IsolatedTDDFTState:
     """E-driven charge-dipole state with live savepoints and separate replay archives."""
     def __init__(self,engine,position):
         self._engine=engine
-        self._contract=FieldContract(TimeSpec(engine.dt,(InputPort('E'),),(),
-                            integrator='SALMON isolated middlepoint; E at native step index'),
+        self._contract=FieldContract(TimeSpec(engine.dt,(InputPort('E',offset='1/2',lag=1,uses_t0=False),),(),
+                            integrator='SALMON isolated middlepoint; E for update n is at local (n-1/2)*dt'),
                             units={'E':'E:au'},position=position,gauge='length')
 
     @property
@@ -866,7 +866,7 @@ def run_molecular_mpi(build_record, solver_comm, control_comm, *, controller_ran
     sends INIT_E, STEP_E, GRID_E, PROBE_E and CLOSE on control_comm. No MPI launcher,
     MPI initialization/finalization or process creation occurs here. Current host
     scope is fixed-ion scalar PZ/direct E/H. Direct disk restore requires an
-    unchanged group layout and binary. Deep-error recovery remains separate.
+    matching binary and physical inputs; molecular layouts may change. Deep-error recovery remains separate.
     """
     import ctypes as c
     import os
@@ -899,7 +899,7 @@ def run_molecular_mpi(build_record, solver_comm, control_comm, *, controller_ran
         except AttributeError as exc:
             raise InputError('calculation library lacks the molecular MPI entry; explicitly prepare a matching build') from exc
         probe.argtypes=[];probe.restype=c.c_int
-        if probe()!=2:raise InputError('CPU molecular host-MPI protocol 2 required')
+        if probe()!=3:raise InputError('CPU molecular host-MPI protocol 3 required')
         fn=lib.sp_molecular_mpi_run
         fn.restype=c.c_int;fn.argtypes=[c.c_int,c.c_int,c.c_int,c.c_char_p,c.c_void_p]
         descriptor=(str(root),str(inp),layout,record['sha256'],rank)
@@ -955,7 +955,19 @@ class MolecularMPIController:
         self._send(f'INIT_E {self.dt:.17e} {self.capacity} 0 0 0')
         self.observables=self._receive(0)
         initial=json.loads((self.directory/'salmonpy-molecular-initial.json').read_text())
-        self._identity=_fingerprint((initial,self.dt,self.capacity,self.decomposition))
+        self._identity=_fingerprint((initial,self.dt,self.capacity))
+
+    @property
+    def clock(self):
+        """Step numbers in units of dt/2; electronic and FDTD clocks are distinct."""
+        n=self.step_index
+        return {'schema':'salmonpy.molecular-clock/1','molecular_step':n,
+                'electronic_local_half_step':2*n,'electronic_field_half_step':2*n+1,
+                'drive_field_step':n if n else None,
+                'drive_H_half_steps':[2*n-1,2*n+1] if n else None,
+                'transferred_field_steps':[n,n+1] if n else None,
+                'used_grid_frame':n if n else None,'propagator':'middlepoint',
+                'next_frame_role':'prefetch only; not a second half-step propagation'}
 
     def _send(self,line):
         MPI=_caller_mpi()
@@ -1017,8 +1029,8 @@ class MolecularMPIController:
         for source in sorted(self.directory.glob('*.data')):
             target=root/source.name
             shutil.copy2(source,target);streams[target.name]=_digest(target)
-        metadata={'schema':'salmonpy.molecular-mpi-checkpoint/1','identity':self._identity,
-                  'step':self.step_index,'ranks':ranks,'files':files,'streams':streams}
+        metadata={'schema':'salmonpy.molecular-mpi-checkpoint/2','identity':self._identity,
+                  'step':self.step_index,'ranks':ranks,'decomposition':list(self.decomposition),'files':files,'streams':streams}
         (root/'manifest.json').write_text(json.dumps(metadata,indent=2)+'\n')
         # The archive remains intact; remove working SAVE files so a later save
         # can use Fortran status=new without overwriting a prior archive.
@@ -1032,9 +1044,13 @@ class MolecularMPIController:
         if self.step_index!=0:raise InputError('fresh molecular MPI group required for restore')
         metadata=json.loads((root/'manifest.json').read_text())
         ranks=int(np.prod(np.asarray(self.decomposition,dtype=object)))
-        expected={f'isolated-state-{rank:08d}.bin' for rank in range(ranks)}
-        if (metadata.get('schema')!='salmonpy.molecular-mpi-checkpoint/1' or
-                metadata.get('identity')!=self._identity or metadata.get('ranks')!=ranks or
+        old_layout=tuple(metadata.get('decomposition',()))
+        if len(old_layout)!=5 or any(type(v) is not int or v<1 for v in old_layout) or old_layout[0]!=1:
+            raise InputError('molecular checkpoint decomposition required')
+        old_ranks=int(np.prod(np.asarray(old_layout,dtype=object)))
+        expected={f'isolated-state-{rank:08d}.bin' for rank in range(old_ranks)}
+        if (metadata.get('schema')!='salmonpy.molecular-mpi-checkpoint/2' or
+                metadata.get('identity')!=self._identity or metadata.get('ranks')!=old_ranks or
                 set(metadata.get('files',{}))!=expected):
             raise InputError('molecular MPI checkpoint input/binary/layout differs')
         step=_integer(metadata.get('step'),'checkpoint step',0,self.capacity)
@@ -1048,7 +1064,10 @@ class MolecularMPIController:
             if path.is_symlink() or not path.is_file() or _digest(path)!=sha:
                 raise InputError('molecular MPI checkpoint checksum differs')
         for name in expected:shutil.copy2(root/name,self.directory/name)
-        self._send('LOAD_E');result=self._status(7)
+        changed=old_layout!=self.decomposition
+        if changed:
+            (self.directory/'isolated-repartition.dat').write_text(' '.join(map(str,(old_ranks,*old_layout)))+'\n')
+        self._send('REPARTITION_E' if changed else 'LOAD_E');result=self._status(13 if changed else 7)
         if result['status'] or result['step']!=step or result['updates']!=0:
             raise RuntimeFailure('molecular MPI restore failed: '+str(result))
         # LOAD_E closed the fresh output streams; replace the initial prefix

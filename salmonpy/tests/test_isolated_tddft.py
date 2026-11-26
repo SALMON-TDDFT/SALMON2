@@ -163,10 +163,15 @@ class IsolatedTDDFTTests(unittest.TestCase):
     def test_bad_packet_snapshot_and_failed_step(self):
         from salmonpy.field_input import FieldPacket,FieldValue
         a=self.state();bad=self.state(.03).snapshot()
+        port=a.timing.input("E")
+        self.assertEqual((str(port.offset),port.lag),("1/2",1))
         with self.assertRaises(SnapshotError):a.restore(bad)
         with self.assertRaises(InputError):a.step_fields(FieldPacket())
-        with self.assertRaises(InputError):a.step_fields(FieldPacket(E=FieldValue([0,0,1],time=.01,position=(0,0,0),unit='E:au')))
+        with self.assertRaises(InputError):a.step_fields(FieldPacket(E=FieldValue([0,0,1],time=.02,position=(0,0,0),unit='E:au')))
         self.assertEqual(a.time,0.)
+        midpoint=self.state()
+        midpoint.step_fields(FieldPacket(E=FieldValue([0,0,1],time=.01,position=(0,0,0),unit='E:au')))
+        self.assertEqual(midpoint.time,.02)
         a.step([0,0,.1]);old=a.observables.dipole.copy()
         a._engine._proc.kill();a._engine._proc.wait()
         with self.assertRaises(RuntimeFailure):a.step([0,0,.2])
@@ -548,6 +553,22 @@ class LiveGridInputTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     molecular_decomposition(ranks, grid)
 
+        from contextlib import contextmanager, redirect_stderr
+        from types import SimpleNamespace
+        from io import StringIO
+        from salmonpy.examples.molecular_fdtd_mpi_response import abort_on_error
+        order=[]
+        @contextmanager
+        def cleanup():
+            try:
+                yield
+            finally:
+                order.append('cleanup')
+        with self.assertRaises(ValueError), redirect_stderr(StringIO()):
+            with cleanup(), abort_on_error(SimpleNamespace(Abort=lambda code:order.append(('abort',code)))):
+                raise ValueError('restore failed')
+        self.assertEqual(order,[('abort',1),'cleanup'])
+
     def test_target_step_contract_before_transfer(self):
         from types import SimpleNamespace
         from salmonpy.isolated_tddft import IsolatedTDDFTState
@@ -574,6 +595,7 @@ class LiveGridInputTests(unittest.TestCase):
             client=object.__new__(MolecularMPIController)
             client.directory=work;client.dt=.01;client.capacity=4;client.step_index=0
             client.decomposition=(1,2,1,1,1);client._identity='model-and-binary';client.closed=False
+            self.assertEqual(client.clock['electronic_field_half_step'],1)
             client.observables=state.observables;commands=[];client._send=commands.append
             client._status=lambda op:dict(status=35,step=0,updates=0)
             client._receive=lambda n:state.observables
@@ -582,6 +604,8 @@ class LiveGridInputTests(unittest.TestCase):
             commands.clear();client._status=lambda op:dict(status=0,step=0,updates=0)
             client.step_grid_field(field,step_index=1)
             self.assertEqual(commands,['GRID_E','STEP_E 0.00000000000000000e+00 0.00000000000000000e+00 0.00000000000000000e+00'])
+            self.assertEqual(client.clock['electronic_field_half_step'],3)
+            self.assertEqual(client.clock['drive_H_half_steps'],[1,3])
             packet=(work/'salmonpy-grid-frames.bin').read_bytes()
             np.testing.assert_array_equal(np.frombuffer(packet[:24],dtype=np.int32),[16909060,1,1,2,2,2])
             for rank in range(2):(work/f'isolated-state-{rank:08d}.bin').write_bytes(bytes([rank,17,23]))
@@ -604,6 +628,10 @@ class LiveGridInputTests(unittest.TestCase):
             self.assertEqual(calls,['LOAD_E','RELEASE_E','OBSERVE_E'])
             self.assertEqual(restored.step_index,1)
             self.assertEqual((restored.directory/'trace.data').read_text(),'saved prefix\n')
+            # A fresh group with a different orbital layout must request direct repartition.
+            restored.step_index=0;restored.decomposition=(1,1,1,1,1);calls.clear()
+            restored.restore_direct_checkpoint(archive)
+            self.assertEqual(calls,['REPARTITION_E','RELEASE_E','OBSERVE_E'])
         code="""import sys
 from salmonpy.isolated_tddft import run_molecular_mpi
 assert 'mpi4py.MPI' not in sys.modules

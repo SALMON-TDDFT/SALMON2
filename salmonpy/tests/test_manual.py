@@ -85,7 +85,11 @@ class ManualTest(unittest.TestCase):
                                ('分子空間並列','isolated_tddft'),
                                ('molecular spatial decomposition','isolated_tddft'),
                                ('分子混合並列','isolated_tddft'),
-                               ('molecular mixed MPI','isolated_tddft')]:
+                               ('molecular mixed MPI','isolated_tddft'),
+                               ('分子MPI分割変更','isolated_tddft'),
+                               ('molecular repartition','isolated_tddft'),
+                               ('分子 半ステップ','isolated_tddft'),
+                               ('molecular clock','isolated_tddft')]:
             self.assertEqual(search(query)['tasks'][0]['id'],expected)
         for query in ('はじめて','初めて','最初の計算','first calculation','getting started'):
             self.assertEqual(search(query)['tasks'][0]['id'],'first_calculation')

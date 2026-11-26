@@ -1,15 +1,28 @@
 """One MPI launch: caller-owned FDTD group -> MPI-parallel molecular TDDFT group.
 
 Fixed C2H2/LD connection example. No nested launcher, child process, current return
-or own-vacuum field. Direct restart requires the same MPI layout and build.
+or own-vacuum field. Direct restart permits a changed molecular layout with the same field layout/build.
 General deep-error retry is not provided by this dedicated-rank example.
 """
+from contextlib import contextmanager
 import argparse
 from pathlib import Path
 import shutil
 import json
 import os
 import numpy as np
+
+
+@contextmanager
+def abort_on_error(comm):
+    """Report failures before collective communicator cleanup can block."""
+    try:
+        yield
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        comm.Abort(1)
+        raise
 
 
 def molecular_decomposition(ranks, grid):
@@ -62,7 +75,7 @@ def main():
     try:
         if world.rank==0:args.output.mkdir(parents=True,exist_ok=False)
         world.Barrier()
-        with ParallelContext.create(world,plan) as context:
+        with ParallelContext.create(world,plan) as context, abort_on_error(world):
             geometry=None
             if context.group.role=='field':
                 shapes=(Shape('box',(4.,12.,12.),(17.,0.,0.)),) if args.ld else ()
@@ -104,7 +117,7 @@ def main():
                     from salmonpy.api import _bind_field_operations
                     meta=json.loads((args.resume/'complete.json').read_text())
                     record=json.loads(args.build_record.read_text())
-                    expected=dict(steps=args.steps,field_ranks=args.field_ranks,molecule_ranks=args.molecule_ranks,
+                    expected=dict(steps=args.steps,field_ranks=args.field_ranks,
                                   ld=args.ld,library_sha256=record['sha256'])
                     if (meta.get('schema')!='salmonpy.one-way-molecular-mpi/1' or
                             any(meta.get(k)!=v for k,v in expected.items())):
@@ -147,7 +160,7 @@ def main():
                         from salmonpy.isolated_tddft import DipoleObservables
                         frames=[DipoleObservables._from_worker(i*dt,value,checked=True) for i,value in enumerate(saved_values)]
                         for name in ('dipole','electronic_change','electron_number'):
-                            np.testing.assert_array_equal(getattr(controller.observables,name),getattr(frames[-1],name))
+                            np.testing.assert_allclose(getattr(controller.observables,name),getattr(frames[-1],name),rtol=2e-10,atol=2e-12)
                 stop=args.steps if args.stop_after is None else args.stop_after
                 if stop<start_step:raise ValueError('stop-after precedes restored step')
                 for n in range(start_step+1,stop+1):
@@ -197,6 +210,8 @@ def main():
             save_arrays(args.output/'response',{
                 'molecular_step':np.arange(stop+1),
                 'time':np.array([f.time for f in frames]),
+                'electronic_field_half_step':2*np.arange(stop+1)+1,
+                'electronic_field_time':(np.arange(stop+1)+.5)*dt,
                 'dipole':np.array([f.dipole for f in frames]),
                 'electronic_change':np.array([f.electronic_change for f in frames]),
                 'electron_number':np.array([f.electron_number for f in frames]),
@@ -205,8 +220,9 @@ def main():
                 'coupling':'one-way-host-MPI','material_id':'molecule','point_id':10,'field_ranks':args.field_ranks,
                 'molecule_ranks':args.molecule_ranks,'decomposition':list(decomposition),
                 'feedback':False,'self_vacuum_reference':False,'caller_MPI_alive':True,
+                'clock':controller.clock,'electronic_clock_offset':'1/2','time_array_clock':'electronic local',
                 'worker_statistics':stats,'restore_statistics':restore_statistics if args.resume else None,'dt':dt,'physical_convergence':False,
-                'units':{'time':'atomic_time','dipole':'e*bohr','electronic_change':'e*bohr','E':'E:au','H':'H:au'}})
+                'units':{'time':'atomic_time','electronic_field_time':'atomic_time','dipole':'e*bohr','electronic_change':'e*bohr','E':'E:au','H':'H:au'}})
             print('One-way FDTD / molecular MPI response saved:',args.output/'response')
     except Exception:
         import traceback

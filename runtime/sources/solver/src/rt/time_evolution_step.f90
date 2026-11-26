@@ -369,10 +369,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
 ! result
 
-  if(hybrid_mesh_rt.or.xc=='hse06')then
-    ! Propagation uses midpoint A, but energy/current/force describe t_{n+1}.
+  if(hybrid_mesh_rt.or.xc=='hse06'.or.(iperiodic==3.and..not.singlescale%flag_use))then
+    ! All endpoint observations use the same A in the kinetic operator and
+    ! nonlocal projectors. The completed propagation retains its stage A.
     system%vec_Ac=rt%Ac_tot(:,itt)
-    call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+    if(yn_jm=='n'.or.hybrid_mesh_rt.or.xc=='hse06') &
+      call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   endif
 
   call timer_begin(LOG_CALC_PROJECTION)
@@ -413,12 +415,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call timer_end(LOG_CALC_SINGLESCALE)
     else
       call timer_begin(LOG_CALC_CURRENT)
-      system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
-      ! Propagation uses midpoint A; current uses endpoint A. Refresh both
-      ! kinetic and nonlocal phases for the validated HSE laser path as well.
-      if (propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') then
-        if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
-      end if
+      ! Endpoint A and its nonlocal phases were installed together before energy.
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
       spsi_out%update_zwf_overlap = .true.
       call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)

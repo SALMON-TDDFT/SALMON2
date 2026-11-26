@@ -330,9 +330,13 @@ call rt_state_clear(independent_hse)
 #endif
 contains
 
-recursive subroutine isolated_state_control(operation,status)
+recursive subroutine isolated_state_control(operation,status,repartitioned)
  integer,intent(in)::operation
  integer,intent(out)::status
+ logical,optional,intent(in)::repartitioned
+ logical::redistributed
+ redistributed=.false.
+ if(present(repartitioned))redistributed=repartitioned
  status=0
  ! Read-only density/magnetic exports still have single-rank assumptions.
  if(worker_host_requested().and.(operation==8.or.operation==10.or.operation==11))then
@@ -402,7 +406,11 @@ recursive subroutine isolated_state_control(operation,status)
     V_local=worker_saved%V_local
     Vxc=worker_saved%Vxc
     rt=worker_saved%rt
-    call activate_near_magnetic(system,rt,ppg)
+    if(redistributed)then
+     call apply_near_magnetic(rt%near_index,mg,lg,system,rt,info,ppg)
+    else
+     call activate_near_magnetic(system,rt,ppg)
+    endif
     poisson=worker_saved%poisson
     energy=worker_saved%energy
   system%xc_payload=worker_saved%xc
@@ -432,19 +440,23 @@ recursive subroutine isolated_state_control(operation,status)
   if(status/=0)return
   call isolated_disk_io(.false.,status)
   deallocate(worker_saved)
- case(7)
+ case(7,13)
   ! Only a fresh worker may import. Failed reads never install partial arrays.
   if(itt/=0.or.worker_updates/=0.or.allocated(worker_saved))then
    status=14;return
   endif
   call isolated_state_control(1,status)
   if(status/=0)return
-  call isolated_disk_io(.true.,status)
+  if(operation==13)then
+   call isolated_repartition(status)
+  else
+   call isolated_disk_io(.true.,status)
+  endif
   if(worker_host_requested())call comm_get_max(status,nproc_group_global)
   if(status/=0)then
    deallocate(worker_saved);return
   endif
-  call isolated_state_control(2,status)
+  call isolated_state_control(2,status,operation==13)
 
  case(8)
   call isolated_density_samples(status)
@@ -1057,6 +1069,7 @@ subroutine isolated_payload_io(unit,reading,value,ios)
   call checkpoint_io_s_vector(unit,reading,value%xc%uvel,ios)
 end subroutine
 
+#include "molecular_repartition.inc"
 #include "checkpoint_arrays.inc"
 
 subroutine print_header()

@@ -2,13 +2,18 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
-## 最新の残作業（2026-11-25 一方向の分子励起を優先）
+## 最新の残作業（2026-11-26 一方向の分子励起を優先）
 
 空間依存E/H、軌道磁化電流、本計算−自己真空参照の双方向結合は、
 スピンなし固定イオンPZのC₂H₂で接続・直接保存／再開・再試行まで検証済みです。
 分子96／場97からの再開、1／2場ランク、通常出力6ファイルが連続実行と一致しました。
 根拠は末尾と `docs/magnetic-self-field-feedback-validation-2026-11-25.md` を参照します。
 以下を現在の残件の整理とし、後続の古い未完了欄を重複して数えません。
+
+分子内部の軌道・空間MPI、検証済み分割間の直接再開、E/Hと電子更新の半ステップ対応、
+通常XCの更新後の電流・エネルギーでのAの統一は完了しています。末尾の2026-11-26の記録を参照し、
+これらを残件へ戻しません。現在の利用経路はFDTD→分子TDDFTの一方向です。
+双方向結合の設計・物理診断は保留として、過去の開発試験の記録と区別します。
 
 1. **今回の空間依存・磁気結合の物理診断**：電気＋磁気を合わせた離散電荷連続則・仕事量・エネルギー収支。既存の双極子モデルの収支検証とは区別する。 **双方向結合を再開する際に自己場の分担を再設計**：全自己真空E/H差し引きは環境散乱だけの比較近似と位置付け、分子自身の縦クーロン場のみを除く案を検討する。近接場の空間分布と環境の縦電場は保持する。根拠と未解決点は `2026-11-25-molecular-self-field-review.md`。
 2. **一般の配置・運用への接続**：固定形状の検証ドライバーを超える配置指定、途中失敗時に全状態を保持する一般的な結合処理。今回の正常再開・意図的再試行の成功だけで包括保証しない。
@@ -5062,3 +5067,76 @@ current queue; later completed entries supersede their matching scope.
   process and general composed failure recovery. This supersedes the prior
   unchecked combined-orbital/spatial verification item only for the tested layouts.
   Physical convergence and feedback/radiation remain separate/deferred.
+
+
+### 2026-11-26: molecular MPI layout-changing direct restart
+
+- [x] Committed/pushed mixed-MPI validation as729e51a8 to both development branches.
+- [x] Added Fortran direct redistribution of saved numerical state into a separate
+  candidate, using centered isolated-grid indices and complete orbital/scalar
+  ownership coverage. Checkpoint wrapper2/protocol3 only; no compatibility branch.
+- [x] Verified molecular1 -> mixed4, mixed4 ->1, and mixed4 -> spatial4 with
+  changed orbital/spatial ownership. All96-step histories and ordinary molecular
+  streams match target-layout continuous runs within roundoff (dipole <=1.27e-13
+  e bohr, electron number <=3.66e-13); field arrays/two files are exact.
+  Restore updates0; continuation48. Same-layout restart remains fully bit-exact.
+- [x] Normal one-rank/mixed4/spatial4 histories remain bit-exact against previous
+  controls. Tracked-file-only audited solver build and54targeted source tests pass.
+  Unexpected sample failures now abort before collective communicator cleanup.
+- [ ] Remaining: larger layouts/other physical conditions, multiple nodes/site MPI,
+  checkpoint I/O scaling, multiple molecular states per process and general
+  composed recovery. Joint sample field decomposition stays fixed. See
+  molecular-repartition-validation-2026-11-26.md. Physics convergence and molecular
+  feedback/radiation remain separate/deferred.
+- Installed follow-up: extracted-sdist wheel built; installed54targeted tests
+  passed. Installed mixed4 -> spatial4 direct restart matches source restart
+  arrays/four streams exactly, with48/0 restore and96/48 final counters.
+
+### 2026-11-26: FDTD / electronic half-step clock audit
+
+- [x] Organized integer k=FDTD time/(dt/2): old A/psi/J/raw H2n-1,
+  E/centered H2n, new A/psi/J/raw H2n+1. Molecular local n maps to field2n+1.
+- [x] Confirmed current isolated workers require middlepoint and read frame n
+  only; n+1 is prefetched, not a second ETRS half-step. Verified by changing only
+  future E or future H, with unchanged response. No numerical extra shift added.
+- [x] Corrected uniform molecular E packet timing to offset1/2/lag1 on its local
+  clock; added controller.clock and field-clock time/half-step arrays to one-way
+  examples. Human Japanese/English guides and AI JSON explain both clocks.
+- [x] Real FDTD A/E and nonzero raw/centered H checks passed. C2H2 grid/direct-E
+  linear drive matches to8.48e-20; intentionally wrong half-step differs9.61e-6.
+  Direct process-exit restart MPI1->2 preserves clock/update0; real LD/FDTD
+  restart MPI4->1 retains old arrays exactly while exposing half-step193/194.
+  Source79targeted tests pass; see half-step-validation-2026-11-26.md.
+- [ ] Historical molecular current/radiation return timing, unequal-dt/subcycling,
+  broader physical settings and multi-node validation remain separate/deferred.
+  Do not infer two-way or ETRS validation from the two-frame input packet.
+- Installed follow-up: extracted-sdist wheel includes the manual half-step audit
+  tool; installed79targeted tests pass. Installed real FDTD probe and magnetic
+  direct restart match source arrays exactly. Electric/magnetic MPI1->2 restore
+  errors <=5.33e-15/1.78e-15, restore updates0. Public clock/input docs match wheel.
+
+### 2026-11-26: ordinary-XC endpoint current/energy A consistency
+
+- [x] Reproduced stale midpoint nonlocal phase in ordinary-XC endpoint current
+  and midpoint-A energy evaluation. Propagation kinetic/phase A was consistent.
+- [x] Install endpoint A and projector phases together before observations;
+  preserve the midpoint propagation and single-scale/molecular update ordering.
+  No additional normal-step MPI diagnostic agreement is introduced.
+- [x] Fortran frozen-state current/energy and x/y/z energy-A-derivative audit:
+  corrected current/energy recomputation exact, derivative error <=8.59e-13au.
+  PZ serial and k/orbital/spatial MPI2; Libxc-PZ/PBE and TB-mBJ k-MPI2.
+- [x] All owned wavefunction bytes unchanged against old-code controls for the
+  same fixed-ion prescribed A. New-process direct disk restart has no replay;
+  wavefunctions/observations and actual matching-time output rows agree exactly.
+  Checked/performance and production singleton/state-handle results agree;
+  charge-current sign verified. Japanese/English guides and AI JSON synchronized.
+- [x] Source119 and installed-wheel119 targeted checks passed; tracked-only
+  preparation and source/object audits passed. See
+  crystal-endpoint-validation-2026-11-26.md for scope and evidence.
+- [ ] Optical convergence, multi-node/GPU/SOC/moving-ion coverage and self-consistent
+  FDTD energy changes from corrected current remain separate validation scopes;
+  do not claim unchanged feedback trajectories from prescribed-A equality.
+
+- Installed follow-up: PZ public-handle MPI2 continuous/direct restart and
+  Libxc-PBE frozen-state audit match source arrays and written streams exactly;
+  installed guides/JSON/tool/solver source bytes agree with the checkout.

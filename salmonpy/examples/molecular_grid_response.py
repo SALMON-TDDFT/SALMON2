@@ -43,6 +43,8 @@ def main():
     arrays={
         'molecular_step':np.arange(start,stop+1,dtype=np.int64),
         'time':np.array([frame.time for frame in frames]),
+        'electronic_field_half_step':2*np.arange(start,stop+1,dtype=np.int64)+1,
+        'electronic_field_time':fields.time_origin+(np.arange(start,stop+1)+.5)*dt,
         'dipole':np.array([frame.dipole for frame in frames]),
         'electron_number':np.array([frame.electron_number for frame in frames]),
         'electronic_change':np.array([frame.electronic_change for frame in frames])}
@@ -52,9 +54,10 @@ def main():
         'internal_energy_available':energy_available,
         'coupling':'FDTD_to_molecule_only','spatial_EH':True,'feedback':False,
         'restore_statistics':restore_statistics,'final_statistics':final_statistics,
-        'source_time_origin':fields.time_origin,'source_frames_per_molecular_step':'n,n+1',
+        'source_time_origin':fields.time_origin,'electronic_clock_offset':'1/2',
+        'used_source_frame_per_step':'n; n+1 is prefetched, not a second half-step','source_frames_per_molecular_step':'n,n+1',
         'executable_sha256':runtime.executable.sha256,
-        'units':{'time':'atomic_time','dipole':'e*bohr','electronic_change':'e*bohr',
+        'units':{'time':'atomic_time','electronic_field_time':'atomic_time','dipole':'e*bohr','electronic_change':'e*bohr',
                  'electron_number':'electrons','internal_energy':'hartree'},
         'convergence':'not checked; weak molecular back-action assumed'})
     print('Saved one-way molecular response:',args.output)

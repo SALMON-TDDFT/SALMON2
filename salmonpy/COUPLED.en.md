@@ -198,6 +198,13 @@ every point's matter declaration over MPI, places it on the electronic clock
 first step; `stepper.timing` and `response.json` record both. See
 [FIELDS.en.md](FIELDS.en.md).
 
+
+With integer k counting dt/2, old A/psi/J/raw H have k=2n-1, E(n) and centered H(n) have k=2n, and new A/psi/J/raw H have k=2n+1. FDTD consumes previous J at2n-1; midpoint TDDFT uses the mean of old/new A. Since A_new-A_old=-dt*S(E_n), both use the same midpoint2n.
+
+Crystal TDDFT uses the same midpoint A for the kinetic operator and nonlocal projector phase during propagation, then switches both to endpoint A before current/energy evaluation. See [A and observation step numbers](SHARED_TDDFT.en.md#crystal-tddft-a-and-observation-step-numbers). The prescribed-A propagation is unchanged; observations previously evaluated at inconsistent A values are corrected.
+
+Current molecular one-way E/H input uses the same electronic clock correspondence. A two-frame transfer does not mean two half-step propagations. See the [molecular step table](ISOLATED_TDDFT.en.md#half-steps-and-update-numbers).
+
 S matches solver observation collocation: Ex averages edges `(i,j,k)` and
 `(i−1,j,k)`; Ey/Ez use the corresponding previous y/z edge. Deposit J using S transpose,
 half to each corresponding edge. Each macro point represents one uniform grid-cell

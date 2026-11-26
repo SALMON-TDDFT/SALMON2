@@ -67,6 +67,26 @@ analysis streams require the existing separate-state route. solver handle and
 legacy initialization must not be mixed in one process. Initialization, allocation,
 I/O and MPI failures do not gain a general recovery guarantee.
 
+## Crystal TDDFT: A and observation step numbers
+
+Write `a = A/c`. Electronic middlepoint update `n-1 → n` uses
+`(a[n-1] + a[n])/2` in both the kinetic operator and the nonlocal
+pseudopotential phase. After propagation, evaluate current and energy with
+`a[n]` in both places. Changing only the kinetic A while retaining the midpoint
+projector phase is inconsistent.
+
+In the FDTD connection, E for this update is at field half-step number `2n`;
+new A, the electronic state and current are at `2n+1`. Integrating E to A and
+installing the same A in the Hamiltonian and projector phases are separate checks.
+
+Ordinary-XC observations have been corrected to follow this rule. For fixed ions
+and the same prescribed A history, the propagated wavefunctions are unchanged;
+current and energy values are corrected. Feeding that corrected current back to
+the field can also change later fields and electronic states in a self-consistent
+calculation. This change does not alter molecular E driving or the update order
+of Maxwell calculations using spatially varying A on the electronic grid.
+Use the matching calculation library when directly resuming saved states.
+
 ## Ordinary multiple-point placement
 
 Opt in to session ownership with `shared_model=True` and set
