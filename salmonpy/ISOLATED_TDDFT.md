@@ -21,7 +21,7 @@ PZ・固定イオン・非偏極・スカラー擬ポテンシャル・中点伝
 
 ### 分子内部もMPI並列にする
 
-外側のPythonで場と分子にランクを分け、分子用のグループをFortranへ渡せます。分子の中では軌道をMPIで分割します。計算用共有ライブラリに分子MPIの入口が必要です。以前の実行ファイルと検証記録を渡す方式とは別で、対応するライブラリの`build.json`と既存のC2H2入力一式を使います。共有ライブラリは配布物を使うか、[計算プログラムの準備](RUNTIME.md)に従って明示的にビルドしてください。import時には準備しません。
+外側のPythonで場と分子にランクを分け、分子用のグループをFortranへ渡せます。分子の中では軌道と実空間の格子をMPIで分割できます。計算用共有ライブラリに分子MPIの入口が必要です。以前の実行ファイルと検証記録を渡す方式とは別で、対応するライブラリの`build.json`と既存のC2H2入力一式を使います。共有ライブラリは配布物を使うか、[計算プログラムの準備](RUNTIME.md)に従って明示的にビルドしてください。import時には準備しません。
 
 次のコマンドは計算を開始します。管理ノードでの検査コマンドではなく、計算資源の割当内で実行します。
 
@@ -29,7 +29,18 @@ PZ・固定イオン・非偏極・スカラー擬ポテンシャル・中点伝
 OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mpi --field-ranks 2 --molecule-ranks 2 --steps 96 --ld
 ```
 
-MPIの総数は`field-ranks + molecule-ranks`です。上では場2＋分子2の計4プロセスを使い、子プロセスや内側の`mpiexec`は起動しません。両方のグループを一度の起動で進め、分子へは空間分布を保持したE/Hを渡します。分子電流の返却や自己真空参照はありません。現在の検証は、固定形状のLD＋C2H2例、内部1／2ランクの軌道並列、1ランク1スレッドです。分子内部の空間分割、多ノード、大きなランク数は別途検証が必要です。
+MPIの総数は`field-ranks + molecule-ranks`です。上では場2＋分子2の計4プロセスを使い、子プロセスや内側の`mpiexec`は起動しません。両方のグループを一度の起動で進め、分子へは空間分布を保持したE/Hを渡します。分子電流の返却や自己真空参照はありません。現在の検証は、固定形状のLD＋C2H2例、内部1／2ランクの軌道並列と、x・y・z各方向の空間2分割、x/z方向の空間4分割、1ランク1スレッドです。多ノード、大きなランク数、空間・軌道を同時に分割する計算は別途検証が必要です。
+
+`--molecule-grid NX NY NZ`で分子の空間分割数を指定します。省略時は`1 1 1`で、これまでどおり軌道を分割します。空間分割数の積は`--molecule-ranks`を割り切る必要があります。残りの倍率が軌道分割数です。これはTDDFTの分割であり、FDTDの分割や計算格子の総数を変更する指定ではありません。
+
+```sh
+# 場2ランク＋分子のz方向2分割。計4ランク。
+OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-space --field-ranks 2 --molecule-ranks 2 --molecule-grid 1 1 2 --steps 96 --ld
+# 場2ランク＋分子のx/z方向4分割。計6ランク。
+OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-space4 --field-ranks 2 --molecule-ranks 4 --molecule-grid 2 1 2 --steps 96 --ld
+```
+
+空間分割で保存／再開する時は、上と同じ分割指定を両方のコマンドに付け、最初の起動に`--stop-after 48`、次の起動に新しい出力先と`--resume SAVED_OUTPUT/checkpoint`を指定します。最大ステップ数は両方とも96のままです。検証では、空間分割と独立した1ランク実行の差は観測量で4×10⁻¹³以内でした。z方向2分割とx/z方向4分割の直接再開は、連続実行の全配列と通常出力4ファイルに完全一致し、復元時の時間発展は0回でした。これは接続と再開の検証であり、物理的収束の保証ではありません。
 
 場と分子がアクセスできる共有作業フォルダを出力先に使います。場の代表ランクがE/H入力を書き、分子の代表ランクが一度だけ読み、その分子グループ内へ配ります。毎ステップの通信にアプリケーション全体の集約は使いません。mpi4pyと計算ライブラリには同じMPI実装が必要です。分子ランクは計算中専用で、同じプロセス内で他の計算やファイル操作を並行させません。
 
@@ -42,7 +53,7 @@ OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_re
 
 結果は`response/arrays.npz`、実行情報は`response/manifest.json`の`metadata`です。分子の配列は`molecular_step`、E/Hは`field_step`で対応付けます。分子のステップn−1→nには場のn,n+1を使うため、場のフレームが分子より1枚多くなります。再開後の履歴には保存前も含まれ、前ジョブの配列を再結合する必要はありません。`restore_statistics`の更新回数0と、`worker_statistics`の新規更新回数を確認してください。保存／再開を含む同じ設定で全履歴と通常出力の一致を確認していますが、光学物性の収束を保証する試験ではありません。
 
-部品として使う場合は、分子グループ全員で`run_molecular_mpi(..., decomposition=(1, N, 1, 1, 1))`を呼び、場側の代表ランクが`MolecularMPIController`で入力します。前者は分子の寿命の間Fortran内で待機・計算する呼び出しで、後者の`close()`で終了します。通信グループと作業先は呼び出し元が所有し、終了後もMPIは利用できます。この入口は1プロセスにつき1寿命です。`controller.save_direct_checkpoint()`／`restore_direct_checkpoint()`は同じ配置での直接保存／復元です。プロセス終了・MPI異常・深部数値異常からの一般的な復旧や、復元途中の全グループの一括巻き戻しは保証しません。異常時はジョブを終了し、保存状態から新しい起動で再開します。密度・軌道磁化の読み出しは従来の1ランク側の機能で、分子MPI側にはまだ接続していません。
+部品として使う場合は、分子グループ全員で`run_molecular_mpi(..., decomposition=(1, N_ob, NX, NY, NZ))`を呼び、場側の代表ランクが`MolecularMPIController`で入力します。前者は分子の寿命の間Fortran内で待機・計算する呼び出しで、後者の`close()`で終了します。`N_ob`は軌道分割数で、分子グループのランク数は`N_ob*NX*NY*NZ`です。`MolecularMPIController`にも同じ`decomposition`を渡します。通信グループと作業先は呼び出し元が所有し、終了後もMPIは利用できます。この入口は1プロセスにつき1寿命です。`controller.save_direct_checkpoint()`／`restore_direct_checkpoint()`は同じ配置での直接保存／復元です。プロセス終了・MPI異常・深部数値異常からの一般的な復旧や、復元途中の全グループの一括巻き戻しは保証しません。異常時はジョブを終了し、保存状態から新しい起動で再開します。密度・軌道磁化の読み出しは従来の1ランク側の機能で、分子MPI側にはまだ接続していません。
 
 ### 一度の起動でFDTDと分子を進める
 

@@ -12,17 +12,33 @@ import os
 import numpy as np
 
 
+def molecular_decomposition(ranks, grid):
+    """Return (k, orbital, x, y, z) for an explicit molecular rank budget."""
+    if ranks < 1 or len(grid) != 3 or any(v < 1 for v in grid):
+        raise ValueError('positive molecular ranks and three positive grid divisions required')
+    spatial = grid[0] * grid[1] * grid[2]
+    if ranks % spatial:
+        raise ValueError('molecular ranks must be divisible by the spatial grid product')
+    return (1, ranks // spatial, *grid)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('build_record','bundle','output'):parser.add_argument(name,type=Path)
     parser.add_argument('--field-ranks',type=int,default=2)
     parser.add_argument('--molecule-ranks',type=int,default=2)
+    parser.add_argument('--molecule-grid',type=int,nargs=3,default=(1,1,1),metavar=('NX','NY','NZ'),
+        help='molecular spatial divisions; remaining ranks divide orbitals')
     parser.add_argument('--steps',type=int,default=4)
     parser.add_argument('--ld',action='store_true')
     parser.add_argument('--stop-after',type=int)
     parser.add_argument('--resume',type=Path)
     args=parser.parse_args()
     if args.stop_after is not None and not 1<=args.stop_after<=args.steps:parser.error('invalid stop-after')
+    try:
+        decomposition=molecular_decomposition(args.molecule_ranks,args.molecule_grid)
+    except ValueError as exc:
+        parser.error(str(exc))
     from mpi4py import MPI
     from salmonpy.distributed import ParallelPlan,ParallelContext,SolverGroup
     from salmonpy.coupled import NativeEHField
@@ -70,11 +86,11 @@ def main():
             world.Barrier()
             if context.group.role!='field':
                 run_molecular_mpi(args.build_record,context.solver_comm,transport,controller_rank=0,
-                    work_directory=work,decomposition=(1,args.molecule_ranks,1,1,1))
+                    work_directory=work,decomposition=decomposition)
             else:
                 if world.rank==0:
                     controller=MolecularMPIController(transport,solver_root=args.field_ranks,
-                        work_directory=work,dt=dt,max_steps=args.steps,decomposition=(1,args.molecule_ranks,1,1,1))
+                        work_directory=work,dt=dt,max_steps=args.steps,decomposition=decomposition)
                     frames=[controller.observables];field_frames=[]
                 # Retain actual field-step0, then the established one-step hold.
                 zero=field.component_fields(indices).reshape((2,*shape))
@@ -187,7 +203,7 @@ def main():
                 'E':np.array([f[0] for f in field_frames]),'H':np.array([f[1] for f in field_frames]),
                 'field_step':np.arange(len(field_frames))},metadata={
                 'coupling':'one-way-host-MPI','material_id':'molecule','point_id':10,'field_ranks':args.field_ranks,
-                'molecule_ranks':args.molecule_ranks,'decomposition':[1,args.molecule_ranks,1,1,1],
+                'molecule_ranks':args.molecule_ranks,'decomposition':list(decomposition),
                 'feedback':False,'self_vacuum_reference':False,'caller_MPI_alive':True,
                 'worker_statistics':stats,'restore_statistics':restore_statistics if args.resume else None,'dt':dt,'physical_convergence':False,
                 'units':{'time':'atomic_time','dipole':'e*bohr','electronic_change':'e*bohr','E':'E:au','H':'H:au'}})

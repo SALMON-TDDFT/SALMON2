@@ -21,7 +21,7 @@ Use `--stop-after 2 --direct-checkpoint NEW_CHECKPOINT`, then run the same comma
 
 ### Use MPI inside the molecule
 
-Python partitions field and molecular ranks, then supplies the molecular communicator to Fortran for orbital parallelism. Use a calculation library containing the molecular MPI entry, its build.json and an existing C2H2 bundle. This differs from the executable-plus-worker-validation interface. Obtain a matching library or explicitly build it using [runtime preparation](RUNTIME.en.md); import never builds it.
+Python partitions field and molecular ranks, then supplies the molecular communicator to Fortran for orbital and spatial parallelism. Use a calculation library containing the molecular MPI entry, its build.json and an existing C2H2 bundle. This differs from the executable-plus-worker-validation interface. Obtain a matching library or explicitly build it using [runtime preparation](RUNTIME.en.md); import never builds it.
 
 These commands start calculations: run within allocated compute resources, not as management-node input checks.
 
@@ -29,7 +29,7 @@ These commands start calculations: run within allocated compute resources, not a
 OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mpi --field-ranks 2 --molecule-ranks 2 --steps 96 --ld
 ```
 
-Total MPI ranks equal field-ranks + molecule-ranks: four processes above, with no child process or nested launcher. Both groups advance in one job. Spatial component E/H drives the molecule; no molecular current or own-vacuum field is returned. Validated scope is the fixed LD/C2H2 geometry with one or two orbital-parallel molecular ranks and one thread per rank. Spatial decomposition inside the molecule, multiple nodes and larger rank counts require additional validation.
+Total MPI ranks equal field-ranks + molecule-ranks: four processes above, with no child process or nested launcher. Both groups advance in one job. Spatial component E/H drives the molecule; no molecular current or own-vacuum field is returned. Validated scope is the fixed LD/C2H2 geometry with one or two orbital-parallel molecular ranks, two spatial ranks along each of x/y/z, four spatial ranks in x/z, and one thread per rank. Multiple nodes, larger rank counts and combined orbital/spatial decomposition require additional validation.
 
 Choose a shared output/work directory accessible to both groups. The field root writes each E/H input, the molecular root reads it once and broadcasts only within its group. There are no application-wide per-step gathers. The library and mpi4py must use the same MPI implementation. Molecular ranks are dedicated while running; do not concurrently perform another calculation or relative-path file work in those processes.
 
@@ -42,7 +42,18 @@ This directly saves field/LD/molecule at molecular step 48 / field step 49. Keep
 
 Read response/arrays.npz and metadata in response/manifest.json. Molecular arrays use molecular_step; E/H uses field_step. Molecular n-1 -> n consumes field n,n+1, so there is one additional field frame. Resumed histories already include the saved prefix; do not concatenate the previous job again. Check zero updates in restore_statistics and new updates in worker_statistics. Equal histories and ordinary streams were verified for this configuration, not physical optical convergence.
 
-For component use, all molecular ranks call run_molecular_mpi(..., decomposition=(1, N, 1, 1, 1)); the field root drives MolecularMPIController. The former remains inside Fortran for the molecular lifetime, ending when the controller closes. Communicators and work directories remain caller-owned, and caller MPI survives return. This entry supports one lifetime per process. Controller save_direct_checkpoint()/restore_direct_checkpoint() directly save/load an unchanged layout. It does not promise general recovery from process/MPI/deep numerical failure or whole-application rollback after a partly failed restore. End the job on such a failure and restart from a saved state. Density/orbital-magnetization readout remains on the existing single-rank interface and is not exposed by the molecular MPI controller.
+Use `--molecule-grid NX NY NZ` to choose the molecular spatial decomposition. The default `1 1 1` keeps orbital decomposition. Its product must divide `--molecule-ranks`; the remaining factor divides orbitals. This changes neither the molecular grid size nor the FDTD decomposition.
+
+```sh
+# Two field ranks plus two molecular spatial ranks along z.
+OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-space --field-ranks 2 --molecule-ranks 2 --molecule-grid 1 1 2 --steps 96 --ld
+# Two field ranks plus four molecular spatial ranks in x/z.
+OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-space4 --field-ranks 2 --molecule-ranks 4 --molecule-grid 2 1 2 --steps 96 --ld
+```
+
+For spatial restart, retain the same grid/rank arguments in both launches. Add `--stop-after 48` to the first launch, then use a fresh output directory and `--resume SAVED_OUTPUT/checkpoint`. Keep `--steps 96` in both. Spatial runs differ from an independent one-rank control by less than 4e-13 in the observations. Direct restart with two z ranks or four x/z ranks matches all continuous histories and four ordinary streams bit-exactly, with zero restoration updates. These are connection/restart checks, not physical-convergence evidence.
+
+For component use, all molecular ranks call run_molecular_mpi(..., decomposition=(1, N_ob, NX, NY, NZ)); the field root drives MolecularMPIController. The former remains inside Fortran for the molecular lifetime, ending when the controller closes. N_ob is the orbital division count; molecular ranks equal N_ob*NX*NY*NZ. Supply the same decomposition to MolecularMPIController. Communicators and work directories remain caller-owned, and caller MPI survives return. This entry supports one lifetime per process. Controller save_direct_checkpoint()/restore_direct_checkpoint() directly save/load an unchanged layout. It does not promise general recovery from process/MPI/deep numerical failure or whole-application rollback after a partly failed restore. End the job on such a failure and restart from a saved state. Density/orbital-magnetization readout remains on the existing single-rank interface and is not exposed by the molecular MPI controller.
 
 ### Advance FDTD and the molecule in one launch
 

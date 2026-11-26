@@ -5021,3 +5021,24 @@ current queue; later completed entries supersede their matching scope.
   FDTD -> molecular TDDFT-only scope. Do not restart it implicitly.
 - Previously deferred fast-HSE electron-number and real-material grid-convergence
   campaigns remain deferred. Recheck their detailed dated records before resuming.
+
+
+### 2026-11-26: molecular spatial MPI verification
+
+- [x] Added explicit `--molecule-grid NX NY NZ` to the existing public sample;
+  orbital count follows the remaining factor of the molecular rank budget.
+  Invalid products are rejected before MPI initialization; default orbital use is unchanged.
+- [x] Compared separate one-rank C2H2 execution against spatial2 along each x/y/z
+  axis and spatial4 in x/z, all96steps. Dipole differences <=1.27e-13 e bohr,
+  electron number <=3.66e-13, energy <=8.99e-12 eV; field E/H are exact.
+- [x] Spatial2(z) and spatial4(x/z) joint field/LD/molecular direct process-exit
+  restart at48/49 matches every continuous history array and four ordinary
+  streams exactly. Restore updates0; continuation updates48. No numerical kernel
+  or existing validated binary was modified. See molecular-spatial-mpi-validation-2026-11-26.md.
+- [ ] Next: combined orbital/spatial decomposition, site MPI/multiple nodes and
+  transfer/I/O scaling, multiple molecular states per process, general composed
+  failure recovery. Changed-layout molecular restart remains unsupported here.
+  Physical convergence and feedback/radiation remain separate/deferred work.
+- Distribution follow-up: source54tests passed; extracted-sdist wheel built,
+  installed54tests passed, and installed six-rank spatial4 restart matches all
+  source continuous arrays/four output streams exactly with restore updates0.

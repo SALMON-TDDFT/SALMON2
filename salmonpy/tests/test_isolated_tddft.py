@@ -532,6 +532,20 @@ class ChargeDensityReadoutTests(unittest.TestCase):
 
 
 class LiveGridInputTests(unittest.TestCase):
+    def test_molecular_mpi_decomposition(self):
+        from salmonpy.examples.molecular_fdtd_mpi_response import molecular_decomposition
+        for ranks, grid, expected in (
+            (2, (1, 1, 1), (1, 2, 1, 1, 1)),
+            (2, (1, 1, 2), (1, 1, 1, 1, 2)),
+            (4, (2, 1, 1), (1, 2, 2, 1, 1)),
+        ):
+            with self.subTest(ranks=ranks, grid=grid):
+                self.assertEqual(molecular_decomposition(ranks, grid), expected)
+        for ranks, grid in ((2, (1, 1, 3)), (2, (0, 1, 2)), (0, (1, 1, 1))):
+            with self.subTest(ranks=ranks, grid=grid):
+                with self.assertRaises(ValueError):
+                    molecular_decomposition(ranks, grid)
+
     def test_target_step_contract_before_transfer(self):
         from types import SimpleNamespace
         from salmonpy.isolated_tddft import IsolatedTDDFTState
