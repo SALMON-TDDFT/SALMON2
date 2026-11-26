@@ -8,6 +8,12 @@ module tddft_worker
   public :: worker_performance_requested,worker_spin_supported
   public :: worker_solid_requested,worker_solid_load,worker_near_requested,worker_near_load
   public :: worker_E_requested, worker_reply_E,worker_norm_requested,worker_electron_number,worker_state_reply
+  public :: worker_read_line,worker_channel_context,worker_channel_begin,worker_channel_end,worker_host_requested
+  type worker_channel_context
+    integer::transport=0,controller=0,decomposition(5)=1
+  end type
+  ! Borrowed only during one blocking host call; the call frame owns the context.
+  type(worker_channel_context),pointer::host_channel=>null()
   ! Embedded mode is set only by the explicit host-MPI ABI, once per process.
   logical,public,save :: worker_embedded=.false.
   real(8),public,save :: embedded_dt
@@ -15,12 +21,92 @@ module tddft_worker
   real(8), save :: worker_initial_A(3)=0d0
   real(8),save :: worker_electron_number=0d0
 contains
+  logical function worker_host_requested()
+    worker_host_requested=associated(host_channel)
+  end function
+  subroutine worker_channel_begin(owner)
+    type(worker_channel_context),target,intent(inout)::owner
+    if(associated(host_channel))error stop 'molecular host channel already active'
+    host_channel=>owner
+  end subroutine
+  subroutine worker_channel_end()
+    nullify(host_channel)
+  end subroutine
+  subroutine channel_read(line,ios)
+#ifdef USE_MPI
+    use mpi,only:MPI_Recv,MPI_CHARACTER,MPI_STATUS_SIZE,MPI_SUCCESS
+#endif
+    character(*),intent(inout)::line
+    integer,intent(out)::ios
+#ifdef USE_MPI
+    integer::packet_status(MPI_STATUS_SIZE),ierr
+    call MPI_Recv(line,len(line),MPI_CHARACTER,host_channel%controller,4101, &
+                  host_channel%transport,packet_status,ierr)
+    ios=0
+    if(ierr/=MPI_SUCCESS)ios=1
+#else
+    ios=1
+#endif
+  end subroutine
+  subroutine channel_observation(step,values)
+#ifdef USE_MPI
+    use mpi,only:MPI_Send,MPI_DOUBLE_PRECISION
+#endif
+    integer,intent(in)::step
+    real(8),intent(in)::values(9)
+#ifdef USE_MPI
+    real(8)::packet(10)
+    integer::ierr
+    packet(1)=real(step,8);packet(2:10)=values
+    call MPI_Send(packet,10,MPI_DOUBLE_PRECISION,host_channel%controller,4102,host_channel%transport,ierr)
+#endif
+  end subroutine
+  subroutine channel_status(operation,status,step,updates)
+#ifdef USE_MPI
+    use mpi,only:MPI_Send,MPI_INTEGER
+#endif
+    integer,intent(in)::operation,status,step,updates
+#ifdef USE_MPI
+    integer::packet(4),ierr
+    packet=[operation,status,step,updates]
+    call MPI_Send(packet,4,MPI_INTEGER,host_channel%controller,4103,host_channel%transport,ierr)
+#endif
+  end subroutine
+
+  ! Control input belongs to the caller-selected material communicator.
+  ! Only its root owns the stream; no MPI_COMM_WORLD operation is introduced.
+  subroutine worker_read_line(line,ios,stream_unit)
+    use iso_fortran_env,only:input_unit
+    use parallelization,only:nproc_id_global,nproc_group_global
+    use communication,only:comm_is_root,comm_bcast
+    character(*),intent(out)::line
+    integer,intent(out)::ios
+    integer,optional,intent(in)::stream_unit
+    integer::unit
+    line='';ios=0;unit=input_unit
+    if(present(stream_unit))unit=stream_unit
+    if(comm_is_root(nproc_id_global))then
+      if(associated(host_channel))then
+        call channel_read(line,ios)
+      else
+        read(unit,'(a)',iostat=ios)line
+      endif
+    endif
+    call comm_bcast(ios,nproc_group_global)
+    if(ios==0)then
+      call comm_bcast(line,nproc_group_global)
+    else
+      line=''
+    endif
+  end subroutine
+
   logical function worker_performance_requested()
     character(16)::value
     integer::status
     ! One explicitly owned child process; never select embedded-host behavior.
     call get_environment_variable('SALMONPY_TDDFT_EXECUTION_MODE',value,status=status)
-    worker_performance_requested=.not.worker_embedded.and.status==0.and.trim(value)=='performance'
+    worker_performance_requested=.not.worker_embedded.and..not.associated(host_channel).and. &
+      status==0.and.trim(value)=='performance'
   end function
   logical function worker_norm_requested()
     character(8) :: value
@@ -32,7 +118,7 @@ contains
     character(8) :: value
     integer :: status
     call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
-    worker_requested=worker_embedded.or.(status==0.and.( &
+    worker_requested=associated(host_channel).or.worker_embedded.or.(status==0.and.( &
       trim(value)=='1'.or.trim(value)=='E3'.or.trim(value)=='E3N'.or. &
       trim(value)=='E3Y'.or.trim(value)=='E3M'))
   end function
@@ -41,16 +127,16 @@ contains
     character(8) :: value
     integer :: status
     call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
-    worker_E_requested=.not.worker_embedded.and.status==0.and. &
-      (trim(value)=='E3'.or.trim(value)=='E3N'.or.trim(value)=='E3Y'.or.trim(value)=='E3M')
+    worker_E_requested=associated(host_channel).or.(.not.worker_embedded.and.status==0.and. &
+      (trim(value)=='E3'.or.trim(value)=='E3N'.or.trim(value)=='E3Y'.or.trim(value)=='E3M'))
   end function
 
   logical function worker_nearfield_requested()
     character(8) :: value
     integer :: status
     call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
-    worker_nearfield_requested=.not.worker_embedded.and.status==0.and. &
-      (trim(value)=='E3N'.or.trim(value)=='E3Y'.or.trim(value)=='E3M')
+    worker_nearfield_requested=associated(host_channel).or.(.not.worker_embedded.and.status==0.and. &
+      (trim(value)=='E3N'.or.trim(value)=='E3Y'.or.trim(value)=='E3M'))
   end function
 
   logical function worker_solid_requested()
@@ -64,7 +150,8 @@ contains
     character(8)::value
     integer::status
     call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
-    worker_near_requested=.not.worker_embedded.and.status==0.and.trim(value)=='E3M'
+    worker_near_requested=associated(host_channel).or. &
+      (.not.worker_embedded.and.status==0.and.trim(value)=='E3M')
   end function
 
   subroutine worker_near_load(rt)
@@ -218,10 +305,12 @@ contains
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     character(32) :: command
+    character(131072)::initial_line
     integer :: ios,i,j
     logical :: plus_u_file
     if(.not.worker_requested()) return
-    if(.not.worker_embedded.and.nproc_size_global/=1) error stop 'SALMONpy TDDFT requires one MPI rank'
+    if(.not.worker_embedded.and..not.associated(host_channel).and.nproc_size_global/=1) &
+      error stop 'SALMONpy process worker requires one MPI rank'
     if(worker_E_requested()) then
       if(theory/='tddft_pulse'.or.yn_periodic/='n'.or.yn_md/='n') &
         error stop 'SALMONpy E worker requires isolated fixed-ion tddft_pulse'
@@ -292,7 +381,8 @@ contains
       nproc_rgrid=embedded_decomposition(3:5)
       ios=0; command='INIT'
     else
-      read(*,*,iostat=ios) command,dt,nt,worker_initial_A
+      call worker_read_line(initial_line,ios)
+      if(ios==0)read(initial_line,*,iostat=ios)command,dt,nt,worker_initial_A
     end if
     if(worker_E_requested()) then
       if(worker_performance_requested())then
@@ -310,6 +400,10 @@ contains
     do i=1,3
       if(.not.ieee_is_finite(worker_initial_A(i))) error stop 'SALMONpy: invalid initial A'
     end do
+    if(associated(host_channel))then
+      nproc_k=host_channel%decomposition(1);nproc_ob=host_channel%decomposition(2)
+      nproc_rgrid=host_channel%decomposition(3:5)
+    endif
     ! No external field or restart-output path can own the evolving state.
     if(worker_near_requested())yn_symmetrized_stencil='y'
     base_directory='./'
@@ -353,7 +447,7 @@ contains
     integer :: ios,i
     worker_next_A=.false.
     if(present(operation))operation=0
-    read(*,'(a)',iostat=ios) line
+    call worker_read_line(line,ios)
     if(ios<0) return
     if(ios/=0) error stop 'SALMONpy: command read failed'
     read(line,*,iostat=ios) command
@@ -372,6 +466,7 @@ contains
       case('GRID_E');operation=9
       case('ORBITAL_E');operation=10
       case('ORBITAL_AUDIT_E');operation=11
+      case('OBSERVE_E');operation=12
       end select
       if(operation/=0)then
         A=0d0;worker_next_A=.true.;return
@@ -419,13 +514,25 @@ contains
   end function
 
   subroutine worker_state_reply(operation,status,step,updates)
+    use parallelization,only:nproc_id_global
+    use communication,only:comm_is_root,comm_get_max
+    use parallelization,only:nproc_group_global
     use iso_fortran_env,only:output_unit
     integer,intent(in)::operation,status,step,updates
+    integer::agreed
+    agreed=status
+    if(associated(host_channel))call comm_get_max(agreed,nproc_group_global)
+    if(.not.comm_is_root(nproc_id_global))return
+    if(associated(host_channel))then
+      call channel_status(operation,agreed,step,updates);return
+    endif
     write(output_unit,'(a,4(1x,i0))')'SALMONPY_E_STATE_V1',operation,status,step,updates
     flush(output_unit)
   end subroutine
 
   subroutine worker_reply(step,J)
+    use parallelization,only:nproc_id_global
+    use communication,only:comm_is_root
     use iso_fortran_env, only: output_unit
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
@@ -444,6 +551,7 @@ contains
       endif
     end do
     endif
+    if(.not.comm_is_root(nproc_id_global))return
     if(worker_norm_requested())then
       write(output_unit,'(a,1x,i0,4(1x,es26.17e3))') trim(prefix),step,J,worker_electron_number
     else
@@ -452,6 +560,8 @@ contains
     flush(output_unit)
   end subroutine
   subroutine worker_reply_E(step,delta_dipole,total_dipole,electron_number,internal_energy,energy_fresh)
+    use parallelization,only:nproc_id_global
+    use communication,only:comm_is_root
     use iso_fortran_env, only: output_unit
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     integer,intent(in) :: step
@@ -468,6 +578,12 @@ contains
     end do
     if(.not.ieee_is_finite(electron_number))error stop 'SALMONpy: nonfinite electron number'
     if(.not.ieee_is_finite(internal_energy))error stop 'SALMONpy: nonfinite internal energy'
+    endif
+    if(.not.comm_is_root(nproc_id_global))return
+    if(associated(host_channel))then
+      call channel_observation(step,[delta_dipole,total_dipole,electron_number,internal_energy, &
+        merge(1d0,0d0,energy_fresh)])
+      return
     endif
     write(output_unit,'(a,1x,i0,9(1x,es26.17e3))') trim(prefix), &
       step,delta_dipole,total_dipole,electron_number,internal_energy,merge(1d0,0d0,energy_fresh)

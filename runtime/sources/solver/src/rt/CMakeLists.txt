@@ -1,5 +1,6 @@
 set(SOURCES
     tddft_worker.f90
+    molecular_mpi.f90
     dip.f90
     em_field.f90
     near_field_coupling.f90

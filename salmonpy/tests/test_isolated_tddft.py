@@ -548,3 +548,52 @@ class LiveGridInputTests(unittest.TestCase):
         self.assertIs(calls[0][0],field);self.assertEqual(calls[0][1],1)
         state._grid_stream_enabled=False
         with self.assertRaises(InputError):state.step_grid_field(field,step_index=1)
+
+        from salmonpy.isolated_tddft import MolecularMPIController
+        from salmonpy.errors import RuntimeFailure
+        import tempfile,json,subprocess,sys
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);work=root/'work';work.mkdir()
+            client=object.__new__(MolecularMPIController)
+            client.directory=work;client.dt=.01;client.capacity=4;client.step_index=0
+            client.decomposition=(1,2,1,1,1);client._identity='model-and-binary';client.closed=False
+            client.observables=state.observables;commands=[];client._send=commands.append
+            client._status=lambda op:dict(status=35,step=0,updates=0)
+            client._receive=lambda n:state.observables
+            with self.assertRaises(RuntimeFailure):client.step_grid_field(field,step_index=1)
+            self.assertEqual(commands,['GRID_E']);self.assertEqual(client.step_index,0)
+            commands.clear();client._status=lambda op:dict(status=0,step=0,updates=0)
+            client.step_grid_field(field,step_index=1)
+            self.assertEqual(commands,['GRID_E','STEP_E 0.00000000000000000e+00 0.00000000000000000e+00 0.00000000000000000e+00'])
+            packet=(work/'salmonpy-grid-frames.bin').read_bytes()
+            np.testing.assert_array_equal(np.frombuffer(packet[:24],dtype=np.int32),[16909060,1,1,2,2,2])
+            for rank in range(2):(work/f'isolated-state-{rank:08d}.bin').write_bytes(bytes([rank,17,23]))
+            (work/'trace.data').write_text('saved prefix\n')
+            client._status=lambda op:dict(status=0,step=1,updates=1)
+            archive=root/'saved';client.save_direct_checkpoint(archive)
+            self.assertFalse((work/'isolated-state-00000000.bin').exists())
+            restored=object.__new__(MolecularMPIController);restored.directory=root/'restored';restored.directory.mkdir()
+            restored.dt=.01;restored.capacity=4;restored.step_index=0;restored.decomposition=client.decomposition
+            restored._identity='wrong-model';calls=[];restored._send=calls.append
+            restored._status=lambda op:dict(status=0,step=1,updates=0)
+            restored._receive=lambda n:state.observables
+            with self.assertRaises(InputError):restored.restore_direct_checkpoint(archive)
+            self.assertEqual(calls,[])
+            restored._identity=client._identity
+            payload=archive/'isolated-state-00000001.bin';original=payload.read_bytes();payload.write_bytes(b'broken')
+            with self.assertRaises(InputError):restored.restore_direct_checkpoint(archive)
+            self.assertEqual(calls,[]);payload.write_bytes(original)
+            restored.restore_direct_checkpoint(archive)
+            self.assertEqual(calls,['LOAD_E','RELEASE_E','OBSERVE_E'])
+            self.assertEqual(restored.step_index,1)
+            self.assertEqual((restored.directory/'trace.data').read_text(),'saved prefix\n')
+        code="""import sys
+from salmonpy.isolated_tddft import run_molecular_mpi
+assert 'mpi4py.MPI' not in sys.modules
+try: run_molecular_mpi(None,None,None,controller_rank=0,work_directory='.',decomposition=(1,1,1,1,1))
+except ValueError: pass
+else: raise AssertionError('missing caller MPI accepted')
+assert 'mpi4py.MPI' not in sys.modules
+"""
+        subprocess.run([sys.executable,'-c',code],check=True,capture_output=True,text=True)

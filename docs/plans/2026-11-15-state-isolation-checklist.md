@@ -4994,3 +4994,30 @@ GSは許可済みの既存C2H2データだけを再利用。クラウド同期�
 - Shared the existing spatial coupling runner between the validation tool and a public one-way example; no duplicated numerical implementation.
 - One field group supplies full component E/H, no quantum-to-field current or own-vacuum group. Joint direct field/LD/molecular save/resume and explicit field/molecular step labels are verified.
 - Completed96molecular/97field steps; aligned saved-field response and field-only control match exactly. Installed stop48/field49 and separate-launch resume match every history array and four ordinary streams,0restore evolutions.45tests each on source/wheel. See docs/live-one-way-molecular-validation-2026-11-25.md. No molecular feedback or radiation was added.
+
+### 2026-11-26: molecular inner-MPI connection
+
+- [x] Worker bootstrap/commands are root-owned and broadcast only inside the supplied material group; replies are root-only. Two independent1/2-rank subgroup control tests preserve caller MPI.
+- [x] Tracked-file-only source preparation and complete executable build, prohibition audits,29related tests, and bit-exact four-step single-rank C2H2 E/H regression.
+- [x] Exposed a dedicated isolated E/H host-MPI entry and connected two field ranks to two molecular orbital ranks without a nested launcher. Actual 96-step C2H2 propagation and direct joint restart at molecular48/field49 agree with continuous execution; restoration adds zero updates. Separate-process workers remain single-rank. Details:2026-11-26-molecular-host-mpi.md.
+- [ ] Validate molecular spatial decomposition, multiple nodes/larger rank counts and multiple molecular states per process. General composed failure recovery and molecular feedback remain outside this completed one-way route.
+
+### 2026-11-26: latest list check after molecular two-level MPI
+
+Historical unchecked entries above are dated progress records, not a cumulative
+current queue; later completed entries supersede their matching scope.
+
+- Completed this campaign: caller-owned field2 + molecular orbital2 execution,
+  live one-way spatial E/H, joint direct process-exit restart, and installed-wheel
+  reproduction (53 targeted tests; full histories/four ordinary streams exact).
+- Next molecular work: validate spatial decomposition and additional rank counts;
+  then multi-node/site-MPI operation and shared-filesystem transfer costs. Multiple
+  molecular states per process and general composed rollback remain separate work.
+- Existing broader work: SOC restart across changed MPI layouts, physical
+  convergence of magnetic/SOC materials and fast-HSE SOC; cross-platform runtime
+  release/distribution and GPU/Fujitsu evidence. A local successful build is not
+  evidence for these environments.
+- Molecular radiation/feedback redesign remains deferred by the user's current
+  FDTD -> molecular TDDFT-only scope. Do not restart it implicitly.
+- Previously deferred fast-HSE electron-number and real-material grid-convergence
+  campaigns remain deferred. Recheck their detailed dated records before resuming.

@@ -13,7 +13,7 @@ from .ld import _array_unchecked
 from .sbe import _frozen,_integer
 
 __all__ = ['IsolatedRuntime','load_isolated_runtime','DipoleObservables','ChargeDensitySamples','OrbitalMagneticResponse',
-           'IsolatedTDDFTInitialState','IsolatedTDDFTState','IsolatedSavepoint']
+           'IsolatedTDDFTInitialState','IsolatedTDDFTState','IsolatedSavepoint','run_molecular_mpi','MolecularMPIController']
 _CAPABILITIES = {'isolated','pz','fixed-ions','middlepoint','single-rank','E-to-dipole','measured-electron-number','internal-energy-freshness','live-savepoint','direct-disk-state'}
 
 
@@ -252,12 +252,7 @@ class _EEngine(TDDFTState):
 
     def _stage_grid_field(self,window,n):
         if not self.usable:raise SnapshotError('live grid staging requires an accepted usable worker')
-        header=np.array([16909060,1,n,*window.counts],dtype=np.int32)
-        geometry=np.array([*window.center,*window.molecule_position,self.dt,*window.origin.ravel(),*window.spacing])
-        frames=np.stack((np.stack((window.E[0],window.H[0])),np.stack((window.E[1],window.H[1]))))
-        path=Path(self._work.name)/'run/salmonpy-grid-frames.bin'
-        with path.open('wb') as stream:
-            stream.write(header.tobytes());stream.write(geometry.tobytes());stream.write(frames.tobytes())
+        _write_grid_packet(Path(self._work.name)/'run/salmonpy-grid-frames.bin',window,n,self.dt)
         status,step,_=self._command('GRID_E',9)
         if status:raise InputError('live grid transfer rejected; check fixed geometry, target step and complete finite E/H: '+str(status))
         if step!=self._steps:raise RuntimeFailure('live grid staging advanced or changed the worker step')
@@ -853,3 +848,226 @@ class IsolatedTDDFTState:
     def close(self): self._engine.close()
     def __enter__(self): return self
     def __exit__(self,*args): self.close()
+
+
+def _caller_mpi():
+    import sys
+    mpi=sys.modules.get('mpi4py.MPI')
+    if mpi is None or not mpi.Is_initialized() or mpi.Is_finalized():
+        raise InputError('initialize MPI in the caller before using a molecular MPI group')
+    return mpi
+
+
+def run_molecular_mpi(build_record, solver_comm, control_comm, *, controller_rank,
+                      work_directory, input_file='input.inp', decomposition):
+    """Run one molecular lifetime collectively on caller-owned MPI ranks.
+
+    Blocking call on dedicated main-thread solver ranks. The external controller
+    sends INIT_E, STEP_E, GRID_E, PROBE_E and CLOSE on control_comm. No MPI launcher,
+    MPI initialization/finalization or process creation occurs here. Current host
+    scope is fixed-ion scalar PZ/direct E/H. Direct disk restore requires an
+    unchanged group layout and binary. Deep-error recovery remains separate.
+    """
+    import ctypes as c
+    import os
+    import threading
+    MPI=_caller_mpi()
+    error=None;descriptor=None
+    try:
+        if not MPI.Is_initialized() or MPI.Is_finalized():raise InputError('caller-owned live MPI required')
+        if threading.current_thread() is not threading.main_thread():raise InputError('main thread required')
+        rank=_integer(controller_rank,'controller_rank',0,control_comm.size-1)
+        if control_comm.rank==rank:raise InputError('controller must be outside the molecular group')
+        root=Path(work_directory).resolve(strict=True)
+        inp=Path(input_file)
+        if inp.is_absolute() or '..' in inp.parts:raise InputError('relative molecular input path required')
+        if not (root/inp).is_file():raise InputError('molecular input file missing')
+        layout=tuple(_integer(v,'decomposition',1,2**31-1) for v in decomposition)
+        if len(layout)!=5 or layout[0]!=1 or np.prod(np.asarray(layout,dtype=object))!=solver_comm.size:
+            raise InputError('isolated (k=1,orbital,x,y,z) decomposition must match solver group')
+        record=json.loads(Path(build_record).read_text())
+        library=Path(record['library']).resolve(strict=True)
+        if _digest(library)!=record['sha256']:raise InputError('molecular library checksum mismatch')
+        lib=c.CDLL(str(library))
+        from .api import query_host_abi,_bind_host_operations
+        query_host_abi(lib);_bind_host_operations(lib)
+        text=c.create_string_buffer(8192);active=c.c_int()
+        lib.sp_library(text,len(text),c.byref(active))
+        if not active.value or text.value.decode().strip()!=MPI.Get_library_version().rstrip('\x00').strip():
+            raise InputError('calculation library and mpi4py must use the same initialized MPI runtime')
+        try:probe=lib.sp_molecular_mpi_protocol
+        except AttributeError as exc:
+            raise InputError('calculation library lacks the molecular MPI entry; explicitly prepare a matching build') from exc
+        probe.argtypes=[];probe.restype=c.c_int
+        if probe()!=2:raise InputError('CPU molecular host-MPI protocol 2 required')
+        fn=lib.sp_molecular_mpi_run
+        fn.restype=c.c_int;fn.argtypes=[c.c_int,c.c_int,c.c_int,c.c_char_p,c.c_void_p]
+        descriptor=(str(root),str(inp),layout,record['sha256'],rank)
+    except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+    admissions=solver_comm.allgather((error,descriptor))
+    if any(item[0] for item in admissions):raise InputError(next(item[0] for item in admissions if item[0]))
+    if any(item[1]!=descriptor for item in admissions):raise InputError('molecular group configuration differs')
+    initial_error=None
+    if solver_comm.rank==0:
+        try:
+            marker=root/'salmonpy-molecular-initial.json'
+            if marker.exists():raise InputError('fresh molecular working directory required')
+            assets=[]
+            for path in sorted(root.rglob('*')):
+                if path.is_symlink():raise InputError('molecular input symlinks unsupported')
+                if path.is_file():assets.append((path.relative_to(root).as_posix(),_digest(path)))
+            identity=_fingerprint((tuple(assets),record['sha256']))
+            with marker.open('x') as stream:
+                stream.write(json.dumps({'identity':identity,'library_sha256':record['sha256']})+'\n')
+        except Exception as exc:initial_error=f'{type(exc).__name__}: {exc}'
+    errors=solver_comm.allgather(initial_error)
+    if any(errors):raise InputError(next(error for error in errors if error))
+    raw=np.ascontiguousarray(layout,dtype=np.int32)
+    previous=Path.cwd()
+    try:
+        os.chdir(root)
+        status=fn(solver_comm.py2f(),control_comm.py2f(),rank,os.fsencode(str(inp)),raw.ctypes.data)
+    finally:os.chdir(previous)
+    statuses=solver_comm.allgather(status)
+    if any(statuses):raise RuntimeFailure('molecular host-MPI exit status '+str(statuses))
+
+
+class MolecularMPIController:
+    """Root-only E/H controller for a dedicated run_molecular_mpi group.
+
+    Uses caller-owned MPI, shared working files and blocking point-to-point
+    commands. No process launch and no application-wide step collectives.
+    The caller owns job termination if a solver process or MPI fails. This is
+    not the process-isolated savepoint/recovery interface.
+    """
+    def __init__(self,control_comm,*,solver_root,work_directory,dt,max_steps,decomposition):
+        _caller_mpi()
+        self.comm=control_comm
+        self.root=_integer(solver_root,'solver_root',0,control_comm.size-1)
+        if self.root==control_comm.rank:raise InputError('separate molecular root required')
+        self.directory=Path(work_directory).resolve(strict=True)
+        self.dt=float(_real(dt,(),'dt'))
+        if self.dt<=0:raise InputError('positive dt required')
+        self.capacity=_integer(max_steps,'max_steps',1,2**31-2)
+        self.decomposition=tuple(_integer(v,'decomposition',1,2**31-1) for v in decomposition)
+        if len(self.decomposition)!=5 or self.decomposition[0]!=1:raise InputError('isolated decomposition required')
+        self.step_index=0;self.closed=False
+        self._send(f'INIT_E {self.dt:.17e} {self.capacity} 0 0 0')
+        self.observables=self._receive(0)
+        initial=json.loads((self.directory/'salmonpy-molecular-initial.json').read_text())
+        self._identity=_fingerprint((initial,self.dt,self.capacity,self.decomposition))
+
+    def _send(self,line):
+        MPI=_caller_mpi()
+        if self.closed:raise RuntimeFailure('molecular MPI controller is closed')
+        self.comm.Send([line.encode('ascii'),MPI.CHAR],dest=self.root,tag=4101)
+
+    def _receive(self,n):
+        value=np.empty(10)
+        self.comm.Recv(value,source=self.root,tag=4102)
+        value=_real(value,(10,),'molecular MPI response')
+        if value[0]!=n or value[9] not in (0.,1.):raise RuntimeFailure('molecular MPI response step/flag differs')
+        return DipoleObservables._from_worker(n*self.dt,value[1:],checked=True)
+
+    def step_grid_field(self,window,*,step_index,E_extra=(0.,0.,0.)):
+        from .near_field import GridFieldSeries
+        n=_integer(step_index,'step_index',1,self.capacity)
+        if n!=self.step_index+1:raise InputError('next molecular step required')
+        if not isinstance(window,GridFieldSeries) or len(window.times)!=2:
+            raise InputError('two-frame GridFieldSeries required')
+        if not np.isclose(window.times[1],self.dt,rtol=1e-12,atol=0.) or not np.isclose(window.time_origin,n*self.dt,rtol=1e-12,atol=1e-15):
+            raise InputError('field frames n,n+1 at the molecular dt required')
+        extra=_real(E_extra,(3,),'additional uniform E')
+        _write_grid_packet(self.directory/'salmonpy-grid-frames.bin',window,n,self.dt)
+        self._send('GRID_E');status=self._status(9)
+        if status['status'] or status['step']!=self.step_index:
+            raise RuntimeFailure('molecular MPI grid staging failed: '+str(status))
+        self._send('STEP_E '+' '.join(f'{v:.17e}' for v in extra))
+        result=self._receive(n);self.step_index=n;self.observables=result
+        return result
+
+    def _status(self,operation):
+        value=np.empty(4,dtype=np.int32)
+        self.comm.Recv(value,source=self.root,tag=4103)
+        if value[0]!=operation:raise RuntimeFailure('molecular MPI operation reply differs')
+        return dict(status=int(value[1]),step=int(value[2]),updates=int(value[3]))
+
+    def worker_statistics(self):
+        self._send('PROBE_E')
+        result=self._status(5)
+        if result.pop('status'):raise RuntimeFailure('molecular MPI counter query failed')
+        return result
+
+    def save_direct_checkpoint(self,directory):
+        """Save rank-owned electronic payloads plus the root output streams."""
+        import shutil
+        root=Path(directory).resolve()
+        root.mkdir(parents=True,exist_ok=False)
+        self._send('SAVE_E');result=self._status(6)
+        if result['status'] or result['step']!=self.step_index:
+            raise RuntimeFailure('molecular MPI save failed: '+str(result))
+        files={}
+        ranks=int(np.prod(np.asarray(self.decomposition,dtype=object)))
+        # Retire only the transient files owned by this completed SAVE_E.
+        for rank in range(ranks):
+            source=self.directory/f'isolated-state-{rank:08d}.bin'
+            target=root/source.name
+            shutil.copy2(source,target);files[target.name]=_digest(target)
+        streams={}
+        for source in sorted(self.directory.glob('*.data')):
+            target=root/source.name
+            shutil.copy2(source,target);streams[target.name]=_digest(target)
+        metadata={'schema':'salmonpy.molecular-mpi-checkpoint/1','identity':self._identity,
+                  'step':self.step_index,'ranks':ranks,'files':files,'streams':streams}
+        (root/'manifest.json').write_text(json.dumps(metadata,indent=2)+'\n')
+        # The archive remains intact; remove working SAVE files so a later save
+        # can use Fortran status=new without overwriting a prior archive.
+        for name in files:(self.directory/name).unlink()
+        return metadata
+
+    def restore_direct_checkpoint(self,directory):
+        """Restore into a fresh group without replay; errors are not group rollback."""
+        import shutil
+        root=Path(directory).resolve()
+        if self.step_index!=0:raise InputError('fresh molecular MPI group required for restore')
+        metadata=json.loads((root/'manifest.json').read_text())
+        ranks=int(np.prod(np.asarray(self.decomposition,dtype=object)))
+        expected={f'isolated-state-{rank:08d}.bin' for rank in range(ranks)}
+        if (metadata.get('schema')!='salmonpy.molecular-mpi-checkpoint/1' or
+                metadata.get('identity')!=self._identity or metadata.get('ranks')!=ranks or
+                set(metadata.get('files',{}))!=expected):
+            raise InputError('molecular MPI checkpoint input/binary/layout differs')
+        step=_integer(metadata.get('step'),'checkpoint step',0,self.capacity)
+        streams=metadata.get('streams',{})
+        if not isinstance(streams,dict):raise InputError('molecular stream inventory required')
+        for name,sha in {**metadata['files'],**streams}.items():
+            if (not isinstance(name,str) or Path(name).name!=name or name in ('.','..') or
+                    (name not in expected and not name.endswith('.data'))):
+                raise InputError('invalid molecular checkpoint filename')
+            path=root/name
+            if path.is_symlink() or not path.is_file() or _digest(path)!=sha:
+                raise InputError('molecular MPI checkpoint checksum differs')
+        for name in expected:shutil.copy2(root/name,self.directory/name)
+        self._send('LOAD_E');result=self._status(7)
+        if result['status'] or result['step']!=step or result['updates']!=0:
+            raise RuntimeFailure('molecular MPI restore failed: '+str(result))
+        # LOAD_E closed the fresh output streams; replace the initial prefix
+        # before reconnecting the existing owning units for append.
+        for name in streams:shutil.copy2(root/name,self.directory/name)
+        self._send('RELEASE_E');result=self._status(3)
+        if result['status']:raise RuntimeFailure('molecular MPI stream reconnection failed: '+str(result))
+        self._send('OBSERVE_E')
+        self.observables=self._receive(step);self.step_index=step
+        for name in expected:(self.directory/name).unlink()
+        return self.observables
+
+    def close(self):
+        if not self.closed:self._send('CLOSE');self.closed=True
+
+
+def _write_grid_packet(path,window,n,dt):
+    header=np.array([16909060,1,n,*window.counts],dtype=np.int32)
+    geometry=np.array([*window.center,*window.molecule_position,dt,*window.origin.ravel(),*window.spacing])
+    frames=np.stack((np.stack((window.E[0],window.H[0])),np.stack((window.E[1],window.H[1]))))
+    with Path(path).open('wb') as stream:
+        stream.write(header.tobytes());stream.write(geometry.tobytes());stream.write(frames.tobytes())

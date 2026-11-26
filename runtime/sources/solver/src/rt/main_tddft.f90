@@ -22,6 +22,7 @@ subroutine main_tddft
 use tddft_worker
 use em_field,only:apply_near_magnetic,activate_near_magnetic
 use salmonpy_step_output
+use sendrecv_grid,only:dealloc_cache
 use dip, only: subdip,calc_dip
 use density_matrix, only: calc_current
 use hamiltonian, only: update_kvector_nonlocalpt
@@ -32,8 +33,8 @@ use exx_native,only:exx_bind_system,exx_unbind_system
 use math_constants, only: pi
 use salmon_global
 use structures
-use parallelization, only: nproc_group_global
-use communication, only: comm_is_root, comm_sync_all, comm_bcast
+use parallelization, only: nproc_group_global,nproc_size_global
+use communication, only: comm_is_root, comm_sync_all, comm_bcast,comm_get_max
 use salmon_xc, only: finalize_xc
 use timer
 use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
@@ -173,6 +174,13 @@ itt=Mit
 TE : do while(itt<nt.or.worker_E_requested())
   if(worker_requested()) then
     if(.not.worker_next_A(worker_A,worker_operation,rt,itt+1)) exit TE
+    if(worker_operation==12)then
+      call calc_dip(info%icomm_r,lg,mg,system,rho_s,worker_density_integral)
+      worker_electron_number=worker_density_integral(4)*system%Hvol
+      call worker_reply_E(itt,rt%dDp_e(:,itt),rt%Dp_e(:,itt)+rt%Dp_i(:,itt),worker_electron_number, &
+        energy%E_tot,itt==0.or.itt==1.or.itt==nt.or.mod(itt,out_rt_energy_step)==0)
+      cycle TE
+    endif
     if(worker_operation/=0)then
       call isolated_state_control(worker_operation,worker_status)
       call worker_state_reply(worker_operation,worker_status,itt,worker_updates)
@@ -273,7 +281,14 @@ close(030) ! laser
 
 ! Worker outputs are consumed at each endpoint. Do not analyze uncomputed tail.
 if(worker_requested()) then
-  if(comm_is_root(nproc_id_global)) close(ofl%fh_rt)
+  if(comm_is_root(nproc_id_global))then
+    close(ofl%fh_rt)
+    if(worker_host_requested())close(ofl%fh_rt_energy)
+  endif
+  if(worker_host_requested())then
+    call dealloc_cache(srg)
+    call dealloc_cache(srg_scalar)
+  endif
   call finalize_xc(xc_func)
   return
 end if
@@ -319,6 +334,10 @@ recursive subroutine isolated_state_control(operation,status)
  integer,intent(in)::operation
  integer,intent(out)::status
  status=0
+ ! Read-only density/magnetic exports still have single-rank assumptions.
+ if(worker_host_requested().and.(operation==8.or.operation==10.or.operation==11))then
+  status=15;return
+ endif
  select case(operation)
  case(1)
   if(allocated(worker_saved))then
@@ -328,10 +347,15 @@ recursive subroutine isolated_state_control(operation,status)
      yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n'.or.yn_out_current_decomposed/='n'.or.yn_out_rvf_rt/='n')then
    status=15;return
   endif
-  call step_output_capture(worker_outputs,ofl,status)
+  if(comm_is_root(nproc_id_global))call step_output_capture(worker_outputs,ofl,status)
+  if(worker_host_requested())call comm_get_max(status,nproc_group_global)
   if(status/=0)return
   allocate(worker_saved,stat=status)
-  if(status/=0)return
+  if(worker_host_requested())call comm_get_max(status,nproc_group_global)
+  if(status/=0)then
+    if(allocated(worker_saved))deallocate(worker_saved)
+    return
+  endif
     worker_saved%spsi_in=spsi_in
     worker_saved%spsi_out=spsi_out
     worker_saved%tpsi=tpsi
@@ -361,7 +385,8 @@ recursive subroutine isolated_state_control(operation,status)
   endif
   ! A partial close must suspend further writes until explicit reconnection.
   worker_outputs_closed=.true.
-  call step_output_close(worker_outputs,status)
+  if(comm_is_root(nproc_id_global))call step_output_close(worker_outputs,status)
+  if(worker_host_requested())call comm_get_max(status,nproc_group_global)
   if(status/=0)return
     spsi_in=worker_saved%spsi_in
     spsi_out=worker_saved%spsi_out
@@ -394,7 +419,8 @@ recursive subroutine isolated_state_control(operation,status)
   if(.not.allocated(worker_saved))then
    status=14;return
   endif
-  call step_output_reopen(worker_outputs,status,ofl)
+  if(comm_is_root(nproc_id_global))call step_output_reopen(worker_outputs,status,ofl)
+  if(worker_host_requested())call comm_get_max(status,nproc_group_global)
   if(status/=0)return
   worker_outputs_closed=.false.
   if(operation==3)deallocate(worker_saved)
@@ -414,6 +440,7 @@ recursive subroutine isolated_state_control(operation,status)
   call isolated_state_control(1,status)
   if(status/=0)return
   call isolated_disk_io(.true.,status)
+  if(worker_host_requested())call comm_get_max(status,nproc_group_global)
   if(status/=0)then
    deallocate(worker_saved);return
   endif
@@ -443,6 +470,9 @@ subroutine isolated_grid_stage(status)
  integer(8)::bytes,position_in_file
  status=34
  if(.not.allocated(rt%near_grid_values))return
+ if(worker_host_requested())then
+   call isolated_grid_stage_host(status);return
+ endif
  n=itt+1
  if(n<1.or.n>rt%max_steps)return
  status=35
@@ -504,6 +534,95 @@ subroutine isolated_grid_stage(status)
  status=0;return
 900 continue
  close(u,iostat=close_ios)
+end subroutine
+
+! Host root reads once; only the owning molecular group receives the frames.
+subroutine isolated_grid_stage_host(status)
+ use iso_c_binding,only:c_int
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ use salmonpy_grid_field,only:grid_validate,grid_values
+#ifdef USE_MPI
+ use mpi,only:MPI_Bcast,MPI_DOUBLE_PRECISION,MPI_SUCCESS
+#endif
+ integer,intent(out)::status
+ integer(c_int)::header(6)
+ integer::n,u,ios,close_ios,astat,k,valid,corner,d,index(3),atom,j,ilma,ierr
+ integer(8)::bytes,position_in_file
+ real(8)::geometry(7),origins(3,3,2),spacing(3),point(3),mapped(3),ev(3),hv(3)
+ real(8),allocatable::frames(:,:,:,:,:,:)
+ status=34;n=itt+1
+ if(.not.allocated(rt%near_grid_values))return
+ if(n<1.or.n>rt%max_steps)return
+ if(6_8*product(int(rt%near_grid_counts,8))*2_8>huge(1))return
+ allocate(frames(3,rt%near_grid_counts(1),rt%near_grid_counts(2),rt%near_grid_counts(3),2,2),stat=astat)
+ status=0
+ if(astat/=0)status=32
+ call comm_get_max(status,nproc_group_global)
+ if(status/=0)return
+ if(comm_is_root(nproc_id_global))then
+   status=35
+   open(newunit=u,file='salmonpy-grid-frames.bin',access='stream',form='unformatted', &
+        status='old',action='read',iostat=ios)
+   if(ios==0)then
+     read(u,iostat=ios)header
+     if(ios==0)then
+       if(any(header/=[16909060_c_int,1_c_int,int(n,c_int),int(rt%near_grid_counts,c_int)]))ios=1
+     endif
+     if(ios==0)read(u,iostat=ios)geometry,origins,spacing
+     if(ios==0)read(u,iostat=ios)frames
+     if(ios==0)then
+       inquire(unit=u,size=bytes,pos=position_in_file,iostat=ios)
+       if(ios==0.and.bytes/=position_in_file-1_8)ios=1
+     endif
+     close(u,iostat=close_ios)
+     if(ios==0.and.close_ios==0)status=0
+   endif
+ endif
+ call comm_bcast(status,nproc_group_global)
+ if(status/=0)return
+ call comm_bcast(geometry,nproc_group_global)
+ call comm_bcast(origins,nproc_group_global)
+ call comm_bcast(spacing,nproc_group_global)
+#ifdef USE_MPI
+ call MPI_Bcast(frames,size(frames),MPI_DOUBLE_PRECISION,0,nproc_group_global,ierr)
+ if(ierr/=MPI_SUCCESS)status=35
+#else
+ status=15
+#endif
+ if(any(geometry(1:3)/=rt%near_geometry(1:3)).or.any(geometry(4:6)/=rt%near_grid_center))status=35
+ if(.not.ieee_is_finite(geometry(7)))status=35
+ if(abs(geometry(7)-rt%time_step)>1d-12*rt%time_step)status=35
+ if(any(origins/=rt%near_grid_origins).or.any(spacing/=rt%near_grid_spacing))status=35
+ do k=1,2
+   call grid_validate(rt%near_grid_counts,origins,spacing,frames(:,:,:,:,:,k),valid)
+   if(valid/=0)status=35
+ enddo
+ if(status==0.and..not.rt%near_magnetic.and.any(frames(:,:,:,:,2,:)/=0d0))then
+   do corner=0,7
+     do d=1,3
+       index(d)=merge(mg%ie_array(d),mg%is_array(d),btest(corner,d-1))
+       point(d)=lg%coordinate(lg%is(d),d)+(index(d)-lg%is(d))*system%Hgs(d)
+     enddo
+     mapped=rt%near_grid_center+point-rt%near_geometry(1:3)
+     call grid_values(rt%near_grid_counts,origins,spacing,frames(:,:,:,:,:,1),mapped,ev,hv,valid)
+     if(valid/=0)status=35
+   enddo
+   do ilma=1,ppg%nlma
+     atom=ppg%ia_tbl(ilma)
+     mapped=rt%near_grid_center+system%Rion(:,atom)-rt%near_geometry(1:3)
+     call grid_values(rt%near_grid_counts,origins,spacing,frames(:,:,:,:,:,1),mapped,ev,hv,valid)
+     if(valid/=0)status=35
+     do j=1,ppg%mps(atom)
+       mapped=rt%near_grid_center+system%Rion(:,atom)+ppg%rxyz(:,j,atom)-rt%near_geometry(1:3)
+       call grid_values(rt%near_grid_counts,origins,spacing,frames(:,:,:,:,:,1),mapped,ev,hv,valid)
+       if(valid/=0)status=35
+     enddo
+   enddo
+ endif
+ call comm_get_max(status,nproc_group_global)
+ if(status/=0)return
+ rt%near_grid_values(:,:,:,:,:,n:n+1)=frames
+ if(any(frames(:,:,:,:,2,:)/=0d0))rt%near_magnetic=.true.
 end subroutine
 
 ! Read-only -d<E>/dH query. All scratch/model copies are local to this operation.
@@ -661,7 +780,9 @@ subroutine isolated_disk_io(reading,status)
  integer,intent(out)::status
  integer::u,ios,close_status,header(8),expected(8),extra,grid_step,grid_status,k
  real(8)::saved_dt,cell(3,3)
- character(32)::magic
+ character(32)::magic,expected_magic
+ character(80)::filename
+ integer::layout(7),saved_layout(7)
  worker_checkpoint_limit=max(64_8*(int(nt,8)+1_8),64_8*int(system%ngrid,8))
  if(allocated(spsi_in%zwf))worker_checkpoint_limit=max(worker_checkpoint_limit,size(spsi_in%zwf,kind=8))
  if(allocated(spsi_in%rwf))worker_checkpoint_limit=max(worker_checkpoint_limit,size(spsi_in%rwf,kind=8))
@@ -670,11 +791,18 @@ subroutine isolated_disk_io(reading,status)
   worker_checkpoint_limit=max(worker_checkpoint_limit,size(rt%near_grid_values,kind=8))
  expected=[1,nt,system%nspin,system%no,system%nk,lg%num]
  header=expected;saved_dt=dt;cell=system%primitive_a;magic='SALMONPY_ISOLATED_DIRECT_V7'
+ filename='isolated-state.bin'
+ layout=[nproc_size_global,nproc_id_global,nproc_k,nproc_ob,nproc_rgrid]
+ if(worker_host_requested())then
+   magic='SALMONPY_ISOLATED_MPI_V1'
+   write(filename,'(a,i8.8,a)')'isolated-state-',nproc_id_global,'.bin'
+ endif
+ expected_magic=magic
  if(reading)then
-  open(newunit=u,file='isolated-state.bin',access='stream',form='unformatted',status='old', &
+  open(newunit=u,file=trim(filename),access='stream',form='unformatted',status='old', &
     action='read',iostat=ios)
  else
-  open(newunit=u,file='isolated-state.bin',access='stream',form='unformatted',status='new', &
+  open(newunit=u,file=trim(filename),access='stream',form='unformatted',status='new', &
     action='write',iostat=ios)
  endif
  status=ios
@@ -682,11 +810,19 @@ subroutine isolated_disk_io(reading,status)
  if(reading)then
   read(u,iostat=ios)magic,header,saved_dt,cell
   if(ios==0)then
-   if(magic/='SALMONPY_ISOLATED_DIRECT_V7'.or.any(header/=expected))ios=1
+   if(magic/=expected_magic.or.any(header/=expected))ios=1
    if(saved_dt/=dt.or.any(cell/=system%primitive_a))ios=1
   endif
  else
   write(u,iostat=ios)magic,header,saved_dt,cell
+ endif
+ if(ios==0.and.worker_host_requested())then
+   if(reading)then
+     read(u,iostat=ios)saved_layout
+     if(ios==0.and.any(saved_layout/=layout))ios=1
+   else
+     write(u,iostat=ios)layout
+   endif
  endif
  if(ios==0)call isolated_payload_io(u,reading,worker_saved,ios)
  if(ios==0.and.reading)then

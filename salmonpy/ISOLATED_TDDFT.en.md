@@ -1,6 +1,6 @@
 # Isolated TDDFT: E input and named dipoles
 
-Explicit process-isolated PZ, fixed ions, unpolarized scalar pseudopotentials and middlepoint propagation. Crystalline TDDFT/SBE remain A-driven. The response is a charge dipole, not a current density. Grid, dt and electronic-box convergence remain the user's responsibility.
+PZ, fixed ions, unpolarized scalar pseudopotentials and middlepoint propagation. Choose a separate molecular process or caller-owned molecular MPI ranks. Crystalline TDDFT/SBE remain A-driven. The response is a charge dipole, not a current density. Grid, dt and electronic-box convergence remain the user's responsibility.
 
 ## Choose a calculation
 
@@ -18,6 +18,31 @@ Prepare the existing GS bundle with matching `salmonpy-near-eh.dat` grid geometr
 Frames are numbered 0..N+1 at constant dt. Molecular step n-1 -> n uses frames n,n+1. `history.window(step_index=n,dt=dt)` constructs that pair without fitting, spatial averaging or temporal interpolation. The Fortran worker performs spatial interpolation and the molecular path-integral coupling. Source `time_origin` is recorded as provenance; it does not recreate earlier molecular excitation.
 
 Use `--stop-after 2 --direct-checkpoint NEW_CHECKPOINT`, then run the same command with a new output directory and `--resume-direct NEW_CHECKPOINT`. Restore requires the same full history, prepared geometry, dt, capacity and runtime. The saved state retains its staged fields; resumption starts at the next molecular step without replay. Inspect `restore_statistics` and `final_statistics` in the output metadata. Outputs include molecular step numbers, dipole, electronic change, electron number and, when available at every frame, internal energy. Availability is recorded. No auxiliary uniform-E archive is required.
+
+### Use MPI inside the molecule
+
+Python partitions field and molecular ranks, then supplies the molecular communicator to Fortran for orbital parallelism. Use a calculation library containing the molecular MPI entry, its build.json and an existing C2H2 bundle. This differs from the executable-plus-worker-validation interface. Obtain a matching library or explicitly build it using [runtime preparation](RUNTIME.en.md); import never builds it.
+
+These commands start calculations: run within allocated compute resources, not as management-node input checks.
+
+```sh
+OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mpi --field-ranks 2 --molecule-ranks 2 --steps 96 --ld
+```
+
+Total MPI ranks equal field-ranks + molecule-ranks: four processes above, with no child process or nested launcher. Both groups advance in one job. Spatial component E/H drives the molecule; no molecular current or own-vacuum field is returned. Validated scope is the fixed LD/C2H2 geometry with one or two orbital-parallel molecular ranks and one thread per rank. Spatial decomposition inside the molecule, multiple nodes and larger rank counts require additional validation.
+
+Choose a shared output/work directory accessible to both groups. The field root writes each E/H input, the molecular root reads it once and broadcasts only within its group. There are no application-wide per-step gathers. The library and mpi4py must use the same MPI implementation. Molecular ranks are dedicated while running; do not concurrently perform another calculation or relative-path file work in those processes.
+
+```sh
+OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mpi-first --field-ranks 2 --molecule-ranks 2 --steps 96 --ld --stop-after 48
+OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mpi-resumed --field-ranks 2 --molecule-ranks 2 --steps 96 --ld --resume run-mpi-first/checkpoint
+```
+
+This directly saves field/LD/molecule at molecular step 48 / field step 49. Keep capacity 96, inputs, binary, MPI decomposition and thread settings for restart. Electronic payloads are rank-distinct. Input/binary/layout and file consistency are checked before loading. No elapsed evolution is replayed. Migration to a different MPI layout is not supported by this entry.
+
+Read response/arrays.npz and metadata in response/manifest.json. Molecular arrays use molecular_step; E/H uses field_step. Molecular n-1 -> n consumes field n,n+1, so there is one additional field frame. Resumed histories already include the saved prefix; do not concatenate the previous job again. Check zero updates in restore_statistics and new updates in worker_statistics. Equal histories and ordinary streams were verified for this configuration, not physical optical convergence.
+
+For component use, all molecular ranks call run_molecular_mpi(..., decomposition=(1, N, 1, 1, 1)); the field root drives MolecularMPIController. The former remains inside Fortran for the molecular lifetime, ending when the controller closes. Communicators and work directories remain caller-owned, and caller MPI survives return. This entry supports one lifetime per process. Controller save_direct_checkpoint()/restore_direct_checkpoint() directly save/load an unchanged layout. It does not promise general recovery from process/MPI/deep numerical failure or whole-application rollback after a partly failed restore. End the job on such a failure and restart from a saved state. Density/orbital-magnetization readout remains on the existing single-rank interface and is not exposed by the molecular MPI controller.
 
 ### Advance FDTD and the molecule in one launch
 
@@ -84,7 +109,7 @@ python -m salmonpy.examples.molecular_grid_response salmon validation.json molec
 python -m salmonpy.examples.molecular_grid_response salmon validation.json molecule-input rt.inp FIELDS.npz result-2 --resume-direct checkpoint-2
 ```
 
-For uninterrupted evolution, omit `--stop-after` and `--direct-checkpoint` and choose a different output directory. These commands start the molecule only, not an MPI FDTD calculation. Current molecular scope: PZ, fixed ions, unpolarized scalar pseudopotentials, CPU one rank.
+For uninterrupted evolution, omit `--stop-after` and `--direct-checkpoint` and choose a different output directory. These commands start the molecule only, not an MPI FDTD calculation. This saved-field route uses PZ, fixed ions, unpolarized scalar pseudopotentials and one CPU rank.
 
 ### Read and join output segments
 

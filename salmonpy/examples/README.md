@@ -261,6 +261,7 @@ See [CONFIG.en.md](../CONFIG.en.md) / [CONFIG.md](../CONFIG.md).
 | [mpi_recorded_material.py](mpi_recorded_material.py) | 記録付き自作物質／SBEの直列・MPI比較 | 3 ranks; optional SBE catalog |
 | [mpi_point_identity.py](mpi_point_identity.py) | MPIで点IDと材料情報を保持 | 3 ranks; new output |
 | [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1次元場と独立TDDFT群を結合 | 3 ranks with --material-ranks 1; 計算処理 build and GS |
+| [molecular_fdtd_mpi_response.py](molecular_fdtd_mpi_response.py) | 場と分子内部の二重MPI・直接保存／再開 | 固定C2H2例。MPI総数＝場＋分子、子プロセスなし。[手順](../ISOLATED_TDDFT.md#one-way-grid) |
 | [molecular_fdtd_response.py](molecular_fdtd_response.py) | 一度の起動でLD/FDTD→分子TDDFT、一括保存・再開 | 固定C2H2例。2または3 MPIランク＋分子ワーカー。[手順](../ISOLATED_TDDFT.md#one-way-grid) |
 | [molecular_grid_response.py](molecular_grid_response.py) | 空間E/Hによる一方向の分子励起・直接再開 | 検証済み実行ファイル・GS入力一式・格子形式FIELDS.npz。[準備手順](../ISOLATED_TDDFT.md#one-way-grid) |
 | [isolated_response.py](isolated_response.py) | 孤立系のE駆動・双極子出力 | Validated E-worker, receipt, GS bundle, E NPZ |
