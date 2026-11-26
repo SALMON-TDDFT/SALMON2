@@ -1,7 +1,8 @@
 """Experimental native E/H-to-A/J coupling on separate field/material MPI groups.
 
-E is at native time n*dt. Electronic local time n*dt corresponds to field clock
-(n+1/2)*dt; native saved H is centered at E time, not the raw H endpoint.
+For equal steps, E is at n*dt and electronic local n*dt maps to (n+1/2)*dt.
+FieldSubcycledStepper instead records both steps and origin dt_field/2 explicitly.
+Saved H is centered at E time, not the raw H endpoint.
 """
 from .errors import InputError, InputTypeError, NumericalError, RuntimeFailure
 from pathlib import Path
@@ -17,7 +18,7 @@ from .fdtd import FDTD,FDTDMPI,PlaneWave
 from .tddft import _digest
 from .timing import TimeSpec,InputPort,OutputPort,check_loop
 
-#: Electronic local time n*dt is field clock (n+1/2)*dt in the native E/H scheme.
+#: Equal-step interface: electronic local n*dt maps to field (n+1/2)*dt.
 ELECTRONIC_CLOCK_OFFSET='1/2'
 
 
@@ -1012,3 +1013,99 @@ class _BoxEnergyObserver:
         return dict(available=True,step=field.step_index,units='hartree',
                     lower=self.box[0].tolist(),upper=self.box[1].tolist(),
                     **{name:float(value) for name,value in zip(self._names,values)})
+
+
+class FieldSubcycledStepper:
+    """A-driven matter updates with several native E/H updates per matter step.
+
+    Hold the last accepted charge current during the field substeps. Exchange
+    endpoint A and new j once per matter step. No predictor, implicit solve,
+    substep current interpolation or whole-cycle rollback is implied.
+    All ranks call step in the same order; optional field-only callbacks bracket
+    each actual field update and may be used for read-only energy observations.
+    Callbacks must obey matching field-group collective order; generic local
+    callback/OS/MPI failure recovery is outside this scheduler contract.
+    """
+    def __init__(self,response,field=None,*,field_steps):
+        self.response=response;self.field=field;self.step_index=0
+        context=response.context;error=None
+        try:
+            if isinstance(field_steps,(bool,np.bool_)) or not isinstance(field_steps,(int,np.integer)) or field_steps<1:
+                raise InputError('field_steps must be a positive integer')
+            if response.closed or response.failed or response.step_index!=0:
+                raise InputError('field substeps require a fresh response')
+            if getattr(response,'_field_contracts',None) is not None:
+                raise InputError('field substeps currently require A-driven response states')
+            self.field_steps=int(field_steps);self.field_dt=response.dt/self.field_steps
+            if context.group.role=='field':
+                if not isinstance(field,NativeEHField) or field.context is not context:
+                    raise InputError('matching native E/H field required')
+                if field.closed or field.failed or field.step_index!=0 or field.point_ids!=context.plan.point_ids:
+                    raise InputError('fresh matching field points required')
+                if not np.isclose(field.dt,self.field_dt,rtol=32*np.finfo(float).eps,atol=0):
+                    raise InputError('electronic dt must equal field_steps times field dt')
+            elif field is not None:raise InputError('material ranks must not provide a field')
+        except Exception as exc:error=str(exc)
+        response.agree(error)
+        descriptor=(self.field_steps,self.field_dt,response.dt)
+        local=context.solver_comm.allgather(descriptor)
+        groups=context.leaders.allgather(descriptor) if context.is_leader else None
+        error='field-step parameters differ across ranks' if any(v!=descriptor for v in local) else None
+        if groups is not None and any(v!=descriptor for v in groups):error='field-step parameters differ across groups'
+        response.agree(error)
+        # Interface time is the material-local clock; physical origin is dt_field/2.
+        interface=TimeSpec(response.dt,(InputPort('j',lag=1,uses_t0=False),),(OutputPort('A'),))
+        matter=response.timing_records();error=None
+        try:
+            for record in matter.values():
+                spec=TimeSpec.from_dict(record)
+                if len(spec.inputs)!=1 or spec.input('A') is None or spec.output('j') is None:
+                    raise InputError('field substeps require endpoint A in and charge current j out')
+                check_loop(interface,spec)
+        except Exception as exc:error=str(exc)
+        response.agree(error)
+        self.timing={'scheme':'salmonpy.field-substeps-held-current/1',
+            'field_dt':self.field_dt,'electronic_dt':response.dt,'field_steps_per_electronic_step':self.field_steps,
+            'electronic_time_origin_au':.5*self.field_dt,'current_policy':'hold-last-accepted',
+            'interface':interface.to_dict(),'matter':matter}
+        self.J=np.zeros((len(context.plan.point_ids),3))
+        CoupledStepper._configure_current_routing(self)
+        self._merge_response_admission=_select_response_admission(response)
+        error=None
+        if field is not None:
+            try:
+                field.manifest['time_coupling']=self.timing
+                field._write_manifest()
+            except Exception as exc:error=str(exc)
+        response.agree(error)
+
+    def step(self,*,before_field_step=None,after_field_step=None):
+        r=self.response;cxt=r.context;error=None;A=None
+        if r.closed or r.failed:error='field-substep response is not usable'
+        elif r.step_index!=self.step_index:error='electronic update counters differ'
+        elif self.field is not None:
+            if self.field.step_index!=self.field_steps*self.step_index:error='field update counter differs'
+            elif self.field.step_index+self.field_steps>self.field.capacity:error='field capacity cannot cover this electronic update'
+        if getattr(r,'execution_mode','checked')=='checked':r.agree(error)
+        if self.field is not None and error is None:
+            try:
+                for _ in range(self.field_steps):
+                    if before_field_step is not None:before_field_step(self.field)
+                    A=self.field.advance_owned(self.J)
+                    if after_field_step is not None:after_field_step(self.field)
+            except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        try:
+            current=_response_from_field(r,A if cxt.group.role=='field' and cxt.is_leader else None,error,
+                                         merge=self._merge_response_admission)
+        except BaseException:
+            r.failed=True
+            raise
+        self.step_index+=1
+        if self.field is not None:
+            previous=self.J.copy();self.J=current
+            return {'field_step':self.field.step_index,'electronic_step':self.step_index,
+                'field_time':self.field.step_index*self.field.dt,'electronic_local_time':self.step_index*r.dt,
+                'electronic_field_clock':self.step_index*r.dt+.5*self.field.dt,
+                'A_over_c':A.copy(),'E_at_points':self.field.E.copy(),
+                'J_previous':previous,'J_charge':current.copy()}
+        return None

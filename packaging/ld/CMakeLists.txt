@@ -351,3 +351,7 @@ install(FILES "${ROOT}/tools/test_molecular_timing_mpi.py" DESTINATION salmonpy/
 
 # Manual frozen-state current/energy audit; not a required material-physics CI job.
 install(FILES "${ROOT}/tools/test_endpoint_observables_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+# Explicit coupled timestep study; no required real-material CI calculation.
+install(FILES "${ROOT}/tools/test_coupled_timestep_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_coupled_timestep.f90" DESTINATION salmonpy/_runtime_source/tests/native)

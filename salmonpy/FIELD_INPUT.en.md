@@ -207,7 +207,7 @@ mpiexec -n 3 python -m salmonpy.examples.mpi_packet_coupling NEW_NATIVE --field 
 Models in this example are synthetic. Dipoles are not current density, and no
 magnetic material/self-field physics is inferred. Legacy CoupledStepper remains.
 The new driver requires explicit packet calculation implementations; it does not silently adapt
-existing TDDFT/SBE providers. General interpolation/subcycling remain follow-up.
+existing TDDFT/SBE providers. General interpolation/subcycling for this packet driver remain follow-up. For periodic A-only coupling with finer light updates, explicitly use [FieldSubcycledStepper](COUPLED.en.md).
 
 ### Existing A-driven bindings
 

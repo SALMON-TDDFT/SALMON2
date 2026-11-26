@@ -111,3 +111,58 @@ class CoupleTimingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class FieldSubstepTests(unittest.TestCase):
+    def make(self,dt=.01,quantum_dt=.02):
+        from types import SimpleNamespace as NS
+        from unittest.mock import patch
+        from salmonpy.coupled import NativeEHField
+        from salmonpy.material_response import _response_timing
+        field=object.__new__(NativeEHField)
+        comm=NS(allgather=lambda v:[v],bcast=lambda v,root=0:v)
+        context=NS(group=NS(role='field'),plan=NS(point_ids=(1,)),is_leader=True,
+                   solver_comm=comm,leaders=comm)
+        field.context=context;field.dt=dt;field.step_index=0;field.closed=False;field.failed=False
+        field.point_ids=(1,);field.A=np.zeros((1,3));field.E=field.A.copy()
+        field.capacity=100;field.current_rows_by_rank=None;field.manifest={};field._write_manifest=lambda:None
+        response=NS(context=context,dt=quantum_dt,step_index=0,closed=False,failed=False,
+                    _field_contracts=None,timing_records=lambda:{1:_response_timing(quantum_dt,'test').to_dict()})
+        def agree(error):
+            if error:raise ValueError(error)
+        response.agree=agree;events=[];held=[]
+        def advance(j):
+            events.append('field');held.append(j.copy());field.step_index+=1;field.A=field.A+.01
+            return field.A.copy()
+        field.advance_owned=advance;field.advance=advance
+        def material(r,A,error,**kw):
+            agree(error);events.append('electrons');r.step_index+=1;return np.full((1,3),r.step_index)
+        self.addCleanup(patch.stopall)
+        patch('salmonpy.coupled._select_response_admission',return_value=False).start()
+        patch('salmonpy.coupled._response_from_field',side_effect=material).start()
+        return response,field,events,held
+
+    def test_field_updates_hold_current_and_use_one_electronic_endpoint(self):
+        from salmonpy.coupled import FieldSubcycledStepper
+        for count in (1,2,4,10):
+            with self.subTest(field_steps=count):
+                r,f,events,held=self.make(.02/count,.02)
+                stepper=FieldSubcycledStepper(r,f,field_steps=count)
+                for n in range(3):
+                    frame=stepper.step()
+                    self.assertEqual(frame['field_step'],(n+1)*count)
+                    self.assertEqual(frame['electronic_step'],n+1)
+                    self.assertAlmostEqual(frame['electronic_field_clock'],(n+1)*.02+.01/count)
+                self.assertEqual(events,(['field']*count+['electrons'])*3)
+                for i,j in enumerate(held):np.testing.assert_array_equal(j,float(i//count))
+
+    def test_invalid_ratio_or_partial_failure_is_not_silently_reused(self):
+        from salmonpy.coupled import FieldSubcycledStepper
+        for count in (0,True,1.5,3):
+            r,f,_,_=self.make()
+            with self.subTest(count=count),self.assertRaises(ValueError):FieldSubcycledStepper(r,f,field_steps=count)
+            self.assertEqual(f.step_index,0)
+        r,f,events,_=self.make();stepper=FieldSubcycledStepper(r,f,field_steps=2)
+        def fail(field):raise ValueError('observation failed')
+        with self.assertRaisesRegex(ValueError,'observation failed'):stepper.step(after_field_step=fail)
+        self.assertTrue(r.failed);self.assertEqual(events,['field'])
+        with self.assertRaises(ValueError):stepper.step()

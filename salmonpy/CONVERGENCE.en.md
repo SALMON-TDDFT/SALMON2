@@ -103,3 +103,9 @@ The5% relative-RMS current default is a grid-screening criterion, not a dielectr
 or high-harmonic spectrum accuracy guarantee. Choose stricter `rtol`/`atol` and
 check the target spectrum separately where required; the report records the
 actual tolerances. The default numerical threshold is unchanged.
+
+
+For coupled TDDFT/FDTD also compare currents, transferred work and six-face energy balance. See [the coupled timestep audit](COUPLED.en.md). Its explicit half-step interpolation is separate from the existing grid-scan API.
+
+
+For coupled runs, use the time integral of J·E with the actual current supplied to FDTD as the primary absorption. See [the coupling guide](COUPLED.en.md) for the electronic dt=0.04 au, field dt=0.01/0.005/0.0025 au example and its scope. Internal TDDFT energy changes are a separate auxiliary diagnostic.

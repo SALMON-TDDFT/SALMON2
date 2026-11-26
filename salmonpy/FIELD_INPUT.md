@@ -188,7 +188,7 @@ mpiexec -n 3 python -m salmonpy.examples.mpi_packet_coupling NEW_NATIVE --field 
 
 例の物質は合成電流模型です。孤立系の双極子を直接jとして返さず、磁気応答や自己場を自動推定しません。
 既存A駆動用CoupledStepperは維持します。新driverは明示packetを返すbackend向けで、
-既存TDDFT/SBEプロバイダーを黙ってpacket形式へ変換しません。一般の時空間補間やサブサイクルは後続です。
+既存TDDFT/SBEプロバイダーを黙ってpacket形式へ変換しません。このpacket結合での一般の時空間補間やサブサイクルは後続です。Aのみの周期系で光を細かく進める場合は、[FieldSubcycledStepper](COUPLED.md)を明示します。
 
 ### 既存のA駆動binding
 

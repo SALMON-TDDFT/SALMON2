@@ -214,6 +214,57 @@ Coupled points stay at least ten cells from boundaries and clear of the incident
 source plane/support and nonvacuum constitutive edges. The surrounding 3³ background
 cells must be vacuum. LD may occupy other regions.
 
+
+## Advance light more often than electrons
+
+`CoupledStepper` is the equal-step interface. Use
+`FieldSubcycledStepper(response, field, field_steps=m)` for m field updates per
+electronic update. Set electronic step delta_t=response.dt and field step
+Delta_t=field.dt with the explicit integer ratio delta_t=m*Delta_t. Field-local
+LD advances at each field step; external electronic states advance at delta_t.
+
+Each cycle advances the field m times with the **last accepted current held**,
+then sends endpoint A, advances the electrons once and receives new j. There is
+no future-current interpolation, prediction or implicit iteration. The hold error
+is part of the accuracy study. A/j are exchanged once per electronic update;
+no extra application-wide communication is added per light update. All ranks
+call step once per electronic update. Field-only before_field_step/after_field_step
+callbacks can observe each actual light update.
+
+For light index l, E is at l*Delta_t and raw H/A at(l+1/2)*Delta_t. Electronic
+local zero corresponds to field Delta_t/2. New electronic state/current is at
+n*delta_t+Delta_t/2; the electronic midpoint is(n-1/2)*delta_t+Delta_t/2.
+**With unequal steps that midpoint need not coincide with a stored E time.**
+The kinetic operator and projector phases still use the same midpoint A, and
+observations use the same endpoint A. Current midpoint A is the mean of the two
+electronic endpoints; the complete fine-field history is not passed to TDDFT.
+Retain field_step/electronic_step and timing's two steps/time origin.
+
+This interface supports periodic A-driven matter. Molecular E/H driving,
+noninteger ratios, coarser light steps, whole-cycle protected restore and disk
+restart are not validated here. Do not continue a failed composite cycle or infer
+the equal-step interface's restoration guarantees for this new schedule.
+
+## Choose TDDFT + FDTD timesteps
+
+Set the electronic timestep δt and field timestep Δt separately. `FieldSubcycledStepper` requires δt=mΔt: advance the field m times, then update the electrons once. The field step must satisfy the CFL condition for the Maxwell grid; the ratio alone does not determine a suitable step.
+
+Use the same GS, grids, k points, pulse and final physical time for comparisons. First fix the electronic step and halve the field step; then vary the electronic step separately. Compare currents at matching physical times. Evaluate absorption with **Σ Δt V J·E**, using the actual current supplied to FDTD and E averaged before/after each field update. Internal TDDFT energy gain is a separate auxiliary diagnostic.
+
+A5% relative difference in current and absorption is an initial screening target. Tighten it for the intended application and check electron-number loss too. Field-step convergence does not establish convergence in electronic step, spatial grids or k sampling.
+
+### Si comparison example
+
+This example uses electronic dt0.04 au, fourth-order Taylor propagation, a16³ electronic grid,2×2×2 k points and a40³ Maxwell grid with20 bohr spacing. One FDTD point carries Si/PZ response. All cases reach20 atomic time units.
+
+| Field dt (au) | Field updates / electronic update | Absorption (Ha, including macro-point volume) |
+|---|---:|---:|
+| 0.01 | 4 | 7.27652472e-5 |
+| 0.005 | 8 | 7.13166003e-5 |
+| 0.0025 | 16 | 7.05918506e-5 |
+
+Adjacent relative current RMS differences are0.0231% and0.0114%. Relative absorption differences are2.03% and1.03%, normalized by the finer result. This short, weakly driven example meets the5% screening target; it does not prescribe steps for other materials, strong excitation or long runs.
+
 ## Stored fields, outputs and limits
 
 - One calculation state lifetime per process. No reinitialization, multiple states in
@@ -229,7 +280,8 @@ cells must be vacuum. LD may occupy other regions.
 - Collectively close response, field, then Python context. Fortran does not finalize
   MPI. solver hangs/failures require launcher timeouts; the sample aborts the job on error.
 - Same-topology protected restart is documented below. Nonzero initial fields,
-  impulse sources, rotations, unequal macro volumes, subcycling remain unsupported.
+  impulse sources, rotations and unequal macro volumes remain unsupported.
+  Use the separate explicit FieldSubcycledStepper for multiple light updates.
 
 `response.json` stores point-ordered A/c, sampled E, previous/new charge currents
 and both clocks. `salmonpy-coupled-field.json` records mapping, MPI decomposition,
@@ -243,9 +295,13 @@ replay. Physical grid/time/GS convergence and production scaling remain separate
 
 ## Different materials and time steps
 
-All material states connected to the same current FDTD loop use the field's common dt, even when their material, grid or XC differ. Independent states having separate dt values does not imply multirate coupling support. The coupler checks every point's timing declaration before stepping and rejects mismatched dt. An integer ratio, such as a material step half the field step, is also rejected without a separately validated adapter.
-
-Preserve the solver Yee half-step clock and lag1 current feedback. Equal dt does not permit a mismatched half-step phase. Subcycling, intermediate A interpolation and time-averaged current feedback are not implemented or applied automatically. Different dt requires independent runs or a future explicitly validated temporal adapter.
+Material states in one ResponseSession share an electronic exchange interval,
+regardless of their material/grid/XC. Default CoupledStepper also requires that
+field step and rejects mismatched dt. Explicitly choose FieldSubcycledStepper
+only for finer light steps with electronic_dt=m*field_dt. Finer electrons and
+noninteger ratios are not supported by this interface. No intermediate-A,
+time-averaged or future-current prediction is applied automatically. The physical
+electronic origin is field_dt/2, not electronic_dt/2.
 
 ## Toward mixed LD, SBE and TDDFT
 

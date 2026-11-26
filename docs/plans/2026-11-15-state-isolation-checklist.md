@@ -12,7 +12,7 @@ Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This
 
 分子内部の軌道・空間MPI、検証済み分割間の直接再開、E/Hと電子更新の半ステップ対応、
 通常XCの更新後の電流・エネルギーでのAの統一は完了しています。末尾の2026-11-26の記録を参照し、
-これらを残件へ戻しません。現在の利用経路はFDTD→分子TDDFTの一方向です。
+これらを残件へ戻しません。周期系では電子1更新に光を複数回更新する整数比の接続と、独立した刻みの収支診断も追加しました。異なる刻みでの一括再開・保護復元は残件です。現在の分子の利用経路はFDTD→分子TDDFTの一方向です。
 双方向結合の設計・物理診断は保留として、過去の開発試験の記録と区別します。
 
 1. **今回の空間依存・磁気結合の物理診断**：電気＋磁気を合わせた離散電荷連続則・仕事量・エネルギー収支。既存の双極子モデルの収支検証とは区別する。 **双方向結合を再開する際に自己場の分担を再設計**：全自己真空E/H差し引きは環境散乱だけの比較近似と位置付け、分子自身の縦クーロン場のみを除く案を検討する。近接場の空間分布と環境の縦電場は保持する。根拠と未解決点は `2026-11-25-molecular-self-field-review.md`。
@@ -5140,3 +5140,38 @@ current queue; later completed entries supersede their matching scope.
 - Installed follow-up: PZ public-handle MPI2 continuous/direct restart and
   Libxc-PBE frozen-state audit match source arrays and written streams exactly;
   installed guides/JSON/tool/solver source bytes agree with the checkout.
+
+### 2026-11-26: distinct field/electronic steps and energy convergence
+
+- [x] Equal-dt runs are retained as baseline only. Added FieldSubcycledStepper:
+  electronic_dt=m*field_dt, fixed accepted j during m light updates, one A/j
+  exchange per electronic update. Physical electron origin is field_dt/2.
+  No new native physics or per-light-step application-wide collective.
+- [x] Separate clocks/counters and admission/failure tests;1:1 scheduling retains
+  previous arrays exactly. Fortran interpolation/work/energy/NaN/Inf self-tests.
+- [x] Actual Si PZ,2field+2k ranks, same16.002au and pulse: A(q=.003,f=.0015),
+  B(q=.003,f=.00075), C(q=.0015,f=.00075). Field-only refinement: current
+  relative RMS3.0064e-5, absorption difference0.26535%. Electronic-only:6.2498e-5
+  and0.53055%. Both halved(A->C):3.7799e-5 and0.26661%. No NaN/Inf; norm loss~1e-14.
+- [x] Six-face flux plus field storage plus actual electronic energy measured.
+  Material-normalized defects A/B/C0.57368%/0.84366%/0.28607%. Explicit held-current
+  work term explains why light-only refinement does not improve closure.
+  Report field-discrete and physical energy residuals separately. No observed
+  convergence-order or long-time/material-convergence claim from two levels.
+- [x] Japanese/English guides and AI JSON distinguish default equal-step from
+  explicit finer-light scheduling. Fixed-input manual tool, not required physics CI.
+- [ ] Unequal-step whole-cycle protected restore/direct disk restart and normal
+  mixed-sample checkpoint integration; current prediction/correction if accuracy
+  requires it; longer/stronger/many-point/other-XC/facility validation remain separate.
+  See coupled-multirate-validation-2026-11-26.md. Molecular two-way work stays deferred.
+
+- 10:1 follow-up: q=.003/f=.0003 is stable; A->D current RMS4.8092e-5, quantum
+  energy difference4.9680e-5, field work0.4252%; closure defect1.0063% of work.
+- User-typical q=.2/f=.02 passes field CFL with20bohr spacing, but this16^3 Si
+  Taylor4 electronic fixture runs away even at zero drive. Do not certify .2au
+  from the small-step results. Matching the user's typical grid/propagator is
+  pending; no GS recomputation or altered source GS was used.
+
+- 2026-11-26: requested electronic0.08 / field0.02 au completed with Taylor4, plus field-only and joint refinement. Current RMS difference0.148%; electronic gain0.484%. Held-current energy mismatch28.8% ->12.7%; improving current transfer for energy closure remains open. No universal stability or persistence guarantee added.
+
+- 2026-11-26: 電子dt=0.04 au固定、光dt=0.01/0.005/0.0025 auのMPI実測を完了。電流隣接差0.0231%→0.0114%、実際のFDTD電流によるJ·E吸収量差2.03%→1.03%。J·Eを吸収基準とし内部電子エネルギーとの差は補助診断。短時間の光刻み検査は完了、電子・空間・k点収束や長時間の検証は別件。
