@@ -29,7 +29,7 @@ PZ・固定イオン・非偏極・スカラー擬ポテンシャル・中点伝
 OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mpi --field-ranks 2 --molecule-ranks 2 --steps 96 --ld
 ```
 
-MPIの総数は`field-ranks + molecule-ranks`です。上では場2＋分子2の計4プロセスを使い、子プロセスや内側の`mpiexec`は起動しません。両方のグループを一度の起動で進め、分子へは空間分布を保持したE/Hを渡します。分子電流の返却や自己真空参照はありません。現在の検証は、固定形状のLD＋C2H2例、内部1／2ランクの軌道並列と、x・y・z各方向の空間2分割、x/z方向の空間4分割、1ランク1スレッドです。多ノード、大きなランク数、空間・軌道を同時に分割する計算は別途検証が必要です。
+MPIの総数は`field-ranks + molecule-ranks`です。上では場2＋分子2の計4プロセスを使い、子プロセスや内側の`mpiexec`は起動しません。両方のグループを一度の起動で進め、分子へは空間分布を保持したE/Hを渡します。分子電流の返却や自己真空参照はありません。現在の検証は、固定形状のLD＋C2H2例、内部1／2ランクの軌道並列と、x・y・z各方向の空間2分割、x/z方向の空間4分割、1ランク1スレッドです。軌道2×空間2／4の混合並列も検証しています。多ノード、これらより大きなランク数、他の計算条件は別途検証が必要です。
 
 `--molecule-grid NX NY NZ`で分子の空間分割数を指定します。省略時は`1 1 1`で、これまでどおり軌道を分割します。空間分割数の積は`--molecule-ranks`を割り切る必要があります。残りの倍率が軌道分割数です。これはTDDFTの分割であり、FDTDの分割や計算格子の総数を変更する指定ではありません。
 
@@ -52,6 +52,16 @@ OMP_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.molecular_fdtd_mpi_re
 分子48／場49で、場・LD・分子をまとめて直接保存します。再開時も最大ステップ数96、入力、バイナリ、MPI分割、スレッド設定を揃えます。分子の保存データは内部ランク別で、入力・バイナリ・MPI分割とファイルの整合性を確認して復元します。波動関数からの再計算や、経過したステップの再実行はしません。異なるMPI分割への移行はこの入口では扱いません。
 
 結果は`response/arrays.npz`、実行情報は`response/manifest.json`の`metadata`です。分子の配列は`molecular_step`、E/Hは`field_step`で対応付けます。分子のステップn−1→nには場のn,n+1を使うため、場のフレームが分子より1枚多くなります。再開後の履歴には保存前も含まれ、前ジョブの配列を再結合する必要はありません。`restore_statistics`の更新回数0と、`worker_statistics`の新規更新回数を確認してください。保存／再開を含む同じ設定で全履歴と通常出力の一致を確認していますが、光学物性の収束を保証する試験ではありません。
+
+軌道と空間を同時に分割する場合も、同じ入口を使います。例えば、分子4ランクに`--molecule-grid 1 1 2`を指定すると、空間2分割×軌道2分割です。分子8ランクに`--molecule-grid 2 1 2`なら空間4分割×軌道2分割になります。場に2ランクを使う場合、MPIの総数はそれぞれ6／10です。
+
+```sh
+# 場2＋分子（軌道2×空間2）の計6ランク。
+OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mixed --field-ranks 2 --molecule-ranks 4 --molecule-grid 1 1 2 --steps 96 --ld --stop-after 48
+OMP_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.molecular_fdtd_mpi_response BUILD_RECORD EXISTING_C2H2_BUNDLE run-mixed-resumed --field-ranks 2 --molecule-ranks 4 --molecule-grid 1 1 2 --steps 96 --ld --resume run-mixed/checkpoint
+```
+
+同じ固定C2H2例で、両方の混合分割による96ステップ計算を独立した1ランク実行と比較しました。双極子・電子数の差は4×10⁻¹³以内で、FDTDのE/Hは完全一致しました。両方の混合分割について、分子48／場49からの直接再開も、全履歴と通常出力4ファイルが連続実行に完全一致し、復元時の時間発展は0回です。これらは1台のMac・PZ・固定イオン・スピンなし・1ランク1スレッドの検証です。空間分割数と軌道分割数を再開時に変える機能ではありません。
 
 部品として使う場合は、分子グループ全員で`run_molecular_mpi(..., decomposition=(1, N_ob, NX, NY, NZ))`を呼び、場側の代表ランクが`MolecularMPIController`で入力します。前者は分子の寿命の間Fortran内で待機・計算する呼び出しで、後者の`close()`で終了します。`N_ob`は軌道分割数で、分子グループのランク数は`N_ob*NX*NY*NZ`です。`MolecularMPIController`にも同じ`decomposition`を渡します。通信グループと作業先は呼び出し元が所有し、終了後もMPIは利用できます。この入口は1プロセスにつき1寿命です。`controller.save_direct_checkpoint()`／`restore_direct_checkpoint()`は同じ配置での直接保存／復元です。プロセス終了・MPI異常・深部数値異常からの一般的な復旧や、復元途中の全グループの一括巻き戻しは保証しません。異常時はジョブを終了し、保存状態から新しい起動で再開します。密度・軌道磁化の読み出しは従来の1ランク側の機能で、分子MPI側にはまだ接続していません。
 

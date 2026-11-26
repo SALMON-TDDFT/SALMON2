@@ -538,6 +538,8 @@ class LiveGridInputTests(unittest.TestCase):
             (2, (1, 1, 1), (1, 2, 1, 1, 1)),
             (2, (1, 1, 2), (1, 1, 1, 1, 2)),
             (4, (2, 1, 1), (1, 2, 2, 1, 1)),
+            (4, (1, 1, 2), (1, 2, 1, 1, 2)),
+            (8, (2, 1, 2), (1, 2, 2, 1, 2)),
         ):
             with self.subTest(ranks=ranks, grid=grid):
                 self.assertEqual(molecular_decomposition(ranks, grid), expected)

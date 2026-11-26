@@ -5042,3 +5042,23 @@ current queue; later completed entries supersede their matching scope.
 - Distribution follow-up: source54tests passed; extracted-sdist wheel built,
   installed54tests passed, and installed six-rank spatial4 restart matches all
   source continuous arrays/four output streams exactly with restore updates0.
+
+
+### 2026-11-26: molecular orbital/spatial mixed MPI verification
+
+- [x] Committed spatial support/verification as e2de1901 and pushed the same
+  development branch to SALMONpy and the fork source repository.
+- [x] Verified orbital2 x spatial2(z), molecular4/total6 ranks, and orbital2 x
+  spatial4(x/z), molecular8/total10 ranks. Each96-step run matches the independent
+  one-rank control: dipole <=1.24e-13 e bohr, electron number <=3.66e-13,
+  total energy <=8.02e-12 eV; FDTD E/H exact.
+- [x] Both mixed layouts directly save at molecular48/field49, exit, restore in
+  a fresh MPI launch, and match every continuous history array/four ordinary
+  streams exactly. Restore updates0; continuation48. Installed wheel used for
+  actual execution; unchanged library hash checked.54targeted source tests pass.
+  See molecular-mixed-mpi-validation-2026-11-26.md. Human ja/en and AI JSON synced.
+- [ ] Remaining molecular work: facility MPI/multiple nodes, larger layouts and
+  resource/I/O scaling, changed-layout restart, multiple molecular states per
+  process and general composed failure recovery. This supersedes the prior
+  unchecked combined-orbital/spatial verification item only for the tested layouts.
+  Physical convergence and feedback/radiation remain separate/deferred.

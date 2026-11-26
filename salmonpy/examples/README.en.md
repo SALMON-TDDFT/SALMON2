@@ -248,7 +248,7 @@ Run configured Si DFT→TDDFT: [configured_si.py](configured_si.py), [guide](../
 | [mpi_recorded_material.py](mpi_recorded_material.py) | Recorded custom/SBE serial–MPI comparison | 3 ranks; optional SBE catalog |
 | [mpi_point_identity.py](mpi_point_identity.py) | Point and material identities over MPI | 3 ranks; new output |
 | [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1D field coupled to independent TDDFT groups | 3 ranks with --material-ranks 1; solver build and GS |
-| [molecular_fdtd_mpi_response.py](molecular_fdtd_mpi_response.py) | Field + molecular inner MPI, direct restart | Fixed C2H2 example; `--molecule-grid NX NY NZ` selects molecular spatial divisions. Total ranks = field + molecule, no children. [Guide](../ISOLATED_TDDFT.en.md#one-way-grid) |
+| [molecular_fdtd_mpi_response.py](molecular_fdtd_mpi_response.py) | Field + molecular inner MPI, direct restart | Fixed C2H2 example; `--molecule-grid NX NY NZ` selects spatial divisions; remaining molecular ranks divide orbitals. Total ranks = field + molecule, no children. [Guide](../ISOLATED_TDDFT.en.md#one-way-grid) |
 | [molecular_fdtd_response.py](molecular_fdtd_response.py) | One launch: LD/FDTD -> molecule, joint restart | Fixed C2H2 example, 2 or 3 MPI ranks plus molecular worker; [guide](../ISOLATED_TDDFT.en.md#one-way-grid) |
 | [molecular_grid_response.py](molecular_grid_response.py) | One-way spatial E/H molecular excitation and direct restart | Validated executable, GS bundle, grid-layout FIELDS.npz; [preparation](../ISOLATED_TDDFT.en.md#one-way-grid) |
 | [isolated_response.py](isolated_response.py) | Isolated E-driven dipole response | Validated E-worker, validation record, GS bundle, E NPZ |
