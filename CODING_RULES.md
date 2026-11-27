@@ -69,6 +69,7 @@ These rules apply to new and modified code. Existing legacy code may not fully c
 - Follow the existing test directory pattern: numbered directory, `CMakeLists.txt`, `inputfile`, `preparation`, and `verification`.
 - Register new tests in `testsuites/CMakeLists.txt` for the appropriate CPU/GPU sections.
 - Keep tests small enough for routine CI while still checking the behavior that changed.
+- In `verification` scripts, write each tolerance check so that a NaN result fails, e.g. `if not (abs(value - reference) <= tolerance):` rather than `if abs(value - reference) > tolerance:`. Every comparison with NaN is False, so the `>` form passes a NaN value, and `max()`/`min()` can silently drop a NaN operand.
 - For restart tests, make the producer and consumer relationship explicit in `preparation`.
 
 ## Build and Verification
