@@ -964,6 +964,14 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
   call timer_begin(LOG_UHPSI_PSEUDO_COMM)
 #ifdef FORTRAN_COMPILER_HAS_MPI_VERSION3
+#ifdef USE_OPENACC
+! Reduce the host copies: CUDA-aware MPI need not accept device buffers in
+! non-blocking reductions (Open MPI computes them on the CPU, which faults).
+!$acc kernels
+uVpsibox = dev_uVpsibox
+uVpsibox2 = 0d0
+!$acc end kernels
+#endif
 ! FIXME: This subroutine uses MPI functions directly...
   nreq = 0
   do ia=1,natom
@@ -973,17 +981,10 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
 
     if (ppg%ireferred_atom(ia)) then
       nreq = nreq + 1
-#ifdef USE_OPENACC
-      call MPI_Iallreduce( dev_uVpsibox (1,io_s,ik_s,im_s,is) &
-                         , dev_uVpsibox2(1,io_s,ik_s,im_s,is) &
-                         , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
-                         , ireqs(nreq), ierr )
-#else
       call MPI_Iallreduce( uVpsibox (1,io_s,ik_s,im_s,is) &
                          , uVpsibox2(1,io_s,ik_s,im_s,is) &
                          , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
                          , ireqs(nreq), ierr )
-#endif
       call comm_show_error(ierr)
     !else
       ! uvpsibox2(:,:,:,:,ppg%irange_ia(1:2,ia)) does not use in this process...
@@ -991,12 +992,6 @@ subroutine calc_uVpsi_rdivided(nspin,info,ppg,tpsi,uVpsibox,uVpsibox2)
     end if
   end do
   call comm_wait_all(ireqs(1:nreq))
-#ifdef USE_OPENACC
-!$acc kernels
-uVpsibox2 = dev_uVpsibox2
-uVpsibox = dev_uVpsibox
-!$acc end kernels
-#endif
 #else
 #ifdef USE_OPENACC
 !$acc kernels
