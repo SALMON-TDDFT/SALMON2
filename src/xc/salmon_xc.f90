@@ -1023,6 +1023,8 @@ contains
       case (XC_FAMILY_GGA)
         xc%use_gradient = .true.
       case ( XC_FAMILY_MGGA)
+        print '(A, A)', "libxc meta-GGA is not available (use xc='r2scan' or 'tbmbj'):", trim(libxc_name)
+        stop
         xc%use_gradient = .true.
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
