@@ -30,9 +30,9 @@ module ttm
 
   type(ttm_param) :: tp
 
-  real(8),allocatable :: Te(:,:,:), NABLA_Te(:,:,:)
+  real(8),allocatable :: Te(:,:,:)
   real(8),allocatable :: Tl(:,:,:)
-  real(8),allocatable :: work(:,:,:), NABLA_work(:,:,:)
+  real(8),allocatable :: work(:,:,:)
   real(8),allocatable :: rhs_e(:,:,:)
   real(8),allocatable :: rhs_l(:,:,:)
 
@@ -228,18 +228,12 @@ contains
     allocate( work(rg%is_array(1):rg%ie_array(1), &
                    rg%is_array(2):rg%ie_array(2), &
                    rg%is_array(3):rg%ie_array(3)) ); work=0.0d0
-    allocate( NABLA_Te(rg%is_array(1):rg%ie_array(1), &
-                       rg%is_array(2):rg%ie_array(2), &
-                       rg%is_array(3):rg%ie_array(3)) ); NABLA_Te=0.0d0
-    allocate( NABLA_work(rg%is_array(1):rg%ie_array(1), &
-                         rg%is_array(2):rg%ie_array(2), &
-                         rg%is_array(3):rg%ie_array(3)) ); NABLA_work=0.0d0
     allocate( rhs_e(rg%is_array(1):rg%ie_array(1), &
                     rg%is_array(2):rg%ie_array(2), &
                     rg%is_array(3):rg%ie_array(3)) ); rhs_e=0.0d0
     allocate( rhs_l(rg%is_array(1):rg%ie_array(1), &
                     rg%is_array(2):rg%ie_array(2), &
-                    rg%is_array(3):rg%ie_array(3)) ); rhs_e=0.0d0
+                    rg%is_array(3):rg%ie_array(3)) ); rhs_l=0.0d0
 
   end subroutine init_ttm_alloc
 
@@ -251,7 +245,7 @@ contains
     type(s_sendrecv_grid), intent(inout) :: srg
     type(s_rgrid), intent(in) :: rg
     real(8), intent(in) :: source(rg%is(1):,rg%is(2):,rg%is(3):)
-    integer :: i,ii,ix,iy,iz
+    integer :: ii,ix,iy,iz
     real(8) :: const_e, const_l
 
     rhs_e(:,:,:) = 0.0d0
@@ -261,14 +255,30 @@ contains
 
     call update_overlap_real8( srg, rg, Te )
 
-    do i = 1, 3
-       call calc_nabla( Te, NABLA_Te, i )
-       where( Tl /= 0.0d0 )
-          work(:,:,:) = tp%kappa_e0*( Te(:,:,:)/Tl(:,:,:) ) * NABLA_Te(:,:,:)
-       end where
-       call update_overlap_real8( srg, rg, work )
-       call calc_nabla( work, NABLA_work, i )
-       rhs_e = rhs_e + NABLA_work
+    ! electronic thermal conductivity at each grid point: kappa = kappa_e0 * Te/Tl
+    work(:,:,:) = 0.0d0
+    where( Tl /= 0.0d0 )
+       work(:,:,:) = tp%kappa_e0*( Te(:,:,:)/Tl(:,:,:) )
+    end where
+    call update_overlap_real8( srg, rg, work )
+
+    ! rhs_e <- div( kappa grad Te ) using conservative half-grid (midpoint) fluxes:
+    !   d/dx_i[ kappa dTe/dx_i ] =
+    !     [ kappa_{i+1/2}(Te_{i+1}-Te_i) - kappa_{i-1/2}(Te_i-Te_{i-1}) ] / h^2 ,
+    !   kappa_{i+1/2} = ( kappa_i + kappa_{i+1} )/2 .
+    ! (Previously this was a central difference applied twice, which couples only
+    !  the i+-2 points and skips the midpoint -> an even/odd-decoupled stencil.)
+    do ii = 1, size(ijk_media_myrnk,2)
+       ix = ijk_media_myrnk(1,ii)
+       iy = ijk_media_myrnk(2,ii)
+       iz = ijk_media_myrnk(3,ii)
+       rhs_e(ix,iy,iz) = rhs_e(ix,iy,iz) &
+         + ( 0.5d0*(work(ix  ,iy,iz)+work(ix+1,iy,iz))*(Te(ix+1,iy,iz)-Te(ix  ,iy,iz))   &
+           - 0.5d0*(work(ix-1,iy,iz)+work(ix  ,iy,iz))*(Te(ix  ,iy,iz)-Te(ix-1,iy,iz)) ) / hgs(1)**2 &
+         + ( 0.5d0*(work(ix,iy  ,iz)+work(ix,iy+1,iz))*(Te(ix,iy+1,iz)-Te(ix,iy  ,iz))   &
+           - 0.5d0*(work(ix,iy-1,iz)+work(ix,iy  ,iz))*(Te(ix,iy  ,iz)-Te(ix,iy-1,iz)) ) / hgs(2)**2 &
+         + ( 0.5d0*(work(ix,iy,iz  )+work(ix,iy,iz+1))*(Te(ix,iy,iz+1)-Te(ix,iy,iz  ))   &
+           - 0.5d0*(work(ix,iy,iz-1)+work(ix,iy,iz  ))*(Te(ix,iy,iz  )-Te(ix,iy,iz-1)) ) / hgs(3)**2
     end do
 
     do ii = 1, size(ijk_media_myrnk,2)
@@ -303,43 +313,6 @@ contains
 !    Qe(0,t)=Qe(L,t)=0
 !    Te(r,0)=Tl(r,0)=80K
 !---
-
-  contains
-
-    subroutine calc_nabla( f, NABLA_f, idir )
-      implicit none
-      real(8), intent(in) :: f(is_array(1):,is_array(2):,is_array(3):)
-      real(8), intent(inout) :: NABLA_f(is_array(1):,is_array(2):,is_array(3):)
-      integer, intent(in) :: idir
-      real(8) :: c1,c2,c3
-      integer :: ii,ix,iy,iz
-      c1 = 0.5d0/hgs(1)
-      c2 = 0.5d0/hgs(2)
-      c3 = 0.5d0/hgs(3)
-      select case(idir)
-      case( 1 )
-         do ii = 1, size(ijk_media_myrnk,2)
-            ix = ijk_media_myrnk(1,ii)
-            iy = ijk_media_myrnk(2,ii)
-            iz = ijk_media_myrnk(3,ii)
-            NABLA_f(ix,iy,iz) = ( f(ix+1,iy,iz) - f(ix-1,iy,iz) )*c1
-         end do
-      case( 2 )
-         do ii = 1, size(ijk_media_myrnk,2)
-            ix = ijk_media_myrnk(1,ii)
-            iy = ijk_media_myrnk(2,ii)
-            iz = ijk_media_myrnk(3,ii)
-            NABLA_f(ix,iy,iz) = ( f(ix,iy+1,iz) - f(ix,iy-1,iz) )*c2
-         end do
-      case( 3 )
-         do ii = 1, size(ijk_media_myrnk,2)
-            ix = ijk_media_myrnk(1,ii)
-            iy = ijk_media_myrnk(2,ii)
-            iz = ijk_media_myrnk(3,ii)
-            NABLA_f(ix,iy,iz) = ( f(ix,iy,iz+1) - f(ix,iy,iz-1) )*c3
-         end do
-      end select
-    end subroutine calc_nabla
 
   end subroutine ttm_main
 
