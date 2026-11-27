@@ -1,0 +1,49 @@
+GitHub pull request #1356 of commit aaf636dc09317e6bc91f4dfa2eb38dd88bbaacf3, no merge conflicts.
+Running as SYSTEM
+Setting status of aaf636dc09317e6bc91f4dfa2eb38dd88bbaacf3 to PENDING with url http://192.168.10.254:8080/job/PR_SALMON2_gfortran/451/ and message: 'Build started for merge commit.'
+Using context: qst-test-gfortran
+masterでビルドします。 ワークスペース: /var/lib/jenkins/workspace/PR_SALMON2_gfortran
+[WS-CLEANUP] Deleting project workspace...
+[WS-CLEANUP] Deferred wipeout is used...
+[WS-CLEANUP] Done
+The recommended git tool is: NONE
+using credential jenkins-diana_rsa
+Cloning the remote Git repository
+Cloning repository git@github.com:SALMON-TDDFT/SALMON2.git
+ > git init /var/lib/jenkins/workspace/PR_SALMON2_gfortran # timeout=10
+Fetching upstream changes from git@github.com:SALMON-TDDFT/SALMON2.git
+ > git --version # timeout=10
+ > git --version # 'git version 2.27.0'
+using GIT_SSH to set credentials 
+ > git fetch --tags --force --progress -- git@github.com:SALMON-TDDFT/SALMON2.git +refs/heads/*:refs/remotes/origin/* # timeout=10
+ERROR: Timeout after 10 minutes
+ERROR: Error cloning remote repo 'origin'
+hudson.plugins.git.GitException: Command "git fetch --tags --force --progress -- git@github.com:SALMON-TDDFT/SALMON2.git +refs/heads/*:refs/remotes/origin/*" returned status code 128:
+stdout: 
+stderr: /var/lib/jenkins/workspace/PR_SALMON2_gfortran@tmp/jenkins-gitclient-ssh8408348356028307637.sh-copy: 6 行: 351643 Terminated              ssh -i "/var/lib/jenkins/workspace/PR_SALMON2_gfortran@tmp/jenkins-gitclient-ssh2206381585180551874.key" -l "git" -o StrictHostKeyChecking=no "$@"
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+
+	at org.jenkinsci.plugins.gitclient.CliGitAPIImpl.launchCommandIn(CliGitAPIImpl.java:2671)
+	at org.jenkinsci.plugins.gitclient.CliGitAPIImpl.launchCommandWithCredentials(CliGitAPIImpl.java:2096)
+	at org.jenkinsci.plugins.gitclient.CliGitAPIImpl.access$500(CliGitAPIImpl.java:84)
+	at org.jenkinsci.plugins.gitclient.CliGitAPIImpl$1.execute(CliGitAPIImpl.java:618)
+	at org.jenkinsci.plugins.gitclient.CliGitAPIImpl$2.execute(CliGitAPIImpl.java:847)
+	at hudson.plugins.git.GitSCM.retrieveChanges(GitSCM.java:1234)
+	at hudson.plugins.git.GitSCM.checkout(GitSCM.java:1316)
+	at hudson.scm.SCM.checkout(SCM.java:540)
+	at hudson.model.AbstractProject.checkout(AbstractProject.java:1239)
+	at hudson.model.AbstractBuild$AbstractBuildExecution.defaultCheckout(AbstractBuild.java:649)
+	at jenkins.scm.SCMCheckoutStrategy.checkout(SCMCheckoutStrategy.java:85)
+	at hudson.model.AbstractBuild$AbstractBuildExecution.run(AbstractBuild.java:521)
+	at hudson.model.Run.execute(Run.java:1899)
+	at hudson.model.FreeStyleBuild.run(FreeStyleBuild.java:44)
+	at hudson.model.ResourceController.execute(ResourceController.java:107)
+	at hudson.model.Executor.run(Executor.java:449)
+ERROR: Error cloning remote repo 'origin'
+Setting status of aaf636dc09317e6bc91f4dfa2eb38dd88bbaacf3 to FAILURE with url http://192.168.10.254:8080/job/PR_SALMON2_gfortran/451/ and message: 'Build finished. '
+Using context: qst-test-gfortran
+[8mha:////4HJnxQcrQ9BYz/MF2Lv/yNCUkksTCzrbY7jSqvsCZVCpAAAAqR+LCAAAAAAAAP9b85aBtbiIQTGjNKU4P08vOT+vOD8nVc83PyU1x6OyILUoJzMv2y+/JJUBAhiZGBgqihhk0NSjKDWzXb3RdlLBUSYGJk8GtpzUvPSSDB8G5tKinBIGIZ+sxLJE/ZzEvHT94JKizLx0a6BxUmjGOUNodHsLgAzxEgZZ/az8JP2c/PT4gKD4YEcfX38/o/j0tPyikqLEPH0AD3Rq09IAAAA=[0mlog_PR_SALMON2_gfortran の新規ビルドを実行します
+Finished: FAILURE
