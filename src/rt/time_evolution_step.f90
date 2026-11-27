@@ -491,6 +491,19 @@ contains
       call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
     end if
 
+    if(iperiodic==0 .and. ihpsieff==1) then
+!$OMP parallel do collapse(3) private(is,iz,iy,ix)
+      do is=1,nspin
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        V_local(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz) - Vbox%f(ix,iy,iz)
+      end do
+      end do
+      end do
+      end do
+    end if
+
 !$OMP parallel do private(is,iz,iy,ix) collapse(3)
     do is=1,nspin
     do iz=mg%is(3),mg%ie(3)
