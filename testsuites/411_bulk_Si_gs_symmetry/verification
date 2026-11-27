@@ -8,6 +8,7 @@
 import sys 
 import os 
 import re 
+import math
 
 print("#" * 60) 
 print("# Verification start") 
@@ -55,11 +56,11 @@ for line in open("Si_eigen.data"):
 diff1=v2-v1
 diff2=v4-v3
 
-if abs(diff1 - reference_value_1) > permissible_error_1:
+if not (abs(diff1 - reference_value_1) <= permissible_error_1):
         print("Mismatch |%e - %e| > %e)" % (diff1, reference_value_1, permissible_error_1))
         sys.exit(-1)  # Failure 
 
-if abs(diff2 - reference_value_2) > permissible_error_2:
+if not (abs(diff2 - reference_value_2) <= permissible_error_2):
         print("Mismatch |%e - %e| > %e)" % (diff2, reference_value_2, permissible_error_2))
         sys.exit(-1)  # Failure 
 
@@ -70,9 +71,12 @@ for line in open("Si_info.data"):
     if linecount >= 27 and linecount <= 34: # line 27 (below 'Force [au]')
         data = line.split()
         v4 = [ abs(float(i)) for i in data[1:4] ]
+        if any(math.isnan(f) for f in v4):
+            print("Non-finite force component: %s" % line.strip())
+            sys.exit(-1)  # Failure
         v5 = max( [v5, max(v4)] )
 
-if v5 > reference_value_3:
+if not (v5 <= reference_value_3):
     print("Mismatch in the maximum absolute value of Force %e > %e" % (v5, reference_value_3))
     sys.exit(-1)  # Failure 
 
