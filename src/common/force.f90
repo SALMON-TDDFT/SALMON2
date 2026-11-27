@@ -378,7 +378,7 @@ contains
         end do
       end do
 #ifdef USE_OPENACC
-!$acc end loop
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif
@@ -402,7 +402,7 @@ contains
       system%Force(:,ia) = system%Force(:,ia) + F_sum(:,ia)
     end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif
@@ -728,7 +728,7 @@ contains
             end do  !ipair
          end do     !ia
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif

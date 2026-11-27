@@ -91,7 +91,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
         end do
         end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #endif
       end if
     else
@@ -116,7 +116,7 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
       end do
       end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #endif
     end if
   end do

@@ -1095,7 +1095,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
     end do
   end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif
@@ -1119,7 +1119,7 @@ subroutine init_uvpsi_summation(ppg,icomm_r)
     end do
   end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif

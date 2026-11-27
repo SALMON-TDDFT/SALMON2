@@ -407,7 +407,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
 #ifdef USE_OPENACC
-        !$acc end kernels
+        !$acc end kernels loop
 #else
         !$omp end parallel do
 #endif
@@ -437,7 +437,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
         end do
         end do
 #ifdef USE_OPENACC
-        !$acc end kernels
+        !$acc end kernels loop
 #else
         !$omp end parallel do
 #endif
@@ -1210,7 +1210,7 @@ subroutine update_vlocal(mg,nspin,Vh,Vpsl,Vxc,Vlocal)
     end do
     end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #endif
   end do
 

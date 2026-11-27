@@ -594,7 +594,7 @@ CONTAINS
       end do
       end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif
@@ -629,7 +629,7 @@ CONTAINS
         end do
       end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif
@@ -663,7 +663,7 @@ CONTAINS
         end do
       end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif
@@ -692,7 +692,7 @@ CONTAINS
       end do
       end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif
@@ -729,7 +729,7 @@ CONTAINS
         end do
       end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif
@@ -760,7 +760,7 @@ CONTAINS
         end do
       end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif
@@ -786,7 +786,7 @@ CONTAINS
           end do
         end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif
@@ -906,7 +906,7 @@ CONTAINS
         npair_bk_max = max(npair_bk_max,npair_bk_loc)
       end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif
@@ -964,7 +964,7 @@ CONTAINS
         ewald%npair_bk(iia) = ipair
       end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif

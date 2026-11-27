@@ -159,7 +159,7 @@ subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif
@@ -846,7 +846,7 @@ subroutine calc_uVpsi(nspin,info,ppg,tpsi,uVpsibox)
   end do
   end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif
