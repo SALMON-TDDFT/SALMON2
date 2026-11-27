@@ -46,7 +46,7 @@ for name, [resval, refval, error] in checklist.items():
         sys.exit(-1)  # Failure
     else:
         print("Result %s = %e (Reference = %e)" % (name, result[name], refval))
-        if abs(result[name] - refval) > error:
+        if not (abs(result[name] - refval) <= error):
             print("Mismatch |%e - %e| > %e)" % (result[name], refval, error))
             sys.exit(-1)  # Failure
 
