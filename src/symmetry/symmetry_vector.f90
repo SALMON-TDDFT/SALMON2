@@ -74,7 +74,7 @@ contains
 
     end do !iatm
 
-    Fxyz = Ftmp/nsym
+    Fxyz = matmul( Amat, Ftmp )/nsym
 
     deallocate( Faaa )
     deallocate( Raaa )
