@@ -6457,17 +6457,21 @@ contains
   subroutine calc_poynting_vector(fs, fe, Spoynting)
     use structures, only: s_fdtd_system
     use sendrecv_grid, only: update_overlap_real8
+    use phys_constants, only: cspeed_au
+    use math_constants, only: pi
     implicit none
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh), intent(inout)   :: fe
     real(8), intent(inout) :: Spoynting(:,:,:,:)
     integer :: ix,iy,iz,jx,jy,jz,ix0,iy0,iz0,ix1,iy1,iz1
+    real(8) :: coef
     ix0=fs%mg%is_array(1)
     iy0=fs%mg%is_array(2)
     iz0=fs%mg%is_array(3)
     ix1=fs%mg%ie_array(1)
     iy1=fs%mg%ie_array(2)
     iz1=fs%mg%ie_array(3)
+    coef=cspeed_au/(4.0d0*pi)
 !$omp parallel
 !$omp do private(ix,iy,iz,jx,jy,jz)
     do iz = iz0, iz1
@@ -6476,9 +6480,9 @@ contains
        jy=iy-iy0+1
     do ix = ix0, ix1
        jx=ix-ix0+1
-       Spoynting(jx,jy,jz,1) = fe%ey_s(ix,iy,iz)*fe%hz_s(ix,iy,iz) - fe%ez_s(ix,iy,iz)*fe%hy_s(ix,iy,iz)
-       Spoynting(jx,jy,jz,2) = fe%ez_s(ix,iy,iz)*fe%hx_s(ix,iy,iz) - fe%ex_s(ix,iy,iz)*fe%hz_s(ix,iy,iz)
-       Spoynting(jx,jy,jz,3) = fe%ex_s(ix,iy,iz)*fe%hy_s(ix,iy,iz) - fe%ey_s(ix,iy,iz)*fe%hx_s(ix,iy,iz)
+       Spoynting(jx,jy,jz,1) = coef*( fe%ey_s(ix,iy,iz)*fe%hz_s(ix,iy,iz) - fe%ez_s(ix,iy,iz)*fe%hy_s(ix,iy,iz) )
+       Spoynting(jx,jy,jz,2) = coef*( fe%ez_s(ix,iy,iz)*fe%hx_s(ix,iy,iz) - fe%ex_s(ix,iy,iz)*fe%hz_s(ix,iy,iz) )
+       Spoynting(jx,jy,jz,3) = coef*( fe%ex_s(ix,iy,iz)*fe%hy_s(ix,iy,iz) - fe%ey_s(ix,iy,iz)*fe%hx_s(ix,iy,iz) )
     end do
     end do
     end do
