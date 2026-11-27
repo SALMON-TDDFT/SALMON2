@@ -52,6 +52,40 @@ for name, [resval, refval, error] in checklist.items():
             print("Mismatch |%e - %e| > %e)" % (result[name], refval, error)) 
             sys.exit(-1)  # Failure 
 
+# Forces at the last step, rounded from the four-rank CPU run. They depend on the forces
+# of every earlier step and on the projector updates every step_update_ps steps.
+force_step = 1000
+force_reference = (
+    (-0.010070, 0.002065, 0.000312),
+    (0.000373, 0.002750, 0.000042),
+    (-0.028490, -0.047665, 0.000282),
+)
+force_tolerance = 2e-5  # eV/angstrom, per component
+
+with open("H2O_trj.xyz") as trj:
+    for line in trj:
+        fields = line.split()
+        if fields[:2] == ["#rt", "step="] and fields[2:3] == [str(force_step)]:
+            break
+    else:
+        sys.exit("Step %d not found in H2O_trj.xyz" % force_step)
+
+    for atom, reference in enumerate(force_reference, 1):
+        fields = next(trj, "").split("#f=")
+        if len(fields) != 2 or len(fields[1].split()) != 3:
+            sys.exit("Missing or malformed force for atom %d at step %d" % (atom, force_step))
+        try:
+            force = tuple(float(value) for value in fields[1].split())
+        except ValueError:
+            sys.exit("Invalid force value for atom %d at step %d" % (atom, force_step))
+        for axis, value, expected in zip("xyz", force, reference):
+            if not abs(value - expected) <= force_tolerance:
+                sys.exit(
+                    "Force mismatch for atom %d (%s) at step %d: %.8g vs %.8g eV/A (tolerance %.1g)"
+                    % (atom, axis, force_step, value, expected, force_tolerance)
+                )
+
+print("Forces of all three atoms at step %d match the reference." % force_step)
 print("# Verification end") 
 print("#" * 60) 
 
