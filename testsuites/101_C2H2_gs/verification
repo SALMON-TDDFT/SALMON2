@@ -73,6 +73,38 @@ for name2, [resval2, refval2, error2] in checklist2.items():
             print("Mismatch |%e - %e| > %e)" % (result2[name2], refval2, error2))
             sys.exit(-1)  # Failure
 
+# Rounded CPU reference from the four-rank run. Transverse forces are zero by symmetry.
+force_reference = (
+    (0.0, 0.0, -0.59498),
+    (0.0, 0.0, 0.55623),
+    (0.0, 0.0, 0.59499),
+    (0.0, 0.0, -0.55623),
+)
+force_tolerance = 2e-4  # eV/angstrom, per component
+
+with open("C2H2_info.data") as info:
+    for line in info:
+        if line.strip() == "Force [eV/A]":
+            break
+    else:
+        sys.exit("Force [eV/A] section not found in C2H2_info.data")
+
+    for atom, reference in enumerate(force_reference, 1):
+        fields = next(info, "").split()
+        if len(fields) != 4 or fields[0] != str(atom):
+            sys.exit("Missing or malformed force row for atom %d" % atom)
+        try:
+            force = tuple(float(value) for value in fields[1:])
+        except ValueError:
+            sys.exit("Invalid force value for atom %d" % atom)
+        for axis, value, expected in zip("xyz", force, reference):
+            if not abs(value - expected) <= force_tolerance:
+                sys.exit(
+                    "Force mismatch for atom %d (%s): %.8g vs %.8g eV/A (tolerance %.1g)"
+                    % (atom, axis, value, expected, force_tolerance)
+                )
+
+print("Forces for all four atoms match the reference.")
 print("# Verification end")
 print("#" * 60)
 
