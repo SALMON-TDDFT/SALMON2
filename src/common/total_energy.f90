@@ -26,6 +26,7 @@ CONTAINS
     use structures
     use math_constants,only : pi,zi
     use salmon_global, only: kion, yn_jm, method_poisson, yn_ffte, natom, yn_fix_func, theory
+    use density_matrix_and_energy_plusU_sub, only: calc_energy_correction_plusU, PLUS_U_ON
 #ifdef USE_FFTW
     use salmon_global,only : yn_fftw
 #endif
@@ -47,7 +48,7 @@ CONTAINS
     integer :: io,ik,ispin,Nspin
     integer :: ix,iy,iz,ia,ib
     real(8) :: sum1,sum2,Eion,Etot,rr,r(3),g(3),Gd,sysvol,E_wrk(5),E_sum(5)
-    real(8) :: etmp
+    real(8) :: etmp,dE_U
     integer :: ifgx_s,ifgx_e
     integer :: ifgy_s,ifgy_e
     integer :: ifgz_s,ifgz_e
@@ -266,6 +267,10 @@ CONTAINS
       case('ft')
         Etot = Etot + E_sum(1) + E_sum(2) + E_sum(3)
       end select
+      if( PLUS_U_ON ) then
+        call calc_energy_correction_plusU( ppg, energy%E_U, .true., dE_U )
+        Etot = Etot + dE_U
+      end if
     end if
     energy%E_tot = Etot
 
@@ -277,10 +282,12 @@ CONTAINS
 !===================================================================================================================================
 
   SUBROUTINE calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
+    ! DFT+U: E_ion_nloc contains Tr(V_eff n) except with spin-orbit.
     use structures
     use salmon_math
     use math_constants,only : pi,zi
-    use salmon_global, only: kion,aEwald, cutoff_r, yn_jm, yn_fix_func, theory
+    use salmon_global, only: kion,aEwald, cutoff_r, yn_jm, yn_fix_func, theory, yn_spinorbit
+    use density_matrix_and_energy_plusU_sub, only: calc_energy_correction_plusU, PLUS_U_ON
     use communication, only: comm_summation,comm_is_root
     use timer
     use nvtx_wrapper
@@ -299,7 +306,7 @@ CONTAINS
     integer :: ix,iy,iz,iia,ia,ib,zps1,zps2,ipair,ispin,ik,io
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),Gd,sysvol,E_wrk(5),E_sum(5)
     real(8) :: E_wrk_local_1,E_wrk_local_2
-    real(8) :: etmp
+    real(8) :: etmp,dE_U
     integer :: nion_mg_l
     complex(8) :: rho_e,rho_i
     call nvtxStartRange('calc_Total_Energy_periodic', __LINE__)
@@ -506,6 +513,11 @@ CONTAINS
 
   ! total energy
     energy%E_tot = energy%E_kin + energy%E_h + energy%E_ion_loc + energy%E_ion_nloc + energy%E_xc + energy%E_ion_ion
+
+    if( PLUS_U_ON ) then
+      call calc_energy_correction_plusU( ppg, energy%E_U, yn_spinorbit=='n', dE_U )
+      energy%E_tot = energy%E_tot + dE_U
+    end if
 
 !    if ( comm_is_root(nproc_id_global) ) then
 !      write(*,*) "E_tot     =",energy%E_tot
