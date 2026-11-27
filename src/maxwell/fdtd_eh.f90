@@ -4741,12 +4741,12 @@ contains
           do ii=1,nenergy
             write(fe%ifn,"(F16.8,99(1X,E23.15E3))",advance='no')                      &
                   dble(ii)*de*uenergy_from_au,                                        &
-                  fe%fr_lr(ii,1)/(-e_impulse)*(ulength_from_au**2/fe%uVperm_from_au), &
-                  fe%fi_lr(ii,1)/(-e_impulse)*(ulength_from_au**2/fe%uVperm_from_au), &
-                  fe%fr_lr(ii,2)/(-e_impulse)*(ulength_from_au**2/fe%uVperm_from_au), &
-                  fe%fi_lr(ii,2)/(-e_impulse)*(ulength_from_au**2/fe%uVperm_from_au), &
-                  fe%fr_lr(ii,3)/(-e_impulse)*(ulength_from_au**2/fe%uVperm_from_au), &
-                  fe%fi_lr(ii,3)/(-e_impulse)*(ulength_from_au**2/fe%uVperm_from_au), &
+                  fe%fr_lr(ii,1)/(-e_impulse)*(ulength_from_au/fe%uVperm_from_au), &
+                  fe%fi_lr(ii,1)/(-e_impulse)*(ulength_from_au/fe%uVperm_from_au), &
+                  fe%fr_lr(ii,2)/(-e_impulse)*(ulength_from_au/fe%uVperm_from_au), &
+                  fe%fi_lr(ii,2)/(-e_impulse)*(ulength_from_au/fe%uVperm_from_au), &
+                  fe%fr_lr(ii,3)/(-e_impulse)*(ulength_from_au/fe%uVperm_from_au), &
+                  fe%fi_lr(ii,3)/(-e_impulse)*(ulength_from_au/fe%uVperm_from_au), &
                   2.0d0*dble(ii)*de/pi*fe%fi_lr(ii,1:3)/(-e_impulse)
             write(fe%ifn,*)
           end do
