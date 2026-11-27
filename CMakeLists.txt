@@ -72,6 +72,16 @@ include_directories(${CMAKE_BINARY_DIR})
 
 include(${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
 
+# Preserve the default topology mapping for Fujitsu MPI builds.
+set(FJMPI_DEFAULT OFF)
+if(USE_MPI AND IS_FUJITSU_COMPILER)
+  set(FJMPI_DEFAULT ON)
+endif()
+option_set(USE_FJMPI "Use Fujitsu MPI topology routines" ${FJMPI_DEFAULT})
+if(USE_FJMPI AND NOT USE_MPI)
+  message(FATAL_ERROR "USE_FJMPI requires USE_MPI=ON")
+endif()
+
 
 if(USE_HSE AND USE_OPENACC)
   message(FATAL_ERROR "Native HSE requires a CPU build; use USE_HSE=OFF for accelerators")
