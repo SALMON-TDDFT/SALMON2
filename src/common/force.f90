@@ -530,7 +530,7 @@ contains
     end do
     end do
     end do
-!$acc end parallel
+!$acc end parallel loop
 
     ! sum over the local orbitals, one gang per projector and component
 !$acc parallel loop collapse(2) gang private(ilocal,ic,fsum)
@@ -548,7 +548,7 @@ contains
       F_ilocal(ic,ilocal) = fsum
     end do
     end do
-!$acc end parallel
+!$acc end parallel loop
 
 !$acc end data
 
@@ -642,7 +642,7 @@ contains
     end do
     end do
     end do
-!$acc end parallel
+!$acc end parallel loop
 
   end subroutine calc_dden_gpu
 #endif
