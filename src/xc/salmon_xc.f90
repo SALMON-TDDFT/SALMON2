@@ -156,7 +156,7 @@ contains
       end do
       end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif
@@ -415,7 +415,7 @@ contains
       end do
       end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif
@@ -467,7 +467,7 @@ contains
     end do
     end do
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #else
 !$omp end parallel do
 #endif

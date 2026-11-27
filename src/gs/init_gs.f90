@@ -118,7 +118,7 @@ SUBROUTINE init_wf(lg,mg,system,info,pp,spsi)
           end do
           end do
 #ifdef USE_OPENACC
-!$acc end parallel
+!$acc end parallel loop
 #else
 !$omp end parallel do
 #endif

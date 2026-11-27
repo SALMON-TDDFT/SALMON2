@@ -45,7 +45,7 @@ contains
       Vexc(i)=e_xc+(2d0*trho)*de_xc_drho
     enddo
 #ifdef USE_OPENACC
-!$acc end kernels
+!$acc end kernels loop
 #endif
     return
   end subroutine exc_cor_pw
