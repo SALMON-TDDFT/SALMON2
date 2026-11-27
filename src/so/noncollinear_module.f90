@@ -333,7 +333,7 @@ contains
 #endif
     
     m_tmp(1) = 0.5d0* dble( zmat(1,2) + zmat(2,1) )
-    m_tmp(2) = 0.5d0* dble( -zi* zmat(1,2) + zi* zmat(2,1) )
+    m_tmp(2) = 0.5d0* dble( zi* zmat(1,2) - zi* zmat(2,1) )
     m_tmp(3) = 0.5d0* dble( zmat(1,1) - zmat(2,2) )
     call comm_summation( m_tmp, m, 3, info%icomm_r )
     return
@@ -347,7 +347,7 @@ contains
     real(8)                   :: m(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
     !
     m(:,:,:,1) = 0.5d0* dble( den_mat(:,:,:,1,2) + den_mat(:,:,:,2,1) )
-    m(:,:,:,2) = 0.5d0* dble( -zi* den_mat(:,:,:,1,2) + zi* den_mat(:,:,:,2,1) )
+    m(:,:,:,2) = 0.5d0* dble( zi* den_mat(:,:,:,1,2) - zi* den_mat(:,:,:,2,1) )
     m(:,:,:,3) = 0.5d0* dble( den_mat(:,:,:,1,1) - den_mat(:,:,:,2,2) )
     return
   end subroutine calc_magnetization_micro
@@ -391,7 +391,7 @@ contains
       end do !js
       zmat = zmat * system%hvol
       m_tmp(1,io,ik) = 0.5d0* dble( zmat(1,2) + zmat(2,1) )
-      m_tmp(2,io,ik) = 0.5d0* dble( -zi* zmat(1,2) + zi* zmat(2,1) )
+      m_tmp(2,io,ik) = 0.5d0* dble( zi* zmat(1,2) - zi* zmat(2,1) )
       m_tmp(3,io,ik) = 0.5d0* dble( zmat(1,1) - zmat(2,2) )
     end do !io
     end do !ik
