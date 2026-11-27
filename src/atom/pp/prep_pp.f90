@@ -1181,6 +1181,7 @@ subroutine init_uvpsi_blocking(ppg,lg)
 
   integer, allocatable :: v2nlma(:), i2vi(:)
   integer :: nl,ilma,i,j,ix,iy,iz,max_nlma,vi,n,ia
+  integer, save :: nbuilt = 0
 
   nl = product(lg%num)
   allocate(v2nlma(0:nl-1))
@@ -1247,6 +1248,8 @@ subroutine init_uvpsi_blocking(ppg,lg)
       ppg%k2j   (vi,n) = j
     end do
   end do
+  nbuilt = nbuilt + 1
+  ppg%vi_tables_version = nbuilt
 
 end subroutine init_uvpsi_blocking
 

@@ -536,6 +536,9 @@ CONTAINS
     use salmon_global, only: yn_spinorbit
     use timer
     use nvtx_wrapper
+#ifdef USE_CUDA
+    use eigen_cuda, only: eigen_sums_cuda
+#endif
     implicit none
     type(s_dft_energy)                     :: energy
     type(s_orbital)                        :: tpsi,htpsi,ttpsi
@@ -550,6 +553,7 @@ CONTAINS
     integer :: ik,io,ispin,im,nk,no,is(3),ie(3),Nspin
     real(8) :: E_tmp,E_local(2),E_sum(2)
     real(8),allocatable :: wrk1(:,:,:),wrk2(:,:,:)
+    logical :: fused
     call nvtxStartRange('calc_eigen_energy', __LINE__)
     call timer_begin(LOG_EIGEN_ENERGY_CALC)
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: calc_eigen_energy"
@@ -671,9 +675,16 @@ CONTAINS
       call timer_end(LOG_EIGEN_ENERGY_CALC)
       
     else ! complex wavefunctions
+      fused = .false.
+#ifdef USE_CUDA
+      call timer_begin(LOG_EIGEN_ENERGY_CALC)
+      if (yn_spinorbit == 'n') fused = eigen_sums_cuda(tpsi,htpsi,ttpsi,V_local,system,info,mg,im,wrk1,E_local)
+      call timer_end(LOG_EIGEN_ENERGY_CALC)
+#endif
     
     ! eigen energies (esp)
   
+      if (.not. fused) then
       call timer_begin(LOG_EIGEN_ENERGY_CALC)
       wrk1 = 0d0
 #ifdef USE_OPENACC
@@ -697,6 +708,7 @@ CONTAINS
 !$omp end parallel do
 #endif
       call timer_end(LOG_EIGEN_ENERGY_CALC)
+      end if
 
       call timer_begin(LOG_EIGEN_ENERGY_COMM_COLL)
       call comm_summation(wrk1,wrk2,nspin*no*nk,info%icomm_rko)
@@ -709,6 +721,7 @@ CONTAINS
       end if
       call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 
+      if (.not. fused) then
     ! kinetic energy (E_kin)
       E_tmp = 0d0
 #ifdef USE_OPENACC
@@ -793,6 +806,7 @@ CONTAINS
       end if
       E_local(2) = E_tmp  ! E_local(1:2) is used as a temporal working array (iwata)
       call timer_end(LOG_EIGEN_ENERGY_CALC)
+      end if
 
     end if
     

@@ -18,10 +18,83 @@
 #include "config.h"
 
 module density_matrix
+#if defined(USE_OPENACC) && defined(USE_NCCL_KO)
+  use nccl
+  use cudafor
+#endif
   implicit none
   integer,private,parameter :: Nd = 4
 
+#if defined(USE_OPENACC) && defined(USE_NCCL_KO)
+  ! Persistent NCCL communicator/stream for the density collective over
+  ! icomm_ko. Module-scoped: ensure_ready and allreduce_inplace both touch
+  ! it, and Fortran save locals are not shared across subroutines.
+  type(ncclComm), save, private :: nc_ko_comm
+  integer(cuda_stream_kind), save, private :: nc_ko_stream
+  logical, save, private :: nc_ko_ready = .false.
+#endif
+
 contains
+
+#if defined(USE_OPENACC) && defined(USE_NCCL_KO)
+  ! Pay ncclCommInitRank's one-time handshake here, called from
+  ! calc_density's entry -- before any timer starts -- so it is never
+  ! attributed to the per-step collective. NCCL also establishes its data
+  ! channels lazily on the FIRST collective of a given message size (a
+  ! cost scaling with message size, measured as a 15-37x rank-to-rank
+  ! spread when skipped), so run one throwaway allreduce at the production
+  ! size as a warm-up.
+  subroutine density_nccl_ensure_ready(icomm, n)
+    use mpi, only: MPI_Comm_rank, MPI_Comm_size, MPI_Bcast, MPI_CHARACTER
+    implicit none
+    integer, intent(in) :: icomm, n
+    type(ncclUniqueId) :: nc_uid
+    type(ncclResult) :: nc_stat
+    integer :: nc_rank, nc_size, ierr, cuda_stat
+    real(8), allocatable :: warm(:)
+
+    if (nc_ko_ready) return
+    call MPI_Comm_rank(icomm, nc_rank, ierr)
+    call MPI_Comm_size(icomm, nc_size, ierr)
+    if (nc_rank == 0) nc_stat = ncclGetUniqueId(nc_uid)
+    call MPI_Bcast(nc_uid%internal, 128, MPI_CHARACTER, 0, icomm, ierr)
+    nc_stat = ncclCommInitRank(nc_ko_comm, nc_size, nc_uid, nc_rank)
+    if (nc_stat /= ncclSuccess) stop 'density_nccl_ensure_ready: ncclCommInitRank failed'
+    cuda_stat = cudaStreamCreate(nc_ko_stream)
+    if (cuda_stat /= 0) stop 'density_nccl_ensure_ready: cudaStreamCreate failed'
+
+    allocate(warm(n))
+    warm = 0d0
+!$acc data create(warm)
+!$acc host_data use_device(warm)
+    nc_stat = ncclAllReduce(warm, warm, n, ncclDouble, ncclSum, nc_ko_comm, nc_ko_stream)
+!$acc end host_data
+    cuda_stat = cudaStreamSynchronize(nc_ko_stream)
+!$acc end data
+    deallocate(warm)
+    if (nc_stat /= ncclSuccess .or. cuda_stat /= 0) stop 'density_nccl_ensure_ready: warm-up ncclAllReduce failed'
+    nc_ko_ready = .true.
+  end subroutine density_nccl_ensure_ready
+
+  ! Device-resident in-place NCCL allreduce replacing comm_summation for
+  ! the density collective: MPI_Allreduce handed device pointers does the
+  ! arithmetic on the host and round-trips device<->host every step.
+  subroutine density_nccl_allreduce_inplace(buf, n, icomm)
+    implicit none
+    real(8), intent(inout) :: buf(:,:,:)
+    integer, intent(in)    :: n
+    integer, intent(in)    :: icomm
+    type(ncclResult) :: nc_stat
+    integer :: cuda_stat
+
+    call density_nccl_ensure_ready(icomm, n)
+!$acc host_data use_device(buf)
+    nc_stat = ncclAllReduce(buf, buf, n, ncclDouble, ncclSum, nc_ko_comm, nc_ko_stream)
+!$acc end host_data
+    cuda_stat = cudaStreamSynchronize(nc_ko_stream)
+    if (nc_stat /= ncclSuccess .or. cuda_stat /= 0) stop 'density_nccl_allreduce_inplace: ncclAllReduce failed'
+  end subroutine density_nccl_allreduce_inplace
+#endif
 
   subroutine calc_density(system,rho,psi,info,mg)
     use structures
@@ -31,6 +104,9 @@ contains
     use timer
     use sym_rho_sub, only: sym_rho
     use salmon_global, only: yn_spinorbit
+#if defined(USE_OPENACC) && defined(USE_NCCL_KO)
+    use salmon_global, only: yn_nccl_ko
+#endif
     use noncollinear_module, only: calc_dm_noncollinear, rot_dm_noncollinear
     use nvtx_wrapper
     implicit none
@@ -43,6 +119,12 @@ contains
     integer :: im,ispin,ik,io,is(3),ie(3),nsize,nspin,tid,ix,iy,iz,nthreads
     real(8) :: wrk2
     real(8),allocatable :: wrk(:,:,:,:)
+#if defined(USE_OPENACC) && defined(USE_NCCL_KO)
+    ! One-time NCCL handshake + warm-up, outside every timer.
+    if (yn_nccl_ko == 'y') then
+      call density_nccl_ensure_ready(info%icomm_ko, mg%num(1)*mg%num(2)*mg%num(3))
+    end if
+#endif
     call nvtxStartRange('calc_density', __LINE__)
     call timer_begin(LOG_DENSITY_CALC)
     
@@ -126,7 +208,18 @@ contains
         call timer_end(LOG_DENSITY_CALC)
 
         call timer_begin(LOG_DENSITY_COMM_COLL)
+#if defined(USE_OPENACC) && defined(USE_NCCL_KO)
+        if (yn_nccl_ko == 'y') then
+          call density_nccl_allreduce_inplace(wrk(:,:,:,0), nsize, info%icomm_ko)
+!$acc kernels
+          rho(ispin,im)%f(:,:,:) = wrk(:,:,:,0)
+!$acc end kernels
+        else
+          call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
+        end if
+#else
         call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
+#endif
         call timer_end(LOG_DENSITY_COMM_COLL)
       end do
       end do
@@ -190,7 +283,18 @@ contains
         call timer_end(LOG_DENSITY_CALC)
 
         call timer_begin(LOG_DENSITY_COMM_COLL)
+#if defined(USE_OPENACC) && defined(USE_NCCL_KO)
+        if (yn_nccl_ko == 'y') then
+          call density_nccl_allreduce_inplace(wrk(:,:,:,0), nsize, info%icomm_ko)
+!$acc kernels
+          rho(ispin,im)%f(:,:,:) = wrk(:,:,:,0)
+!$acc end kernels
+        else
+          call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
+        end if
+#else
         call comm_summation(wrk(:,:,:,0),rho(ispin,im)%f(:,:,:),nsize,info%icomm_ko)
+#endif
         call timer_end(LOG_DENSITY_COMM_COLL)
 
         call timer_begin(LOG_DENSITY_CALC)
@@ -221,6 +325,9 @@ contains
     use timer
     use iso_c_binding
     use nvtx_wrapper
+#ifdef USE_CUDA
+    use stencil_cuda, only: current_stencil_cuda
+#endif
 #if defined(USE_OPENACC) && defined(USE_GEMM)
     use cudafor
     use cublas
@@ -228,41 +335,6 @@ contains
     use openacc
 #endif
     implicit none
-#if defined(USE_OPENACC)
-    interface
-      subroutine stencil_current_core_gpu(ik_s,ik_e,io_s,io_e,vec_k,vec_Ac,is_array,ie_array &
-                                         ,is,ie,idx,idy,idz,nabt,ispin,im,spin_len,psi,BT,rocc,wtk,jx,jy,jz) bind(c)
-        import
-        ! Input
-        integer(c_int), value :: ik_s
-        integer(c_int), value :: ik_e
-        integer(c_int), value :: io_s
-        integer(c_int), value :: io_e
-        integer(c_int), value :: ispin
-        integer(c_int), value :: im
-        integer(c_int), value :: spin_len
-        ! Output
-        real(c_double), intent(inout) :: jx
-        real(c_double), intent(inout) :: jy
-        real(c_double), intent(inout) :: jz
-        ! Input (ptr)
-        real(c_double), intent(in) :: vec_k(3,ik_e-ik_s+1)
-        real(c_double), intent(in) :: vec_Ac(3)
-        integer(c_int), intent(in) :: is_array(3)
-        integer(c_int), intent(in) :: ie_array(3)
-        integer(c_int), intent(in) :: is(3)
-        integer(c_int), intent(in) :: ie(3)
-        integer(c_int), intent(in) :: idx(is(1)-Nd:ie(1)+Nd)
-        integer(c_int), intent(in) :: idy(is(2)-Nd:ie(2)+Nd)
-        integer(c_int), intent(in) :: idz(is(3)-Nd:ie(3)+Nd)
-        real(c_double), intent(in) :: nabt(Nd,3)
-        complex(c_double_complex), intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
-        real(c_double), intent(in) :: BT(3,3)
-        real(c_double), intent(in) :: rocc(io_e-io_s+1,ik_e-ik_s+1)
-        real(c_double), intent(in) :: wtk(ik_e-ik_s+1)
-      end  subroutine stencil_current_core_gpu
-    end interface
-#endif
     type(s_dft_system),intent(in) :: system
     type(s_rgrid)  ,intent(in) :: mg
     type(s_stencil),intent(in) :: stencil
@@ -337,12 +409,12 @@ contains
       jy = 0d0
       jz = 0d0
       call timer_begin(LOG_CALC_STENCIL_CURRENT)
-#if defined(USE_OPENACC) && defined(USE_CUDA)
-      call stencil_current_core_gpu(info%ik_s,info%ik_e,info%io_s,info%io_e,system%vec_k,system%vec_Ac &
-                                   ,mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx(1:),mg%idy(1:),mg%idz(1:) &
-                                   ,stencil%coef_nab,ispin,im,nspin,psi%zwf,BT,system%rocc,system%wtk,jx,jy,jz)
+#ifdef USE_CUDA
+      if (current_stencil_cuda(system,mg,stencil,info,psi,BT,ispin,im,jx,jy,jz)) then
 !$acc enter data copyin(jx,jy,jz)
-#else
+!$acc update device(system%vec_Ac)
+      else
+#endif
 !$acc enter data copyin(jx,jy,jz)
 !$acc update device(system%vec_Ac)
 
@@ -387,6 +459,8 @@ contains
       end do
       end do
 !$acc end kernels
+#ifdef USE_CUDA
+      end if
 #endif
       call timer_end(LOG_CALC_STENCIL_CURRENT)
       

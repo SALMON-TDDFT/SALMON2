@@ -21,6 +21,9 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
 #ifdef USE_OPENACC
   use cudafor, only: cudaGetDevice, cudaGetDeviceProperties, cudaDeviceProp
 #endif
+#ifdef USE_CUDA
+  use stencil_cuda, only: hpsi_stencil_cuda
+#endif
   implicit none
 
 
@@ -70,6 +73,10 @@ subroutine zstencil_typical_gpu(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,
 #define DX(dt) idx(ix+(dt)),iy,iz
 #define DY(dt) ix,idy(iy+(dt)),iz
 #define DZ(dt) ix,iy,idz(iz+(dt))
+#ifdef USE_CUDA
+  if (hpsi_stencil_cuda(io_s,io_e,Nspin,is_array,ie_array,is,ie,idx,idy,idz,igs,ige, &
+                        tpsi,htpsi,V_local,lap0,lapt,nabt)) return
+#endif
 #ifdef USE_OPENACC
   ! Pulling io out of the collapse is ~1.4x faster on Blackwell, ~1.6x slower on
   ! Hopper; the binary is multi-architecture, so dispatch at runtime.
